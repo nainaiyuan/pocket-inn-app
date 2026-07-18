@@ -16,14 +16,27 @@ jobs:
         with:
           channel: stable
           
-      - name: Build APK
+      - name: Build Release APK
         run: |
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
-          flutter build apk --debug
+          
+          # 生成签名密钥
+          keytool -genkey -v -keystore release.keystore \
+            -alias release -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android -keypass android \
+            -dname "CN=PocketInn, O=PocketInn, C=CN"
+          
+          # 设置签名环境变量给 build.gradle.kts 使用
+          export ANDROID_KEYSTORE_PATH=$PWD/release.keystore
+          export ANDROID_KEYSTORE_PASSWORD=android
+          export ANDROID_KEY_ALIAS=release
+          export ANDROID_KEY_PASSWORD=android
+          
+          flutter build apk --release
           
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
+          name: pocketinn-release-apk
           path: build/app/outputs/flutter-apk/*.apk
