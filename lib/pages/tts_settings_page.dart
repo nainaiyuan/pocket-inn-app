@@ -17,7 +17,7 @@ class TtsSettingsPage extends StatefulWidget {
 }
 
 class _TtsSettingsPageState extends State<TtsSettingsPage> {
-  final _tts = getIt<TtsService>();
+  final _tts = GetIt.instance<TtsService>();
   late TextEditingController _urlController;
   bool _isChecking = false;
   bool? _connectionOk;

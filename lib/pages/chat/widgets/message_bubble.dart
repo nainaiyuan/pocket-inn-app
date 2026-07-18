@@ -365,7 +365,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   String _restoreIfButlerActive(String text) {
     if (widget.message.isMe) return text; // 用户消息不需要还原
     try {
-      final chatService = getIt<ChatService>();
+      final chatService = GetIt.instance<ChatService>();
       if (chatService.butler != null && chatService.butler!.config.maskLayerEnabled) {
         final sessionId = ''; // sessionId 需要在后续传递，当前简化处理
         return chatService.restoreButlerMask(text, sessionId);
