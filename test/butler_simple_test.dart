@@ -196,8 +196,8 @@ void main() {
     for (final (input, isCmd, expected) in tests) {
       final result = processCommand(input);
       final pass = isCmd ? result != 'NULL' : result == 'NULL';
-      assert(result.contains(expected));
-      print('  "${input.substring(0, input.length.clamp(10))}..." → $result ${pass ? "✅" : "❌"}');
+      assert(result?.contains(expected) ?? false);
+      print('  "${input.substring(0, input.length.clamp(0, 10))}..." → $result ${pass ? "✅" : "❌"}');
     }
     print('[PASS]\n');
   }

@@ -9,7 +9,9 @@
 /// 6. 管家命令处理
 
 import 'package:pocket_inn/butler/butler.dart';
+import 'package:pocket_inn/butler/butler_config.dart';
 import 'package:pocket_inn/butler/butler_memory.dart';
+import 'package:pocket_inn/butler/mask_engine.dart';
 
 void main() async {
   print('=== 管家模块集成测试 ===\n');

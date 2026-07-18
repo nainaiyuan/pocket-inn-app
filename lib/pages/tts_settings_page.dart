@@ -7,7 +7,7 @@
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 
-import '../services/tts_service.dart';
+import '../services/tts/tts_service.dart';
 
 class TtsSettingsPage extends StatefulWidget {
   const TtsSettingsPage({super.key});

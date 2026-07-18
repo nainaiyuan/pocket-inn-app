@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../butler/task/task_manager.dart' as bt;
-import '../butler/task/butler_task.dart';
+import '../butler/task/task_manager.dart';
+import '../butler/task/butler_task.dart' as bt;
 
 /// 管家任务列表页面
 class ButlerTaskPage extends StatefulWidget {
@@ -190,7 +190,7 @@ class _ButlerTaskPageState extends State<ButlerTaskPage> {
   }
 
   String _taskTypeLabel(type) {
-    if (type is TaskType) {
+    if (type is bt.TaskType) {
       switch (type) {
         case bt.TaskType.cleanupCheck: return '清理检查';
         case bt.TaskType.cleanupExecute: return '执行清理';

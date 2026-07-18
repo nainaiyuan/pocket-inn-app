@@ -18,7 +18,7 @@ import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:get_it/get_it.dart';
 
-import '../butler/butler.dart' show Butler;
+import '../../butler/butler.dart' show Butler;
 import 'tts_interface.dart';
 import 'tts_remote_impl.dart';
 import 'tts_local_impl.dart';
