@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../butler/task/task_manager.dart';
-import '../butler/task/butler_task.dart' as bt;
+import '../butler/task/butler_task.dart';
 
 /// 管家任务列表页面
 class ButlerTaskPage extends StatefulWidget {
@@ -190,18 +190,18 @@ class _ButlerTaskPageState extends State<ButlerTaskPage> {
   }
 
   String _taskTypeLabel(type) {
-    if (type is bt.TaskType) {
+    if (type is TaskType) {
       switch (type) {
-        case bt.TaskType.cleanupCheck: return '清理检查';
-        case bt.TaskType.cleanupExecute: return '执行清理';
-        case bt.TaskType.processMessage: return '处理消息';
-        case bt.TaskType.syncData: return '同步数据';
-        case bt.TaskType.deviceControl: return '设备控制';
-        case bt.TaskType.characterCreate: return '创建角色';
-        case bt.TaskType.characterDelete: return '删除角色';
-        case bt.TaskType.exportData: return '导出数据';
-        case bt.TaskType.importData: return '导入数据';
-        case bt.TaskType.other: return '其他';
+        case TaskType.cleanupCheck: return '清理检查';
+        case TaskType.cleanupExecute: return '执行清理';
+        case TaskType.processMessage: return '处理消息';
+        case TaskType.syncData: return '同步数据';
+        case TaskType.deviceControl: return '设备控制';
+        case TaskType.characterCreate: return '创建角色';
+        case TaskType.characterDelete: return '删除角色';
+        case TaskType.exportData: return '导出数据';
+        case TaskType.importData: return '导入数据';
+        case TaskType.other: return '其他';
       }
     }
     if (type is String) {
