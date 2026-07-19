@@ -83,17 +83,20 @@ Future<void> setupServiceLocator() async {
   // 12. API 配置列表（顶层函数）
   await api_configs.initializeApiConfigs();
 
-  // 13. 管家初始化（DB + 引擎）
+  // 13. 聊天服务（ChatService 需在管家之前注册，因为管家初始化要调用它）
+  getIt.registerSingleton<ChatService>(ChatService.instance);
+
+  // 14. 管家初始化（DB + 引擎）
   final butler = Butler();
   await ButlerDatabase.instance.initialize();
   getIt.registerSingleton<Butler>(butler);
   getIt<ChatService>().initButler(butler);
 
-  // 14. 语音合成服务（TTS）
+  // 15. 语音合成服务（TTS）
   getIt.registerSingleton<TtsService>(TtsService.instance);
   await getIt<TtsService>().init();
 
-  // 15. 语音聊天服务（自动朗读 + ASR 预留）
+  // 16. 语音聊天服务（自动朗读 + ASR 预留）
   getIt.registerSingleton<VoiceChatService>(VoiceChatService.instance);
   await getIt<VoiceChatService>().init();
 
@@ -105,7 +108,6 @@ Future<void> setupServiceLocator() async {
   getIt.registerLazySingleton<AppSettingsService>(
     () => AppSettingsService.instance,
   );
-  getIt.registerLazySingleton<ChatService>(() => ChatService.instance);
   getIt.registerLazySingleton<ChatCharacterResolver>(
     () => ChatCharacterResolver.instance,
   );
