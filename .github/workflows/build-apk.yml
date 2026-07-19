@@ -16,11 +16,20 @@ jobs:
         with:
           channel: stable
           
-      - name: Build Release APK
+      - name: Install dependencies & generate code
         run: |
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
+      
+      # 🔧 DEBUG APK — 免签名，崩溃时在屏幕上显示红色错误页和堆栈信息
+      - name: Build Debug APK
+        run: |
+          flutter build apk --debug
+          cp build/app/outputs/flutter-apk/app-debug.apk app-debug.apk
           
+      # 📦 RELEASE APK — 带签名
+      - name: Build Release APK
+        run: |
           # 生成签名密钥
           keytool -genkey -v -keystore release.keystore \
             -alias release -keyalg RSA -keysize 2048 -validity 10000 \
@@ -38,5 +47,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: pocketinn-release-apk
-          path: build/app/outputs/flutter-apk/*.apk
+          name: pocketinn-apks
+          path: |
+            app-debug.apk
+            build/app/outputs/flutter-apk/app-release.apk
