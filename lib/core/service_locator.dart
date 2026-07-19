@@ -83,7 +83,7 @@ Future<void> setupServiceLocator() async {
   final butler = Butler();
   await _tryInit('ButlerDatabase', () => ButlerDatabase.instance.initialize());
   getIt.registerSingleton<Butler>(butler);
-  await _tryInit('ChatService.initButler', () => getIt<ChatService>().initButler(butler));
+  _tryInitSync('ChatService.initButler', () => getIt<ChatService>().initButler(butler));
 
   // ── TTS ──
   getIt.registerSingleton<TtsService>(TtsService.instance);
@@ -104,10 +104,20 @@ Future<void> setupServiceLocator() async {
   getIt.registerLazySingleton<chat_memory.ChatMemoryService>(() => chat_memory.ChatMemoryService.instance);
 }
 
-/// 执行 [fn]，失败时打印日志但**不抛出异常**，保证后续初始化不受影响。
+/// 执行异步 [fn]，失败时打印日志但**不抛出异常**。
 Future<void> _tryInit(String label, Future<void> Function() fn) async {
   try {
     await fn();
+  } catch (e, stack) {
+    // ignore: avoid_print
+    print('⚠️ [$label] 初始化失败: $e\n$stack');
+  }
+}
+
+/// 执行同步 [fn]，失败时打印日志但**不抛出异常**。
+void _tryInitSync(String label, void Function() fn) {
+  try {
+    fn();
   } catch (e, stack) {
     // ignore: avoid_print
     print('⚠️ [$label] 初始化失败: $e\n$stack');
