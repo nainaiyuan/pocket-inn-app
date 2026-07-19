@@ -19,13 +19,14 @@ jobs:
       - name: Install dependencies & generate code
         run: |
           flutter pub get
-          dart run build_runner build --delete-conflicting-outputs
+          dart run build_runner build --delete-conflicting-outputs 2>&1 | tail -50
       
-      # 🔧 DEBUG APK — 免签名，崩溃时在屏幕上显示红色错误页和堆栈信息
+      # 🔧 DEBUG APK — 输出完整编译日志便于排查
       - name: Build Debug APK
         run: |
-          flutter build apk --debug
+          flutter build apk --debug 2>&1 | tee debug-build.log
           cp build/app/outputs/flutter-apk/app-debug.apk app-debug.apk
+          echo "=== Build log saved ==="
           
       # 📦 RELEASE APK — 带签名
       - name: Build Release APK
