@@ -32,97 +32,84 @@ import '../services/world_book_service.dart';
 /// 不变，避免一次性大改回归。两者指向同一实例，互相兼容。
 final getIt = GetIt.instance;
 
-/// 初始化所有 service 与全局状态。
-///
-/// 注册顺序与原 [main.dart] 中的初始化顺序一致，保证依赖关系正确。
-/// 顶层 mutation 函数（如 [api_configs.initializeApiConfigs]）不属于
-/// 具体 service，仍通过函数调用执行。
+/// 将所有 service 按正确依赖顺序注册 + 初始化。
+/// 每个步骤独立 try-catch，防止一个初始化失败阻塞后续步骤。
 Future<void> setupServiceLocator() async {
-  // 1. 储存服务（其余 service 依赖它）
+  // ── 第1组：无依赖的基础 service（先注册再初始化） ──
   getIt.registerSingleton<StorageService>(StorageService.instance);
-  await getIt<StorageService>().initialize();
+  await _tryInit('StorageService', () => getIt<StorageService>().initialize());
 
-  // 2. 世界书服务
   getIt.registerSingleton<WorldBookService>(WorldBookService.instance);
-  await getIt<WorldBookService>().initialize();
+  await _tryInit('WorldBookService', () => getIt<WorldBookService>().initialize());
 
-  // 3. 角色服务
   getIt.registerSingleton<CharacterService>(CharacterService.instance);
-  await getIt<CharacterService>().initialize();
+  await _tryInit('CharacterService', () => getIt<CharacterService>().initialize());
 
-  // 4. 预设服务 + 选中预设
   getIt.registerSingleton<PresetService>(PresetService.instance);
-  await getIt<PresetService>().initialize();
-  await preset_selection.initializeSelectedPreset();
+  await _tryInit('PresetService', () => getIt<PresetService>().initialize());
 
-  // 5. API 配置服务
+  // ── 依赖 StorageService 的顶层函数 ──
+  await _tryInit('preset_selection', () => preset_selection.initializeSelectedPreset());
+  await _tryInit('app_settings', () => app_settings.initializeAppSettings());
+
+  // ── API 服务 ──
   getIt.registerSingleton<ApiConfigService>(ApiConfigService.instance);
-  await getIt<ApiConfigService>().initialize();
+  await _tryInit('ApiConfigService', () => getIt<ApiConfigService>().initialize());
 
-  // 6. API 请求日志
   getIt.registerSingleton<ApiRequestLogService>(ApiRequestLogService.instance);
-  await getIt<ApiRequestLogService>().initialize();
+  await _tryInit('ApiRequestLogService', () => getIt<ApiRequestLogService>().initialize());
 
-  // 7. 应用设置（顶层函数，依赖 StorageService）
-  await app_settings.initializeAppSettings();
-
-  // 8. 自定义字体
+  // ── 字体 ──
   getIt.registerSingleton<FontService>(FontService.instance);
-  await getIt<FontService>().initializeCustomFont();
+  await _tryInit('FontService', () => getIt<FontService>().initializeCustomFont());
 
-  // 9. 用户设定（顶层函数）
-  await mock_user_settings.initializeUserSettings();
+  // ── 用户设定 ──
+  await _tryInit('user_settings', () => mock_user_settings.initializeUserSettings());
 
-  // 10. 聊天数据库
+  // ── 聊天数据库 ──
   getIt.registerSingleton<ChatDatabaseService>(ChatDatabaseService.instance);
-  await getIt<ChatDatabaseService>().initialize();
+  await _tryInit('ChatDatabaseService', () => getIt<ChatDatabaseService>().initialize());
 
-  // 11. 长期记忆配置（顶层函数）
-  await chat_memory.initializeMemoryConfig();
+  // ── 长期记忆配置 ──
+  await _tryInit('memory_config', () => chat_memory.initializeMemoryConfig());
 
-  // 12. API 配置列表（顶层函数）
-  await api_configs.initializeApiConfigs();
+  // ── API 配置列表 ──
+  await _tryInit('api_configs', () => api_configs.initializeApiConfigs());
 
-  // 13. 聊天服务（ChatService 需在管家之前注册，因为管家初始化要调用它）
+  // ── 聊天服务 ──
   getIt.registerSingleton<ChatService>(ChatService.instance);
 
-  // 14. 管家初始化（DB + 引擎）
+  // ── 管家 ──
   final butler = Butler();
-  await ButlerDatabase.instance.initialize();
+  await _tryInit('ButlerDatabase', () => ButlerDatabase.instance.initialize());
   getIt.registerSingleton<Butler>(butler);
-  getIt<ChatService>().initButler(butler);
+  await _tryInit('ChatService.initButler', () => getIt<ChatService>().initButler(butler));
 
-  // 15. 语音合成服务（TTS）
+  // ── TTS ──
   getIt.registerSingleton<TtsService>(TtsService.instance);
-  await getIt<TtsService>().init();
+  await _tryInit('TtsService', () => getIt<TtsService>().init());
 
-  // 16. 语音聊天服务（自动朗读 + ASR 预留）
+  // ── 语音聊天 ──
   getIt.registerSingleton<VoiceChatService>(VoiceChatService.instance);
-  await getIt<VoiceChatService>().init();
+  await _tryInit('VoiceChatService', () => getIt<VoiceChatService>().init());
 
-  // 其余无 initialize() 的 service 注册为懒加载单例（保持与 instance 同一实例）
-  getIt.registerLazySingleton<AppBackupService>(
-    () => AppBackupService.instance,
-  );
+  // ── 懒加载 service（用到时才实例化，无初始化问题） ──
+  getIt.registerLazySingleton<AppBackupService>(() => AppBackupService.instance);
   getIt.registerLazySingleton<AppDataService>(() => AppDataService.instance);
-  getIt.registerLazySingleton<AppSettingsService>(
-    () => AppSettingsService.instance,
-  );
-  getIt.registerLazySingleton<ChatCharacterResolver>(
-    () => ChatCharacterResolver.instance,
-  );
-  getIt.registerLazySingleton<IOpenAiApiService>(
-    () => OpenAICompatibleApiService.instance,
-  );
-  getIt.registerLazySingleton<OpenAICompatibleApiService>(
-    () => OpenAICompatibleApiService.instance,
-  );
-  getIt.registerLazySingleton<UserSettingsService>(
-    () => UserSettingsService.instance,
-  );
-  getIt.registerLazySingleton<chat_memory.ChatMemoryService>(
-    () => chat_memory.ChatMemoryService.instance,
-  );
+  getIt.registerLazySingleton<AppSettingsService>(() => AppSettingsService.instance);
+  getIt.registerLazySingleton<ChatCharacterResolver>(() => ChatCharacterResolver.instance);
+  getIt.registerLazySingleton<IOpenAiApiService>(() => OpenAICompatibleApiService.instance);
+  getIt.registerLazySingleton<OpenAICompatibleApiService>(() => OpenAICompatibleApiService.instance);
+  getIt.registerLazySingleton<UserSettingsService>(() => UserSettingsService.instance);
+  getIt.registerLazySingleton<chat_memory.ChatMemoryService>(() => chat_memory.ChatMemoryService.instance);
+}
 
-  // 注：ChatVariableService 全部为静态方法，无 instance 单例，无需注册。
+/// 执行 [fn]，失败时打印日志但**不抛出异常**，保证后续初始化不受影响。
+Future<void> _tryInit(String label, Future<void> Function() fn) async {
+  try {
+    await fn();
+  } catch (e, stack) {
+    // ignore: avoid_print
+    print('⚠️ [$label] 初始化失败: $e\n$stack');
+  }
 }
