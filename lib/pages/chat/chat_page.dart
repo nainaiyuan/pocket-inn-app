@@ -12,7 +12,10 @@ import 'widgets/chat_input_bar.dart';
 import 'widgets/plus_menu.dart';
 import 'widgets/character_world_page.dart';
 
-/// 聊天主页面
+/// 聊天主页面 —— 三页联动侧栏
+///
+/// 左右滑动时，中间页面被推开，露出左侧/右侧页面。
+/// 手势在屏幕左右边缘 40px 内触发，不干扰列表滚动。
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
 
@@ -35,19 +38,18 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   bool _showRightSidebar = false;
   late AnimationController _slideCtrl;
 
-  // 手势跟踪
-  double _dragStartX = 0;
-  bool _isDragging = false;
-
   static const double _sidebarFraction = 0.65;
-  static const double _dragThreshold = 30.0;
+
+  /// 当前拖拽的偏移量（用于三页联动）
+  double _dragOffset = 0;
+  bool _isDragging = false;
 
   @override
   void initState() {
     super.initState();
     _slideCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 280),
+      duration: const Duration(milliseconds: 300),
     );
     _initCharacter();
   }
@@ -94,15 +96,12 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
 
   void _openSidebar({required bool left}) {
     if (_showLeftSidebar || _showRightSidebar) return;
-    // 如果有 PlusMenu，先关上
-    if (_showPlusMenu) {
-      setState(() => _showPlusMenu = false);
-    }
     setState(() {
       _showLeftSidebar = left;
       _showRightSidebar = !left;
+      _showPlusMenu = false;
     });
-    _slideCtrl.forward();
+    _slideCtrl.forward(from: 0.0);
     HapticFeedback.mediumImpact();
   }
 
@@ -113,51 +112,87 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
         setState(() {
           _showLeftSidebar = false;
           _showRightSidebar = false;
+          _isDragging = false;
+          _dragOffset = 0;
         });
       }
     });
   }
 
   void _togglePlusMenu() {
-    // 如果侧边栏开着，先关侧边栏（反之亦然）
     if (_showLeftSidebar || _showRightSidebar) {
       _closeSidebar();
       return;
     }
+    setState(() => _showPlusMenu = !_showPlusMenu);
+  }
+
+  /// 获取中间页面的当前偏移量
+  double _getMainOffset(double screenW) {
+    final progress = _slideCtrl.value;
+    double offset = 0;
+    if (_showLeftSidebar) {
+      offset = screenW * _sidebarFraction * progress;
+    } else if (_showRightSidebar) {
+      offset = -screenW * _sidebarFraction * progress;
+    }
+    // 拖动时叠加拖拽偏移
+    if (_isDragging) {
+      offset += _dragOffset;
+    }
+    return offset;
+  }
+
+  // ===== 边缘滑动识别 =====
+  void _onLeftEdgeHorizontalDragUpdate(DragUpdateDetails details) {
+    if (_showRightSidebar || _showPlusMenu) return;
+    if (details.primaryDelta == null) return;
     setState(() {
-      _showPlusMenu = !_showPlusMenu;
+      _isDragging = true;
+      _dragOffset += details.primaryDelta!;
+      _dragOffset = _dragOffset.clamp(0, MediaQuery.of(context).size.width * _sidebarFraction);
     });
   }
 
-  // ===== 手势处理：连续跟踪拖动距离，超过阈值触发 =====
-  void _onPanStart(DragStartDetails details) {
-    if (_showLeftSidebar || _showRightSidebar || _showPlusMenu) return;
-    _dragStartX = details.globalPosition.dx;
-    _isDragging = true;
-  }
-
-  void _onPanUpdate(DragUpdateDetails details) {
+  void _onLeftEdgeDragEnd(DragEndDetails details) {
     if (!_isDragging) return;
-    final currentX = details.globalPosition.dx;
-    final delta = currentX - _dragStartX;
-
-    // 向右拖动超过阈值 → 打开左侧栏
-    if (delta > _dragThreshold && !_showLeftSidebar) {
+    final screenW = MediaQuery.of(context).size.width;
+    final threshold = screenW * _sidebarFraction * 0.35;
+    if (_dragOffset > threshold) {
+      _showLeftSidebar = true;
+      _slideCtrl.forward(from: (_dragOffset / (screenW * _sidebarFraction)).clamp(0.0, 1.0));
+    }
+    setState(() {
       _isDragging = false;
-      _openSidebar(left: true);
-    }
-    // 向左拖动超过阈值 → 打开右侧栏（屏幕右侧1/3区域开始拖才有效，避免误触）
-    else if (delta < -_dragThreshold && !_showRightSidebar) {
-      // 只在屏幕右半部分开始的左滑才触发右侧栏
-      if (_dragStartX > MediaQuery.of(context).size.width * 0.5) {
-        _isDragging = false;
-        _openSidebar(left: false);
-      }
-    }
+      _dragOffset = 0;
+    });
   }
 
-  void _onPanEnd(DragEndDetails details) {
-    _isDragging = false;
+  void _onRightEdgeHorizontalDragUpdate(DragUpdateDetails details) {
+    if (_showLeftSidebar || _showPlusMenu) return;
+    if (details.primaryDelta == null) return;
+    setState(() {
+      _isDragging = true;
+      _dragOffset += details.primaryDelta!;
+      _dragOffset = _dragOffset.clamp(
+        -(MediaQuery.of(context).size.width * _sidebarFraction),
+        0,
+      );
+    });
+  }
+
+  void _onRightEdgeDragEnd(DragEndDetails details) {
+    if (!_isDragging) return;
+    final screenW = MediaQuery.of(context).size.width;
+    final threshold = -(screenW * _sidebarFraction * 0.35);
+    if (_dragOffset < threshold) {
+      _showRightSidebar = true;
+      _slideCtrl.forward(from: (-_dragOffset / (screenW * _sidebarFraction)).clamp(0.0, 1.0));
+    }
+    setState(() {
+      _isDragging = false;
+      _dragOffset = 0;
+    });
   }
 
   Future<void> _sendMessage(String text) async {
@@ -196,7 +231,6 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     );
   }
 
-  /// 点击消息区域（关闭 PlusMenu 或侧边栏）
   void _onTapMessageArea() {
     if (_showPlusMenu) {
       setState(() => _showPlusMenu = false);
@@ -214,25 +248,9 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final screenW = MediaQuery.of(context).size.width;
-    final progress = _slideCtrl.value;
+    final mainOffset = _getMainOffset(screenW);
     final sidebarOpen = _showLeftSidebar || _showRightSidebar;
-
-    // 计算主页面偏移
-    // 左侧栏打开时：向右推，left=正，right=负
-    // 右侧栏打开时：向左推，left=负，right=正
-    double mainLeft = 0;
-    double mainRight = 0;
-    if (sidebarOpen) {
-      if (_showLeftSidebar) {
-        final offset = screenW * _sidebarFraction * progress;
-        mainLeft = offset;
-        mainRight = -offset;
-      } else {
-        final offset = screenW * _sidebarFraction * progress;
-        mainLeft = -offset;
-        mainRight = offset;
-      }
-    }
+    final edgeHitWidth = 35.0; // 边缘触发宽度
 
     return SizedBox(
       width: double.infinity,
@@ -240,14 +258,14 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
       child: Stack(
         children: [
           // ===== 左侧边栏 =====
-          if (_showLeftSidebar)
+          if (_showLeftSidebar || (_isDragging && _dragOffset > 0))
             Positioned(
               left: 0,
               top: 0,
               bottom: 0,
               width: screenW * _sidebarFraction,
               child: Container(
-                color: const Color(0xFFF8F2F4),
+                color: const Color(0xFFF5EEF0),
                 child: ChatSidebarLeft(
                   currentLead: _currentLead,
                   currentPersona: _currentPersona,
@@ -259,45 +277,43 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
             ),
 
           // ===== 右侧边栏 =====
-          if (_showRightSidebar)
+          if (_showRightSidebar || (_isDragging && _dragOffset < 0))
             Positioned(
               right: 0,
               top: 0,
               bottom: 0,
               width: screenW * _sidebarFraction,
               child: Container(
-                color: const Color(0xFFF8F2F4),
+                color: const Color(0xFFF5EEF0),
                 child: const ChatSidebarRight(),
               ),
             ),
 
-          // ===== 暗色遮罩层 =====
-          // 当侧边栏动画进行中但还没完全展开时，遮罩也有过渡
-          if (_showLeftSidebar || _showRightSidebar)
+          // ===== 遮罩层 =====
+          if (sidebarOpen && !_isDragging)
             Positioned.fill(
               child: GestureDetector(
                 onTap: _closeSidebar,
                 child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 280),
-                  opacity: progress.clamp(0.0, 0.45),
+                  duration: const Duration(milliseconds: 300),
+                  opacity: _slideCtrl.value * 0.45,
                   child: Container(color: Colors.black),
                 ),
               ),
             ),
 
-          // ===== 中间聊天主页面 =====
+          // ===== 中间聊天主页面（含动画+手势） =====
           AnimatedPositioned(
-            duration: const Duration(milliseconds: 280),
+            duration: const Duration(milliseconds: 300),
             curve: Curves.easeOutCubic,
-            left: mainLeft,
+            left: mainOffset,
             top: 0,
-            right: mainRight,
+            right: -mainOffset,
             bottom: 0,
-            child: _buildChatContent(),
+            child: _buildChatContent(edgeHitWidth),
           ),
 
           // ===== [+] 弹出菜单 =====
-          // 只在侧边栏关闭时显示 PlusMenu
           if (_showPlusMenu && !sidebarOpen)
             Positioned.fill(
               child: PlusMenu(
@@ -309,53 +325,71 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildChatContent() {
-    // 如果 PlusMenu 打开时，拖动手势由 PlusMenu 自己处理
-    // 如果侧边栏打开时，不需要手势识别
-    final sidebarOpen = _showLeftSidebar || _showRightSidebar;
-    final needsGesture = !sidebarOpen && !_showPlusMenu;
-
-    Widget chatContent = Scaffold(
+  Widget _buildChatContent(double edgeHitWidth) {
+    return Scaffold(
       backgroundColor: const Color(0xFFF5EEF0),
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            ChatTopBar(
-              currentLead: _currentLead,
-              currentPersona: _currentPersona,
-              onAvatarTap: _openCharacterWorld,
-              onMenuTap: () => _openSidebar(left: true),
-            ),
-            Expanded(
-              child: GestureDetector(
-                onTap: _onTapMessageArea,
-                child: ChatMessageArea(
-                  key: _msgKey,
+            // 聊天内容主体
+            Column(
+              children: [
+                ChatTopBar(
+                  currentLead: _currentLead,
                   currentPersona: _currentPersona,
+                  onAvatarTap: _openCharacterWorld,
+                  onMenuTap: () => _openSidebar(left: true),
+                ),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: _onTapMessageArea,
+                    child: ChatMessageArea(
+                      key: _msgKey,
+                      currentPersona: _currentPersona,
+                    ),
+                  ),
+                ),
+                ChatInputBar(
+                  onCameraTap: () {},
+                  onVoiceTap: () {},
+                  onPlusTap: _togglePlusMenu,
+                  onSendTap: _sendMessage,
+                ),
+              ],
+            ),
+
+            // 左边缘手势区域（透明覆盖层）
+            if (!_showRightSidebar && !_showPlusMenu)
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: edgeHitWidth,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragUpdate: _onLeftEdgeHorizontalDragUpdate,
+                  onHorizontalDragEnd: _onLeftEdgeDragEnd,
+                  child: Container(), // 透明
                 ),
               ),
-            ),
-            ChatInputBar(
-              onCameraTap: () {},
-              onVoiceTap: () {},
-              onPlusTap: _togglePlusMenu,
-              onSendTap: _sendMessage,
-            ),
+
+            // 右边缘手势区域
+            if (!_showLeftSidebar && !_showPlusMenu)
+              Positioned(
+                right: 0,
+                top: 0,
+                bottom: 0,
+                width: edgeHitWidth,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragUpdate: _onRightEdgeHorizontalDragUpdate,
+                  onHorizontalDragEnd: _onRightEdgeDragEnd,
+                  child: Container(),
+                ),
+              ),
           ],
         ),
       ),
     );
-
-    // 仅在需要手势识别时包裹 GestureDetector
-    if (needsGesture) {
-      chatContent = GestureDetector(
-        onPanStart: _onPanStart,
-        onPanUpdate: _onPanUpdate,
-        onPanEnd: _onPanEnd,
-        child: chatContent,
-      );
-    }
-
-    return chatContent;
   }
 }
