@@ -42,7 +42,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     super.initState();
     _slideCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 350),
+      duration: const Duration(milliseconds: 300),
     );
     _initCharacter();
   }
@@ -64,9 +64,8 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     setState(() {
       _currentLead = lead;
       _currentPersona = persona;
-      _showLeftSidebar = false;
     });
-    _slideCtrl.reverse();
+    _closeSidebar();
     HapticFeedback.lightImpact();
   }
 
@@ -96,10 +95,8 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
       timestamp: DateTime.now(),
       status: MessageStatus.sending,
     );
-
     _msgKey.currentState?.appendMessage(userMsg);
 
-    // 走AI回复
     final reply = await _aiService.generateReply(text, _currentPersona!.id);
     final aiMsg = ChatMessage(
       id: '${DateTime.now().millisecondsSinceEpoch}_ai',
@@ -107,7 +104,6 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
       text: reply,
       timestamp: DateTime.now(),
     );
-
     _msgKey.currentState?.appendMessage(aiMsg);
   }
 
@@ -120,9 +116,8 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
           lead: _currentLead!,
           persona: _currentPersona!,
         ),
-        transitionsBuilder: (_, anim, __, child) {
-          return FadeTransition(opacity: anim, child: child);
-        },
+        transitionsBuilder: (_, anim, __, child) =>
+            FadeTransition(opacity: anim, child: child),
         transitionDuration: const Duration(milliseconds: 300),
       ),
     );
@@ -150,74 +145,60 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
           _closeSidebar();
         }
       },
-      child: Stack(
-        children: [
-          _buildBackground(),
-          _buildAnimatedLayout(),
-          if (_showPlusMenu) PlusMenu(onDismiss: () {
-            setState(() => _showPlusMenu = false);
-          }),
-        ],
-      ),
+      child: _buildBody(),
     );
   }
 
-  Widget _buildBackground() {
-    return Container(
-      color: const Color(0xFFFff5f7),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -80, left: -60,
-            child: Container(
-              width: 300, height: 300,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: const Color(0xFFFFB5C5).withValues(alpha: 0.2),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: 40, right: -40,
-            child: Container(
-              width: 200, height: 200,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: const Color(0xFFC5B5FF).withValues(alpha: 0.15),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAnimatedLayout() {
+  Widget _buildBody() {
+    final screenW = MediaQuery.of(context).size.width;
     final progress = _slideCtrl.value;
-    final offset = _showLeftSidebar
-        ? _sidebarFraction * progress
-        : _showRightSidebar
-            ? -_sidebarFraction * progress
-            : 0.0;
+    final sidebarOpen = _showLeftSidebar || _showRightSidebar;
+
+    // 主页面偏移量
+    double mainOffset = 0;
+    if (_showLeftSidebar) mainOffset = _sidebarFraction * screenW * progress;
+    if (_showRightSidebar) mainOffset = -_sidebarFraction * screenW * progress;
 
     return Stack(
       children: [
-        // 阴影
-        if (_showLeftSidebar || _showRightSidebar)
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: _closeSidebar,
-              child: Container(
-                color: const Color(0xFF5A4A52).withValues(alpha: 0.15 * progress),
+        // ===== 背景层 =====
+        Container(
+          color: const Color(0xFFFff5f7),
+          child: Stack(
+            children: [
+              Positioned(
+                top: -80, left: -60,
+                child: Container(
+                  width: 300, height: 300,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xFFFFB5C5).withValues(alpha: 0.2),
+                  ),
+                ),
               ),
-            ),
+              Positioned(
+                bottom: 40, right: -40,
+                child: Container(
+                  width: 200, height: 200,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xFFC5B5FF).withValues(alpha: 0.15),
+                  ),
+                ),
+              ),
+            ],
           ),
+        ),
 
-        // 侧边栏
+        // ===== 左侧边栏（在聊天页下面，不会覆盖） =====
         if (_showLeftSidebar)
-          FractionallySizedBox(
-            widthFactor: _sidebarFraction,
-            alignment: Alignment.centerLeft,
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: screenW * _sidebarFraction,
             child: ChatSidebarLeft(
               currentLead: _currentLead,
               currentPersona: _currentPersona,
@@ -227,43 +208,78 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
             ),
           ),
 
+        // ===== 右侧边栏 =====
         if (_showRightSidebar)
-          FractionallySizedBox(
-            widthFactor: _sidebarFraction,
-            alignment: Alignment.centerRight,
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: screenW * _sidebarFraction,
             child: const ChatSidebarRight(),
           ),
 
-        // 主页面
-        Transform.translate(
-          offset: Offset(offset * MediaQuery.of(context).size.width, 0),
-          child: Transform.scale(
-            scale: 1 - 0.03 * progress,
-            child: Container(
+        // ===== 阴影遮罩（点击可关闭） =====
+        if (sidebarOpen && progress > 0.01)
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: _closeSidebar,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 300),
+                opacity: progress,
+                child: Container(
+                  color: const Color(0xFF5A4A52).withValues(alpha: 0.3),
+                ),
+              ),
+            ),
+          ),
+
+        // ===== 主聊天页面（盖在侧边栏上方，被推开露出侧栏） =====
+        AnimatedPositioned(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOutCubic,
+          left: mainOffset,
+          top: 0,
+          right: -mainOffset,
+          bottom: 0,
+          child: AnimatedScale(
+            duration: const Duration(milliseconds: 300),
+            scale: sidebarOpen ? 0.96 : 1.0,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16 * progress),
-                boxShadow: progress > 0.01
+                borderRadius: BorderRadius.circular(sidebarOpen ? 12 : 0),
+                boxShadow: sidebarOpen
                     ? [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.08 * progress),
+                          color: Colors.black.withValues(alpha: 0.1),
                           blurRadius: 20,
                           offset: const Offset(0, 4),
                         ),
                       ]
                     : null,
               ),
-              clipBehavior: progress > 0.01 ? Clip.antiAlias : Clip.none,
+              clipBehavior: sidebarOpen ? Clip.antiAlias : Clip.none,
               child: _buildChatContent(),
             ),
           ),
         ),
+
+        // ===== [+] 弹出菜单 =====
+        if (_showPlusMenu)
+          Positioned.fill(
+            child: PlusMenu(
+              onDismiss: () => setState(() => _showPlusMenu = false),
+            ),
+          ),
       ],
     );
   }
 
   Widget _buildChatContent() {
     return Scaffold(
-      backgroundColor: Colors.white.withValues(alpha: 0.55),
+      backgroundColor: Colors.white.withValues(alpha: 0.85),
       body: Column(
         children: [
           ChatTopBar(

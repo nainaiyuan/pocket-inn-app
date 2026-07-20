@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../../models/male_lead.dart';
-import '../../../services/character_service.dart';
 
 /// 左滑侧边栏 —— 选择男主/形象
 class ChatSidebarLeft extends StatefulWidget {
@@ -80,7 +78,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     final leads = _service.leads;
 
     return Container(
-      color: const Color(0xFFF5F0F2),
+      color: const Color(0xFFE8DCE0), // 更实的底色
       child: SafeArea(
         child: Column(
           children: [
@@ -96,7 +94,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w500,
-                      color: const Color(0xFF6A4A5A).withValues(alpha: 0.6),
+                      color: const Color(0xFF6A4A5A).withValues(alpha: 0.75),
                       letterSpacing: 2,
                     ),
                   ),
@@ -112,7 +110,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
                       child: Text(
                         '还没有角色，点击下方 + 新建',
                         style: TextStyle(
-                          color: const Color(0xFF6A4A5A).withValues(alpha: 0.2),
+                          color: const Color(0xFF6A4A5A).withValues(alpha: 0.35),
                           fontSize: 13,
                         ),
                       ),
@@ -139,7 +137,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
                     ),
             ),
 
-            // 底部新建按钮
+            // 底部新建
             Padding(
               padding: EdgeInsets.fromLTRB(
                 12,
@@ -150,7 +148,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
               child: SizedBox(
                 width: double.infinity,
                 child: Material(
-                  color: Colors.white.withValues(alpha: 0.4),
+                  color: Colors.white.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(16),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(16),
@@ -188,7 +186,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
   }
 }
 
-/// 单个男主卡片（可展开）
+/// 单个男主卡片
 class _LeadCard extends StatelessWidget {
   final MaleLead lead;
   final bool isExpanded;
@@ -211,18 +209,17 @@ class _LeadCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: isActive ? 0.5 : 0.3),
+        color: Colors.white.withValues(alpha: isActive ? 0.7 : 0.5),
         borderRadius: BorderRadius.circular(18),
         border: isActive
             ? Border.all(
-                color: const Color(0xFFE8A0B8).withValues(alpha: 0.2),
+                color: const Color(0xFFE8A0B8).withValues(alpha: 0.3),
               )
             : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 收起状态：立绘+姓名+语录+当前身份
           InkWell(
             borderRadius: BorderRadius.circular(18),
             onTap: onToggle,
@@ -230,7 +227,6 @@ class _LeadCard extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               child: Row(
                 children: [
-                  // 立绘占位
                   Container(
                     width: 56,
                     height: 72,
@@ -238,8 +234,8 @@ class _LeadCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                       gradient: LinearGradient(
                         colors: [
-                          const Color(0xFFE8A0B8).withValues(alpha: 0.15),
-                          const Color(0xFFC8A8D8).withValues(alpha: 0.15),
+                          const Color(0xFFE8A0B8).withValues(alpha: 0.2),
+                          const Color(0xFFC8A8D8).withValues(alpha: 0.2),
                         ],
                       ),
                       border: Border.all(
@@ -250,13 +246,11 @@ class _LeadCard extends StatelessWidget {
                       child: Icon(
                         Icons.person_outline_rounded,
                         size: 28,
-                        color: const Color(0xFFB48296).withValues(alpha: 0.4),
+                        color: const Color(0xFFB48296).withValues(alpha: 0.5),
                       ),
                     ),
                   ),
                   const SizedBox(width: 12),
-
-                  // 文字信息
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -276,7 +270,7 @@ class _LeadCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 12,
-                            color: const Color(0xFF5A4A52).withValues(alpha: 0.25),
+                            color: const Color(0xFF5A4A52).withValues(alpha: 0.4),
                             fontStyle: FontStyle.italic,
                           ),
                         ),
@@ -288,14 +282,14 @@ class _LeadCard extends StatelessWidget {
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFE8A0B8).withValues(alpha: 0.1),
+                              color: const Color(0xFFE8A0B8).withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
                               '当前：${currentPersona!.name}',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: const Color(0xFFB48296).withValues(alpha: 0.7),
+                                color: const Color(0xFFB48296).withValues(alpha: 0.8),
                               ),
                             ),
                           ),
@@ -303,20 +297,17 @@ class _LeadCard extends StatelessWidget {
                       ],
                     ),
                   ),
-
-                  // 展开箭头
                   Icon(
                     isExpanded
                         ? Icons.expand_less_rounded
                         : Icons.expand_more_rounded,
-                    color: const Color(0xFF5A4A52).withValues(alpha: 0.2),
+                    color: const Color(0xFF5A4A52).withValues(alpha: 0.3),
                   ),
                 ],
               ),
             ),
           ),
 
-          // 展开状态：形象列表
           if (isExpanded) ...[
             const Divider(height: 1, indent: 16, endIndent: 16),
             Padding(
@@ -328,7 +319,6 @@ class _LeadCard extends StatelessWidget {
                         isActive: isActive && currentPersona?.id == persona.id,
                         onTap: () => onSelectPersona(persona),
                       )),
-                  // 新建形象按钮
                   _AddPersonaTile(leadId: lead.id),
                 ],
               ),
@@ -340,7 +330,6 @@ class _LeadCard extends StatelessWidget {
   }
 }
 
-/// 形象选择行
 class _PersonaTile extends StatelessWidget {
   final Persona persona;
   final bool isActive;
@@ -358,7 +347,7 @@ class _PersonaTile extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 6),
       child: Material(
         color: isActive
-            ? const Color(0xFFE8A0B8).withValues(alpha: 0.1)
+            ? const Color(0xFFE8A0B8).withValues(alpha: 0.15)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
@@ -374,31 +363,23 @@ class _PersonaTile extends StatelessWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: isActive
-                        ? const Color(0xFFE8A0B8).withValues(alpha: 0.2)
-                        : Colors.white.withValues(alpha: 0.3),
+                        ? const Color(0xFFE8A0B8).withValues(alpha: 0.3)
+                        : Colors.white.withValues(alpha: 0.4),
                     border: isActive
                         ? Border.all(
-                            color: const Color(0xFFE8A0B8).withValues(alpha: 0.4),
+                            color: const Color(0xFFE8A0B8).withValues(alpha: 0.5),
                             width: 1.5,
                           )
                         : Border.all(
                             color: Colors.white.withValues(alpha: 0.3),
                           ),
-                    boxShadow: isActive
-                        ? [
-                            BoxShadow(
-                              color: const Color(0xFFE8A0B8).withValues(alpha: 0.15),
-                              blurRadius: 8,
-                            ),
-                          ]
-                        : null,
                   ),
                   child: Icon(
                     Icons.face_6_outlined,
                     size: 16,
                     color: isActive
                         ? const Color(0xFFB48296)
-                        : const Color(0xFFB48296).withValues(alpha: 0.4),
+                        : const Color(0xFFB48296).withValues(alpha: 0.5),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -409,7 +390,7 @@ class _PersonaTile extends StatelessWidget {
                     fontWeight: isActive ? FontWeight.w500 : FontWeight.normal,
                     color: isActive
                         ? const Color(0xFF6A4A5A)
-                        : const Color(0xFF6A4A5A).withValues(alpha: 0.6),
+                        : const Color(0xFF6A4A5A).withValues(alpha: 0.7),
                   ),
                 ),
                 if (isActive) ...[
@@ -432,7 +413,6 @@ class _PersonaTile extends StatelessWidget {
   }
 }
 
-/// 新建形象按钮
 class _AddPersonaTile extends StatefulWidget {
   final String leadId;
   const _AddPersonaTile({required this.leadId});
@@ -487,7 +467,7 @@ class _AddPersonaTileState extends State<_AddPersonaTile> {
     return Padding(
       padding: const EdgeInsets.only(top: 4),
       child: Material(
-        color: Colors.white.withValues(alpha: 0.15),
+        color: Colors.white.withValues(alpha: 0.25),
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -501,15 +481,15 @@ class _AddPersonaTileState extends State<_AddPersonaTile> {
                   height: 32,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: const Color(0xFFE8A0B8).withValues(alpha: 0.08),
+                    color: const Color(0xFFE8A0B8).withValues(alpha: 0.12),
                     border: Border.all(
-                      color: const Color(0xFFE8A0B8).withValues(alpha: 0.15),
+                      color: const Color(0xFFE8A0B8).withValues(alpha: 0.2),
                     ),
                   ),
                   child: Icon(
                     Icons.add_rounded,
                     size: 18,
-                    color: const Color(0xFFB48296).withValues(alpha: 0.5),
+                    color: const Color(0xFFB48296).withValues(alpha: 0.6),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -517,7 +497,7 @@ class _AddPersonaTileState extends State<_AddPersonaTile> {
                   '新建身份',
                   style: TextStyle(
                     fontSize: 14,
-                    color: const Color(0xFFB48296).withValues(alpha: 0.5),
+                    color: const Color(0xFFB48296).withValues(alpha: 0.6),
                   ),
                 ),
               ],
