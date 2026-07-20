@@ -53,6 +53,10 @@ class _FloatingNavigatorState extends State<FloatingNavigator>
       curve: Curves.easeOutBack,
       reverseCurve: Curves.easeInOut,
     );
+    // 监听动画变化触发重建
+    _animCtrl.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   @override

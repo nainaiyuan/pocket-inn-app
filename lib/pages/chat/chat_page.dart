@@ -48,15 +48,36 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   }
 
   Future<void> _initCharacter() async {
-    await _characterService.load();
+    try {
+      await _characterService.load();
+    } catch (_) {
+      // 第一次打开可能还没有数据
+    }
+    if (!mounted) return;
     final leads = _characterService.leads;
-    if (leads.isNotEmpty && mounted) {
+    if (leads.isNotEmpty) {
       setState(() {
         _currentLead = leads.first;
         _currentPersona = leads.first.personas.isNotEmpty
             ? leads.first.personas.first
             : null;
       });
+    } else {
+      // 没有角色时自动建一个默认的
+      await _characterService.addMaleLead(MaleLead(
+        id: 'default',
+        name: '沈星回',
+      ));
+      if (!mounted) return;
+      await _characterService.load();
+      if (_characterService.leads.isNotEmpty && mounted) {
+        setState(() {
+          _currentLead = _characterService.leads.first;
+          _currentPersona = _characterService.leads.first.personas.isNotEmpty
+              ? _characterService.leads.first.personas.first
+              : null;
+        });
+      }
     }
   }
 
@@ -70,9 +91,11 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   }
 
   void _openSidebar({required bool left}) {
+    if (_showLeftSidebar || _showRightSidebar) return;
     setState(() {
       _showLeftSidebar = left;
       _showRightSidebar = !left;
+      _showPlusMenu = false;
     });
     _slideCtrl.forward();
     HapticFeedback.mediumImpact();
@@ -90,7 +113,9 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   }
 
   Future<void> _sendMessage(String text) async {
-    if (_currentPersona == null) return;
+    if (_currentPersona == null) {
+      // 没选角色也能发，只是给一个虚拟回复
+    }
 
     final userMsg = ChatMessage(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -100,10 +125,13 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     );
     _msgKey.currentState?.appendMessage(userMsg);
 
-    final reply = await _aiService.generateReply(text, _currentPersona!.id);
+    final reply = await _aiService.generateReply(
+      text,
+      _currentPersona?.id ?? 'default',
+    );
     final aiMsg = ChatMessage(
       id: '${DateTime.now().millisecondsSinceEpoch}_ai',
-      personaId: _currentPersona!.id,
+      personaId: _currentPersona?.id ?? 'default',
       text: reply,
       timestamp: DateTime.now(),
     );
@@ -126,6 +154,12 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     );
   }
 
+  void _togglePlusMenu() {
+    setState(() {
+      _showPlusMenu = !_showPlusMenu;
+    });
+  }
+
   @override
   void dispose() {
     _slideCtrl.dispose();
@@ -138,7 +172,6 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     final progress = _slideCtrl.value;
     final sidebarOpen = _showLeftSidebar || _showRightSidebar;
 
-    // 三张纸：中间页移动，侧边栏固定在两边
     double mainOffset = 0;
     if (sidebarOpen) {
       if (_showLeftSidebar) {
@@ -148,23 +181,13 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
       }
     }
 
-    return GestureDetector(
-      onHorizontalDragEnd: (details) {
-        if (details.primaryVelocity == null) return;
-        final v = details.primaryVelocity!;
-        if (v > 300 && !sidebarOpen) {
-          _openSidebar(left: true);
-        } else if (v < -300 && !sidebarOpen) {
-          _openSidebar(left: false);
-        } else if (v > 300 && _showRightSidebar) {
-          _closeSidebar();
-        } else if (v < -300 && _showLeftSidebar) {
-          _closeSidebar();
-        }
-      },
+    // 侧边栏按钮 + 手势都用，不用纯手势
+    return SizedBox(
+      width: double.infinity,
+      height: double.infinity,
       child: Stack(
         children: [
-          // ===== 左侧边栏（固定在左边，动画时不被推走） =====
+          // ===== 左侧边栏 =====
           Positioned(
             left: 0,
             top: 0,
@@ -182,7 +205,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
             ),
           ),
 
-          // ===== 右侧边栏（固定在右边） =====
+          // ===== 右侧边栏 =====
           Positioned(
             right: 0,
             top: 0,
@@ -194,7 +217,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
             ),
           ),
 
-          // ===== 暗色遮罩（动画时可点击关闭） =====
+          // ===== 暗色遮罩 =====
           if (sidebarOpen)
             Positioned.fill(
               child: GestureDetector(
@@ -207,7 +230,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
               ),
             ),
 
-          // ===== 中间聊天页（三张纸的中间那张，左右滑动） =====
+          // ===== 中间聊天页 =====
           AnimatedPositioned(
             duration: const Duration(milliseconds: 280),
             curve: Curves.easeOutCubic,
@@ -225,6 +248,30 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
                 onDismiss: () => setState(() => _showPlusMenu = false),
               ),
             ),
+
+          // ===== 触发侧边栏的点击按钮层（只在聊天页露出的边缘） =====
+          // 左侧边缘点击区
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 30,
+            child: GestureDetector(
+              onTap: () => _openSidebar(left: true),
+              behavior: HitTestBehavior.translucent,
+            ),
+          ),
+          // 右侧边缘点击区
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 30,
+            child: GestureDetector(
+              onTap: () => _openSidebar(left: false),
+              behavior: HitTestBehavior.translucent,
+            ),
+          ),
         ],
       ),
     );
@@ -251,7 +298,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
             ChatInputBar(
               onCameraTap: () {},
               onVoiceTap: () {},
-              onPlusTap: () => setState(() => _showPlusMenu = !_showPlusMenu),
+              onPlusTap: _togglePlusMenu,
               onSendTap: _sendMessage,
             ),
           ],
