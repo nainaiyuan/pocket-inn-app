@@ -1,38 +1,76 @@
 import 'package:flutter/material.dart';
-import '../models/chat_message.dart';
+
+import '../../../models/chat_message.dart';
+import '../../../models/user_setting.dart';
+import '../../../services/chat_character_resolver.dart';
 
 /// 消息气泡
 class MessageBubble extends StatelessWidget {
   final ChatMessage message;
-  final String? personaName;
+  final UserSetting? userSetting;
+  final ResolvedChatCharacter? character;
+  final Object inputTapRegionGroupId;
+  final bool isLastUserMessageWithoutReply;
+  final bool isLastCharacterMessage;
+  final bool showActions;
+  final bool canEdit;
+  final bool canDelete;
+  final bool isBusyRegenerating;
+  final bool isBusyImpersonating;
+  final VoidCallback? onCopy;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+  final VoidCallback? onGenerate;
+  final VoidCallback? onRegenerate;
+  final VoidCallback? onContinue;
+  final VoidCallback? onImpersonate;
+  final VoidCallback? onSelectPreviousVariant;
+  final VoidCallback? onSelectNextVariant;
 
   const MessageBubble({
     super.key,
     required this.message,
-    this.personaName,
+    this.userSetting,
+    this.character,
+    required this.inputTapRegionGroupId,
+    this.isLastUserMessageWithoutReply = false,
+    this.isLastCharacterMessage = false,
+    this.showActions = false,
+    this.canEdit = false,
+    this.canDelete = false,
+    this.isBusyRegenerating = false,
+    this.isBusyImpersonating = false,
+    this.onCopy,
+    this.onEdit,
+    this.onDelete,
+    this.onGenerate,
+    this.onRegenerate,
+    this.onContinue,
+    this.onImpersonate,
+    this.onSelectPreviousVariant,
+    this.onSelectNextVariant,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.only(
-        left: message.isUser ? 60 : 16,
-        right: message.isUser ? 16 : 60,
+        left: message.isMe ? 60 : 16,
+        right: message.isMe ? 16 : 60,
         top: 6,
         bottom: 2,
       ),
       child: Column(
         crossAxisAlignment:
-            message.isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            message.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
           // 头像 + 气泡
           Row(
             mainAxisAlignment:
-                message.isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+                message.isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              if (!message.isUser) ...[
-                // AI头像
+              if (!message.isMe) ...[
                 _Avatar(isUser: false),
                 const SizedBox(width: 8),
               ],
@@ -44,16 +82,16 @@ class MessageBubble extends StatelessWidget {
                     vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    color: message.isUser
+                    color: message.isMe
                         ? const Color(0xFFE8A0B8).withValues(alpha: 0.15)
                         : Colors.white.withValues(alpha: 0.5),
                     borderRadius: BorderRadius.only(
                       topLeft: const Radius.circular(18),
                       topRight: const Radius.circular(18),
-                      bottomLeft: message.isUser
+                      bottomLeft: message.isMe
                           ? const Radius.circular(18)
                           : Radius.zero,
-                      bottomRight: message.isUser
+                      bottomRight: message.isMe
                           ? Radius.zero
                           : const Radius.circular(18),
                     ),
@@ -64,24 +102,6 @@ class MessageBubble extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (message.imageUrl != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Container(
-                              width: 180,
-                              height: 180,
-                              color: const Color(0xFFE8A0B8).withValues(alpha: 0.05),
-                              child: Center(
-                                child: Icon(
-                                  Icons.image_outlined,
-                                  color: const Color(0xFFB48296).withValues(alpha: 0.3),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
                       Text(
                         message.text,
                         style: TextStyle(
@@ -90,31 +110,101 @@ class MessageBubble extends StatelessWidget {
                           height: 1.5,
                         ),
                       ),
+                      // 操作按钮（仅在 showActions 时显示）
+                      if (showActions) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (onCopy != null)
+                              _ActionButton(
+                                icon: Icons.copy_rounded,
+                                onTap: onCopy!,
+                              ),
+                            if (canEdit && onEdit != null)
+                              _ActionButton(
+                                icon: Icons.edit_rounded,
+                                onTap: onEdit!,
+                              ),
+                            if (canDelete && onDelete != null)
+                              _ActionButton(
+                                icon: Icons.delete_outline_rounded,
+                                onTap: onDelete!,
+                              ),
+                            if (message.isMe && onGenerate != null)
+                              _ActionButton(
+                                icon: Icons.refresh_rounded,
+                                onTap: onGenerate!,
+                              ),
+                            if (!message.isMe && onRegenerate != null)
+                              _ActionButton(
+                                icon: Icons.replay_rounded,
+                                onTap: onRegenerate!,
+                              ),
+                            if (!message.isMe && onContinue != null)
+                              _ActionButton(
+                                icon: Icons.play_arrow_rounded,
+                                onTap: onContinue!,
+                              ),
+                            if (message.hasMultiple) ...[
+                              if (onSelectPreviousVariant != null)
+                                _ActionButton(
+                                  icon: Icons.chevron_left_rounded,
+                                  onTap: onSelectPreviousVariant!,
+                                ),
+                              if (onSelectNextVariant != null)
+                                _ActionButton(
+                                  icon: Icons.chevron_right_rounded,
+                                  onTap: onSelectNextVariant!,
+                                ),
+                            ],
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ),
-              if (message.isUser) ...[
+              if (message.isMe) ...[
                 const SizedBox(width: 8),
                 _Avatar(isUser: true),
               ],
             ],
           ),
-          // 状态指示
-          if (message.isUser && message.status != MessageStatus.sent)
-            Padding(
-              padding: const EdgeInsets.only(top: 2, right: 52),
-              child: Text(
-                message.status == MessageStatus.sending ? '发送中…' : '发送失败',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: message.status == MessageStatus.failed
-                      ? const Color(0xFFE57373)
-                      : const Color(0xFF5A4A52).withValues(alpha: 0.2),
-                ),
-              ),
-            ),
         ],
+      ),
+    );
+  }
+}
+
+/// 操作小按钮
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _ActionButton({
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(4),
+            child: Icon(
+              icon,
+              size: 16,
+              color: const Color(0xFFB48296).withValues(alpha: 0.5),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -149,7 +239,9 @@ class _Avatar extends StatelessWidget {
         ),
       ),
       child: Icon(
-        isUser ? Icons.person_outline_rounded : Icons.auto_awesome_mosaic_outlined,
+        isUser
+            ? Icons.person_outline_rounded
+            : Icons.auto_awesome_mosaic_outlined,
         size: 18,
         color: const Color(0xFFB48296).withValues(alpha: 0.4),
       ),

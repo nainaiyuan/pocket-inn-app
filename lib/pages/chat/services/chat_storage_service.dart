@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/chat_message.dart';
+import '../../../models/chat_message.dart';
 
 /// 聊天消息持久化服务
 class ChatStorageService {

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../models/male_lead.dart';
-import '../models/chat_message.dart';
+import '../../../models/chat_message.dart';
 import '../services/chat_storage_service.dart';
 import 'message_bubble.dart';
 
@@ -98,7 +98,18 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
       itemBuilder: (context, index) {
         return MessageBubble(
           message: _messages[index],
-          personaName: widget.currentPersona!.name,
+          userSetting: null,
+          character: null,
+          inputTapRegionGroupId: const Object(),
+          isLastUserMessageWithoutReply:
+              index == _messages.length - 1 && _messages[index].isMe,
+          isLastCharacterMessage:
+              index == _messages.length - 1 && !_messages[index].isMe,
+          showActions: false,
+          canEdit: false,
+          canDelete: false,
+          isBusyRegenerating: false,
+          isBusyImpersonating: false,
         );
       },
     );

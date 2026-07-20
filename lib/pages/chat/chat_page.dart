@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../models/male_lead.dart';
 import '../../services/character_service.dart';
-import 'models/chat_message.dart';
+import '../../models/chat_message.dart';
 import 'services/ai_chat_service.dart';
 import 'widgets/chat_sidebar_left.dart';
 import 'widgets/chat_sidebar_right.dart';
@@ -120,8 +120,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     final userMsg = ChatMessage(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       text: text,
-      timestamp: DateTime.now(),
-      status: MessageStatus.sending,
+      isMe: true,
     );
     _msgKey.currentState?.appendMessage(userMsg);
 
@@ -131,9 +130,8 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     );
     final aiMsg = ChatMessage(
       id: '${DateTime.now().millisecondsSinceEpoch}_ai',
-      personaId: _currentPersona?.id ?? 'default',
       text: reply,
-      timestamp: DateTime.now(),
+      isMe: false,
     );
     _msgKey.currentState?.appendMessage(aiMsg);
   }
