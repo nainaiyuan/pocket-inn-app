@@ -4,7 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'core/error_handler.dart';
 import 'core/service_locator.dart';
 import 'data/app_settings.dart';
-import 'pages/chat_page.dart';
+import 'pages/home/home_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -149,7 +149,7 @@ class MyApp extends StatelessWidget {
             GlobalWidgetsLocalizations.delegate,
           ],
           supportedLocales: const [Locale('zh', 'CN'), Locale('en', 'US')],
-          home: const ChatPage(),
+          home: const HomePage(),
         );
       },
     );
