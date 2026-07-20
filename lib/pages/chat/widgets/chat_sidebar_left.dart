@@ -43,7 +43,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white.withValues(alpha: 0.85),
+        backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('新建男主'),
         content: TextField(
@@ -80,7 +80,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     final leads = _service.leads;
 
     return Container(
-      color: const Color(0xFFE8DCE0), // 更实的底色
+      color: const Color(0xFFF5EEF0),
       child: SafeArea(
         child: Column(
           children: [
@@ -95,8 +95,8 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
                     '角色',
                     style: TextStyle(
                       fontSize: 22,
-                      fontWeight: FontWeight.w500,
-                      color: const Color(0xFF6A4A5A).withValues(alpha: 0.75),
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF3D2C33),
                       letterSpacing: 2,
                     ),
                   ),
@@ -112,7 +112,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
                       child: Text(
                         '还没有角色，点击下方 + 新建',
                         style: TextStyle(
-                          color: const Color(0xFF6A4A5A).withValues(alpha: 0.35),
+                          color: const Color(0xFF8A7A80),
                           fontSize: 13,
                         ),
                       ),
@@ -150,7 +150,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
               child: SizedBox(
                 width: double.infinity,
                 child: Material(
-                  color: Colors.white.withValues(alpha: 0.5),
+                  color: Colors.white.withValues(alpha: 0.7),
                   borderRadius: BorderRadius.circular(16),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(16),
@@ -211,11 +211,11 @@ class _LeadCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: isActive ? 0.7 : 0.5),
+        color: Colors.white.withValues(alpha: isActive ? 0.85 : 0.65),
         borderRadius: BorderRadius.circular(18),
         border: isActive
             ? Border.all(
-                color: const Color(0xFFE8A0B8).withValues(alpha: 0.3),
+                color: const Color(0xFFE8A0B8).withValues(alpha: 0.4),
               )
             : null,
       ),
@@ -236,19 +236,19 @@ class _LeadCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                       gradient: LinearGradient(
                         colors: [
-                          const Color(0xFFE8A0B8).withValues(alpha: 0.2),
-                          const Color(0xFFC8A8D8).withValues(alpha: 0.2),
+                          const Color(0xFFE8A0B8).withValues(alpha: 0.3),
+                          const Color(0xFFC8A8D8).withValues(alpha: 0.3),
                         ],
                       ),
                       border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.3),
+                        color: Colors.white.withValues(alpha: 0.5),
                       ),
                     ),
                     child: Center(
                       child: Icon(
                         Icons.person_outline_rounded,
                         size: 28,
-                        color: const Color(0xFFB48296).withValues(alpha: 0.5),
+                        color: const Color(0xFF8A6A78),
                       ),
                     ),
                   ),
@@ -261,8 +261,8 @@ class _LeadCard extends StatelessWidget {
                           lead.name,
                           style: const TextStyle(
                             fontSize: 16,
-                            fontWeight: FontWeight.w500,
-                            color: Color(0xFF6A4A5A),
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF3D2C33),
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -272,7 +272,7 @@ class _LeadCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 12,
-                            color: const Color(0xFF5A4A52).withValues(alpha: 0.4),
+                            color: const Color(0xFF8A7A80),
                             fontStyle: FontStyle.italic,
                           ),
                         ),
@@ -284,14 +284,14 @@ class _LeadCard extends StatelessWidget {
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFE8A0B8).withValues(alpha: 0.15),
+                              color: const Color(0xFFE8A0B8).withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
                               '当前：${currentPersona!.name}',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: const Color(0xFFB48296).withValues(alpha: 0.8),
+                                color: const Color(0xFFB48296),
                               ),
                             ),
                           ),
@@ -303,7 +303,7 @@ class _LeadCard extends StatelessWidget {
                     isExpanded
                         ? Icons.expand_less_rounded
                         : Icons.expand_more_rounded,
-                    color: const Color(0xFF5A4A52).withValues(alpha: 0.3),
+                    color: const Color(0xFF8A7A80),
                   ),
                 ],
               ),
@@ -349,7 +349,7 @@ class _PersonaTile extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 6),
       child: Material(
         color: isActive
-            ? const Color(0xFFE8A0B8).withValues(alpha: 0.15)
+            ? const Color(0xFFE8A0B8).withValues(alpha: 0.2)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
@@ -365,23 +365,21 @@ class _PersonaTile extends StatelessWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: isActive
-                        ? const Color(0xFFE8A0B8).withValues(alpha: 0.3)
-                        : Colors.white.withValues(alpha: 0.4),
-                    border: isActive
-                        ? Border.all(
-                            color: const Color(0xFFE8A0B8).withValues(alpha: 0.5),
-                            width: 1.5,
-                          )
-                        : Border.all(
-                            color: Colors.white.withValues(alpha: 0.3),
-                          ),
+                        ? const Color(0xFFE8A0B8).withValues(alpha: 0.35)
+                        : Colors.white.withValues(alpha: 0.5),
+                    border: Border.all(
+                      color: isActive
+                          ? const Color(0xFFE8A0B8).withValues(alpha: 0.6)
+                          : Colors.white.withValues(alpha: 0.4),
+                      width: 1.5,
+                    ),
                   ),
                   child: Icon(
                     Icons.face_6_outlined,
                     size: 16,
                     color: isActive
                         ? const Color(0xFFB48296)
-                        : const Color(0xFFB48296).withValues(alpha: 0.5),
+                        : const Color(0xFF8A6A78),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -389,10 +387,10 @@ class _PersonaTile extends StatelessWidget {
                   persona.name,
                   style: TextStyle(
                     fontSize: 14,
-                    fontWeight: isActive ? FontWeight.w500 : FontWeight.normal,
+                    fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
                     color: isActive
-                        ? const Color(0xFF6A4A5A)
-                        : const Color(0xFF6A4A5A).withValues(alpha: 0.7),
+                        ? const Color(0xFF3D2C33)
+                        : const Color(0xFF5A4A52),
                   ),
                 ),
                 if (isActive) ...[
@@ -431,7 +429,7 @@ class _AddPersonaTileState extends State<_AddPersonaTile> {
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white.withValues(alpha: 0.85),
+        backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('新建形象'),
         content: TextField(
@@ -469,7 +467,7 @@ class _AddPersonaTileState extends State<_AddPersonaTile> {
     return Padding(
       padding: const EdgeInsets.only(top: 4),
       child: Material(
-        color: Colors.white.withValues(alpha: 0.25),
+        color: Colors.white.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -483,15 +481,15 @@ class _AddPersonaTileState extends State<_AddPersonaTile> {
                   height: 32,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: const Color(0xFFE8A0B8).withValues(alpha: 0.12),
+                    color: const Color(0xFFE8A0B8).withValues(alpha: 0.15),
                     border: Border.all(
-                      color: const Color(0xFFE8A0B8).withValues(alpha: 0.2),
+                      color: const Color(0xFFE8A0B8).withValues(alpha: 0.3),
                     ),
                   ),
                   child: Icon(
                     Icons.add_rounded,
                     size: 18,
-                    color: const Color(0xFFB48296).withValues(alpha: 0.6),
+                    color: const Color(0xFFB48296),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -499,7 +497,7 @@ class _AddPersonaTileState extends State<_AddPersonaTile> {
                   '新建身份',
                   style: TextStyle(
                     fontSize: 14,
-                    color: const Color(0xFFB48296).withValues(alpha: 0.6),
+                    color: const Color(0xFFB48296),
                   ),
                 ),
               ],

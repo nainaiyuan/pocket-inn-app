@@ -22,7 +22,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: const Color(0xFFE8DCE0), // 实底不透明
+      color: const Color(0xFFF5EEF0),
       child: SafeArea(
         child: Column(
           children: [
@@ -37,8 +37,8 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                     '设置',
                     style: TextStyle(
                       fontSize: 22,
-                      fontWeight: FontWeight.w500,
-                      color: const Color(0xFF6A4A5A).withValues(alpha: 0.6),
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF3D2C33),
                       letterSpacing: 2,
                     ),
                   ),
@@ -58,7 +58,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.3),
+                        color: Colors.white.withValues(alpha: 0.35),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
@@ -66,7 +66,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                           Icon(
                             Icons.vpn_key_outlined,
                             size: 18,
-                            color: const Color(0xFFB48296).withValues(alpha: 0.4),
+                            color: const Color(0xFF8A6A78),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
@@ -74,14 +74,14 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                               '未设置',
                               style: TextStyle(
                                 fontSize: 14,
-                                color: const Color(0xFF5A4A52).withValues(alpha: 0.3),
+                                color: const Color(0xFF5A4A52),
                               ),
                             ),
                           ),
                           Icon(
                             Icons.chevron_right_rounded,
                             size: 18,
-                            color: const Color(0xFF5A4A52).withValues(alpha: 0.15),
+                            color: const Color(0xFF8A7A80),
                           ),
                         ],
                       ),
@@ -109,7 +109,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                       height: 160,
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.3),
+                        color: Colors.white.withValues(alpha: 0.35),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: TextField(
@@ -120,7 +120,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                         decoration: InputDecoration(
                           hintText: '在这里自由书写男主的设定…\n管家会帮你整理分类',
                           hintStyle: TextStyle(
-                            color: const Color(0xFF5A4A52).withValues(alpha: 0.12),
+                            color: const Color(0xFF8A7A80),
                             fontSize: 13,
                             height: 1.5,
                           ),
@@ -130,7 +130,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                         ),
                         style: TextStyle(
                           fontSize: 13,
-                          color: const Color(0xFF5A4A52).withValues(alpha: 0.7),
+                          color: const Color(0xFF3D2C33),
                           height: 1.5,
                         ),
                       ),
@@ -144,7 +144,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.3),
+                        color: Colors.white.withValues(alpha: 0.35),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
@@ -152,7 +152,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                           Icon(
                             Icons.shield_outlined,
                             size: 18,
-                            color: const Color(0xFFB48296).withValues(alpha: 0.4),
+                            color: const Color(0xFF8A6A78),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
@@ -160,14 +160,14 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                               '未设置屏蔽词',
                               style: TextStyle(
                                 fontSize: 14,
-                                color: const Color(0xFF5A4A52).withValues(alpha: 0.3),
+                                color: const Color(0xFF5A4A52),
                               ),
                             ),
                           ),
                           Icon(
                             Icons.chevron_right_rounded,
                             size: 18,
-                            color: const Color(0xFF5A4A52).withValues(alpha: 0.15),
+                            color: const Color(0xFF8A7A80),
                           ),
                         ],
                       ),
@@ -199,7 +199,7 @@ class _SectionCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.4),
+        color: Colors.white.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Column(
@@ -209,8 +209,8 @@ class _SectionCard extends StatelessWidget {
             title,
             style: TextStyle(
               fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: const Color(0xFF6A4A5A).withValues(alpha: 0.5),
+              fontWeight: FontWeight.w600,
+              color: const Color(0xFF5A4A52),
               letterSpacing: 1,
             ),
           ),
@@ -241,7 +241,7 @@ class _SwitchTile extends StatelessWidget {
           Icon(
             Icons.circle_outlined,
             size: 14,
-            color: const Color(0xFFB48296).withValues(alpha: 0.3),
+            color: const Color(0xFF8A6A78).withValues(alpha: 0.5),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -249,7 +249,7 @@ class _SwitchTile extends StatelessWidget {
               label,
               style: TextStyle(
                 fontSize: 14,
-                color: const Color(0xFF5A4A52).withValues(alpha: 0.6),
+                color: const Color(0xFF3D2C33),
               ),
             ),
           ),
@@ -259,8 +259,8 @@ class _SwitchTile extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(11),
               color: value
-                  ? const Color(0xFFE8A0B8).withValues(alpha: 0.4)
-                  : const Color(0xFF5A4A52).withValues(alpha: 0.08),
+                  ? const Color(0xFFE8A0B8).withValues(alpha: 0.5)
+                  : const Color(0xFF5A4A52).withValues(alpha: 0.12),
             ),
             child: Stack(
               children: [
@@ -276,7 +276,7 @@ class _SwitchTile extends StatelessWidget {
                       color: Colors.white,
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.05),
+                          color: Colors.black.withValues(alpha: 0.08),
                           blurRadius: 2,
                         ),
                       ],
