@@ -143,7 +143,11 @@ class _FloatingNavigatorState extends State<FloatingNavigator>
             constraints.maxHeight - 120,
           );
         }
-        return _buildWidget(context, constraints);
+        return SizedBox(
+          width: constraints.maxWidth,
+          height: constraints.maxHeight,
+          child: _buildWidget(context, constraints),
+        );
       },
     );
   }

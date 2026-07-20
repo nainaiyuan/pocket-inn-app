@@ -58,17 +58,13 @@ class _HomePageState extends State<HomePage> {
             child: _buildPage(_currentIndex),
           ),
 
-          // 悬浮导航球
-          Positioned(
-            right: 24,
-            bottom: 160,
-            child: FloatingNavigator(
-              pageCount: _pages.length,
-              currentIndex: _currentIndex,
-              pageIcons: _pages.map((p) => p.icon).toList(),
-              pageColors: _pages.map((p) => p.color).toList(),
-              onPageSelected: _switchPage,
-            ),
+          // 悬浮导航球 —— 不包 Positioned，交给 FloatingNavigator 自己管理位置
+          FloatingNavigator(
+            pageCount: _pages.length,
+            currentIndex: _currentIndex,
+            pageIcons: _pages.map((p) => p.icon).toList(),
+            pageColors: _pages.map((p) => p.color).toList(),
+            onPageSelected: _switchPage,
           ),
         ],
       ),
