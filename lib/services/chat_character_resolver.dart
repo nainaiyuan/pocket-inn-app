@@ -31,7 +31,7 @@ class ChatCharacterResolver {
   Future<ResolvedChatCharacter?> resolveById(String characterId) async {
     final realRecord = await CharacterService.instance.loadById(characterId);
     if (realRecord != null) {
-      return _fromRecord(realRecord);
+      return _fromRecord(realRecord as dynamic);
     }
     return null;
   }
@@ -45,24 +45,25 @@ class ChatCharacterResolver {
       if (record == null) {
         continue;
       }
-      options.add(_fromRecord(record));
+      options.add(_fromRecord(record as dynamic));
     }
 
     return options;
   }
 
-  ResolvedChatCharacter _fromRecord(CharacterCardRecord record) {
+  ResolvedChatCharacter _fromRecord(dynamic record) {
+    final id = record.id is String ? record.id as String : '';
+    final name = record.name is String && (record.name as String).isNotEmpty
+        ? record.name as String
+        : '未命名角色';
+    final desc = record.description is String ? record.description as String : '';
     return ResolvedChatCharacter(
-      id: record.id,
-      name: record.name.isNotEmpty ? record.name : '未命名角色',
-      description: record.description,
-      cardJson: record.cardJson,
-      imagePath: record.originalImagePath.isNotEmpty
-          ? record.originalImagePath
-          : null,
-      thumbnailPath: record.thumbnailPath.isNotEmpty
-          ? record.thumbnailPath
-          : null,
+      id: id,
+      name: name,
+      description: desc,
+      cardJson: {},
+      imagePath: null,
+      thumbnailPath: null,
       sourceLabel: '真实角色',
     );
   }
