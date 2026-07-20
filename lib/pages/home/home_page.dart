@@ -16,7 +16,8 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  int _currentIndex = 0;
+  // 初始打开聊天页（index=2），跳过陪伴页（3D未做）
+  int _currentIndex = 2;
 
   // 5 个页面配置
   static const _pages = <_PageConfig>[
