@@ -3,52 +3,28 @@ name: Build APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
-          
-      - name: Install dependencies & generate code
-        run: |
-          flutter pub get
-          dart run build_runner build --delete-conflicting-outputs 2>&1 | tail -50
-      
-      # 🔧 DEBUG APK — 输出完整编译日志便于排查
-      - name: Build Debug APK
-        run: |
-          flutter build apk --debug 2>&1 | tee debug-build.log
-          cp build/app/outputs/flutter-apk/app-debug.apk app-debug.apk
-          echo "=== Build log saved ==="
-          
-      # 📦 RELEASE APK — 带签名
-      - name: Build Release APK
-        run: |
-          # 生成签名密钥
-          keytool -genkey -v -keystore release.keystore \
-            -alias release -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass android -keypass android \
-            -dname "CN=PocketInn, O=PocketInn, C=CN"
-          
-          # 设置签名环境变量给 build.gradle.kts 使用
-          export ANDROID_KEYSTORE_PATH=$PWD/release.keystore
-          export ANDROID_KEYSTORE_PASSWORD=android
-          export ANDROID_KEY_ALIAS=release
-          export ANDROID_KEY_PASSWORD=android
-          
-          flutter build apk --release
-          
+          flutter-version: '3.16'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        run: flutter build apk --release
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: pocketinn-apks
-          path: |
-            app-debug.apk
-            build/app/outputs/flutter-apk/app-release.apk
+          name: app-release
+          path: build/app/outputs/flutter-apk/app-release.apk
