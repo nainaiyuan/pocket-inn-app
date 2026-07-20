@@ -9,6 +9,7 @@ class CharacterService {
   // 单例
   static final CharacterService _instance = CharacterService._();
   factory CharacterService() => _instance;
+  static CharacterService get instance => _instance;
   CharacterService._();
 
   List<MaleLead> _leads = [];

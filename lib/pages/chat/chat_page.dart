@@ -99,11 +99,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
 
     _msgKey.currentState?.appendMessage(userMsg);
 
-    // 模拟发送中 → 已发送
-    await Future.delayed(const Duration(milliseconds: 200));
-    userMsg.status = MessageStatus.sent;
-
-    // 生成AI回复
+    // 走AI回复
     final reply = await _aiService.generateReply(text, _currentPersona!.id);
     final aiMsg = ChatMessage(
       id: '${DateTime.now().millisecondsSinceEpoch}_ai',

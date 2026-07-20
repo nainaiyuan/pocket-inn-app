@@ -1,7 +1,7 @@
 /// 聊天消息模型
 class ChatMessage {
   final String id;
-  final String personaId; // 发送者（null = 用户）
+  final String? personaId; // 发送者（null = 用户）
   final String text;
   final String? imageUrl;
   final DateTime timestamp;
