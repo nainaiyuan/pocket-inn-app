@@ -42,7 +42,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     super.initState();
     _slideCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 280),
     );
     _initCharacter();
   }
@@ -79,11 +79,14 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   }
 
   void _closeSidebar() {
-    setState(() {
-      _showLeftSidebar = false;
-      _showRightSidebar = false;
+    _slideCtrl.reverse().then((_) {
+      if (mounted) {
+        setState(() {
+          _showLeftSidebar = false;
+          _showRightSidebar = false;
+        });
+      }
     });
-    _slideCtrl.reverse();
   }
 
   Future<void> _sendMessage(String text) async {
@@ -126,6 +129,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   @override
   void dispose() {
     _slideCtrl.dispose();
+    _characterService.dispose();
     super.dispose();
   }
 
@@ -154,116 +158,75 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     final progress = _slideCtrl.value;
     final sidebarOpen = _showLeftSidebar || _showRightSidebar;
 
-    // 主页面偏移量
+    // 三张纸一起推的偏移量
     double mainOffset = 0;
-    if (_showLeftSidebar) mainOffset = _sidebarFraction * screenW * progress;
-    if (_showRightSidebar) mainOffset = -_sidebarFraction * screenW * progress;
+    if (sidebarOpen) {
+      mainOffset = (_showLeftSidebar ? _sidebarFraction : -_sidebarFraction) * screenW * progress;
+    }
 
     return Stack(
       children: [
         // ===== 背景层 =====
-        Container(
-          color: const Color(0xFFFff5f7),
-          child: Stack(
-            children: [
-              Positioned(
-                top: -80, left: -60,
-                child: Container(
-                  width: 300, height: 300,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: const Color(0xFFFFB5C5).withValues(alpha: 0.2),
-                  ),
-                ),
-              ),
-              Positioned(
-                bottom: 40, right: -40,
-                child: Container(
-                  width: 200, height: 200,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: const Color(0xFFC5B5FF).withValues(alpha: 0.15),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+        Container(color: const Color(0xFFE8DCE0)),
 
-        // ===== 左侧边栏（在聊天页下面，不会覆盖） =====
+        // ===== 左侧边栏（偏移量与主页面同步，看起来像连在一起） =====
         if (_showLeftSidebar)
           AnimatedPositioned(
-            duration: const Duration(milliseconds: 300),
+            duration: const Duration(milliseconds: 280),
             curve: Curves.easeOutCubic,
-            left: 0,
+            left: mainOffset - screenW * _sidebarFraction,
             top: 0,
             bottom: 0,
             width: screenW * _sidebarFraction,
-            child: ChatSidebarLeft(
-              currentLead: _currentLead,
-              currentPersona: _currentPersona,
-              onSelectPersona: (entry) {
-                _selectPersona(entry.key, entry.value);
-              },
+            child: Container(
+              color: const Color(0xFFE8DCE0),
+              child: ChatSidebarLeft(
+                currentLead: _currentLead,
+                currentPersona: _currentPersona,
+                onSelectPersona: (entry) {
+                  _selectPersona(entry.key, entry.value);
+                },
+              ),
             ),
           ),
 
         // ===== 右侧边栏 =====
         if (_showRightSidebar)
           AnimatedPositioned(
-            duration: const Duration(milliseconds: 300),
+            duration: const Duration(milliseconds: 280),
             curve: Curves.easeOutCubic,
-            right: 0,
+            left: screenW * _sidebarFraction + mainOffset,
             top: 0,
             bottom: 0,
             width: screenW * _sidebarFraction,
-            child: const ChatSidebarRight(),
+            child: Container(
+              color: const Color(0xFFE8DCE0),
+              child: const ChatSidebarRight(),
+            ),
           ),
 
-        // ===== 阴影遮罩（点击可关闭） =====
-        if (sidebarOpen && progress > 0.01)
+        // ===== 暗色遮罩（点击侧边栏可关闭） =====
+        if (sidebarOpen)
           Positioned.fill(
             child: GestureDetector(
               onTap: _closeSidebar,
               child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 300),
-                opacity: progress,
-                child: Container(
-                  color: const Color(0xFF5A4A52).withValues(alpha: 0.3),
-                ),
+                duration: const Duration(milliseconds: 280),
+                opacity: 0.4 * progress,
+                child: Container(color: const Color(0xFF5A4A52)),
               ),
             ),
           ),
 
-        // ===== 主聊天页面（盖在侧边栏上方，被推开露出侧栏） =====
+        // ===== 主聊天页面（三张纸中间那张） =====
         AnimatedPositioned(
-          duration: const Duration(milliseconds: 300),
+          duration: const Duration(milliseconds: 280),
           curve: Curves.easeOutCubic,
           left: mainOffset,
           top: 0,
           right: -mainOffset,
           bottom: 0,
-          child: AnimatedScale(
-            duration: const Duration(milliseconds: 300),
-            scale: sidebarOpen ? 0.96 : 1.0,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(sidebarOpen ? 12 : 0),
-                boxShadow: sidebarOpen
-                    ? [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.1),
-                          blurRadius: 20,
-                          offset: const Offset(0, 4),
-                        ),
-                      ]
-                    : null,
-              ),
-              clipBehavior: sidebarOpen ? Clip.antiAlias : Clip.none,
-              child: _buildChatContent(),
-            ),
-          ),
+          child: _buildChatContent(),
         ),
 
         // ===== [+] 弹出菜单 =====
@@ -279,28 +242,30 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
 
   Widget _buildChatContent() {
     return Scaffold(
-      backgroundColor: Colors.white.withValues(alpha: 0.85),
-      body: Column(
-        children: [
-          ChatTopBar(
-            currentLead: _currentLead,
-            currentPersona: _currentPersona,
-            onAvatarTap: _openCharacterWorld,
-            onMenuTap: () {},
-          ),
-          Expanded(
-            child: ChatMessageArea(
-              key: _msgKey,
+      backgroundColor: const Color(0xFFF5EEF0),
+      body: SafeArea(
+        child: Column(
+          children: [
+            ChatTopBar(
+              currentLead: _currentLead,
               currentPersona: _currentPersona,
+              onAvatarTap: _openCharacterWorld,
+              onMenuTap: () {},
             ),
-          ),
-          ChatInputBar(
-            onCameraTap: () {},
-            onVoiceTap: () {},
-            onPlusTap: () => setState(() => _showPlusMenu = !_showPlusMenu),
-            onSendTap: _sendMessage,
-          ),
-        ],
+            Expanded(
+              child: ChatMessageArea(
+                key: _msgKey,
+                currentPersona: _currentPersona,
+              ),
+            ),
+            ChatInputBar(
+              onCameraTap: () {},
+              onVoiceTap: () {},
+              onPlusTap: () => setState(() => _showPlusMenu = !_showPlusMenu),
+              onSendTap: _sendMessage,
+            ),
+          ],
+        ),
       ),
     );
   }

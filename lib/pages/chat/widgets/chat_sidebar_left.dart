@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
 
-/// 左滑侧边栏 —— 选择男主/形象
+/// 左滑侧边栏 —— 选择男主/形象，实底不透明
 class ChatSidebarLeft extends StatefulWidget {
   final MaleLead? currentLead;
   final Persona? currentPersona;

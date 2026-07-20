@@ -22,7 +22,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: const Color(0xFFF5F0F2),
+      color: const Color(0xFFE8DCE0), // 实底不透明
       child: SafeArea(
         child: Column(
           children: [
