@@ -95,13 +95,14 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     setState(() {
       _showLeftSidebar = left;
       _showRightSidebar = !left;
-      _showPlusMenu = false;
+      _showPlusMenu = false; // 关闭加号菜单
     });
     _slideCtrl.forward();
     HapticFeedback.mediumImpact();
   }
 
   void _closeSidebar() {
+    if (!_showLeftSidebar && !_showRightSidebar) return;
     _slideCtrl.reverse().then((_) {
       if (mounted) {
         setState(() {
@@ -110,6 +111,22 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
         });
       }
     });
+  }
+
+  /// 处理水平拖动打开/关闭侧边栏
+  void _onHorizontalDragUpdate(DragUpdateDetails details) {
+    if (_showLeftSidebar || _showRightSidebar) return;
+    if (details.primaryDelta == null) return;
+
+    final delta = details.primaryDelta!;
+    // 向右滑 -> 打开左侧栏
+    if (delta > 20) {
+      _openSidebar(left: true);
+    }
+    // 向左滑 -> 打开右侧栏
+    else if (delta < -20) {
+      _openSidebar(left: false);
+    }
   }
 
   Future<void> _sendMessage(String text) async {
@@ -154,6 +171,11 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
 
   void _togglePlusMenu() {
     setState(() {
+      // 如果侧边栏开着，先关侧边栏
+      if (_showLeftSidebar || _showRightSidebar) {
+        _closeSidebar();
+        return;
+      }
       _showPlusMenu = !_showPlusMenu;
     });
   }
@@ -179,7 +201,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
       }
     }
 
-    // 侧边栏按钮 + 手势都用，不用纯手势
+    // 侧边栏按钮 + 手势都用
     return SizedBox(
       width: double.infinity,
       height: double.infinity,
@@ -192,7 +214,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
             bottom: 0,
             width: screenW * _sidebarFraction,
             child: Container(
-              color: const Color(0xFFE8DCE0),
+              color: const Color(0xFFF5EEF0),
               child: ChatSidebarLeft(
                 currentLead: _currentLead,
                 currentPersona: _currentPersona,
@@ -210,7 +232,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
             bottom: 0,
             width: screenW * _sidebarFraction,
             child: Container(
-              color: const Color(0xFFE8DCE0),
+              color: const Color(0xFFF5EEF0),
               child: const ChatSidebarRight(),
             ),
           ),
@@ -222,8 +244,8 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
                 onTap: _closeSidebar,
                 child: AnimatedOpacity(
                   duration: const Duration(milliseconds: 280),
-                  opacity: progress * 0.4,
-                  child: Container(color: const Color(0xFF5A4A52)),
+                  opacity: progress * 0.5,
+                  child: Container(color: Colors.black),
                 ),
               ),
             ),
@@ -236,40 +258,45 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
             top: 0,
             right: -mainOffset,
             bottom: 0,
-            child: _buildChatContent(),
+            child: GestureDetector(
+              onHorizontalDragUpdate: _onHorizontalDragUpdate,
+              child: _buildChatContent(),
+            ),
           ),
 
-          // ===== [+] 弹出菜单 =====
-          if (_showPlusMenu)
+          // ===== [+] 弹出菜单（只在侧边栏关闭时显示） =====
+          if (_showPlusMenu && !sidebarOpen)
             Positioned.fill(
               child: PlusMenu(
                 onDismiss: () => setState(() => _showPlusMenu = false),
               ),
             ),
 
-          // ===== 触发侧边栏的点击按钮层（只在聊天页露出的边缘） =====
+          // ===== 触发侧边栏的点击按钮层 =====
           // 左侧边缘点击区
-          Positioned(
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: 30,
-            child: GestureDetector(
-              onTap: () => _openSidebar(left: true),
-              behavior: HitTestBehavior.translucent,
+          if (!sidebarOpen)
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: 30,
+              child: GestureDetector(
+                onTap: () => _openSidebar(left: true),
+                behavior: HitTestBehavior.translucent,
+              ),
             ),
-          ),
           // 右侧边缘点击区
-          Positioned(
-            right: 0,
-            top: 0,
-            bottom: 0,
-            width: 30,
-            child: GestureDetector(
-              onTap: () => _openSidebar(left: false),
-              behavior: HitTestBehavior.translucent,
+          if (!sidebarOpen)
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: 30,
+              child: GestureDetector(
+                onTap: () => _openSidebar(left: false),
+                behavior: HitTestBehavior.translucent,
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -285,7 +312,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
               currentLead: _currentLead,
               currentPersona: _currentPersona,
               onAvatarTap: _openCharacterWorld,
-              onMenuTap: () {},
+              onMenuTap: () => _openSidebar(left: true),
             ),
             Expanded(
               child: ChatMessageArea(
