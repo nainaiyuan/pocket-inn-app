@@ -97,4 +97,32 @@ class CharacterService {
       await _save();
     }
   }
+
+  // ═══════════════════════════════════════
+  // 以下方法供旧代码兼容（initialize / clearAllData / loadById / loadAllSummaries）
+  // ═══════════════════════════════════════
+
+  /// 初始化（旧代码兼容）
+  Future<void> initialize() async {
+    await load();
+  }
+
+  /// 清除所有数据
+  Future<void> clearAllData() async {
+    _leads.clear();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_key);
+  }
+
+  /// 根据ID加载角色（旧代码兼容）
+  Future<MaleLead?> loadById(String id) async {
+    await load();
+    return getMaleLead(id);
+  }
+
+  /// 加载所有角色摘要（旧代码兼容）
+  Future<List<MaleLead>> loadAllSummaries() async {
+    await load();
+    return List.from(_leads);
+  }
 }
