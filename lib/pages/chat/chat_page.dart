@@ -35,7 +35,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   bool _showRightSidebar = false;
   late AnimationController _slideCtrl;
 
-  static const _sidebarFraction = 0.65;
+  static const double _sidebarFraction = 0.65;
 
   @override
   void initState() {
@@ -129,19 +129,32 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   @override
   void dispose() {
     _slideCtrl.dispose();
-    _characterService.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final screenW = MediaQuery.of(context).size.width;
+    final progress = _slideCtrl.value;
+    final sidebarOpen = _showLeftSidebar || _showRightSidebar;
+
+    // 三张纸：中间页移动，侧边栏固定在两边
+    double mainOffset = 0;
+    if (sidebarOpen) {
+      if (_showLeftSidebar) {
+        mainOffset = screenW * _sidebarFraction * progress;
+      } else {
+        mainOffset = -screenW * _sidebarFraction * progress;
+      }
+    }
+
     return GestureDetector(
       onHorizontalDragEnd: (details) {
         if (details.primaryVelocity == null) return;
         final v = details.primaryVelocity!;
-        if (v > 300 && !_showLeftSidebar && !_showRightSidebar) {
+        if (v > 300 && !sidebarOpen) {
           _openSidebar(left: true);
-        } else if (v < -300 && !_showLeftSidebar && !_showRightSidebar) {
+        } else if (v < -300 && !sidebarOpen) {
           _openSidebar(left: false);
         } else if (v > 300 && _showRightSidebar) {
           _closeSidebar();
@@ -149,32 +162,11 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
           _closeSidebar();
         }
       },
-      child: _buildBody(),
-    );
-  }
-
-  Widget _buildBody() {
-    final screenW = MediaQuery.of(context).size.width;
-    final progress = _slideCtrl.value;
-    final sidebarOpen = _showLeftSidebar || _showRightSidebar;
-
-    // 三张纸一起推的偏移量
-    double mainOffset = 0;
-    if (sidebarOpen) {
-      mainOffset = (_showLeftSidebar ? _sidebarFraction : -_sidebarFraction) * screenW * progress;
-    }
-
-    return Stack(
-      children: [
-        // ===== 背景层 =====
-        Container(color: const Color(0xFFE8DCE0)),
-
-        // ===== 左侧边栏（偏移量与主页面同步，看起来像连在一起） =====
-        if (_showLeftSidebar)
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 280),
-            curve: Curves.easeOutCubic,
-            left: mainOffset - screenW * _sidebarFraction,
+      child: Stack(
+        children: [
+          // ===== 左侧边栏（固定在左边，动画时不被推走） =====
+          Positioned(
+            left: 0,
             top: 0,
             bottom: 0,
             width: screenW * _sidebarFraction,
@@ -190,12 +182,9 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
             ),
           ),
 
-        // ===== 右侧边栏 =====
-        if (_showRightSidebar)
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 280),
-            curve: Curves.easeOutCubic,
-            left: screenW * _sidebarFraction + mainOffset,
+          // ===== 右侧边栏（固定在右边） =====
+          Positioned(
+            right: 0,
             top: 0,
             bottom: 0,
             width: screenW * _sidebarFraction,
@@ -205,38 +194,39 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
             ),
           ),
 
-        // ===== 暗色遮罩（点击侧边栏可关闭） =====
-        if (sidebarOpen)
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: _closeSidebar,
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 280),
-                opacity: 0.4 * progress,
-                child: Container(color: const Color(0xFF5A4A52)),
+          // ===== 暗色遮罩（动画时可点击关闭） =====
+          if (sidebarOpen)
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: _closeSidebar,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 280),
+                  opacity: progress * 0.4,
+                  child: Container(color: const Color(0xFF5A4A52)),
+                ),
               ),
             ),
+
+          // ===== 中间聊天页（三张纸的中间那张，左右滑动） =====
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeOutCubic,
+            left: mainOffset,
+            top: 0,
+            right: -mainOffset,
+            bottom: 0,
+            child: _buildChatContent(),
           ),
 
-        // ===== 主聊天页面（三张纸中间那张） =====
-        AnimatedPositioned(
-          duration: const Duration(milliseconds: 280),
-          curve: Curves.easeOutCubic,
-          left: mainOffset,
-          top: 0,
-          right: -mainOffset,
-          bottom: 0,
-          child: _buildChatContent(),
-        ),
-
-        // ===== [+] 弹出菜单 =====
-        if (_showPlusMenu)
-          Positioned.fill(
-            child: PlusMenu(
-              onDismiss: () => setState(() => _showPlusMenu = false),
+          // ===== [+] 弹出菜单 =====
+          if (_showPlusMenu)
+            Positioned.fill(
+              child: PlusMenu(
+                onDismiss: () => setState(() => _showPlusMenu = false),
+              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 

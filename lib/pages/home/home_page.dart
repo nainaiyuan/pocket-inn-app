@@ -19,6 +19,15 @@ class _HomePageState extends State<HomePage> {
   // 初始打开聊天页（index=2），跳过陪伴页（3D未做）
   int _currentIndex = 2;
 
+  // 真正持久的页面实例——不让 AnimatedSwitcher 每次都重建
+  final List<Widget> _pageInstances = const [
+    CompanionPage(),
+    GalleryPage(),
+    ChatPage(),
+    ButlerPage(),
+    ProfilePage(),
+  ];
+
   // 5 个页面配置
   static const _pages = <_PageConfig>[
     _PageConfig('陪伴', Icons.star_border, Color(0xFFE8A0B8)),
@@ -40,7 +49,8 @@ class _HomePageState extends State<HomePage> {
       backgroundColor: const Color(0xFFFff5f7),
       body: Stack(
         children: [
-          // 页面内容
+          // 页面内容 —— 用 IndexedStack 保持各页面状态，不做 AnimatedSwitcher
+          // IndexedStack 会在各页面之间无缝切换
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 400),
             switchInCurve: Curves.easeOut,
@@ -56,31 +66,22 @@ class _HomePageState extends State<HomePage> {
                 ),
               );
             },
-            child: _buildPage(_currentIndex),
+            child: _pageInstances[_currentIndex],
           ),
 
-          // 悬浮导航球 —— 不包 Positioned，交给 FloatingNavigator 自己管理位置
-          FloatingNavigator(
-            pageCount: _pages.length,
-            currentIndex: _currentIndex,
-            pageIcons: _pages.map((p) => p.icon).toList(),
-            pageColors: _pages.map((p) => p.color).toList(),
-            onPageSelected: _switchPage,
+          // 悬浮导航球
+          Positioned.fill(
+            child: FloatingNavigator(
+              pageCount: _pages.length,
+              currentIndex: _currentIndex,
+              pageIcons: _pages.map((p) => p.icon).toList(),
+              pageColors: _pages.map((p) => p.color).toList(),
+              onPageSelected: _switchPage,
+            ),
           ),
         ],
       ),
     );
-  }
-
-  Widget _buildPage(int index) {
-    switch (index) {
-      case 0: return const CompanionPage();
-      case 1: return const GalleryPage();
-      case 2: return const ChatPage();
-      case 3: return const ButlerPage();
-      case 4: return const ProfilePage();
-      default: return const SizedBox.shrink();
-    }
   }
 }
 

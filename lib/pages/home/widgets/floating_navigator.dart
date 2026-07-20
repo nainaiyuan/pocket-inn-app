@@ -139,7 +139,7 @@ class _FloatingNavigatorState extends State<FloatingNavigator>
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              // ===== 菜单打开时的透明拦截层 =====
+              // ===== 菜单打开时的透明拦截层（最底层） =====
               if (_isOpen)
                 Positioned.fill(
                   child: GestureDetector(
@@ -148,10 +148,7 @@ class _FloatingNavigatorState extends State<FloatingNavigator>
                   ),
                 ),
 
-              // ===== 菜单项 =====
-              if (_isOpen) ..._buildMenuItems(),
-
-              // ===== 主导航球 =====
+              // ===== 主导航球（中间层） =====
               Positioned(
                 left: _position.dx,
                 top: _position.dy,
@@ -214,6 +211,9 @@ class _FloatingNavigatorState extends State<FloatingNavigator>
                   ),
                 ),
               ),
+
+              // ===== 菜单项（最上层，在主球之上） =====
+              if (_isOpen) ..._buildMenuItems(),
             ],
           ),
         );
