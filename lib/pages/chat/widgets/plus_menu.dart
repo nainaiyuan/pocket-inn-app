@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 
 /// [+] 弹出菜单
 ///
-/// 📷 相册 | 😊 表情包 | 🧧 红包 | 📞 打电话
+/// 背景图  | 换头像
+/// ───────┼───────
+/// 相册   | 表情包
+/// 红包   | 打电话
 class PlusMenu extends StatelessWidget {
   final VoidCallback onDismiss;
 
@@ -29,7 +32,7 @@ class PlusMenu extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.4),
+                color: Colors.white.withValues(alpha: 0.85),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
                   color: Colors.white.withValues(alpha: 0.3),
@@ -40,40 +43,70 @@ class PlusMenu extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    _MenuItem(
-                      icon: Icons.photo_library_outlined,
-                      label: '相册',
-                      onTap: () {
-                        onDismiss();
-                        // TODO: 打开相册
-                      },
+                    Row(
+                      children: [
+                        _MenuItem(
+                          icon: Icons.wallpaper_outlined,
+                          label: '背景图',
+                          onTap: () {
+                            onDismiss();
+                            // TODO: 设置聊天背景
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        _MenuItem(
+                          icon: Icons.portrait_outlined,
+                          label: '换头像',
+                          onTap: () {
+                            onDismiss();
+                            // TODO: 换男主头像
+                          },
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 4),
-                    _MenuItem(
-                      icon: Icons.emoji_emotions_outlined,
-                      label: '表情包',
-                      onTap: () {
-                        onDismiss();
-                        // TODO: 打开表情面板
-                      },
+                    Row(
+                      children: [
+                        _MenuItem(
+                          icon: Icons.photo_library_outlined,
+                          label: '相册',
+                          onTap: () {
+                            onDismiss();
+                            // TODO: 打开相册
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        _MenuItem(
+                          icon: Icons.emoji_emotions_outlined,
+                          label: '表情包',
+                          onTap: () {
+                            onDismiss();
+                            // TODO: 打开表情面板
+                          },
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 4),
-                    _MenuItem(
-                      icon: Icons.card_giftcard_outlined,
-                      label: '红包',
-                      onTap: () {
-                        onDismiss();
-                        // TODO: 发红包
-                      },
-                    ),
-                    const SizedBox(height: 4),
-                    _MenuItem(
-                      icon: Icons.phone_outlined,
-                      label: '打电话',
-                      onTap: () {
-                        onDismiss();
-                        // TODO: 打电话
-                      },
+                    Row(
+                      children: [
+                        _MenuItem(
+                          icon: Icons.card_giftcard_outlined,
+                          label: '红包',
+                          onTap: () {
+                            onDismiss();
+                            // TODO: 发红包
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        _MenuItem(
+                          icon: Icons.phone_outlined,
+                          label: '打电话',
+                          onTap: () {
+                            onDismiss();
+                            // TODO: 打电话
+                          },
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -105,23 +138,23 @@ class _MenuItem extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-          child: Row(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 icon,
                 size: 22,
                 color: const Color(0xFFB48296).withValues(alpha: 0.6),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(height: 4),
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 15,
+                  fontSize: 12,
                   color: const Color(0xFF6A4A5A).withValues(alpha: 0.7),
                 ),
               ),
-              const SizedBox(width: 20),
             ],
           ),
         ),
