@@ -74,8 +74,12 @@ class _GestureTestPageState extends State<GestureTestPage>
   }
 
   // ---- 手势：Listener 全屏只读 ----
+  int _pointerId = -1; // 当前跟踪的 Pointer ID
 
   void _onDown(PointerDownEvent e) {
+    // 已在跟踪中则忽略（防止重建导致重复 Down）
+    if (_pointerId >= 0) return;
+    _pointerId = e.pointer;
     _startX = e.position.dx;
     _startY = e.position.dy;
     _locked = false;
@@ -115,6 +119,8 @@ class _GestureTestPageState extends State<GestureTestPage>
   }
 
   void _onUp(PointerUpEvent e) {
+    if (_pointerId != e.pointer) return;
+    _pointerId = -1;
     if (!_wasHoriz) {
       _isDragging = false;
       // _active removed;
@@ -172,9 +178,9 @@ class _GestureTestPageState extends State<GestureTestPage>
     // 右页   ：left = screenW + off
     // 这样三页形成一个连续的纸张
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: Stack(
+    return Material(
+      color: Colors.white,
+      child: Stack(
         children: [
           // ===== 三页连续空间（按 offset 排列） =====
           // 左页
