@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// 手势测试页面 —— 三页连续空间
+/// 手势测试页面 —— 三页连续空间（最小修复版）
 ///
 /// 纯色测试，不接入任何聊天逻辑。
-/// 只测：左右滑动、方向锁定、手指跟随、松手吸附。
 class GestureTestPage extends StatefulWidget {
   const GestureTestPage({super.key});
 
@@ -14,7 +13,6 @@ class GestureTestPage extends StatefulWidget {
 
 class _GestureTestPageState extends State<GestureTestPage>
     with TickerProviderStateMixin {
-  // 三页数据
   static const double _sideFrac = 0.65;
   final List<Color> _colors = [
     Colors.red.shade300,
@@ -28,21 +26,23 @@ class _GestureTestPageState extends State<GestureTestPage>
   bool _locked = false;
   bool _horiz = false;
   bool _wasHoriz = false;
+  int _pointerId = -1;
 
   // ---- 偏移 ----
   double _offset = 0;
-  int _snapTarget = 0; // 0=中间，1=左，-1=右
+  double _dragStartOffset = 0; // 手指按下时的当前偏移（基准）
+  int _snapTarget = 0;
   late AnimationController _anim;
-
-  // === 添加拖拽状态追踪 ===
-  bool _isDragging = false;
-  double _dragOffset = 0;
 
   static const double _snapThr = 0.40;
   static const double _lockThr = 8.0;
 
-  // 页面宽度
   double get _sideW => MediaQuery.of(context).size.width * _sideFrac;
+
+  double get _currentOffset {
+    if (_locked && _horiz) return _offset; // 拖拽中
+    return _snapTarget * _sideW * _anim.value; // 动画中或静止
+  }
 
   @override
   void initState() {
@@ -53,78 +53,59 @@ class _GestureTestPageState extends State<GestureTestPage>
     )..addListener(() { if (mounted) setState(() {}); });
   }
 
-  double get _currentOffset {
-    if (_isDragging) return _dragOffset;
-    return _snapTarget * _sideW * _anim.value;
-  }
-
-  void _snapTo(int target) {
-    if (target == _snapTarget) return;
-    _snapTarget = target;
-    _anim.forward(from: 0);
-  }
+  void _snapTo(int t) { _snapTarget = t; _anim.forward(from: 0); }
 
   void _snapBack() {
     _snapTarget = 0;
-    // 从当前位置动画回到 0
     _anim.value = _offset.abs() / _sideW;
-    _anim.reverse().then((_) {
-      if (mounted) setState(() { _offset = 0; _dragOffset = 0; });
-    });
+    _anim.reverse().then((_) { if (mounted) setState(() { _offset = 0; }); });
   }
 
-  // ---- 手势：Listener 全屏只读 ----
-  int _pointerId = -1; // 当前跟踪的 Pointer ID
+  // ---- 手势 ----
 
   void _onDown(PointerDownEvent e) {
-    // 已在跟踪中则忽略（防止重建导致重复 Down）
     if (_pointerId >= 0) return;
     _pointerId = e.pointer;
     _startX = e.position.dx;
     _startY = e.position.dy;
     _locked = false;
     _horiz = false;
-    // _active removed;
     _wasHoriz = false;
-    _isDragging = false;
+    _dragStartOffset = _currentOffset; // ★ 记录按下时的真实偏移
     _anim.stop();
   }
 
   void _onMove(PointerMoveEvent e) {
+    if (e.pointer != _pointerId) return; // ★ 过滤非当前 pointer
+
     final dx = e.position.dx - _startX;
     final dy = e.position.dy - _startY;
 
     if (!_locked) {
       if (dx.abs() < _lockThr && dy.abs() < _lockThr) return;
       _locked = true;
-      // 带阈值：水平分量必须明显大于垂直
       _horiz = dx.abs() > dy.abs() * 1.3;
       if (_horiz) {
-        _isDragging = true;
         _wasHoriz = true;
-        _dragOffset = _snapTarget * _sideW;
-        // _active removed;
+        _offset = _dragStartOffset; // 从按下时的位置开始
       }
       return;
     }
 
     if (!_horiz) return;
 
-    // 跟随手指
-    final totalDx = e.position.dx - _startX;
-    final base = _snapTarget * _sideW;
-    _offset = (base + totalDx).clamp(-_sideW, _sideW);
-    _dragOffset = _offset;
+    // ★ 从 _dragStartOffset 累加 dx，不依赖 _snapTarget
+    _offset = (_dragStartOffset + (e.position.dx - _startX)).clamp(-_sideW, _sideW);
     if (mounted) setState(() {});
   }
 
   void _onUp(PointerUpEvent e) {
     if (_pointerId != e.pointer) return;
     _pointerId = -1;
+
     if (!_wasHoriz) {
-      _isDragging = false;
-      // _active removed;
       _locked = false;
+      _horiz = false;
       _wasHoriz = false;
       return;
     }
@@ -134,37 +115,28 @@ class _GestureTestPageState extends State<GestureTestPage>
     final isLeft = _offset > 0;
 
     if (_snapTarget == 0) {
-      // 从中间开始
       if (absOff > sideW * _snapThr) {
         _snapTo(isLeft ? 1 : -1);
       } else {
         _snapBack();
       }
     } else {
-      // 已展开，看是否拉过中间
-      // 左展开(>0)拉到接近 0 或负 → 收回
-      // 右展开(<0)拉到接近 0 或正 → 收回
       if ((_snapTarget == 1 && _offset < sideW * (1 - _snapThr)) ||
           (_snapTarget == -1 && _offset > -sideW * (1 - _snapThr))) {
         _snapBack();
       } else {
-        // 弹回原展开位置
         _snapTo(_snapTarget);
         _offset = _snapTarget * sideW;
       }
     }
 
-    _isDragging = false;
-    // _active removed;
     _locked = false;
+    _horiz = false;
     _wasHoriz = false;
   }
 
   @override
-  void dispose() {
-    _anim.dispose();
-    super.dispose();
-  }
+  void dispose() { _anim.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
@@ -172,142 +144,74 @@ class _GestureTestPageState extends State<GestureTestPage>
     final sideW = screenW * _sideFrac;
     final off = _currentOffset;
 
-    // 三页位置（连续空间）
-    // 左页   ：left = off - sideW
-    // 中间页  ：left = off
-    // 右页   ：left = screenW + off
-    // 这样三页形成一个连续的纸张
-
     return Material(
       color: Colors.white,
-      child: Stack(
-        children: [
-          // ===== 三页连续空间（按 offset 排列） =====
-          // 左页
-          Positioned(
-            left: off - sideW,
-            top: 0,
-            width: sideW,
-            height: double.infinity,
-            child: Container(
-              color: _colors[0],
-              alignment: Alignment.center,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(_labels[0], style: const TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    height: 300,
-                    child: ListView.builder(
-                      itemCount: 30,
-                      itemBuilder: (_, i) => Container(
-                        padding: const EdgeInsets.all(12),
-                        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(color: Colors.white.withOpacity(0.3), borderRadius: BorderRadius.circular(8)),
-                        child: Text('左页第 ${i + 1} 项', style: const TextStyle(color: Colors.white)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // 中间页
-          Positioned(
-            left: off,
-            top: 0,
-            width: screenW,
-            height: double.infinity,
-            child: Container(
-              color: _colors[1],
-              alignment: Alignment.center,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(_labels[1], style: const TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    height: 400,
-                    child: ListView.builder(
-                      itemCount: 50,
-                      itemBuilder: (_, i) => Container(
-                        padding: const EdgeInsets.all(12),
-                        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(color: Colors.white.withOpacity(0.3), borderRadius: BorderRadius.circular(8)),
-                        child: Text('聊天消息 ${i + 1}', style: const TextStyle(color: Colors.white)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // 右页
-          Positioned(
-            left: screenW + off,
-            top: 0,
-            width: sideW,
-            height: double.infinity,
-            child: Container(
-              color: _colors[2],
-              alignment: Alignment.center,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(_labels[2], style: const TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    height: 300,
-                    child: ListView.builder(
-                      itemCount: 20,
-                      itemBuilder: (_, i) => Container(
-                        padding: const EdgeInsets.all(12),
-                        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(color: Colors.white.withOpacity(0.3), borderRadius: BorderRadius.circular(8)),
-                        child: Text('右页第 ${i + 1} 项', style: const TextStyle(color: Colors.white)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // ===== 当前状态指示器 =====
-          Positioned(
-            top: 60,
-            left: 0,
-            right: 0,
-            child: Center(
+      child: SizedBox.expand( // ★ 确保 Stack 铺满
+        child: Stack(
+          children: [
+            // 左页
+            Positioned(
+              left: off - sideW, top: 0,
+              width: sideW, bottom: 0, // ★ bottom:0 确保高度
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  'offset: ${off.toStringAsFixed(0)}  snap: $_snapTarget  '
-                  '${_horiz ? "水平" : _locked ? "垂直" : "等待"}  '
-                  '${_locked ? "🔒" : "🔓"}',
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                color: _colors[0],
+                alignment: Alignment.center,
+                child: Text(_labels[0], style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+            ),
+            // 中间页
+            Positioned(
+              left: off, top: 0,
+              width: screenW, bottom: 0,
+              child: Container(
+                color: _colors[1],
+                alignment: Alignment.center,
+                child: Text(_labels[1], style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+            ),
+            // 右页
+            Positioned(
+              left: screenW + off, top: 0,
+              width: sideW, bottom: 0,
+              child: Container(
+                color: _colors[2],
+                alignment: Alignment.center,
+                child: Text(_labels[2], style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+            ),
+
+            // 状态指示器
+            Positioned(
+              top: 60, left: 0, right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'offset: ${(_locked && _horiz ? _offset : off).toStringAsFixed(0)}  '
+                    'snap: $_snapTarget  '
+                    '${_horiz ? "水平" : _locked ? "垂直" : "等待"}  '
+                    '${_locked ? "🔒" : "🔓"}',
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
                 ),
               ),
             ),
-          ),
 
-          // ===== 全屏 Listener =====
-          Positioned.fill(
-            child: Listener(
-              behavior: HitTestBehavior.translucent,
-              onPointerDown: _onDown,
-              onPointerMove: _onMove,
-              onPointerUp: _onUp,
+            // 全屏 Listener
+            Positioned.fill(
+              child: Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: _onDown,
+                onPointerMove: _onMove,
+                onPointerUp: _onUp,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
