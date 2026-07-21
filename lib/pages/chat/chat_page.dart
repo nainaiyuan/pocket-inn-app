@@ -12,17 +12,13 @@ import 'widgets/chat_input_bar.dart';
 import 'widgets/plus_menu.dart';
 import 'widgets/character_world_page.dart';
 
-/// 聊天主页面 —— 三页独立模块
+/// 聊天主页面 —— 三页独立模块 + GestureDetector onHorizontalDragEnd
 ///
-/// 左/中/右三个独立 Widget，不互相嵌套。
-/// 中间页通过 AnimatedPositioned 左右移动来露/藏两侧页。
-/// 屏幕最上层有一个 Listener 做水平滑动侦测（只读，不消费事件）。
-///
-/// 三态切换：
-///   中间页 → 右滑 → 左页展开（中间页右移露出左页）
-///   中间页 → 左滑 → 右页展开（中间页左移露出右页）
-///   左页展开 → 左滑 → 回中间
-///   右页展开 → 右滑 → 回中间
+/// 三个独立 Widget：左页 / 中间页 / 右页
+/// 中间页用 GestureDetector 监听 onHorizontalDragEnd：
+///   - 水平滑动 → 触发页面切换
+///   - 垂直滑动 → 透给 ListView（ListView 自己管自己的）
+///   onHorizontalDragEnd 是纯水平手势识别，不会跟垂直滚动冲突
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
 
@@ -43,10 +39,6 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   final GlobalKey<ChatMessageAreaState> _msgKey = GlobalKey();
 
   static const double _sideFrac = 0.65;
-
-  // Listener 手势缓存
-  double _downX = 0, _downY = 0;
-  bool _moveHappened = false;
 
   @override
   void initState() {
@@ -105,42 +97,6 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   @override
   void dispose() { _anim.dispose(); super.dispose(); }
 
-  // ========== Listener 水平滑动手势（不消费事件，不影响 ListView） ==========
-
-  void _onPointerDown(PointerDownEvent e) {
-    _downX = e.position.dx;
-    _downY = e.position.dy;
-    _moveHappened = false;
-  }
-
-  void _onPointerMove(PointerMoveEvent e) {
-    if (_showPlus) return;
-    final dx = e.position.dx - _downX;
-    final dy = e.position.dy - _downY;
-
-    if (!_moveHappened) {
-      if (dx.abs() < 6 && dy.abs() < 6) return;
-      _moveHappened = true;
-
-      // 判定是否为水平滑动
-      if (dy.abs() > dx.abs() * 2) return; // 垂直为主，跳过
-
-      if (_state == _center) {
-        // 中间：右滑 → 左页，左滑 → 右页
-        if (dx > 0) _goLeft();
-        else _goRight();
-      } else if (_state == _left && dx < -20) {
-        // 左页展开且左滑 → 收回
-        _goCenter();
-      } else if (_state == _right && dx > 20) {
-        // 右页展开且右滑 → 收回
-        _goCenter();
-      }
-    }
-  }
-
-  void _onPointerUp(PointerUpEvent e) {}
-
   @override
   Widget build(BuildContext context) {
     final w = MediaQuery.of(context).size.width;
@@ -152,7 +108,6 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     return Stack(
       children: [
         // ===== 左页 =====
-        // IgnorePointer: 完全展开时才可交互
         Positioned(left: 0, top: 0, width: sw, height: double.infinity,
           child: Container(color: const Color(0xFFEED9DC),
             child: IgnorePointer(ignoring: !leftShown || _anim.value < 0.95,
@@ -165,18 +120,33 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
         ),
 
         // ===== 中间页（可移动） =====
+        // 用 GestureDetector 包裹，onPanUpdate 判定方向
         Positioned(
           left: off, top: 0, right: -off, bottom: 0,
-          child: Material(
-            color: const Color(0xFFF5EEF0),
-            child: SafeArea(
-              child: Column(children: [
-                ChatTopBar(currentLead: _lead, currentPersona: _persona,
-                  onAvatarTap: _openWorld, onMenuTap: _goLeft),
-                Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
-                ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
-                  onPlusTap: _togglePlus, onSendTap: _sendMsg),
-              ]),
+          child: GestureDetector(
+            onHorizontalDragEnd: (d) {
+              if (_showPlus) return;
+              if (d.primaryVelocity == null) return;
+              if (_state == _center) {
+                if (d.primaryVelocity! > 0) _goLeft();
+                else _goRight();
+              } else if (_state == _left && d.primaryVelocity! < 0) {
+                _goCenter();
+              } else if (_state == _right && d.primaryVelocity! > 0) {
+                _goCenter();
+              }
+            },
+            child: Material(
+              color: const Color(0xFFF5EEF0),
+              child: SafeArea(
+                child: Column(children: [
+                  ChatTopBar(currentLead: _lead, currentPersona: _persona,
+                    onAvatarTap: _openWorld, onMenuTap: _goLeft),
+                  Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
+                  ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
+                    onPlusTap: _togglePlus, onSendTap: _sendMsg),
+                ]),
+              ),
             ),
           ),
         ),
@@ -187,15 +157,6 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
             child: IgnorePointer(ignoring: !rightShown || _anim.value < 0.95,
               child: const ChatSidebarRight(),
             ),
-          ),
-        ),
-
-        // ===== 全屏 Listener（只读，不消费事件） =====
-        Positioned.fill(
-          child: Listener(
-            onPointerDown: _onPointerDown,
-            onPointerMove: _onPointerMove,
-            onPointerUp: _onPointerUp,
           ),
         ),
 
