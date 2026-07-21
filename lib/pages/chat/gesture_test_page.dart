@@ -97,13 +97,15 @@ class _GestureTestPageState extends State<GestureTestPage>
     // ★ 根据触摸坐标预判滚动归属
     final tapX = e.position.dx;
     final screenW = MediaQuery.of(context).size.width;
-    final side = screenW * _sideFrac;
+    int nextScrollPage = 1;
     if (_offset > 0 && tapX < _offset) {
-      _activeScrollPage = 0; // 左页露出区域
+      nextScrollPage = 0;
     } else if (_offset < 0 && tapX > screenW + _offset) {
-      _activeScrollPage = 2; // 右页露出区域
-    } else {
-      _activeScrollPage = 1; // 中间页
+      nextScrollPage = 2;
+    }
+    if (nextScrollPage != _activeScrollPage) {
+      _activeScrollPage = nextScrollPage;
+      if (mounted) setState(() {});
     }
   }
 
@@ -120,13 +122,15 @@ class _GestureTestPageState extends State<GestureTestPage>
         // ★ 垂直锁定：确定触摸坐标对应的页面，只让该页滚动
         final tapX = e.position.dx;
         final screenW = MediaQuery.of(context).size.width;
-        final side = screenW * _sideFrac;
+        int nextScrollPage = 1;
         if (_offset > 0 && tapX < _offset) {
-          _activeScrollPage = 0;
+          nextScrollPage = 0;
         } else if (_offset < 0 && tapX > screenW + _offset) {
-          _activeScrollPage = 2;
-        } else {
-          _activeScrollPage = 1;
+          nextScrollPage = 2;
+        }
+        if (nextScrollPage != _activeScrollPage) {
+          _activeScrollPage = nextScrollPage;
+          if (mounted) setState(() {});
         }
         return;
       }
