@@ -12,18 +12,17 @@ import 'widgets/chat_input_bar.dart';
 import 'widgets/plus_menu.dart';
 import 'widgets/character_world_page.dart';
 
-/// 聊天主页面 —— 三页一体（一张纸）
+/// 聊天主页面 —— 三页独立模块
 ///
-/// 左中右三页是连在一起的**一整张纸**，屏幕是窗口。
+/// 左/中/右三个独立 Widget，不互相嵌套。
+/// 中间页通过 AnimatedPositioned 左右移动来露/藏两侧页。
+/// 屏幕最上层有一个 Listener 做水平滑动侦测（只读，不消费事件）。
 ///
-/// 中间全屏：窗口在纸中间
-/// 全屏左滑：窗口左移 → 看到纸右边（右页展开）
-/// 全屏右滑：窗口右移 → 看到纸左边（左页展开）
-/// 左页展开后左滑：纸往右拉 → 左页塞回，窗口回中间
-/// 右页展开后右滑：纸往左拉 → 右页塞回，窗口回中间
-///
-/// 全屏 Listener 手势：水平分量 > 垂直分量的则移动纸张。
-/// 纯垂直（垂直 > 水平*3）→ 透给 ListView。
+/// 三态切换：
+///   中间页 → 右滑 → 左页展开（中间页右移露出左页）
+///   中间页 → 左滑 → 右页展开（中间页左移露出右页）
+///   左页展开 → 左滑 → 回中间
+///   右页展开 → 右滑 → 回中间
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
 
@@ -32,253 +31,177 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
-  final _characterService = CharacterService();
-  final _aiService = AiChatService();
+  static const int _center = 0, _left = 1, _right = 2;
+  int _state = _center;
+  late AnimationController _anim;
 
-  MaleLead? _currentLead;
-  Persona? _currentPersona;
+  final _charSvc = CharacterService();
+  final _aiSvc = AiChatService();
+  MaleLead? _lead;
+  Persona? _persona;
+  bool _showPlus = false;
   final GlobalKey<ChatMessageAreaState> _msgKey = GlobalKey();
 
-  bool _showPlusMenu = false;
+  static const double _sideFrac = 0.65;
 
-  // 纸张偏移
-  double _paperOffset = 0;
-  bool _isOpen = false;
-  late AnimationController _paperCtrl;
-
-  static const double _sidebarFraction = 0.65;
-
-  // 手势角度判定
-  bool _isDragging = false;
-  double _startX = 0, _startY = 0;
-  bool _claimed = false;
+  // Listener 手势缓存
+  double _downX = 0, _downY = 0;
+  bool _moveHappened = false;
 
   @override
   void initState() {
     super.initState();
-    _paperCtrl = AnimationController(
+    _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
     )..addListener(() { if (mounted) setState(() {}); });
-    _initCharacter();
+    _load();
   }
 
-  Future<void> _initCharacter() async {
-    try { await _characterService.load(); } catch (_) {}
+  Future<void> _load() async {
+    try { await _charSvc.load(); } catch (_) {}
     if (!mounted) return;
-    final leads = _characterService.leads;
-    if (leads.isNotEmpty) {
-      setState(() {
-        _currentLead = leads.first;
-        _currentPersona = leads.first.personas.isNotEmpty
-            ? leads.first.personas.first : null;
-      });
+    final ls = _charSvc.leads;
+    if (ls.isNotEmpty) {
+      setState(() { _lead = ls.first; _persona = ls.first.personas.isNotEmpty ? ls.first.personas.first : null; });
     } else {
-      await _characterService.addMaleLead(MaleLead(id: 'default', name: '沈星回'));
+      await _charSvc.addMaleLead(MaleLead(id: 'd', name: '沈星回'));
       if (!mounted) return;
-      await _characterService.load();
-      if (_characterService.leads.isNotEmpty && mounted) {
-        setState(() {
-          _currentLead = _characterService.leads.first;
-          _currentPersona = _characterService.leads.first.personas.isNotEmpty
-              ? _characterService.leads.first.personas.first : null;
-        });
-      }
+      await _charSvc.load();
+      if (_charSvc.leads.isNotEmpty && mounted)
+        setState(() { _lead = _charSvc.leads.first; _persona = _charSvc.leads.first.personas.isNotEmpty ? _charSvc.leads.first.personas.first : null; });
     }
   }
 
-  void _selectPersona(MaleLead lead, Persona persona) {
-    setState(() { _currentLead = lead; _currentPersona = persona; });
-    _snapToCenter();
-    HapticFeedback.lightImpact();
-  }
-
-  void _snapToCenter() {
-    if (_paperCtrl.isAnimating) _paperCtrl.stop();
-    _paperCtrl.reverse().then((_) {
-      if (mounted) setState(() { _isOpen = false; _paperOffset = 0; });
-    });
-  }
-
-  void _togglePlus() {
-    if (_isOpen) { _snapToCenter(); return; }
-    setState(() => _showPlusMenu = !_showPlusMenu);
-  }
-
-  double _paperOffsetValue() {
-    final w = MediaQuery.of(context).size.width * _sidebarFraction;
-    if (_isDragging) return _paperOffset;
-    if (_isOpen) return _paperOffset > 0 ? w * _paperCtrl.value : -w * _paperCtrl.value;
+  double get _midOff {
+    final sw = MediaQuery.of(context).size.width * _sideFrac;
+    if (_state == _left) return sw * _anim.value;
+    if (_state == _right) return -sw * _anim.value;
     return 0;
   }
 
-  // ========== 全屏手势角度判定 ==========
+  void _goLeft() { if (_state == _left) return; setState(() { _state = _left; _showPlus = false; }); _anim.forward(from: 0); HapticFeedback.mediumImpact(); }
+  void _goRight() { if (_state == _right) return; setState(() { _state = _right; _showPlus = false; }); _anim.forward(from: 0); HapticFeedback.mediumImpact(); }
+  void _goCenter() { if (_state == _center) return; _anim.reverse().then((_) { if (mounted) setState(() => _state = _center); }); }
 
-  void _onPointerDown(PointerDownEvent e) {
-    _isDragging = false;
-    _claimed = false;
-    _startX = e.position.dx;
-    _startY = e.position.dy;
+  void _togglePlus() { if (_state != _center) { _goCenter(); return; } setState(() => _showPlus = !_showPlus); }
+  void _selectPersona(MaleLead l, Persona p) { setState(() { _lead = l; _persona = p; }); _goCenter(); HapticFeedback.lightImpact(); }
+
+  Future<void> _sendMsg(String t) async {
+    _msgKey.currentState?.appendMessage(ChatMessage(id: DateTime.now().millisecondsSinceEpoch.toString(), text: t, isMe: true));
+    final r = await _aiSvc.generateReply(t, _persona?.id ?? 'd');
+    _msgKey.currentState?.appendMessage(ChatMessage(id: '${DateTime.now().millisecondsSinceEpoch}_ai', text: r, isMe: false));
   }
 
-  void _onPointerMove(PointerMoveEvent e) {
-    if (_showPlusMenu) return;
-    final dx = e.position.dx - _startX;
-    final dy = e.position.dy - _startY;
-
-    if (!_claimed) {
-      if (dx.abs() < 4 && dy.abs() < 4) return;
-      // 纯垂直（垂直 > 水平*3）→ 不拦截
-      if (dy.abs() > dx.abs() * 3) return;
-      _claimed = true;
-      _isDragging = true;
-    }
-
-    if (!_isDragging) return;
-
-    // 只在中间页区域生效（侧栏区域透传）
-    final screenW = MediaQuery.of(context).size.width;
-    final sideW = screenW * _sidebarFraction;
-    if (_paperOffset > 0 && e.position.dx < sideW) return;
-    if (_paperOffset < 0 && e.position.dx > screenW - sideW) return;
-
-    setState(() {
-      _paperOffset += dx;
-      final maxW = sideW;
-      _paperOffset = _paperOffset.clamp(-maxW, maxW);
-    });
-    _startX = e.position.dx;
-    _startY = e.position.dy;
-  }
-
-  void _onPointerUp(PointerUpEvent e) {
-    if (!_claimed || !_isDragging) {
-      _isDragging = false;
-      _claimed = false;
-      _paperOffset = 0;
-      return;
-    }
-
-    final screenW = MediaQuery.of(context).size.width;
-    final maxW = screenW * _sidebarFraction;
-    final threshold = maxW * 0.30;
-
-    if (!_isOpen) {
-      // 中间页 → 推开方向
-      if (_paperOffset > threshold) {
-        _isOpen = true;
-        _paperCtrl.forward(from: (_paperOffset / maxW).clamp(0.0, 1.0));
-      } else if (_paperOffset < -threshold) {
-        _isOpen = true;
-        _paperCtrl.forward(from: (-_paperOffset / maxW).clamp(0.0, 1.0));
-      }
-    } else {
-      // 已展开 → 往反方向滑过中间就收回
-      // 左页展开(_paperOffset>0)：用户左滑，_paperOffset 变小
-      // 右页展开(_paperOffset<0)：用户右滑，_paperOffset 变大
-      // 只要 |_paperOffset| 小于阈值的一半，或者符号变了，都算"拉过了中间"
-      final closeThreshold = threshold * 0.5;
-      final crossed = (_paperOffset > 0 && _paperOffset < closeThreshold) ||
-                       (_paperOffset < 0 && _paperOffset > -closeThreshold);
-
-      if (crossed) {
-        _snapToCenter();
-        _isDragging = false;
-        _claimed = false;
-        _paperOffset = 0;
-        return;
-      }
-      // 弹回完全展开
-      _paperCtrl.forward();
-    }
-
-    setState(() {
-      _paperOffset = 0;
-      _isDragging = false;
-      _claimed = false;
-    });
-  }
-
-  Future<void> _sendMessage(String text) async {
-    final userMsg = ChatMessage(
-      id: DateTime.now().millisecondsSinceEpoch.toString(), text: text, isMe: true,
-    );
-    _msgKey.currentState?.appendMessage(userMsg);
-    final reply = await _aiService.generateReply(text, _currentPersona?.id ?? 'default');
-    final aiMsg = ChatMessage(
-      id: '${DateTime.now().millisecondsSinceEpoch}_ai', text: reply, isMe: false,
-    );
-    _msgKey.currentState?.appendMessage(aiMsg);
-  }
-
-  void _openCharacterWorld() {
-    if (_currentLead == null || _currentPersona == null) return;
+  void _openWorld() {
+    if (_lead == null || _persona == null) return;
     Navigator.push(context, PageRouteBuilder(
-      pageBuilder: (_, __, ___) => CharacterWorldPage(lead: _currentLead!, persona: _currentPersona!),
-      transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+      pageBuilder: (_, __, ___) => CharacterWorldPage(lead: _lead!, persona: _persona!),
+      transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c),
       transitionDuration: const Duration(milliseconds: 300),
     ));
   }
 
   @override
-  void dispose() { _paperCtrl.dispose(); super.dispose(); }
+  void dispose() { _anim.dispose(); super.dispose(); }
+
+  // ========== Listener 水平滑动手势（不消费事件，不影响 ListView） ==========
+
+  void _onPointerDown(PointerDownEvent e) {
+    _downX = e.position.dx;
+    _downY = e.position.dy;
+    _moveHappened = false;
+  }
+
+  void _onPointerMove(PointerMoveEvent e) {
+    if (_showPlus) return;
+    final dx = e.position.dx - _downX;
+    final dy = e.position.dy - _downY;
+
+    if (!_moveHappened) {
+      if (dx.abs() < 6 && dy.abs() < 6) return;
+      _moveHappened = true;
+
+      // 判定是否为水平滑动
+      if (dy.abs() > dx.abs() * 2) return; // 垂直为主，跳过
+
+      if (_state == _center) {
+        // 中间：右滑 → 左页，左滑 → 右页
+        if (dx > 0) _goLeft();
+        else _goRight();
+      } else if (_state == _left && dx < -20) {
+        // 左页展开且左滑 → 收回
+        _goCenter();
+      } else if (_state == _right && dx > 20) {
+        // 右页展开且右滑 → 收回
+        _goCenter();
+      }
+    }
+  }
+
+  void _onPointerUp(PointerUpEvent e) {}
 
   @override
   Widget build(BuildContext context) {
-    final screenW = MediaQuery.of(context).size.width;
-    final sideW = screenW * _sidebarFraction;
-    final off = _paperOffsetValue();
-    final windowLeft = sideW + off;
+    final w = MediaQuery.of(context).size.width;
+    final sw = w * _sideFrac;
+    final off = _midOff;
+    final leftShown = _state == _left;
+    final rightShown = _state == _right;
 
     return Stack(
       children: [
-        // ===== 一张纸（左中右连在一起，用窗口剪裁） =====
-        ClipRect(
-          child: SizedBox(
-            width: double.infinity,
-            height: double.infinity,
-            child: Stack(
-              children: [
-                Positioned(left: windowLeft - sideW, top: 0, width: sideW, height: double.infinity,
-                  child: Container(color: const Color(0xFFEED9DC),
-                    child: ChatSidebarLeft(
-                      currentLead: _currentLead, currentPersona: _currentPersona,
-                      onSelectPersona: (entry) => _selectPersona(entry.key, entry.value),
-                    ),
-                  ),
-                ),
-                Positioned(left: windowLeft, top: 0, width: screenW, height: double.infinity,
-                  child: Scaffold(backgroundColor: const Color(0xFFF5EEF0),
-                    body: SafeArea(child: Column(children: [
-                      ChatTopBar(currentLead: _currentLead, currentPersona: _currentPersona,
-                        onAvatarTap: _openCharacterWorld,
-                        onMenuTap: () { if (!_isOpen) { _isOpen = true; _paperCtrl.forward(); }},
-                      ),
-                      Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _currentPersona)),
-                      ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
-                        onPlusTap: _togglePlus, onSendTap: _sendMessage,
-                      ),
-                    ])),
-                  ),
-                ),
-                Positioned(left: windowLeft + screenW, top: 0, width: sideW, height: double.infinity,
-                  child: Container(color: const Color(0xFFDCE4EE), child: const ChatSidebarRight()),
-                ),
-              ],
+        // ===== 左页 =====
+        // IgnorePointer: 完全展开时才可交互
+        Positioned(left: 0, top: 0, width: sw, height: double.infinity,
+          child: Container(color: const Color(0xFFEED9DC),
+            child: IgnorePointer(ignoring: !leftShown || _anim.value < 0.95,
+              child: ChatSidebarLeft(
+                currentLead: _lead, currentPersona: _persona,
+                onSelectPersona: (entry) => _selectPersona(entry.key, entry.value),
+              ),
             ),
           ),
         ),
 
-        // ===== 全屏手势监听 =====
-        Positioned.fill(child: Listener(
-          onPointerDown: _onPointerDown,
-          onPointerMove: _onPointerMove,
-          onPointerUp: _onPointerUp,
-        )),
+        // ===== 中间页（可移动） =====
+        Positioned(
+          left: off, top: 0, right: -off, bottom: 0,
+          child: Material(
+            color: const Color(0xFFF5EEF0),
+            child: SafeArea(
+              child: Column(children: [
+                ChatTopBar(currentLead: _lead, currentPersona: _persona,
+                  onAvatarTap: _openWorld, onMenuTap: _goLeft),
+                Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
+                ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
+                  onPlusTap: _togglePlus, onSendTap: _sendMsg),
+              ]),
+            ),
+          ),
+        ),
+
+        // ===== 右页 =====
+        Positioned(right: 0, top: 0, width: sw, height: double.infinity,
+          child: Container(color: const Color(0xFFDCE4EE),
+            child: IgnorePointer(ignoring: !rightShown || _anim.value < 0.95,
+              child: const ChatSidebarRight(),
+            ),
+          ),
+        ),
+
+        // ===== 全屏 Listener（只读，不消费事件） =====
+        Positioned.fill(
+          child: Listener(
+            onPointerDown: _onPointerDown,
+            onPointerMove: _onPointerMove,
+            onPointerUp: _onPointerUp,
+          ),
+        ),
 
         // ===== [+] 菜单 =====
-        if (_showPlusMenu)
-          Positioned.fill(child: PlusMenu(onDismiss: () => setState(() => _showPlusMenu = false))),
+        if (_showPlus)
+          Positioned.fill(child: PlusMenu(onDismiss: () => setState(() => _showPlus = false))),
       ],
     );
   }
