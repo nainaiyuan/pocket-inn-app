@@ -12,11 +12,12 @@ import 'widgets/chat_input_bar.dart';
 import 'widgets/plus_menu.dart';
 import 'widgets/character_world_page.dart';
 
-/// 聊天主页面 —— 三页一起动的侧栏
+/// 聊天主页面 —— 三页联动侧栏
 ///
-/// 像一张纸折两下，左中右三页永远连在一起。
-/// 中间页全屏时，全屏右滑三页整体右移露出左页，左滑整体左移露出右页。
-/// 用角度判定区分水平和垂直手势：水平角度走侧栏，垂直角度透给 ListView。
+/// 左中右三页像一张纸折两下连在一起。
+/// 顶部栏+底部输入框：全宽水平滑动
+/// 消息区域左右边缘30px：水平滑动
+/// 侧栏展开时：顶层加全屏水平手势层（不挡垂直滚动）
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
 
@@ -34,7 +35,6 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
 
   bool _showPlusMenu = false;
 
-  // 侧栏状态
   bool _showLeft = false;
   bool _showRight = false;
   late AnimationController _slideCtrl;
@@ -44,8 +44,6 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   // 拖动状态
   bool _isDragging = false;
   double _dragOffset = 0;
-  double _dragDeltaX = 0;
-  double _dragDeltaY = 0;
 
   @override
   void initState() {
@@ -144,51 +142,105 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     return 0;
   }
 
-  // ========== 智能手势 ==========
+  // ========== 顶部栏 + 底部输入框水平手势 ==========
 
-  void _onPanStart(DragStartDetails details) {
-    _isDragging = false;
-    _dragOffset = 0;
-    _dragDeltaX = 0;
-    _dragDeltaY = 0;
-  }
-
-  void _onPanUpdate(DragUpdateDetails details) {
-    if (_showPlusMenu) return;
-    final dx = details.delta.dx;
-    final dy = details.delta.dy;
-    _dragDeltaX += dx;
-    _dragDeltaY += dy;
-
+  void _onHoriDragUpdate(DragUpdateDetails details) {
+    if (_showPlusMenu || details.primaryDelta == null) return;
+    if (_showLeft || _showRight) return; // 展开时走 overlay 层
     if (!_isDragging) {
-      // 判断方向：水平还是垂直
-      if (_dragDeltaX.abs() > 5 || _dragDeltaY.abs() > 5) {
-        // 水平分量 > 垂直分量 → 水平拖动
-        if (_dragDeltaX.abs() > _dragDeltaY.abs() * 1.5) {
-          _isDragging = true;
-          _dragOffset = 0;
-        } else {
-          // 垂直拖动 → 不处理，透给 ListView
-          return;
-        }
-      } else {
-        return;
-      }
+      _isDragging = true;
+      _dragOffset = 0;
     }
-
     setState(() {
-      _dragOffset += dx;
+      _dragOffset += details.primaryDelta!;
       final screenW = MediaQuery.of(context).size.width;
       final maxW = screenW * _sidebarFraction;
       _dragOffset = _dragOffset.clamp(-maxW, maxW);
     });
   }
 
-  void _onPanEnd(DragEndDetails details) {
+  void _onHoriDragEnd(DragEndDetails details) {
+    _finishDrag();
+  }
+
+  // ========== 侧栏已展开时 Listener 手势判定 ==========
+
+  double _touchStartX = 0;
+  double _touchStartY = 0;
+  bool _listenerClaimed = false;
+
+  void _onListenerPointerDown(PointerDownEvent event) {
+    _touchStartX = event.position.dx;
+    _touchStartY = event.position.dy;
+    _listenerClaimed = false;
+  }
+
+  void _onListenerPointerMove(PointerMoveEvent event) {
+    // 只在侧栏展开时拦截水平手势
+    if (!_showLeft && !_showRight) return;
+    if (_showPlusMenu) return;
+
+    final dx = event.position.dx - _touchStartX;
+    final dy = event.position.dy - _touchStartY;
+
+    if (!_listenerClaimed) {
+      if (dx.abs() < 5 && dy.abs() < 5) return;
+
+      // 水平 √ | 垂直 ×
+      if (dx.abs() > dy.abs() * 1.2) {
+        _listenerClaimed = true;
+      } else {
+        return;
+      }
+    }
+
+    // 只在中间页区域生效（侧栏区域透传）
+    final screenW = MediaQuery.of(context).size.width;
+    final leftW = screenW * _sidebarFraction;
+    if (_showLeft && event.position.dx < leftW) return;      // 左栏展开时，左半屏是侧栏
+    if (_showRight && event.position.dx > screenW - leftW) return; // 右栏展开时，右半屏是侧栏
+
+    setState(() {
+      _isDragging = true;
+      _dragOffset += event.position.dx - _touchStartX;
+      final maxW = screenW * _sidebarFraction;
+      _dragOffset = _dragOffset.clamp(-maxW, maxW);
+    });
+    _touchStartX = event.position.dx;
+    _touchStartY = event.position.dy;
+  }
+
+  void _onListenerPointerUp(PointerUpEvent event) {
+    if (!_listenerClaimed || !_isDragging) {
+      _isDragging = false;
+      _dragOffset = 0;
+      return;
+    }
+    _finishDrag();
+  }
+
+  // ========== 消息区域边缘手势（只在中间页时生效） ==========
+
+  void _onEdgeDragUpdate({required bool isRightEdge, required double delta}) {
+    if (_showPlusMenu) return;
+    if (_showLeft || _showRight) return; // 展开时走 Listener
+    if (!_isDragging) {
+      _isDragging = true;
+      _dragOffset = 0;
+    }
+    setState(() {
+      _dragOffset += delta;
+      final screenW = MediaQuery.of(context).size.width;
+      final maxW = screenW * _sidebarFraction;
+      _dragOffset = isRightEdge
+          ? _dragOffset.clamp(0, maxW)    // 右侧边缘右滑→左栏
+          : _dragOffset.clamp(-maxW, 0);  // 左侧边缘左滑→右栏
+    });
+  }
+
+  void _finishDrag() {
     if (!_isDragging) {
       _dragOffset = 0;
-      _dragDeltaX = 0;
-      _dragDeltaY = 0;
       return;
     }
 
@@ -197,7 +249,6 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     final threshold = maxW * 0.30;
 
     if (!_showLeft && !_showRight) {
-      // 中间页 → 滑动决定打开哪边
       if (_dragOffset > threshold) {
         _showLeft = true;
         _slideCtrl.forward(from: (_dragOffset / maxW).clamp(0.0, 1.0));
@@ -205,33 +256,19 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
         _showRight = true;
         _slideCtrl.forward(from: (-_dragOffset / maxW).clamp(0.0, 1.0));
       }
-      _dragOffset = 0;
-      _isDragging = false;
-      _dragDeltaX = 0;
-      _dragDeltaY = 0;
+    } else if (_showLeft && _dragOffset < -threshold) {
+      _close();
+      setState(() { _dragOffset = 0; _isDragging = false; });
       return;
-    }
-
-    if (_showLeft) {
-      if (_dragOffset < -threshold) {
-        _close();
-      } else {
-        _slideCtrl.forward();
-      }
-    }
-    if (_showRight) {
-      if (_dragOffset > threshold) {
-        _close();
-      } else {
-        _slideCtrl.forward();
-      }
+    } else if (_showRight && _dragOffset > threshold) {
+      _close();
+      setState(() { _dragOffset = 0; _isDragging = false; });
+      return;
     }
 
     setState(() {
       _dragOffset = 0;
       _isDragging = false;
-      _dragDeltaX = 0;
-      _dragDeltaY = 0;
     });
   }
 
@@ -283,6 +320,8 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     final leftW = screenW * _sidebarFraction;
     final showLeftLayer = _showLeft || (_isDragging && _dragOffset > 0);
     final showRightLayer = _showRight || (_isDragging && _dragOffset < 0);
+    final edgeZoneW = 30.0;
+    final sidebarOpen = _showLeft || _showRight;
 
     return SizedBox(
       width: double.infinity,
@@ -321,7 +360,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
               ),
             ),
 
-          // ===== 中间页（永远在最上层移动） =====
+          // ===== 中间页 =====
           AnimatedPositioned(
             duration: _isDragging
                 ? Duration.zero
@@ -331,10 +370,22 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
             top: 0,
             right: -off,
             bottom: 0,
-            child: _buildChatContent(),
+            child: _buildChatContent(edgeZoneW, sidebarOpen),
           ),
 
-          // ===== [+] 弹出菜单（在最上层） =====
+          // ===== 侧栏展开时：中间页再加一层 Listener =====
+          // 只在中间页区域内拦截水平手势，侧栏区域不受影响
+          // Listener 不消费事件，所以 ListView 垂直滚动正常
+          if (sidebarOpen)
+            Positioned.fill(
+              child: Listener(
+                onPointerDown: _onListenerPointerDown,
+                onPointerMove: _onListenerPointerMove,
+                onPointerUp: _onListenerPointerUp,
+              ),
+            ),
+
+          // ===== [+] 弹出菜单 =====
           if (_showPlusMenu)
             Positioned.fill(
               child: PlusMenu(
@@ -346,37 +397,84 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildChatContent() {
+  Widget _buildChatContent(double edgeZoneW, bool sidebarOpen) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5EEF0),
-      body: GestureDetector(
-        // 用 onPan 来做角度判断：水平走侧栏，垂直透给 ListView
-        onPanStart: _onPanStart,
-        onPanUpdate: _onPanUpdate,
-        onPanEnd: _onPanEnd,
-        child: SafeArea(
-          child: Column(
-            children: [
-              ChatTopBar(
-                currentLead: _currentLead,
-                currentPersona: _currentPersona,
-                onAvatarTap: _openCharacterWorld,
-                onMenuTap: () => _open(left: true),
-              ),
-              Expanded(
-                child: ChatMessageArea(
-                  key: _msgKey,
-                  currentPersona: _currentPersona,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Column(
+              children: [
+                // 顶部栏（全宽水平滑动 → 中间页模式）
+                GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragUpdate: _onHoriDragUpdate,
+                  onHorizontalDragEnd: _onHoriDragEnd,
+                  child: ChatTopBar(
+                    currentLead: _currentLead,
+                    currentPersona: _currentPersona,
+                    onAvatarTap: _openCharacterWorld,
+                    onMenuTap: () => _open(left: true),
+                  ),
                 ),
-              ),
-              ChatInputBar(
-                onCameraTap: () {},
-                onVoiceTap: () {},
-                onPlusTap: _togglePlus,
-                onSendTap: _sendMessage,
-              ),
-            ],
-          ),
+
+                // 消息区域
+                Expanded(
+                  child: Stack(
+                    children: [
+                      ChatMessageArea(
+                        key: _msgKey,
+                        currentPersona: _currentPersona,
+                      ),
+
+                      // 左边缘30px手势区（仅中间页时生效）
+                      if (!sidebarOpen)
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: edgeZoneW,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onHorizontalDragUpdate: (d) =>
+                              _onEdgeDragUpdate(isRightEdge: true, delta: d.primaryDelta ?? 0),
+                            onHorizontalDragEnd: (_) => _finishDrag(),
+                          ),
+                        ),
+
+                      // 右边缘30px手势区（仅中间页时生效）
+                      if (!sidebarOpen)
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: edgeZoneW,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onHorizontalDragUpdate: (d) =>
+                              _onEdgeDragUpdate(isRightEdge: false, delta: d.primaryDelta ?? 0),
+                            onHorizontalDragEnd: (_) => _finishDrag(),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+
+                // 底部输入框（全宽水平滑动）
+                GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragUpdate: _onHoriDragUpdate,
+                  onHorizontalDragEnd: _onHoriDragEnd,
+                  child: ChatInputBar(
+                    onCameraTap: () {},
+                    onVoiceTap: () {},
+                    onPlusTap: _togglePlus,
+                    onSendTap: _sendMessage,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
