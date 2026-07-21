@@ -185,17 +185,20 @@ class _GestureTestPageState extends State<GestureTestPage>
       child: SizedBox.expand(
         child: Stack(
           children: [
-            // ★ IgnorePointer：非当前 Panel → 不接收事件
+            // 左页：当前展开或部分露出
             _buildPage(
-              visible: _currentPanel == Panel.left || _offset > 0,
+              visible: _currentPanel != Panel.center || _offset > 0,
               left: _offset - side,
               width: side,
               color: _colors[0],
               title: '左页',
               itemCount: 30,
             ),
+            // ★ visible 规则：
+            //  - 中间页：始终可交互（手势层在上面）
+            //  - 侧页：当前展开或部分露出时开放交互
             _buildPage(
-              visible: _currentPanel == Panel.center,
+              visible: true, // 中间页始终可交互
               left: _offset,
               width: screenW,
               color: _colors[1],
@@ -203,7 +206,7 @@ class _GestureTestPageState extends State<GestureTestPage>
               itemCount: 50,
             ),
             _buildPage(
-              visible: _currentPanel == Panel.right || _offset < 0,
+              visible: _currentPanel != Panel.center || _offset < 0,
               left: screenW + _offset,
               width: side,
               color: _colors[2],
