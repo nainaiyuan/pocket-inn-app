@@ -279,7 +279,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             child: SafeArea(
               child: Column(children: [
                 ChatTopBar(currentLead: _lead, currentPersona: _persona,
-                  onAvatarTap: _openWorld, onMenuTap: () { _currentPanel = Panel.left; _animateTo(sideW); }),
+                  onAvatarTap: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); }),
                 Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
                 ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
                   onPlusTap: _togglePlus, onSendTap: _sendMsg),
@@ -294,7 +294,26 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           left: screenW + _offset,
           width: sideW,
           color: const Color(0xFFDCE4EE),
-          child: const ChatSidebarRight(),
+          child: ChatSidebarRight(
+            currentLead: _lead,
+            currentPersona: _persona,
+            onDelete: () {
+              // 删完后切到第一个可用角色
+              final ls = _charSvc.leads;
+              if (ls.isNotEmpty) {
+                final firstLead = ls.first;
+                final firstPersona = firstLead.personas.isNotEmpty
+                    ? firstLead.personas.first
+                    : Persona(id: '${firstLead.id}_default', maleLeadId: firstLead.id, name: '默认');
+                setState(() {
+                  _lead = firstLead;
+                  _persona = firstPersona;
+                });
+              }
+              _currentPanel = Panel.center;
+              _animateTo(0);
+            },
+          ),
         ),
 
         // ===== 全屏手势监听 =====

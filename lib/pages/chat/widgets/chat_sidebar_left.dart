@@ -245,126 +245,182 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
   }
 
   Widget _buildLeadCard(MaleLead lead, bool isExpanded, bool isActive) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: isActive ? 0.85 : 0.65),
-        borderRadius: BorderRadius.circular(18),
-        border: isActive
-            ? Border.all(color: const Color(0xFFE8A0B8).withValues(alpha: 0.4))
-            : null,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 卡片主体：点击头像/名字 → 选中聊天；点箭头 → 展开
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                // 头像（可点击上传）
-                GestureDetector(
-                  onTap: () => _pickAvatar(lead),
-                  child: Container(
-                    width: 56,
-                    height: 72,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      gradient: LinearGradient(
-                        colors: [
-                          const Color(0xFFE8A0B8).withValues(alpha: 0.3),
-                          const Color(0xFFC8A8D8).withValues(alpha: 0.3),
+    return GestureDetector(
+      onLongPress: () => _showLeadMenu(lead),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: isActive ? 0.85 : 0.65),
+          borderRadius: BorderRadius.circular(18),
+          border: isActive
+              ? Border.all(color: const Color(0xFFE8A0B8).withValues(alpha: 0.4))
+              : null,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 卡片主体
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  // 头像
+                  GestureDetector(
+                    onTap: () => _pickAvatar(lead),
+                    child: Container(
+                      width: 56,
+                      height: 72,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        gradient: LinearGradient(
+                          colors: [
+                            const Color(0xFFE8A0B8).withValues(alpha: 0.3),
+                            const Color(0xFFC8A8D8).withValues(alpha: 0.3),
+                          ],
+                        ),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
+                      ),
+                      child: Center(
+                        child: Icon(
+                          lead.avatarPath.isEmpty ? Icons.person_outline_rounded : Icons.image_outlined,
+                          size: 28,
+                          color: const Color(0xFF8A6A78),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // 名字
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => _selectLead(lead),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(lead.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF3D2C33))),
+                          const SizedBox(height: 2),
+                          Text(
+                            isActive && widget.currentPersona != null
+                                ? '当前形象：${widget.currentPersona!.name}'
+                                : '点击开始聊天',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12, color: isActive ? const Color(0xFFB48296) : const Color(0xFF8A7A80)),
+                          ),
                         ],
                       ),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
                     ),
-                    child: Center(
-                      child: Icon(
-                        lead.avatarPath.isEmpty ? Icons.person_outline_rounded : Icons.image_outlined,
-                        size: 28,
-                        color: const Color(0xFF8A6A78),
+                  ),
+                  const SizedBox(width: 4),
+                  // 展开箭头
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => _toggleExpand(lead.id),
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(
+                          isExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                          color: const Color(0xFF8A7A80),
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                // 名字 + 描述 → 点击选中
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => _selectLead(lead),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          lead.name,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF3D2C33),
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          isActive && widget.currentPersona != null
-                              ? '当前形象：${widget.currentPersona!.name}'
-                              : '点击开始聊天',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isActive ? const Color(0xFFB48296) : const Color(0xFF8A7A80),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                // 删除按钮
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () => _deleteLead(lead),
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(Icons.delete_outline_rounded, size: 18, color: const Color(0xFFCC9999).withValues(alpha: 0.6)),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                // 展开箭头
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () => _toggleExpand(lead.id),
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(
-                        isExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
-                        color: const Color(0xFF8A7A80),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // 展开：persona 列表
-          if (isExpanded) ...[
-            const Divider(height: 1, indent: 16, endIndent: 16),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              child: Column(
-                children: [
-                  ...lead.personas.map((persona) => _buildPersonaTile(lead, persona)),
-                  _buildAddPersonaTile(lead),
                 ],
               ),
             ),
+            // 展开列表
+            if (isExpanded) ...[
+              const Divider(height: 1, indent: 16, endIndent: 16),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                child: Column(
+                  children: [
+                    ...lead.personas.map((persona) => _buildPersonaTile(lead, persona)),
+                    _buildAddPersonaTile(lead),
+                  ],
+                ),
+              ),
+            ],
           ],
-        ],
+        ),
+      ),
+    );
+  }
+
+  // 长按弹出菜单
+  void _showLeadMenu(MaleLead lead) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      backgroundColor: const Color(0xFFF5EEF0),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFCCBCC4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                lead.name,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF3D2C33)),
+              ),
+              const SizedBox(height: 16),
+              _MenuBtn(icon: Icons.image_outlined, label: '更换立绘', onTap: () { Navigator.pop(ctx); _pickAvatar(lead); }),
+              _MenuBtn(icon: Icons.edit_outlined, label: '编辑设定', onTap: () { Navigator.pop(ctx); _selectLead(lead); }),
+              _MenuBtn(icon: Icons.delete_forever_outlined, label: '删除角色', labelColor: Colors.redAccent, onTap: () { Navigator.pop(ctx); _deleteLead(lead); }),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showPersonaMenu(MaleLead lead, Persona persona) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      backgroundColor: const Color(0xFFF5EEF0),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFCCBCC4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                persona.name,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF3D2C33)),
+              ),
+              const SizedBox(height: 16),
+              _MenuBtn(icon: Icons.image_outlined, label: '更换头像', onTap: () { Navigator.pop(ctx); _pickPersonaAvatar(lead, persona); }),
+              _MenuBtn(icon: Icons.delete_outlined, label: '删除形象', labelColor: Colors.redAccent, onTap: () { Navigator.pop(ctx); _deletePersona(lead, persona); }),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -373,69 +429,60 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     final isActive = widget.currentLead?.id == lead.id && widget.currentPersona?.id == persona.id;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: Material(
-        color: isActive ? const Color(0xFFE8A0B8).withValues(alpha: 0.2) : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
+      child: GestureDetector(
+        onLongPress: () => _showPersonaMenu(lead, persona),
+        child: Material(
+          color: isActive ? const Color(0xFFE8A0B8).withValues(alpha: 0.2) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
-          onTap: () => widget.onSelectPersona(MapEntry(lead, persona)),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            child: Row(
-              children: [
-                // 形象头像
-                GestureDetector(
-                  onTap: () => _pickPersonaAvatar(lead, persona),
-                  child: Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: isActive
-                          ? const Color(0xFFE8A0B8).withValues(alpha: 0.35)
-                          : Colors.white.withValues(alpha: 0.5),
-                      border: Border.all(
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => widget.onSelectPersona(MapEntry(lead, persona)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Row(
+                children: [
+                  // 形象头像
+                  GestureDetector(
+                    onTap: () => _pickPersonaAvatar(lead, persona),
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
                         color: isActive
-                            ? const Color(0xFFE8A0B8).withValues(alpha: 0.6)
-                            : Colors.white.withValues(alpha: 0.4),
-                        width: 1.5,
+                            ? const Color(0xFFE8A0B8).withValues(alpha: 0.35)
+                            : Colors.white.withValues(alpha: 0.5),
+                        border: Border.all(
+                          color: isActive
+                              ? const Color(0xFFE8A0B8).withValues(alpha: 0.6)
+                              : Colors.white.withValues(alpha: 0.4),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Icon(
+                        persona.avatarPath.isEmpty ? Icons.face_6_outlined : Icons.image_outlined,
+                        size: 16,
+                        color: isActive ? const Color(0xFFB48296) : const Color(0xFF8A6A78),
                       ),
                     ),
-                    child: Icon(
-                      persona.avatarPath.isEmpty ? Icons.face_6_outlined : Icons.image_outlined,
-                      size: 16,
-                      color: isActive ? const Color(0xFFB48296) : const Color(0xFF8A6A78),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      persona.name,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                        color: isActive ? const Color(0xFF3D2C33) : const Color(0xFF5A4A52),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    persona.name,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-                      color: isActive ? const Color(0xFF3D2C33) : const Color(0xFF5A4A52),
-                    ),
-                  ),
-                ),
-                // 删除按钮
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(10),
-                    onTap: () => _deletePersona(lead, persona),
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(Icons.close_rounded, size: 16, color: const Color(0xFFCC9999).withValues(alpha: 0.5)),
-                    ),
-                  ),
-                ),
-                if (isActive) ...[
-                  const SizedBox(width: 4),
-                  Container(width: 6, height: 6, decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFFE8A0B8))),
+                  if (isActive) ...[
+                    const SizedBox(width: 4),
+                    Container(width: 6, height: 6, decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFFE8A0B8))),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),
@@ -495,6 +542,52 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
                 ),
                 const SizedBox(width: 10),
                 Text('新建身份', style: TextStyle(fontSize: 14, color: const Color(0xFFB48296))),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 底部菜单按钮
+class _MenuBtn extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color? labelColor;
+  final VoidCallback onTap;
+
+  const _MenuBtn({
+    required this.icon,
+    required this.label,
+    this.labelColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Material(
+        color: Colors.white.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Icon(icon, size: 20, color: labelColor ?? const Color(0xFF6A4A5A)),
+                const SizedBox(width: 12),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: labelColor ?? const Color(0xFF3D2C33),
+                  ),
+                ),
               ],
             ),
           ),
