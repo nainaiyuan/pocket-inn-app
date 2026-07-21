@@ -12,13 +12,15 @@ import 'widgets/chat_input_bar.dart';
 import 'widgets/plus_menu.dart';
 import 'widgets/character_world_page.dart';
 
-/// 聊天主页面 —— 三页独立模块 + GestureDetector onHorizontalDragEnd
+/// 聊天主页面 —— 三页独立模块 + 边缘手势
 ///
-/// 三个独立 Widget：左页 / 中间页 / 右页
-/// 中间页用 GestureDetector 监听 onHorizontalDragEnd：
-///   - 水平滑动 → 触发页面切换
-///   - 垂直滑动 → 透给 ListView（ListView 自己管自己的）
-///   onHorizontalDragEnd 是纯水平手势识别，不会跟垂直滚动冲突
+/// 中间页全屏时，左右各 40px 边缘可左右滑切换。
+/// 中间区域（聊天内容）正常上下滚动，不受干扰。
+///
+/// 左页展开时：
+///   - 左页(65%)：左页内容正常交互
+///   - 右侧(35%)：只认左滑收回，不响应其他手势
+/// 右页展开时对称。
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
 
@@ -39,6 +41,8 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   final GlobalKey<ChatMessageAreaState> _msgKey = GlobalKey();
 
   static const double _sideFrac = 0.65;
+  static const double _edgeSize = 40.0; // 边缘手势触发宽度
+  static const double _speedThreshold = 250.0;
 
   @override
   void initState() {
@@ -99,8 +103,8 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    final sw = w * _sideFrac;
+    final screenW = MediaQuery.of(context).size.width;
+    final sideW = screenW * _sideFrac;
     final off = _midOff;
     final leftShown = _state == _left;
     final rightShown = _state == _right;
@@ -108,7 +112,7 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     return Stack(
       children: [
         // ===== 左页 =====
-        Positioned(left: 0, top: 0, width: sw, height: double.infinity,
+        Positioned(left: 0, top: 0, width: sideW, height: double.infinity,
           child: Container(color: const Color(0xFFEED9DC),
             child: IgnorePointer(ignoring: !leftShown || _anim.value < 0.95,
               child: ChatSidebarLeft(
@@ -119,40 +123,78 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
           ),
         ),
 
-        // ===== 中间页（可移动） =====
-        // 用 GestureDetector 包裹，onPanUpdate 判定方向
+        // ===== 中间页 =====
         Positioned(
           left: off, top: 0, right: -off, bottom: 0,
-          child: GestureDetector(
-            onHorizontalDragEnd: (d) {
-              if (_showPlus) return;
-              if (d.primaryVelocity == null) return;
-              if (_state == _center) {
-                if (d.primaryVelocity! > 0) _goLeft();
-                else _goRight();
-              } else if (_state == _left && d.primaryVelocity! < 0) {
-                _goCenter();
-              } else if (_state == _right && d.primaryVelocity! > 0) {
-                _goCenter();
-              }
-            },
-            child: Material(
-              color: const Color(0xFFF5EEF0),
-              child: SafeArea(
-                child: Column(children: [
-                  ChatTopBar(currentLead: _lead, currentPersona: _persona,
-                    onAvatarTap: _openWorld, onMenuTap: _goLeft),
-                  Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
-                  ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
-                    onPlusTap: _togglePlus, onSendTap: _sendMsg),
-                ]),
+          child: Stack(
+            children: [
+              // 中间页内容
+              Material(
+                color: const Color(0xFFF5EEF0),
+                child: SafeArea(
+                  child: Column(children: [
+                    ChatTopBar(currentLead: _lead, currentPersona: _persona,
+                      onAvatarTap: _openWorld, onMenuTap: _goLeft),
+                    Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
+                    ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
+                      onPlusTap: _togglePlus, onSendTap: _sendMsg),
+                  ]),
+                ),
               ),
-            ),
+
+              // ===== 左边缘手势区（40px）=====
+              // center 状态：右滑 → 左页展开
+              Positioned(left: 0, top: 0, bottom: 0, width: _edgeSize,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragEnd: (d) {
+                    if (_showPlus) return;
+                    if (d.primaryVelocity == null) return;
+                    if (_state == _center && d.primaryVelocity! > _speedThreshold) _goLeft();
+                  },
+                ),
+              ),
+
+              // ===== 右边缘手势区（40px）=====
+              // center 状态：左滑 → 右页展开
+              Positioned(right: 0, top: 0, bottom: 0, width: _edgeSize,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragEnd: (d) {
+                    if (_showPlus) return;
+                    if (d.primaryVelocity == null) return;
+                    if (_state == _center && d.primaryVelocity! < -_speedThreshold) _goRight();
+                  },
+                ),
+              ),
+
+              // ===== 左页展开时：整个中间页露出区域用来左滑收回 =====
+              if (_state == _left)
+                Positioned(left: _edgeSize, top: 0, right: 0, bottom: 0,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onHorizontalDragEnd: (d) {
+                      if (d.primaryVelocity != null && d.primaryVelocity! < -_speedThreshold) _goCenter();
+                    },
+                  ),
+                ),
+
+              // ===== 右页展开时：整个中间页露出区域用来右滑收回 =====
+              if (_state == _right)
+                Positioned(left: 0, top: 0, right: _edgeSize, bottom: 0,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onHorizontalDragEnd: (d) {
+                      if (d.primaryVelocity != null && d.primaryVelocity! > _speedThreshold) _goCenter();
+                    },
+                  ),
+                ),
+            ],
           ),
         ),
 
         // ===== 右页 =====
-        Positioned(right: 0, top: 0, width: sw, height: double.infinity,
+        Positioned(right: 0, top: 0, width: sideW, height: double.infinity,
           child: Container(color: const Color(0xFFDCE4EE),
             child: IgnorePointer(ignoring: !rightShown || _anim.value < 0.95,
               child: const ChatSidebarRight(),
