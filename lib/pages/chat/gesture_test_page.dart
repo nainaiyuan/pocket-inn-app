@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// 手势测试页面 —— 三页连续空间（v7 触摸坐标版）
+/// 手势测试页面 —— 三页连续空间（v8 实时推算版）
 ///
-/// 垂直锁定时，根据触摸坐标决定哪个 ListView 可以滚动。
+/// 不再存储 _activeScrollPage 变量，每次 build 根据 _offset 实时推算。
+/// 无需 setState 同步 physics，永远立即生效。
 class GestureTestPage extends StatefulWidget {
   const GestureTestPage({super.key});
   @override
@@ -35,9 +36,6 @@ class _GestureTestPageState extends State<GestureTestPage>
   double _startX = 0, _startY = 0;
   bool _horizLocked = false;
   int _pointerId = -1;
-
-  // ---- 垂直滚动控制 ----
-  int _activeScrollPage = 1; // 0=左, 1=中, 2=右
 
   // ---- 动画 ----
   late AnimationController _anim;
@@ -93,20 +91,7 @@ class _GestureTestPageState extends State<GestureTestPage>
     _startPanel = _currentPanel;
     _dragging = false;
     _horizLocked = false;
-
-    // ★ 根据触摸坐标预判滚动归属
-    final tapX = e.position.dx;
-    final screenW = MediaQuery.of(context).size.width;
-    int nextScrollPage = 1;
-    if (_offset > 0 && tapX < _offset) {
-      nextScrollPage = 0;
-    } else if (_offset < 0 && tapX > screenW + _offset) {
-      nextScrollPage = 2;
-    }
-    if (nextScrollPage != _activeScrollPage) {
-      _activeScrollPage = nextScrollPage;
-      if (mounted) setState(() {});
-    }
+    setState(() {}); // 刷新 physics
   }
 
   void _onMove(PointerMoveEvent e) {
@@ -119,19 +104,8 @@ class _GestureTestPageState extends State<GestureTestPage>
       if (dx.abs() < _lockThr && dy.abs() < _lockThr) return;
       _horizLocked = dx.abs() > dy.abs() * 1.3;
       if (!_horizLocked) {
-        // ★ 垂直锁定：确定触摸坐标对应的页面，只让该页滚动
-        final tapX = e.position.dx;
-        final screenW = MediaQuery.of(context).size.width;
-        int nextScrollPage = 1;
-        if (_offset > 0 && tapX < _offset) {
-          nextScrollPage = 0;
-        } else if (_offset < 0 && tapX > screenW + _offset) {
-          nextScrollPage = 2;
-        }
-        if (nextScrollPage != _activeScrollPage) {
-          _activeScrollPage = nextScrollPage;
-          if (mounted) setState(() {});
-        }
+        // ★ 垂直锁定：刷新 physics（实时推算不依赖变量，但需触发 build）
+        setState(() {});
         return;
       }
       _dragging = true;
@@ -162,7 +136,7 @@ class _GestureTestPageState extends State<GestureTestPage>
     if (_pointerId != e.pointer) return;
     _pointerId = -1;
 
-    if (!_dragging) { _horizLocked = false; return; }
+    if (!_dragging) { _horizLocked = false; setState(() {}); return; }
 
     _dragging = false;
     _horizLocked = false;
@@ -200,6 +174,25 @@ class _GestureTestPageState extends State<GestureTestPage>
     _animateTo(target);
   }
 
+  // ---- 实时推算当前触摸点落在哪页 ----
+  int _calcScrollPage() {
+    // 无触控时，按 currentPanel 决定
+    if (_pointerId < 0) {
+      switch (_currentPanel) {
+        case Panel.left:   return 0;
+        case Panel.right:  return 2;
+        case Panel.center: return 1;
+      }
+    }
+    return _calcScrollPageByPos(_startX);
+  }
+
+  int _calcScrollPageByPos(double tapX) {
+    if (_offset > 0 && tapX < _offset) return 0;
+    if (_offset < 0 && tapX > MediaQuery.of(context).size.width + _offset) return 2;
+    return 1;
+  }
+
   // ---- build ----
 
   @override
@@ -227,7 +220,7 @@ class _GestureTestPageState extends State<GestureTestPage>
                     'p:$_currentPanel  o:${_offset.toStringAsFixed(0)}  '
                     '${_dragging ? "拖" : _anim.isAnimating ? "动" : "停"}  '
                     '${_horizLocked ? "🔒" : "🔓"}  '
-                    '滚:$_activeScrollPage',
+                    '滚:${_calcScrollPage()}',
                     style: const TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 ),
@@ -250,6 +243,8 @@ class _GestureTestPageState extends State<GestureTestPage>
   }
 
   Widget _pageWidget(int index, double left, double width, Color color, String title, int count) {
+    // ★ 实时推算，不依赖变量
+    final isActive = _calcScrollPage() == index;
     return Positioned(
       left: left, top: 0,
       width: width, bottom: 0,
@@ -263,8 +258,7 @@ class _GestureTestPageState extends State<GestureTestPage>
             ),
             Expanded(
               child: ListView.builder(
-                // ★ 非当前触摸页面的 ListView 不让滚动
-                physics: _activeScrollPage == index
+                physics: isActive
                     ? const AlwaysScrollableScrollPhysics()
                     : const NeverScrollableScrollPhysics(),
                 itemCount: count,
