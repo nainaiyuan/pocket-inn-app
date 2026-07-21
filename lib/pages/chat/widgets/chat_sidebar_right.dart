@@ -145,12 +145,12 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('删除 "${l.name}"？'),
-        content: const Text('所有形象和聊天记录都将被删除，不可恢复。'),
+        content: const Text('此操作不可恢复。'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消', style: TextStyle(color: Color(0xFF8A7A80)))),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定删除', style: TextStyle(color: Colors.redAccent)),
+            child: const Text('确定删除', style: TextStyle(color: Color(0xFFE55050), fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -171,12 +171,12 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('删除 "${p.name}"？'),
-        content: const Text('此形象将被删除。'),
+        content: const Text('此操作不可恢复。'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消', style: TextStyle(color: Color(0xFF8A7A80)))),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定删除', style: TextStyle(color: Colors.redAccent)),
+            child: const Text('确定删除', style: TextStyle(color: Color(0xFFE55050), fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -197,12 +197,12 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('删除所有聊天记录？'),
-        content: const Text('当前角色的聊天记录将被清空，不可恢复。'),
+        content: const Text('当前角色的聊天记录将被清空，此操作不可恢复。'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消', style: TextStyle(color: Color(0xFF8A7A80)))),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定清空', style: TextStyle(color: Colors.redAccent)),
+            child: const Text('确定清空', style: TextStyle(color: Color(0xFFE55050), fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -224,8 +224,6 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
   @override
   Widget build(BuildContext context) {
     final isLead = widget.currentPersona == null || widget.currentPersona?.name == '默认';
-    final personaName = widget.currentPersona?.name ?? '本体';
-    final leadName = widget.currentLead?.name ?? '';
 
     return Container(
       color: const Color(0xFFF5EEF0),
@@ -233,26 +231,13 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
         child: Column(
           children: [
             const SizedBox(height: 56),
+
+            // ─── 设备 / 管家 / 语录 集成区 ───
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      isLead ? leadName : '$leadName · $personaName',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Color(0xFF3D2C33), letterSpacing: 1),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: _DevicePanel(),
             ),
-            const SizedBox(height: 4),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(isLead ? '本体设定' : '时间线设定', style: TextStyle(fontSize: 12, color: const Color(0xFF8A7A80))),
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
 
             Expanded(
               child: ListView(
@@ -441,6 +426,190 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                   ),
                   const SizedBox(height: 40),
                 ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── 设备 / 管家 / 语录 集成面板 ───
+class _DevicePanel extends StatefulWidget {
+  @override
+  State<_DevicePanel> createState() => _DevicePanelState();
+}
+
+class _DevicePanelState extends State<_DevicePanel> {
+  bool _deviceEnabled = false;
+  bool _butlerCodeA = false; // #A# 多轮对话暗号
+  bool _butlerCodeB = false; // #B# 定时唤醒
+  final _quoteCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _quoteCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 第一行：设备开关 + 管家暗号开关
+          Row(
+            children: [
+              // 设备开关
+              SizedBox(
+                height: 28,
+                child: Material(
+                  color: _deviceEnabled
+                      ? const Color(0xFFE8A0B8).withValues(alpha: 0.25)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => setState(() => _deviceEnabled = !_deviceEnabled),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _deviceEnabled ? Icons.bluetooth_connected : Icons.bluetooth_disabled,
+                            size: 14,
+                            color: _deviceEnabled
+                                ? const Color(0xFFE8A0B8)
+                                : const Color(0xFF8A7A80).withValues(alpha: 0.5),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _deviceEnabled ? '设备已连接' : '未连接设备',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: _deviceEnabled
+                                  ? const Color(0xFF6A4A5A)
+                                  : const Color(0xFF8A7A80).withValues(alpha: 0.5),
+                              fontWeight: _deviceEnabled ? FontWeight.w500 : FontWeight.normal,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const Spacer(),
+              // 管家暗号 A：#A# 多轮唤醒
+              _CodeChip(
+                label: '#A#',
+                subtitle: '多轮',
+                active: _butlerCodeA,
+                onTap: () => setState(() => _butlerCodeA = !_butlerCodeA),
+              ),
+              const SizedBox(width: 4),
+              // 管家暗号 B：#B# 定时唤醒
+              _CodeChip(
+                label: '#B#',
+                subtitle: '定时',
+                active: _butlerCodeB,
+                onTap: () => setState(() => _butlerCodeB = !_butlerCodeB),
+              ),
+            ],
+          ),
+          // 第二行：语录
+          const SizedBox(height: 4),
+          SizedBox(
+            height: 36,
+            child: TextField(
+              controller: _quoteCtrl,
+              maxLines: 1,
+              style: const TextStyle(fontSize: 12, color: Color(0xFF6A4A5A), height: 1.3),
+              decoration: InputDecoration(
+                hintText: '角色语录（可选）',
+                hintStyle: TextStyle(fontSize: 11, color: const Color(0xFF8A7A80).withValues(alpha: 0.35)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: const Color(0xFF8A7A80).withValues(alpha: 0.1)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: const Color(0xFF8A7A80).withValues(alpha: 0.08)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: const Color(0xFFE8A0B8).withValues(alpha: 0.3)),
+                ),
+                filled: true,
+                fillColor: Colors.white.withValues(alpha: 0.2),
+                isDense: true,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CodeChip extends StatelessWidget {
+  final String label;
+  final String subtitle;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _CodeChip({
+    required this.label,
+    required this.subtitle,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: active
+              ? const Color(0xFFE8A0B8).withValues(alpha: 0.15)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: active
+                ? const Color(0xFFE8A0B8).withValues(alpha: 0.3)
+                : const Color(0xFF8A7A80).withValues(alpha: 0.1),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: active ? const Color(0xFFC87090) : const Color(0xFF8A7A80).withValues(alpha: 0.4),
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 9,
+                color: active ? const Color(0xFFC87090).withValues(alpha: 0.6) : const Color(0xFF8A7A80).withValues(alpha: 0.25),
               ),
             ),
           ],

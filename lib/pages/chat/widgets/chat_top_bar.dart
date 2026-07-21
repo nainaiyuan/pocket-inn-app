@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
 
-/// 聊天页顶部栏 —— 无头像，角色名居中，长按可改名
-class ChatTopBar extends StatelessWidget {
+/// 聊天页顶部栏 —— 角色名居中，点击进秘密基地，长按改名
+class ChatTopBar extends StatefulWidget {
   final MaleLead? currentLead;
   final Persona? currentPersona;
   final VoidCallback onTapAvatar;
   final VoidCallback onMenuTap;
+  final VoidCallback? onNameChanged; // 改名后通知上层刷新
 
   const ChatTopBar({
     super.key,
@@ -15,13 +17,33 @@ class ChatTopBar extends StatelessWidget {
     required this.currentPersona,
     required this.onTapAvatar,
     required this.onMenuTap,
+    this.onNameChanged,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final name = currentLead?.name ?? '沈星回';
-    final personaName = currentPersona?.name ?? '';
+  State<ChatTopBar> createState() => _ChatTopBarState();
+}
 
+class _ChatTopBarState extends State<ChatTopBar> {
+  late String _displayName;
+
+  @override
+  void initState() {
+    super.initState();
+    _displayName = widget.currentLead?.name ?? '沈星回';
+  }
+
+  @override
+  void didUpdateWidget(ChatTopBar old) {
+    super.didUpdateWidget(old);
+    if (old.currentLead?.id != widget.currentLead?.id ||
+        old.currentLead?.name != widget.currentLead?.name) {
+      _displayName = widget.currentLead?.name ?? '沈星回';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       padding: EdgeInsets.fromLTRB(
         8,
@@ -38,39 +60,26 @@ class ChatTopBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const SizedBox(width: 40), // 左侧留白平衡
+          const SizedBox(width: 40),
           Expanded(
             child: GestureDetector(
-              onTap: onTapAvatar,   // 点击 → 秘密基地
+              onTap: widget.onTapAvatar,
               onLongPress: () => _renameLead(context),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                      color: Color(0xFF6A4A5A),
-                      letterSpacing: 1,
-                    ),
+              child: Center(
+                child: Text(
+                  _displayName,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF6A4A5A),
+                    letterSpacing: 1,
                   ),
-                  if (personaName.isNotEmpty)
-                    Text(
-                      '与 $personaName 聊天中',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: const Color(0xFF5A4A52).withValues(alpha: 0.3),
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                ],
+                ),
               ),
             ),
           ),
           GestureDetector(
-            onTap: onMenuTap,
+            onTap: widget.onMenuTap,
             child: Padding(
               padding: const EdgeInsets.all(8),
               child: Icon(
@@ -85,9 +94,10 @@ class ChatTopBar extends StatelessWidget {
   }
 
   void _renameLead(BuildContext context) {
-    final lead = currentLead;
+    HapticFeedback.mediumImpact();
+    final lead = widget.currentLead;
     if (lead == null) return;
-    final ctrl = TextEditingController(text: lead.name);
+    final ctrl = TextEditingController(text: _displayName);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -100,17 +110,22 @@ class ChatTopBar extends StatelessWidget {
           decoration: const InputDecoration(hintText: '输入新名字', border: InputBorder.none),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
           TextButton(
             onPressed: () {
               final newName = ctrl.text.trim();
               if (newName.isNotEmpty) {
                 lead.name = newName;
                 CharacterService().updateMaleLead(lead);
+                setState(() => _displayName = newName);
+                widget.onNameChanged?.call();
               }
               Navigator.pop(ctx);
             },
-            child: const Text('确定'),
+            child: const Text('确定', style: TextStyle(color: Color(0xFFE8A0B8), fontWeight: FontWeight.w600)),
           ),
         ],
       ),

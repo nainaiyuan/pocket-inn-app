@@ -106,12 +106,15 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('删除 ${_selectedIds.length} 条消息？'),
-        content: const Text('删除后不可恢复。'),
+        content: const Text('此操作不可恢复。'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消', style: TextStyle(color: Color(0xFF8A7A80))),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('删除', style: TextStyle(color: Colors.redAccent)),
+            child: const Text('删除', style: TextStyle(color: Color(0xFFE55050), fontWeight: FontWeight.w600)),
           ),
         ],
       ),

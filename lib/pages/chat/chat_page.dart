@@ -243,9 +243,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   void _openWorld() {
-    if (_lead == null || _persona == null) return;
+    if (_lead == null) return;
+    final pid = _persona?.id ?? '${_lead!.id}_default';
     Navigator.push(context, PageRouteBuilder(
-      pageBuilder: (_, __, ___) => CharacterWorldPage(lead: _lead!, persona: _persona!),
+      pageBuilder: (_, __, ___) => CharacterWorldPage(lead: _lead!, persona: _persona ?? Persona(id: pid, maleLeadId: _lead!.id, name: '默认')),
       transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c),
       transitionDuration: const Duration(milliseconds: 300),
     ));
@@ -343,7 +344,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               child: Column(
                 children: [
                   ChatTopBar(currentLead: _lead, currentPersona: _persona,
-                    onTapAvatar: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); }),
+                    onTapAvatar: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); },
+                    onNameChanged: () { if (mounted) setState(() {}); }),
                   Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
                   ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
                     onPlusTap: _togglePlus, onSendTap: _sendMsg),
