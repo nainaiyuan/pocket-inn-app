@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// 手势测试页面 —— 三页连续空间（v5 最终版）
+/// 手势测试页面 —— 三页连续空间（v6 回退版）
 ///
-/// 核心：当前 Panel 决定三个系统：位置、动画、事件接收。
+/// 去掉 IgnorePointer，裸三页+ListView 测试横纵手势冲突
 class GestureTestPage extends StatefulWidget {
   const GestureTestPage({super.key});
   @override
@@ -23,8 +23,6 @@ class _GestureTestPageState extends State<GestureTestPage>
     Colors.blue.shade300,
     Colors.green.shade300,
   ];
-
-  // ---- 唯一状态 ----
   double _offset = 0;
   Panel _currentPanel = Panel.center;
 
@@ -38,6 +36,7 @@ class _GestureTestPageState extends State<GestureTestPage>
 
   // ---- 动画 ----
   late AnimationController _anim;
+  double _animStart = 0, _animEnd = 0;
 
   double get _sideW => MediaQuery.of(context).size.width * _sideFrac;
 
@@ -53,7 +52,7 @@ class _GestureTestPageState extends State<GestureTestPage>
   void _onAnimTick() {
     if (_dragging) return;
     setState(() {
-      _offset = _anim.value; // ★ 动画直接驱动 offset
+      _offset = _animStart + (_animEnd - _animStart) * _anim.value;
     });
   }
 
@@ -64,9 +63,6 @@ class _GestureTestPageState extends State<GestureTestPage>
       ..value = 0
       ..forward();
   }
-
-  // ---- 动画起始/结束（不修改变量名，完整保留功能） ----
-  double _animStart = 0, _animEnd = 0;
 
   @override
   void dispose() {
@@ -83,7 +79,6 @@ class _GestureTestPageState extends State<GestureTestPage>
     _startX = e.position.dx;
     _startY = e.position.dy;
 
-    // 冻结动画 → 把动画最后位置写入 _offset
     _anim.stop();
     if (_anim.value > 0 && _anim.value < 1) {
       _offset = _animStart + (_animEnd - _animStart) * _anim.value;
@@ -110,7 +105,6 @@ class _GestureTestPageState extends State<GestureTestPage>
 
     if (!_dragging) return;
 
-    // 回滑加速
     double factor = 1.0;
     final goingBack = (_startPanel == Panel.left && dx < 0) ||
                       (_startPanel == Panel.right && dx > 0);
@@ -118,7 +112,6 @@ class _GestureTestPageState extends State<GestureTestPage>
       factor = _closeFactor;
     }
 
-    // 边界约束
     double lo, hi;
     switch (_startPanel) {
       case Panel.left:   lo = 0; hi = _sideW; break;
@@ -185,33 +178,95 @@ class _GestureTestPageState extends State<GestureTestPage>
       child: SizedBox.expand(
         child: Stack(
           children: [
-            // 左页：当前展开或部分露出
-            _buildPage(
-              visible: _currentPanel != Panel.center || _offset > 0,
-              left: _offset - side,
-              width: side,
-              color: _colors[0],
-              title: '左页',
-              itemCount: 30,
+            // 左页
+            Positioned(
+              left: _offset - side, top: 0,
+              width: side, bottom: 0,
+              child: Container(
+                color: _colors[0],
+                child: Column(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 100, bottom: 12),
+                      child: Text('左页', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: 30,
+                        itemBuilder: (_, i) => Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text('左项 ${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 16)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-            // ★ visible 规则：
-            //  - 中间页：始终可交互（手势层在上面）
-            //  - 侧页：当前展开或部分露出时开放交互
-            _buildPage(
-              visible: true, // 中间页始终可交互
-              left: _offset,
-              width: screenW,
-              color: _colors[1],
-              title: '消息',
-              itemCount: 50,
+            // 中间页
+            Positioned(
+              left: _offset, top: 0,
+              width: screenW, bottom: 0,
+              child: Container(
+                color: _colors[1],
+                child: Column(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 100, bottom: 12),
+                      child: Text('消息', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: 50,
+                        itemBuilder: (_, i) => Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text('消息 ${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 16)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-            _buildPage(
-              visible: _currentPanel != Panel.center || _offset < 0,
-              left: screenW + _offset,
-              width: side,
-              color: _colors[2],
-              title: '右页',
-              itemCount: 20,
+            // 右页
+            Positioned(
+              left: screenW + _offset, top: 0,
+              width: side, bottom: 0,
+              child: Container(
+                color: _colors[2],
+                child: Column(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 100, bottom: 12),
+                      child: Text('右页', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: 20,
+                        itemBuilder: (_, i) => Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text('右项 ${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 16)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
 
             // 状态
@@ -241,48 +296,6 @@ class _GestureTestPageState extends State<GestureTestPage>
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPage({
-    required bool visible,
-    required double left,
-    required double width,
-    required Color color,
-    required String title,
-    required int itemCount,
-  }) {
-    return Positioned(
-      left: left, top: 0,
-      width: width, bottom: 0,
-      child: IgnorePointer(
-        ignoring: !visible,
-        child: Container(
-          color: color,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 100, bottom: 12),
-                child: Text(title, style: const TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: itemCount,
-                  itemBuilder: (_, i) => Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.25),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text('${title}${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 16)),
-                  ),
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );
