@@ -383,8 +383,6 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
               const SizedBox(height: 16),
               _MenuBtn(icon: Icons.image_outlined, label: '更换立绘', onTap: () { Navigator.pop(ctx); _pickAvatar(lead); }),
               _MenuBtn(icon: Icons.wallpaper_outlined, label: '设置聊天背景', onTap: () { Navigator.pop(ctx); widget.onSetBg?.call(); }),
-              _MenuBtn(icon: Icons.settings_outlined, label: '角色设定', onTap: () { Navigator.pop(ctx); widget.onOpenSettings?.call(); }),
-              _MenuBtn(icon: Icons.delete_forever_outlined, label: '删除角色', labelColor: Colors.redAccent, onTap: () { Navigator.pop(ctx); _deleteLead(lead); }),
               const SizedBox(height: 8),
             ],
           ),
