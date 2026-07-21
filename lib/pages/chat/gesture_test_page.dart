@@ -40,8 +40,10 @@ class _GestureTestPageState extends State<GestureTestPage>
   double get _sideW => MediaQuery.of(context).size.width * _sideFrac;
 
   double get _currentOffset {
-    if (_locked && _horiz) return _offset; // 拖拽中
-    return _snapTarget * _sideW * _anim.value; // 动画中或静止
+    // 拖拽中或刚锁定时都用 _offset
+    if (_wasHoriz && _locked && _horiz) return _offset;
+    // 动画中或静止
+    return _snapTarget * _sideW * _anim.value;
   }
 
   @override
@@ -87,15 +89,21 @@ class _GestureTestPageState extends State<GestureTestPage>
       _horiz = dx.abs() > dy.abs() * 1.3;
       if (_horiz) {
         _wasHoriz = true;
-        _offset = _dragStartOffset; // 从按下时的位置开始
+        _offset = _dragStartOffset;
+        if (mounted) setState(() {});
       }
       return;
     }
 
     if (!_horiz) return;
 
-    // ★ 从 _dragStartOffset 累加 dx，不依赖 _snapTarget
-    _offset = (_dragStartOffset + (e.position.dx - _startX)).clamp(-_sideW, _sideW);
+    // ★ 计算新偏移，带死区防止边界抖动
+    final newOff = (_dragStartOffset + (e.position.dx - _startX))
+        .clamp(-_sideW, _sideW);
+    // 边界附近且方向向外 → 不更新
+    if ((_offset <= -_sideW && newOff <= _offset) ||
+        (_offset >= _sideW && newOff >= _offset)) return;
+    _offset = newOff;
     if (mounted) setState(() {});
   }
 
