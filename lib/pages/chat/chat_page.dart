@@ -46,7 +46,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   Persona? _persona;
   bool _showPlus = false;
   final GlobalKey<ChatMessageAreaState> _msgKey = GlobalKey();
-  File? _bgImage; // 背景图（可选）
+  File? _bgImage; // 背景图（可选，按 persona id 存储）
+
+  // 获取当前背景图
+  File? get _currentBg {
+    final pid = _persona?.id;
+    if (pid == null) return _bgImage;
+    return _bgImages[pid] ?? _bgImage;
+  }
+
+  final Map<String, File> _bgImages = {}; // personaId → 背景图
 
   @override
   void initState() {
@@ -237,8 +246,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       type: FileType.image,
     );
     if (result != null && result.files.single.path != null) {
+      final img = File(result.files.single.path!);
       setState(() {
-        _bgImage = File(result.files.single.path!);
+        final pid = _persona?.id;
+        if (pid != null) {
+          _bgImages[pid] = img;
+        } else {
+          _bgImage = img;
+        }
       });
     }
   }
@@ -299,11 +314,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                 children: [
                   // 背景图（毛玻璃遮罩）
                   Positioned.fill(
-                    child: _bgImage != null
+                    child: _currentBg != null
                         ? ClipRRect(
                             child: Stack(
                               children: [
-                                Image.file(_bgImage!, fit: BoxFit.cover, width: screenW, height: double.infinity),
+                                Image.file(_currentBg!, fit: BoxFit.cover, width: screenW, height: double.infinity),
                                 Positioned.fill(
                                   child: BackdropFilter(
                                     filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),

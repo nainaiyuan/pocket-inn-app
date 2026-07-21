@@ -42,73 +42,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     });
   }
 
-  // 删除男主（含所有 persona）
-  Future<void> _deleteLead(MaleLead lead) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('删除 "${lead.name}"？'),
-        content: const Text('所有形象和聊天记录将被删除，不可恢复。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('删除', style: TextStyle(color: Colors.redAccent)),
-          ),
-        ],
-      ),
-    );
-    if (confirm == true) {
-      await _service.deleteMaleLead(lead.id);
-      if (mounted) setState(() {});
-      // 如果删的是当前角色，自动切到第一个
-      if (widget.currentLead?.id == lead.id && mounted) {
-        final remaining = _service.leads;
-        if (remaining.isNotEmpty) {
-          widget.onSelectPersona(MapEntry(remaining.first, remaining.first.personas.isNotEmpty ? remaining.first.personas.first : _defaultPersona(remaining.first)));
-        }
-      }
-    }
-  }
-
-  // 删除 persona
-  Future<void> _deletePersona(MaleLead lead, Persona persona) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('删除 "${persona.name}"？'),
-        content: const Text('此形象将被删除。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('删除', style: TextStyle(color: Colors.redAccent)),
-          ),
-        ],
-      ),
-    );
-    if (confirm == true) {
-      await _service.deletePersona(lead.id, persona.id);
-      if (mounted) setState(() {});
-      // 如果删的是当前形象，切到第一个形象或男主默认
-      if (widget.currentLead?.id == lead.id && widget.currentPersona?.id == persona.id && mounted) {
-        final reloaded = _service.leads.where((l) => l.id == lead.id).firstOrNull;
-        if (reloaded != null) {
-          if (reloaded.personas.isNotEmpty) {
-            widget.onSelectPersona(MapEntry(reloaded, reloaded.personas.first));
-          } else {
-            widget.onSelectPersona(MapEntry(reloaded, _defaultPersona(reloaded)));
-          }
-        }
-      }
-    }
-  }
-
-  // 新建角色（可设立绘路径）
+  // 选中男主本体
   Future<void> _addNewLead() async {
     final nameCtrl = TextEditingController();
     final name = await showDialog<String>(
@@ -419,7 +353,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
               ),
               const SizedBox(height: 16),
               _MenuBtn(icon: Icons.image_outlined, label: '更换头像', onTap: () { Navigator.pop(ctx); _pickPersonaAvatar(lead, persona); }),
-              _MenuBtn(icon: Icons.delete_outlined, label: '删除形象', labelColor: Colors.redAccent, onTap: () { Navigator.pop(ctx); _deletePersona(lead, persona); }),
+              // 删除在右页危险操作区处理
               const SizedBox(height: 8),
             ],
           ),

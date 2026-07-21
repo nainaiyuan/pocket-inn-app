@@ -320,61 +320,60 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                     title: '危险操作',
                     child: Column(
                       children: [
-                        // 只有 persona 才显示「删除形象」
-                        if (!isLead && widget.currentPersona != null)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: SizedBox(
-                              width: double.infinity,
-                              child: Material(
-                                color: Colors.redAccent.withValues(alpha: 0.06),
+                        if (isLead)
+                          // 本体 → 删除角色（连带所有形象）
+                          SizedBox(
+                            width: double.infinity,
+                            child: Material(
+                              color: Colors.redAccent.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(12),
+                              child: InkWell(
                                 borderRadius: BorderRadius.circular(12),
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(12),
-                                  onTap: _confirmDeletePersona,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 10),
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(Icons.delete_outline_rounded, size: 16, color: Colors.redAccent.withValues(alpha: 0.6)),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          '删除当前形象「${widget.currentPersona!.name}」',
-                                          style: TextStyle(fontSize: 13, color: Colors.redAccent.withValues(alpha: 0.8)),
-                                        ),
-                                      ],
-                                    ),
+                                onTap: _confirmDelete,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.delete_forever_rounded, size: 16, color: Colors.redAccent.withValues(alpha: 0.6)),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        '删除角色「${widget.currentLead?.name ?? ''}」及其所有形象',
+                                        style: TextStyle(fontSize: 13, color: Colors.redAccent.withValues(alpha: 0.8)),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          )
+                        else if (widget.currentPersona != null)
+                          // 分身 → 只删除当前形象
+                          SizedBox(
+                            width: double.infinity,
+                            child: Material(
+                              color: Colors.redAccent.withValues(alpha: 0.06),
+                              borderRadius: BorderRadius.circular(12),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: _confirmDeletePersona,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.delete_outline_rounded, size: 16, color: Colors.redAccent.withValues(alpha: 0.6)),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        '删除当前形象「${widget.currentPersona!.name}」',
+                                        style: TextStyle(fontSize: 13, color: Colors.redAccent.withValues(alpha: 0.8)),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                        SizedBox(
-                          width: double.infinity,
-                          child: Material(
-                            color: Colors.redAccent.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(12),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(12),
-                              onTap: _confirmDelete,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 10),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.delete_forever_rounded, size: 16, color: Colors.redAccent.withValues(alpha: 0.6)),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      '删除角色「${widget.currentLead?.name ?? ''}」',
-                                      style: TextStyle(fontSize: 13, color: Colors.redAccent.withValues(alpha: 0.8)),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
                       ],
                     ),
                   ),
