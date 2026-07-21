@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../../models/male_lead.dart';
 
@@ -5,14 +6,14 @@ import '../../../models/male_lead.dart';
 class ChatTopBar extends StatelessWidget {
   final MaleLead? currentLead;
   final Persona? currentPersona;
-  final VoidCallback onAvatarTap;
+  final VoidCallback onAvatarLongPress;
   final VoidCallback onMenuTap;
 
   const ChatTopBar({
     super.key,
     required this.currentLead,
     required this.currentPersona,
-    required this.onAvatarTap,
+    required this.onAvatarLongPress,
     required this.onMenuTap,
   });
 
@@ -37,9 +38,9 @@ class ChatTopBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // 男主头像
+          // 男主头像（长按进秘密基地）
           GestureDetector(
-            onTap: onAvatarTap,
+            onLongPress: onAvatarLongPress,
             child: Container(
               width: 40,
               height: 40,
@@ -55,12 +56,20 @@ class ChatTopBar extends StatelessWidget {
                   color: Colors.white.withValues(alpha: 0.5),
                   width: 1.5,
                 ),
+                image: (currentLead?.avatarPath.isNotEmpty == true)
+                    ? DecorationImage(
+                        image: FileImage(File(currentLead!.avatarPath)),
+                        fit: BoxFit.cover,
+                      )
+                    : null,
               ),
-              child: Icon(
-                Icons.person_outline_rounded,
-                size: 22,
-                color: const Color(0xFFB48296).withValues(alpha: 0.6),
-              ),
+              child: (currentLead?.avatarPath.isNotEmpty != true)
+                  ? Icon(
+                      Icons.person_outline_rounded,
+                      size: 22,
+                      color: const Color(0xFFB48296).withValues(alpha: 0.6),
+                    )
+                  : null,
             ),
           ),
           const SizedBox(width: 12),

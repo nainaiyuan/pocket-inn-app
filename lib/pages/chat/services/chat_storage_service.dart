@@ -49,4 +49,11 @@ class ChatStorageService {
       await saveMessages(personaId, msgs);
     }
   }
+
+  /// 批量删除消息
+  Future<void> deleteMessages(String personaId, List<String> messageIds) async {
+    final msgs = await loadMessages(personaId);
+    msgs.removeWhere((m) => messageIds.contains(m.id));
+    await saveMessages(personaId, msgs);
+  }
 }

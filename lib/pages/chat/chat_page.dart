@@ -333,7 +333,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                   // 聊天内容
                   Column(children: [
                     ChatTopBar(currentLead: _lead, currentPersona: _persona,
-                      onAvatarTap: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); }),
+                      onAvatarLongPress: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); }),
                     Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
                     ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
                       onPlusTap: _togglePlus, onSendTap: _sendMsg),
