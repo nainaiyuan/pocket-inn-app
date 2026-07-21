@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 /// - 点击展开/收起扇形菜单
 /// - 菜单展开时，菜单项在主球周围均匀分布
 /// - 当前页面页签不显示在菜单中
+/// - **只在导航球范围内响应手势**，不影响下层滑动
 class FloatingNavigator extends StatefulWidget {
   final int pageCount;
   final int currentIndex;
@@ -53,7 +54,6 @@ class _FloatingNavigatorState extends State<FloatingNavigator>
       curve: Curves.easeOutBack,
       reverseCurve: Curves.easeInOut,
     );
-    // 监听动画变化触发重建
     _animCtrl.addListener(() {
       if (mounted) setState(() {});
     });
@@ -76,7 +76,6 @@ class _FloatingNavigatorState extends State<FloatingNavigator>
   }
 
   void _selectPage(int index) {
-    // 先显式关闭再切换
     _animCtrl.reset();
     setState(() => _isOpen = false);
     widget.onPageSelected(index);
@@ -102,7 +101,6 @@ class _FloatingNavigatorState extends State<FloatingNavigator>
 
     final n = others.length;
 
-    // 起始角度根据主球位置自适应
     double startAngle = math.pi / 4;
     if (cx >= _screenSize.width / 2 && cy < _screenSize.height / 2) {
       startAngle = 3 * math.pi / 4;
@@ -143,16 +141,7 @@ class _FloatingNavigatorState extends State<FloatingNavigator>
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              // ===== 菜单打开时的透明拦截层（最底层） =====
-              if (_isOpen)
-                Positioned.fill(
-                  child: GestureDetector(
-                    onTap: _toggle,
-                    behavior: HitTestBehavior.translucent,
-                  ),
-                ),
-
-              // ===== 主导航球（中间层） =====
+              // ===== 主导航球 =====
               Positioned(
                 left: _position.dx,
                 top: _position.dy,
@@ -216,7 +205,7 @@ class _FloatingNavigatorState extends State<FloatingNavigator>
                 ),
               ),
 
-              // ===== 菜单项（最上层，在主球之上） =====
+              // ===== 菜单项 =====
               if (_isOpen) ..._buildMenuItems(),
             ],
           ),
