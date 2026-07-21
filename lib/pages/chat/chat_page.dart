@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../models/male_lead.dart';
@@ -43,6 +45,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   Persona? _persona;
   bool _showPlus = false;
   final GlobalKey<ChatMessageAreaState> _msgKey = GlobalKey();
+  File? _bgImage; // 背景图（可选）
 
   @override
   void initState() {
@@ -265,6 +268,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             currentLead: _lead,
             currentPersona: _persona,
             onSelectPersona: (entry) => _selectPersona(entry.key, entry.value),
+            onOpenSettings: () { _currentPanel = Panel.right; _animateTo(-sideW); },
           ),
         ),
 
@@ -277,13 +281,36 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           child: Material(
             color: Colors.transparent,
             child: SafeArea(
-              child: Column(children: [
-                ChatTopBar(currentLead: _lead, currentPersona: _persona,
-                  onAvatarTap: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); }),
-                Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
-                ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
-                  onPlusTap: _togglePlus, onSendTap: _sendMsg),
-              ]),
+              child: Stack(
+                children: [
+                  // 背景图（毛玻璃遮罩）
+                  Positioned.fill(
+                    child: _bgImage != null
+                        ? ClipRRect(
+                            child: Stack(
+                              children: [
+                                Image.file(_bgImage!, fit: BoxFit.cover, width: screenW, height: double.infinity),
+                                Positioned.fill(
+                                  child: BackdropFilter(
+                                    filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                                    child: Container(color: const Color(0xFFF5EEF0).withValues(alpha: 0.4)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                  // 聊天内容
+                  Column(children: [
+                    ChatTopBar(currentLead: _lead, currentPersona: _persona,
+                      onAvatarTap: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); }),
+                    Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
+                    ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
+                      onPlusTap: _togglePlus, onSendTap: _sendMsg),
+                  ]),
+                ],
+              ),
             ),
           ),
         ),

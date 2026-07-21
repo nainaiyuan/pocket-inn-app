@@ -1,14 +1,13 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
 
 /// 角色设置侧栏（右页）
-///
-/// 当前角色的全部配置，长按左页卡片 → 编辑入口
 class ChatSidebarRight extends StatefulWidget {
   final MaleLead? currentLead;
   final Persona? currentPersona;
-  final VoidCallback onDelete; // 删完后切角色用
+  final VoidCallback onDelete;
 
   const ChatSidebarRight({
     super.key,
@@ -21,19 +20,67 @@ class ChatSidebarRight extends StatefulWidget {
   State<ChatSidebarRight> createState() => _ChatSidebarRightState();
 }
 
+/// 角色设定结构化字段
+class _RoleFields {
+  String world;        // 世界观·背景
+  String relation;     // 与用户的关系
+  String traits;       // 喜好·性格·习惯
+  String connections;  // 亲朋好友
+  String history;      // 经历
+
+  _RoleFields({
+    this.world = '',
+    this.relation = '',
+    this.traits = '',
+    this.connections = '',
+    this.history = '',
+  });
+
+  static _RoleFields fromPrompt(String prompt) {
+    if (prompt.isEmpty) return _RoleFields();
+    try {
+      final m = jsonDecode(prompt) as Map<String, dynamic>;
+      return _RoleFields(
+        world: m['world'] as String? ?? '',
+        relation: m['relation'] as String? ?? '',
+        traits: m['traits'] as String? ?? '',
+        connections: m['connections'] as String? ?? '',
+        history: m['history'] as String? ?? '',
+      );
+    } catch (_) {
+      return _RoleFields(world: prompt);
+    }
+  }
+
+  String toPrompt() {
+    final m = <String, String>{
+      'world': world,
+      'relation': relation,
+      'traits': traits,
+      'connections': connections,
+      'history': history,
+    };
+    return jsonEncode(m);
+  }
+}
+
 class _ChatSidebarRightState extends State<ChatSidebarRight> {
-  final _promptCtrl = TextEditingController();
   final _greetingCtrl = TextEditingController();
   final _service = CharacterService();
 
-  // 默认值（本地状态兜底）
-  bool _butlerIntervention = true;   // 管家干预自然语言
-  bool _shareMemory = true;          // 本体记忆共享
-  bool _showingPrompt = true;        // 当前展示 prompt 还是关键词
+  // 5个设定控制器
+  late List<TextEditingController> _fieldCtrls;
+  _RoleFields _fields = _RoleFields();
+
+  // 开关
+  bool _butlerIntervention = true;
+  bool _shareMemory = true;
+  bool _showingPrompt = true;
 
   @override
   void initState() {
     super.initState();
+    _fieldCtrls = List.generate(5, (_) => TextEditingController());
     _syncControllers();
   }
 
@@ -46,21 +93,33 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
   }
 
   void _syncControllers() {
-    if (widget.currentPersona != null) {
-      _promptCtrl.text = widget.currentPersona!.prompt;
-      _greetingCtrl.text = widget.currentPersona!.greeting;
-    } else {
-      _promptCtrl.clear();
-      _greetingCtrl.clear();
-    }
+    final p = widget.currentPersona;
+    if (p == null) return;
+    _greetingCtrl.text = p.greeting;
+
+    _fields = _RoleFields.fromPrompt(p.prompt);
+    _fieldCtrls[0].text = _fields.world;
+    _fieldCtrls[1].text = _fields.relation;
+    _fieldCtrls[2].text = _fields.traits;
+    _fieldCtrls[3].text = _fields.connections;
+    _fieldCtrls[4].text = _fields.history;
   }
 
-  void _savePrompt() {
+  void _saveAll() {
     final p = widget.currentPersona;
     final l = widget.currentLead;
     if (p == null || l == null) return;
+
+    _fields = _RoleFields(
+      world: _fieldCtrls[0].text,
+      relation: _fieldCtrls[1].text,
+      traits: _fieldCtrls[2].text,
+      connections: _fieldCtrls[3].text,
+      history: _fieldCtrls[4].text,
+    );
+
     final updated = p.copyWith(
-      prompt: _promptCtrl.text,
+      prompt: _fields.toPrompt(),
       greeting: _greetingCtrl.text,
     );
     _service.updatePersona(l.id, updated);
@@ -68,12 +127,14 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
 
   @override
   void dispose() {
-    _promptCtrl.dispose();
+    for (final c in _fieldCtrls) {
+      c.dispose();
+    }
     _greetingCtrl.dispose();
     super.dispose();
   }
 
-  // ─── 删除角色（二次确认，放在右侧栏最下方） ───
+  // ─── 删除 ───
   Future<void> _confirmDelete() async {
     final l = widget.currentLead;
     if (l == null) return;
@@ -127,7 +188,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
 
   @override
   Widget build(BuildContext context) {
-    final hasPersona = widget.currentPersona != null;
+    final isLead = widget.currentPersona == null || widget.currentPersona?.name == '默认';
     final personaName = widget.currentPersona?.name ?? '本体';
     final leadName = widget.currentLead?.name ?? '';
 
@@ -137,21 +198,14 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
         child: Column(
           children: [
             const SizedBox(height: 56),
-
-            // 标题
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Row(
                 children: [
                   Expanded(
                     child: Text(
-                      hasPersona ? '$leadName · $personaName' : leadName,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF3D2C33),
-                        letterSpacing: 1,
-                      ),
+                      isLead ? leadName : '$leadName · $personaName',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Color(0xFF3D2C33), letterSpacing: 1),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -161,10 +215,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
             const SizedBox(height: 4),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(
-                '角色设定',
-                style: TextStyle(fontSize: 12, color: const Color(0xFF8A7A80)),
-              ),
+              child: Text(isLead ? '本体设定' : '时间线设定', style: TextStyle(fontSize: 12, color: const Color(0xFF8A7A80))),
             ),
             const SizedBox(height: 12),
 
@@ -172,82 +223,35 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 children: [
-                  // ─── 角色设定（Prompt + 开场白） ───
+                  // ─── 角色设定（5个结构化字段） ───
                   _SectionCard(
-                    title: '角色设定',
+                    title: isLead ? '角色设定（同步到所有形象）' : '角色设定',
                     child: Column(
                       children: [
-                        // 开场白
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.35),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '首次问候',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: const Color(0xFF5A4A52),
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              TextField(
-                                controller: _greetingCtrl,
-                                decoration: const InputDecoration(
-                                  hintText: '你好，我是…',
-                                  border: InputBorder.none,
-                                  isDense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                ),
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Color(0xFF3D2C33),
-                                ),
-                                onChanged: (_) => _savePrompt(),
-                              ),
-                            ],
-                          ),
-                        ),
+                        _FieldBox(label: '首次问候', ctrl: _greetingCtrl, onChanged: _saveAll, maxLines: 2),
                         const SizedBox(height: 8),
-                        // Prompt
-                        Container(
-                          height: 140,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.35),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: TextField(
-                            controller: _promptCtrl,
-                            maxLines: null,
-                            expands: true,
-                            textAlignVertical: TextAlignVertical.top,
-                            decoration: const InputDecoration(
-                              hintText: '在这里书写角色设定…\n管家会帮你整理分类',
-                              hintStyle: TextStyle(
-                                color: Color(0xFF8A7A80),
-                                fontSize: 13,
-                                height: 1.5,
-                              ),
-                              border: InputBorder.none,
-                              isDense: true,
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                            style: const TextStyle(fontSize: 13, color: Color(0xFF3D2C33), height: 1.5),
-                            onChanged: (_) => _savePrompt(),
-                          ),
-                        ),
+
+                        // 5个设定框
+                        // 1. 世界观/背景
+                        _FieldBox(label: '世界观 · 背景', hint: '世界是什么样子的？', ctrl: _fieldCtrls[0], onChanged: _saveAll),
+                        const SizedBox(height: 8),
+                        // 2. 与用户的关系
+                        _FieldBox(label: '与用户的关系', hint: 'ta叫你什么？你们是什么关系？', ctrl: _fieldCtrls[1], onChanged: _saveAll),
+                        const SizedBox(height: 8),
+                        // 3. 喜好·性格·习惯
+                        _FieldBox(label: '喜好 · 性格 · 习惯', hint: '喜欢什么？性格怎么样？', ctrl: _fieldCtrls[2], onChanged: _saveAll),
+                        const SizedBox(height: 8),
+                        // 4. 亲朋好友
+                        _FieldBox(label: '亲朋好友', hint: '身边有哪些重要的人？', ctrl: _fieldCtrls[3], onChanged: _saveAll),
+                        const SizedBox(height: 8),
+                        // 5. 经历
+                        _FieldBox(label: '经历', hint: '过去发生过什么重要的故事？', ctrl: _fieldCtrls[4], onChanged: _saveAll),
                       ],
                     ),
                   ),
                   const SizedBox(height: 8),
 
-                  // ─── 关键词 / 记忆管理 ───
+                  // ─── 关键词 / 记忆 ───
                   _SectionCard(
                     title: '关键词与记忆',
                     child: Container(
@@ -258,7 +262,6 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                       ),
                       child: Column(
                         children: [
-                          // Tab: Prompt / 关键词切换
                           Row(
                             children: [
                               _TabBtn(label: '系统 Prompt', active: _showingPrompt, onTap: () => setState(() => _showingPrompt = true)),
@@ -268,7 +271,6 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                           ),
                           const SizedBox(height: 10),
                           if (_showingPrompt)
-                            // 只读的完整系统 prompt（由管家生成）
                             Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
@@ -276,17 +278,13 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: const Text(
-                                '（系统 Prompt 由管家自动生成，\n可在上方「角色设定」中编辑原始设定）',
+                                '（系统 Prompt 由管家自动生成，可在上方编辑原始设定）',
                                 style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80), height: 1.5),
                               ),
                             )
                           else
-                            // 关键词列表（占位，待接入记忆数据）
                             Center(
-                              child: Text(
-                                '尚未收集到关键词',
-                                style: TextStyle(fontSize: 13, color: const Color(0xFF8A7A80)),
-                              ),
+                              child: Text('尚未收集到关键词', style: TextStyle(fontSize: 13, color: const Color(0xFF8A7A80))),
                             ),
                         ],
                       ),
@@ -299,18 +297,16 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                     title: '全局设置',
                     child: Column(
                       children: [
-                        // 管家干预用户语言
                         _SwitchTile(
                           label: '管家不干预自然语言',
-                          subtitle: '开启后用户输入内容不经过管家处理',
+                          subtitle: '开启后用户输入不经过管家处理',
                           value: !_butlerIntervention,
                           onChanged: (v) => setState(() => _butlerIntervention = !v),
                         ),
                         const SizedBox(height: 4),
-                        // 本体记忆共享
                         _SwitchTile(
                           label: '本体记忆共享',
-                          subtitle: '当前角色的所有形象共享记忆',
+                          subtitle: '所有形象共用本体记忆',
                           value: _shareMemory,
                           onChanged: (v) => setState(() => _shareMemory = v),
                         ),
@@ -324,7 +320,8 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                     title: '危险操作',
                     child: Column(
                       children: [
-                        if (widget.currentPersona != null)
+                        // 只有 persona 才显示「删除形象」
+                        if (!isLead && widget.currentPersona != null)
                           Padding(
                             padding: const EdgeInsets.only(bottom: 8),
                             child: SizedBox(
@@ -410,12 +407,55 @@ class _SectionCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF5A4A52), letterSpacing: 1),
-          ),
+          Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF5A4A52), letterSpacing: 1)),
           const SizedBox(height: 10),
           child,
+        ],
+      ),
+    );
+  }
+}
+
+class _FieldBox extends StatelessWidget {
+  final String label;
+  final String hint;
+  final TextEditingController ctrl;
+  final VoidCallback onChanged;
+  final int maxLines;
+
+  const _FieldBox({
+    required this.label,
+    this.hint = '',
+    required this.ctrl,
+    required this.onChanged,
+    this.maxLines = 3,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF5A4A52), fontWeight: FontWeight.w500)),
+          const SizedBox(height: 6),
+          TextField(
+            controller: ctrl,
+            maxLines: maxLines,
+            decoration: InputDecoration(
+              hintText: hint,
+              border: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+            style: const TextStyle(fontSize: 13, color: Color(0xFF3D2C33)),
+            onChanged: (_) => onChanged(),
+          ),
         ],
       ),
     );
@@ -454,15 +494,12 @@ class _SwitchTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              // 自定义开关
               Container(
                 width: 40,
                 height: 22,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(11),
-                  color: value
-                      ? const Color(0xFFE8A0B8).withValues(alpha: 0.5)
-                      : const Color(0xFF5A4A52).withValues(alpha: 0.12),
+                  color: value ? const Color(0xFFE8A0B8).withValues(alpha: 0.5) : const Color(0xFF5A4A52).withValues(alpha: 0.12),
                 ),
                 child: Stack(
                   children: [
