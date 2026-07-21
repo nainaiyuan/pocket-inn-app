@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../pages/chat/gesture_test_page.dart';
+import '../../pages/chat/chat_page.dart';
 import 'companion_page.dart';
 import 'gallery_page.dart';
 import 'butler_page.dart';
@@ -23,7 +23,7 @@ class _HomePageState extends State<HomePage> {
   final List<Widget> _pageInstances = const [
     CompanionPage(),
     GalleryPage(),
-    GestureTestPage(),
+    const ChatPage(),
     ButlerPage(),
     ProfilePage(),
   ];

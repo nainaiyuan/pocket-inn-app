@@ -12,37 +12,29 @@ import 'widgets/chat_input_bar.dart';
 import 'widgets/plus_menu.dart';
 import 'widgets/character_world_page.dart';
 
-/// 聊天主页面 —— 二维手势空间
-///
-/// 一个连续空间：左页 | 中页 | 右页
-/// 手指拖到哪，页面跟到哪，松手吸附展开/收回。
+/// 聊天主页面 —— 三页连续空间手势（v8 状态机版）
 ///
 /// 手势系统：
-/// - Listener 全屏只读监听（不消费事件，不影响 ListView 滚动）
-/// - PointerDown 记录 startX/startY
-/// - PointerMove 判定方向后锁定：
-///   水平锁 → 更新 _offset，页面跟随手指
-///   垂直锁 → 不做任何事，事件自然透给 ListView
-/// - PointerUp 判断吸附（超过 40% 展开，不足弹回）
+/// - 全屏 Listener（只读，不消费事件）
+/// - 方向锁定后分水平（切页）/ 垂直（滚 ListView）
+/// - 触摸坐标实时推算滚动归属
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
-
   @override
   State<ChatPage> createState() => _ChatPageState();
 }
 
-class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
-  // ---- 偏移状态（ValueNotifier 避免全局 rebuild）----
-  final ValueNotifier<double> _offsetNotifier = ValueNotifier(0);
-  int _snapTarget = 0; // 吸附目标：0=中间，1=左，-1=右
-  late AnimationController _animCtrl;
+enum Panel { left, center, right }
 
-  // ---- 手势 ----
-  double _startX = 0, _startY = 0;
-  bool _locked = false;
-  bool _horiz = false; // true=横向锁定，false=纵向
-  bool _active = false;
-  bool _wasLockedHoriz = false; // 记录本次手势是否锁定了横向（用于 PointerUp）
+class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin {
+  static const double _sideFrac = 0.65;
+  static const double _snapThr = 0.30;
+  static const double _lockThr = 8.0;
+  static const double _closeFactor = 2.5;
+
+  // ---- 唯一状态 ----
+  double _offset = 0;
+  Panel _currentPanel = Panel.center;
 
   // ---- 角色 ----
   final _charSvc = CharacterService();
@@ -52,17 +44,13 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   bool _showPlus = false;
   final GlobalKey<ChatMessageAreaState> _msgKey = GlobalKey();
 
-  static const double _sideFrac = 0.65;
-  static const double _snapThr = 0.40;
-  static const double _lockThr = 8.0;
-
   @override
   void initState() {
     super.initState();
-    _animCtrl = AnimationController(
+    _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
-    )..addListener(() { if (mounted) setState(() {}); });
+    )..addListener(_onAnimTick);
     _load();
   }
 
@@ -81,18 +69,148 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     }
   }
 
+  // ---- 手势 ----
+  bool _dragging = false;
+  double _dragBase = 0;
+  Panel _startPanel = Panel.center;
+  double _startX = 0, _startY = 0;
+  bool _horizLocked = false;
+  int _pointerId = -1;
+
+  // ---- 动画 ----
+  late AnimationController _anim;
+  double _animStart = 0, _animEnd = 0;
+
   double get _sideW => MediaQuery.of(context).size.width * _sideFrac;
 
-  double _getOff() {
-    if (_active) return _offsetNotifier.value;
-    return _snapTarget * _sideW * _animCtrl.value;
+  void _onAnimTick() {
+    if (_dragging) return;
+    setState(() {
+      _offset = _animStart + (_animEnd - _animStart) * _anim.value;
+    });
   }
 
-  void _snapTo(int t) { _snapTarget = t; _animCtrl.forward(from: 0); }
-  void _snapBack() { _animCtrl.reverse().then((_) { if (mounted) setState(() { _snapTarget = 0; _offsetNotifier.value = 0; }); }); }
+  void _animateTo(double target) {
+    _animStart = _offset;
+    _animEnd = target;
+    _anim
+      ..value = 0
+      ..forward();
+  }
 
-  void _togglePlus() { if (_snapTarget != 0) { _snapBack(); return; } setState(() => _showPlus = !_showPlus); }
-  void _selectPersona(MaleLead l, Persona p) { setState(() { _lead = l; _persona = p; }); _snapBack(); HapticFeedback.lightImpact(); }
+  void _onDown(PointerDownEvent e) {
+    if (_showPlus) return;
+    if (_pointerId >= 0) return;
+    _pointerId = e.pointer;
+    _startX = e.position.dx;
+    _startY = e.position.dy;
+
+    _anim.stop();
+    if (_anim.value > 0 && _anim.value < 1) {
+      _offset = _animStart + (_animEnd - _animStart) * _anim.value;
+    }
+
+    _dragBase = _offset;
+    _startPanel = _currentPanel;
+    _dragging = false;
+    _horizLocked = false;
+    setState(() {});
+  }
+
+  void _onMove(PointerMoveEvent e) {
+    if (_showPlus) return;
+    if (e.pointer != _pointerId) return;
+
+    final dx = e.position.dx - _startX;
+    final dy = e.position.dy - _startY;
+
+    if (!_horizLocked) {
+      if (dx.abs() < _lockThr && dy.abs() < _lockThr) return;
+      _horizLocked = dx.abs() > dy.abs() * 1.3;
+      if (!_horizLocked) {
+        setState(() {});
+        return;
+      }
+      _dragging = true;
+    }
+
+    if (!_dragging) return;
+
+    double factor = 1.0;
+    final goingBack = (_startPanel == Panel.left && dx < 0) ||
+                      (_startPanel == Panel.right && dx > 0);
+    if (_startPanel != Panel.center && goingBack) {
+      factor = _closeFactor;
+    }
+
+    double lo, hi;
+    switch (_startPanel) {
+      case Panel.left:   lo = 0; hi = _sideW; break;
+      case Panel.right:  lo = -_sideW; hi = 0; break;
+      case Panel.center: lo = -_sideW; hi = _sideW; break;
+    }
+
+    setState(() {
+      _offset = (_dragBase + dx * factor).clamp(lo, hi);
+    });
+  }
+
+  void _onUp(PointerUpEvent e) {
+    if (_showPlus) return;
+    if (_pointerId != e.pointer) return;
+    _pointerId = -1;
+
+    if (!_dragging) { _horizLocked = false; setState(() {}); return; }
+
+    _dragging = false;
+    _horizLocked = false;
+
+    double target;
+    Panel nextPanel;
+
+    switch (_startPanel) {
+      case Panel.center:
+        if (_offset.abs() < _sideW * _snapThr) {
+          target = 0; nextPanel = Panel.center;
+        } else if (_offset > 0) {
+          target = _sideW; nextPanel = Panel.left;
+        } else {
+          target = -_sideW; nextPanel = Panel.right;
+        }
+        break;
+      case Panel.left:
+        if (_offset < _sideW * (1 - _snapThr)) {
+          target = 0; nextPanel = Panel.center;
+        } else {
+          target = _sideW; nextPanel = Panel.left;
+        }
+        break;
+      case Panel.right:
+        if (_offset > -_sideW * (1 - _snapThr)) {
+          target = 0; nextPanel = Panel.center;
+        } else {
+          target = -_sideW; nextPanel = Panel.right;
+        }
+        break;
+    }
+
+    _currentPanel = nextPanel;
+    _animateTo(target);
+  }
+
+  // ---- 功能 ----
+
+  void _togglePlus() {
+    if (_currentPanel != Panel.center) { setState(() { _currentPanel = Panel.center; }); _animateTo(0); return; }
+    setState(() => _showPlus = !_showPlus);
+  }
+
+  void _selectPersona(MaleLead l, Persona p) {
+    setState(() { _lead = l; _persona = p; });
+    _currentPanel = Panel.center;
+    _animateTo(0);
+    HapticFeedback.lightImpact();
+  }
 
   Future<void> _sendMsg(String t) async {
     _msgKey.currentState?.appendMessage(ChatMessage(id: DateTime.now().millisecondsSinceEpoch.toString(), text: t, isMe: true));
@@ -109,139 +227,77 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     ));
   }
 
-  // ---- Listener 手势（只读，不消费事件）----
-
-  void _onDown(PointerDownEvent e) {
-    if (_showPlus) return;
-    _startX = e.position.dx;
-    _startY = e.position.dy;
-    _locked = false;
-    _horiz = false;
-    _active = false;
-    _wasLockedHoriz = false;
-    _animCtrl.stop();
-  }
-
-  void _onMove(PointerMoveEvent e) {
-    if (_showPlus) return;
-    final dx = e.position.dx - _startX;
-    final dy = e.position.dy - _startY;
-
-    if (!_locked) {
-      if (dx.abs() < _lockThr && dy.abs() < _lockThr) return;
-      _locked = true;
-      _horiz = dx.abs() > dy.abs();
-      if (_horiz) {
-        _active = true;
-        _wasLockedHoriz = true;
-        // 水平锁定：取当前 offset 作为起始
-        _offsetNotifier.value = _snapTarget * _sideW;
-      }
-      return;
-    }
-
-    if (!_horiz) return; // 垂直锁定，透给 ListView
-
-    // 水平锁定：更新偏移，跟随手指
-    // 直接用当前 position 计算偏移（不用增量，更精确）
-    final totalDx = e.position.dx - _startX;
-    final base = _snapTarget * _sideW;
-    _offsetNotifier.value = (base + totalDx).clamp(-_sideW, _sideW);
-  }
-
-  void _onUp(PointerUpEvent e) {
-    if (!_wasLockedHoriz) {
-      // 垂直手势或未锁定 → 恢复状态
-      _active = false;
-      _locked = false;
-      _wasLockedHoriz = false;
-      return;
-    }
-
-    final sideW = _sideW;
-    final off = _offsetNotifier.value;
-    final absOff = off.abs();
-    final isLeft = off > 0;
-
-    if (_snapTarget == 0) {
-      // 中间 → 展开
-      if (absOff > sideW * _snapThr) {
-        _snapTo(isLeft ? 1 : -1);
-      } else {
-        _snapBack();
-      }
-    } else {
-      // 已展开 → 反方向收回
-      if ((_snapTarget == 1 && off < sideW * (1 - _snapThr)) ||
-          (_snapTarget == -1 && off > -sideW * (1 - _snapThr))) {
-        _snapBack();
-      } else {
-        _snapTo(_snapTarget);
+  // ---- 实时推算滚动归属 ----
+  int _calcScrollPage() {
+    if (_pointerId < 0) {
+      switch (_currentPanel) {
+        case Panel.left:   return 0;
+        case Panel.right:  return 2;
+        case Panel.center: return 1;
       }
     }
-
-    _active = false;
-    _locked = false;
-    _wasLockedHoriz = false;
+    if (_offset > 0 && _startX < _offset) return 0;
+    if (_offset < 0 && _startX > MediaQuery.of(context).size.width + _offset) return 2;
+    return 1;
   }
 
   @override
-  void dispose() { _animCtrl.dispose(); _offsetNotifier.dispose(); super.dispose(); }
+  void dispose() {
+    _anim.removeListener(_onAnimTick);
+    _anim.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final screenW = MediaQuery.of(context).size.width;
     final sideW = screenW * _sideFrac;
-    final showingLeft = _snapTarget == 1;
-    final showingRight = _snapTarget == -1;
 
     return Stack(
       children: [
         // ===== 左页 =====
-        Positioned(left: 0, top: 0, width: sideW, height: double.infinity,
-          child: Container(color: const Color(0xFFEED9DC),
-            child: IgnorePointer(ignoring: !showingLeft || _animCtrl.value < 0.95,
-              child: ChatSidebarLeft(
-                currentLead: _lead, currentPersona: _persona,
-                onSelectPersona: (entry) => _selectPersona(entry.key, entry.value),
-              ),
-            ),
+        _pageWidget(
+          index: 0,
+          left: _offset - sideW,
+          width: sideW,
+          color: const Color(0xFFEED9DC),
+          child: ChatSidebarLeft(
+            currentLead: _lead,
+            currentPersona: _persona,
+            onSelectPersona: (entry) => _selectPersona(entry.key, entry.value),
           ),
         ),
 
-        // ===== 中间页（ValueNotifier 监听，只 rebuild Positioned）=====
-        ListenableBuilder(
-          listenable: _offsetNotifier,
-          builder: (ctx, _) {
-            final off = _getOff();
-            return Positioned(
-              left: off, top: 0, right: -off, bottom: 0,
-              child: Material(
-                color: const Color(0xFFF5EEF0),
-                child: SafeArea(
-                  child: Column(children: [
-                    ChatTopBar(currentLead: _lead, currentPersona: _persona,
-                      onAvatarTap: _openWorld, onMenuTap: () { _snapTo(1); }),
-                    Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
-                    ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
-                      onPlusTap: _togglePlus, onSendTap: _sendMsg),
-                  ]),
-                ),
-              ),
-            );
-          },
+        // ===== 中间页（聊天）=====
+        _pageWidget(
+          index: 1,
+          left: _offset,
+          width: screenW,
+          color: const Color(0xFFF5EEF0),
+          child: Material(
+            color: Colors.transparent,
+            child: SafeArea(
+              child: Column(children: [
+                ChatTopBar(currentLead: _lead, currentPersona: _persona,
+                  onAvatarTap: _openWorld, onMenuTap: () { _currentPanel = Panel.left; _animateTo(sideW); }),
+                Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
+                ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
+                  onPlusTap: _togglePlus, onSendTap: _sendMsg),
+              ]),
+            ),
+          ),
         ),
 
         // ===== 右页 =====
-        Positioned(right: 0, top: 0, width: sideW, height: double.infinity,
-          child: Container(color: const Color(0xFFDCE4EE),
-            child: IgnorePointer(ignoring: !showingRight || _animCtrl.value < 0.95,
-              child: const ChatSidebarRight(),
-            ),
-          ),
+        _pageWidget(
+          index: 2,
+          left: screenW + _offset,
+          width: sideW,
+          color: const Color(0xFFDCE4EE),
+          child: const ChatSidebarRight(),
         ),
 
-        // ===== 全屏手势监听（Listener，不消费事件）=====
+        // ===== 全屏手势监听 =====
         Positioned.fill(
           child: Listener(
             behavior: HitTestBehavior.translucent,
@@ -255,6 +311,27 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
         if (_showPlus)
           Positioned.fill(child: PlusMenu(onDismiss: () => setState(() => _showPlus = false))),
       ],
+    );
+  }
+
+  Widget _pageWidget({
+    required int index,
+    required double left,
+    required double width,
+    required Color color,
+    required Widget child,
+  }) {
+    final isActive = _calcScrollPage() == index;
+    return Positioned(
+      left: left, top: 0,
+      width: width, bottom: 0,
+      child: Container(
+        color: color,
+        child: AbsorbPointer(
+          absorbing: !isActive,
+          child: child,
+        ),
+      ),
     );
   }
 }
