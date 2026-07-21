@@ -213,7 +213,8 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
                 children: [
                   // 头像
                   GestureDetector(
-                    onTap: () => _pickAvatar(lead),
+                    onTap: () => _selectLead(lead),
+                    onLongPress: () => _showLeadMenu(lead),
                     child: Container(
                       width: 56,
                       height: 72,

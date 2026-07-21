@@ -422,6 +422,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           Positioned.fill(child: PlusMenu(
             onDismiss: () => setState(() => _showPlus = false),
             onPickAvatar: _pickAvatarFromPlus,
+            onPickBg: _pickBgImage,
           )),
       ],
     );
