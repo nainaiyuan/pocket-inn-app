@@ -1,17 +1,24 @@
 import 'package:flutter/material.dart';
 
-/// 手势测试页面 —— 三页连续空间（v3 修复版）
+/// 手势测试页面 —— 三页连续空间（v4 状态机版）
+///
+/// 关键改进：记录页面状态（Panel），拖拽范围受起始页面限制。
+/// 左 ←→ 中 ←→ 右，不允许跨页。
 class GestureTestPage extends StatefulWidget {
   const GestureTestPage({super.key});
   @override
   State<GestureTestPage> createState() => _GestureTestPageState();
 }
 
+/// 三个页面位置
+enum Panel { left, center, right }
+
 class _GestureTestPageState extends State<GestureTestPage>
     with TickerProviderStateMixin {
   static const double _sideFrac = 0.65;
-  static const double _snapThr = 0.30; // 吸附阈值降低（配合加速）
+  static const double _snapThr = 0.30;
   static const double _lockThr = 8.0;
+  static const double _closeFactor = 2.5; // 回滑加速倍数
 
   final List<Color> _colors = [
     Colors.red.shade300,
@@ -20,22 +27,22 @@ class _GestureTestPageState extends State<GestureTestPage>
   ];
   final List<String> _labels = ['左页', '聊天页', '右页'];
 
-  // ---- 唯一状态：页面偏移量 ----
+  // ---- 状态 ----
+  Panel _currentPanel = Panel.center;
   double _offset = 0;
+  double _sideW = 0;
 
-  // ---- 拖拽状态 ----
+  // ---- 拖拽 ----
   bool _dragging = false;
-  double _dragBase = 0; // 开始拖拽时的 _offset（冻结动画后）
+  double _dragStartOffset = 0;
+  Panel _startPanel = Panel.center;
   double _startX = 0, _startY = 0;
-  bool _horizLocked = false; // 已锁定为水平拖拽
+  bool _horizLocked = false;
   int _pointerId = -1;
 
   // ---- 动画 ----
   late AnimationController _anim;
-  double _animStart = 0; // 动画起始偏移
-  double _animEnd = 0;   // 动画结束偏移
-
-  double get _sideW => MediaQuery.of(context).size.width * _sideFrac;
+  double _animStart = 0, _animEnd = 0;
 
   @override
   void initState() {
@@ -46,24 +53,35 @@ class _GestureTestPageState extends State<GestureTestPage>
     )..addListener(_onAnimTick);
   }
 
-  /// 动画 tick：从 _animStart 线性插值到 _animEnd
   void _onAnimTick() {
-    if (_dragging) return; // ★ 拖拽期间不碰 _offset
+    if (_dragging) return;
     setState(() {
       _offset = _animStart + (_animEnd - _animStart) * _anim.value;
     });
   }
 
-  /// 启动动画：从当前 _offset 到目标
   void _animateTo(double target) {
     _animStart = _offset;
     _animEnd = target;
     _anim.forward(from: 0);
   }
 
-  /// 返回中心
-  void _snapBack() {
-    _animateTo(0);
+  // ---- 获取面板对应的 offset ----
+  double _panelOffset(Panel p) {
+    switch (p) {
+      case Panel.left: return _sideW;
+      case Panel.right: return -_sideW;
+      case Panel.center: return 0;
+    }
+  }
+
+  // ---- 获取起始面板对应的拖拽边界 ----
+  (double, double) _dragBounds(Panel start) {
+    switch (start) {
+      case Panel.left: return (0.0, _sideW);       // 只能往中间(0)拖
+      case Panel.right: return (-_sideW, 0.0);     // 只能往中间(0)拖
+      case Panel.center: return (-_sideW, _sideW); // 两边都能去
+    }
   }
 
   // ---- 手势 ----
@@ -74,14 +92,15 @@ class _GestureTestPageState extends State<GestureTestPage>
     _startX = e.position.dx;
     _startY = e.position.dy;
 
-    // ★ 冻结动画，把最后位置写入 _offset
+    // ★ 冻结动画，锁定起始状态
     _anim.stop();
-    // 如果动画还在跑，把当前位置刷进 _offset
     if (_anim.value > 0 && _anim.value < 1) {
       _offset = _animStart + (_animEnd - _animStart) * _anim.value;
     }
 
-    _dragBase = _offset;
+    _sideW = MediaQuery.of(context).size.width * _sideFrac;
+    _dragStartOffset = _offset;
+    _startPanel = _currentPanel;
     _dragging = false;
     _horizLocked = false;
   }
@@ -92,29 +111,30 @@ class _GestureTestPageState extends State<GestureTestPage>
     final dx = e.position.dx - _startX;
     final dy = e.position.dy - _startY;
 
-    // 未锁定 → 判定方向
     if (!_horizLocked) {
       if (dx.abs() < _lockThr && dy.abs() < _lockThr) return;
       _horizLocked = dx.abs() > dy.abs() * 1.3;
       if (!_horizLocked) return;
-      // ★ 锁定为水平后立刻进入拖拽模式
       _dragging = true;
-      // 不 return——继续往下执行，不丢掉这一次的 dx
+      // 继续往下，不丢第一次 dx
     }
 
     if (!_dragging) return;
 
-    // ★ 回滑加速：展开状态下往回收，factor 3x
+    // ★ 回滑加速
     double factor = 1.0;
-    final isExpanded = _dragBase.abs() > _sideW * 0.5;
-    final goingBack = (_dragBase > 0 && dx < 0) || (_dragBase < 0 && dx > 0);
-    if (isExpanded && goingBack) {
-      // 自适应 factor：大屏(~1046px)≈2.7，小屏(~400px)≈1.6
-      factor = _sideW / 250.0;
+    final goingBack = (_startPanel == Panel.left && dx < 0) ||
+                      (_startPanel == Panel.right && dx > 0) ||
+                      false;
+    if (_startPanel != Panel.center && goingBack) {
+      factor = _closeFactor;
     }
 
+    // ★ 边界约束：从哪出发，只能到哪
+    final (lo, hi) = _dragBounds(_startPanel);
+
     setState(() {
-      _offset = (_dragBase + dx * factor).clamp(-_sideW, _sideW);
+      _offset = (_dragStartOffset + dx * factor).clamp(lo, hi);
     });
   }
 
@@ -132,15 +152,46 @@ class _GestureTestPageState extends State<GestureTestPage>
 
     final sideW = _sideW;
     final absOff = _offset.abs();
+    double target;
+    Panel nextPanel;
 
-    // 判断吸附方向（只根据 _offset 的正负）
-    if (absOff < sideW * _snapThr) {
-      _snapBack();
-    } else {
-      // 展开到对应的侧页
-      final target = _offset > 0 ? sideW : -sideW;
-      _animateTo(target);
+    switch (_startPanel) {
+      case Panel.center:
+        if (absOff < sideW * _snapThr) {
+          target = 0;
+          nextPanel = Panel.center;
+        } else if (_offset > 0) {
+          target = sideW;
+          nextPanel = Panel.left;
+        } else {
+          target = -sideW;
+          nextPanel = Panel.right;
+        }
+        break;
+      case Panel.left:
+        // 从左边出发：只可能回到中间或弹回左边
+        if (_offset < sideW * (1 - _snapThr)) {
+          target = 0;
+          nextPanel = Panel.center;
+        } else {
+          target = sideW;
+          nextPanel = Panel.left;
+        }
+        break;
+      case Panel.right:
+        // 从右边出发：只可能回到中间或弹回右边
+        if (_offset > -sideW * (1 - _snapThr)) {
+          target = 0;
+          nextPanel = Panel.center;
+        } else {
+          target = -sideW;
+          nextPanel = Panel.right;
+        }
+        break;
     }
+
+    _currentPanel = nextPanel;
+    _animateTo(target);
   }
 
   @override
@@ -155,24 +206,22 @@ class _GestureTestPageState extends State<GestureTestPage>
   @override
   Widget build(BuildContext context) {
     final screenW = MediaQuery.of(context).size.width;
-    final sideW = screenW * _sideFrac;
+    final side = screenW * _sideFrac;
 
     return Material(
       color: Colors.white,
       child: SizedBox.expand(
         child: Stack(
           children: [
-            // 左页：在中间页左边
             Positioned(
-              left: _offset - sideW, top: 0,
-              width: sideW, bottom: 0,
+              left: _offset - side, top: 0,
+              width: side, bottom: 0,
               child: Container(
                 color: _colors[0],
                 alignment: Alignment.center,
                 child: Text(_labels[0], style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)),
               ),
             ),
-            // 中间页
             Positioned(
               left: _offset, top: 0,
               width: screenW, bottom: 0,
@@ -182,10 +231,9 @@ class _GestureTestPageState extends State<GestureTestPage>
                 child: Text(_labels[1], style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)),
               ),
             ),
-            // 右页：在中间页右边
             Positioned(
               left: screenW + _offset, top: 0,
-              width: sideW, bottom: 0,
+              width: side, bottom: 0,
               child: Container(
                 color: _colors[2],
                 alignment: Alignment.center,
@@ -193,7 +241,7 @@ class _GestureTestPageState extends State<GestureTestPage>
               ),
             ),
 
-            // 状态指示器
+            // 状态
             Positioned(
               top: 60, left: 0, right: 0,
               child: Center(
@@ -204,8 +252,8 @@ class _GestureTestPageState extends State<GestureTestPage>
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    'offset: ${_offset.toStringAsFixed(0)}  '
-                    '${_dragging ? "拖拽" : _anim.isAnimating ? "动画" : "静止"}  '
+                    'p:$_currentPanel  o:${_offset.toStringAsFixed(0)}  '
+                    '${_dragging ? "拖" : _anim.isAnimating ? "动" : "停"}  '
                     '${_horizLocked ? "🔒" : "🔓"}',
                     style: const TextStyle(color: Colors.white, fontSize: 12),
                   ),
@@ -213,7 +261,6 @@ class _GestureTestPageState extends State<GestureTestPage>
               ),
             ),
 
-            // 全屏 Listener
             Positioned.fill(
               child: Listener(
                 behavior: HitTestBehavior.translucent,
