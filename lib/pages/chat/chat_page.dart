@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:ui' as ui;
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../models/male_lead.dart';
@@ -230,6 +231,18 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     ));
   }
 
+  // 选择聊天背景图
+  Future<void> _pickBgImage() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+    );
+    if (result != null && result.files.single.path != null) {
+      setState(() {
+        _bgImage = File(result.files.single.path!);
+      });
+    }
+  }
+
   // ---- 实时推算滚动归属 ----
   int _calcScrollPage() {
     if (_pointerId < 0) {
@@ -269,6 +282,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             currentPersona: _persona,
             onSelectPersona: (entry) => _selectPersona(entry.key, entry.value),
             onOpenSettings: () { _currentPanel = Panel.right; _animateTo(-sideW); },
+            onSetBg: _pickBgImage,
           ),
         ),
 
