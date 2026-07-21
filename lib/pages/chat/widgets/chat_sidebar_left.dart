@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
 
-/// 左滑侧边栏 —— 选择男主/形象，实底不透明
+/// 左滑侧边栏 —— 选择男主/形象
 class ChatSidebarLeft extends StatefulWidget {
   final MaleLead? currentLead;
   final Persona? currentPersona;
@@ -38,6 +38,73 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     });
   }
 
+  // 删除男主（含所有 persona）
+  Future<void> _deleteLead(MaleLead lead) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('删除 "${lead.name}"？'),
+        content: const Text('所有形象和聊天记录将被删除，不可恢复。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await _service.deleteMaleLead(lead.id);
+      if (mounted) setState(() {});
+      // 如果删的是当前角色，自动切到第一个
+      if (widget.currentLead?.id == lead.id && mounted) {
+        final remaining = _service.leads;
+        if (remaining.isNotEmpty) {
+          widget.onSelectPersona(MapEntry(remaining.first, remaining.first.personas.isNotEmpty ? remaining.first.personas.first : _defaultPersona(remaining.first)));
+        }
+      }
+    }
+  }
+
+  // 删除 persona
+  Future<void> _deletePersona(MaleLead lead, Persona persona) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('删除 "${persona.name}"？'),
+        content: const Text('此形象将被删除。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await _service.deletePersona(lead.id, persona.id);
+      if (mounted) setState(() {});
+      // 如果删的是当前形象，切到第一个形象或男主默认
+      if (widget.currentLead?.id == lead.id && widget.currentPersona?.id == persona.id && mounted) {
+        final reloaded = _service.leads.where((l) => l.id == lead.id).firstOrNull;
+        if (reloaded != null) {
+          if (reloaded.personas.isNotEmpty) {
+            widget.onSelectPersona(MapEntry(reloaded, reloaded.personas.first));
+          } else {
+            widget.onSelectPersona(MapEntry(reloaded, _defaultPersona(reloaded)));
+          }
+        }
+      }
+    }
+  }
+
+  // 新建角色（可设立绘路径）
   Future<void> _addNewLead() async {
     final nameCtrl = TextEditingController();
     final name = await showDialog<String>(
@@ -45,7 +112,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('新建男主'),
+        title: const Text('新建角色'),
         content: TextField(
           controller: nameCtrl,
           autofocus: true,
@@ -55,10 +122,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, nameCtrl.text.trim()),
             child: const Text('创建'),
@@ -75,18 +139,48 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     }
   }
 
+  // 默认 persona（当用户点击男主本体时使用）
+  Persona _defaultPersona(MaleLead lead) {
+    return Persona(
+      id: '${lead.id}_default',
+      maleLeadId: lead.id,
+      name: '默认',
+    );
+  }
+
+  // 选中男主本体（用第一个 persona 或默认）
+  void _selectLead(MaleLead lead) {
+    if (lead.personas.isNotEmpty) {
+      widget.onSelectPersona(MapEntry(lead, lead.personas.first));
+    } else {
+      widget.onSelectPersona(MapEntry(lead, _defaultPersona(lead)));
+    }
+  }
+
+  // 上传立绘（placeholder — 后续接入 file picker）
+  Future<void> _pickAvatar(MaleLead lead) async {
+    // TODO: 接入 image_picker 选本地图片
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('立绘上传功能准备中'), duration: Duration(seconds: 1)),
+    );
+  }
+
+  Future<void> _pickPersonaAvatar(MaleLead lead, Persona persona) async {
+    // TODO: 接入 image_picker
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('形象头像上传功能准备中'), duration: Duration(seconds: 1)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final leads = _service.leads;
-
     return Container(
       color: const Color(0xFFF5EEF0),
       child: SafeArea(
         child: Column(
           children: [
             const SizedBox(height: 56),
-
-            // 标题
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Row(
@@ -100,21 +194,37 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
                       letterSpacing: 2,
                     ),
                   ),
+                  const Spacer(),
+                  // + 新建角色按钮
+                  Material(
+                    color: Colors.white.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: _addNewLead,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.add_rounded, size: 18, color: const Color(0xFFB48296)),
+                            const SizedBox(width: 4),
+                            Text('新建', style: TextStyle(fontSize: 14, color: const Color(0xFFB48296))),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
             const SizedBox(height: 16),
-
-            // 角色列表
             Expanded(
               child: leads.isEmpty
                   ? Center(
                       child: Text(
-                        '还没有角色，点击下方 + 新建',
-                        style: TextStyle(
-                          color: const Color(0xFF8A7A80),
-                          fontSize: 13,
-                        ),
+                        '还没有角色，点 + 新建',
+                        style: TextStyle(color: const Color(0xFF8A7A80), fontSize: 13),
                       ),
                     )
                   : ListView.builder(
@@ -124,112 +234,38 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
                         final lead = leads[index];
                         final isExpanded = _expandedLeadId == lead.id;
                         final isActive = widget.currentLead?.id == lead.id;
-
-                        return _LeadCard(
-                          lead: lead,
-                          isExpanded: isExpanded,
-                          isActive: isActive,
-                          currentPersona: isActive ? widget.currentPersona : null,
-                          onToggle: () => _toggleExpand(lead.id),
-                          onSelectPersona: (persona) {
-                            widget.onSelectPersona(MapEntry(lead, persona));
-                          },
-                        );
+                        return _buildLeadCard(lead, isExpanded, isActive);
                       },
                     ),
-            ),
-
-            // 底部新建
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                12,
-                8,
-                12,
-                MediaQuery.of(context).padding.bottom + 16,
-              ),
-              child: SizedBox(
-                width: double.infinity,
-                child: Material(
-                  color: Colors.white.withValues(alpha: 0.7),
-                  borderRadius: BorderRadius.circular(16),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: _addNewLead,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.add_rounded,
-                            size: 20,
-                            color: const Color(0xFFB48296),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            '新建男主',
-                            style: TextStyle(
-                              fontSize: 15,
-                              color: const Color(0xFFB48296),
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
             ),
           ],
         ),
       ),
     );
   }
-}
 
-/// 单个男主卡片
-class _LeadCard extends StatelessWidget {
-  final MaleLead lead;
-  final bool isExpanded;
-  final bool isActive;
-  final Persona? currentPersona;
-  final VoidCallback onToggle;
-  final ValueChanged<Persona> onSelectPersona;
-
-  const _LeadCard({
-    required this.lead,
-    required this.isExpanded,
-    required this.isActive,
-    required this.currentPersona,
-    required this.onToggle,
-    required this.onSelectPersona,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildLeadCard(MaleLead lead, bool isExpanded, bool isActive) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: isActive ? 0.85 : 0.65),
         borderRadius: BorderRadius.circular(18),
         border: isActive
-            ? Border.all(
-                color: const Color(0xFFE8A0B8).withValues(alpha: 0.4),
-              )
+            ? Border.all(color: const Color(0xFFE8A0B8).withValues(alpha: 0.4))
             : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(18),
-            onTap: onToggle,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  Container(
+          // 卡片主体：点击头像/名字 → 选中聊天；点箭头 → 展开
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                // 头像（可点击上传）
+                GestureDetector(
+                  onTap: () => _pickAvatar(lead),
+                  child: Container(
                     width: 56,
                     height: 72,
                     decoration: BoxDecoration(
@@ -240,20 +276,22 @@ class _LeadCard extends StatelessWidget {
                           const Color(0xFFC8A8D8).withValues(alpha: 0.3),
                         ],
                       ),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.5),
-                      ),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
                     ),
                     child: Center(
                       child: Icon(
-                        Icons.person_outline_rounded,
+                        lead.avatarPath.isEmpty ? Icons.person_outline_rounded : Icons.image_outlined,
                         size: 28,
                         color: const Color(0xFF8A6A78),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
+                ),
+                const SizedBox(width: 12),
+                // 名字 + 描述 → 点击选中
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => _selectLead(lead),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -267,61 +305,61 @@ class _LeadCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '"你好，我是${lead.name}"',
+                          isActive && widget.currentPersona != null
+                              ? '当前形象：${widget.currentPersona!.name}'
+                              : '点击开始聊天',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 12,
-                            color: const Color(0xFF8A7A80),
-                            fontStyle: FontStyle.italic,
+                            color: isActive ? const Color(0xFFB48296) : const Color(0xFF8A7A80),
                           ),
                         ),
-                        if (currentPersona != null && isActive) ...[
-                          const SizedBox(height: 2),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFE8A0B8).withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              '当前：${currentPersona!.name}',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: const Color(0xFFB48296),
-                              ),
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ),
-                  Icon(
-                    isExpanded
-                        ? Icons.expand_less_rounded
-                        : Icons.expand_more_rounded,
-                    color: const Color(0xFF8A7A80),
+                ),
+                // 删除按钮
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => _deleteLead(lead),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(Icons.delete_outline_rounded, size: 18, color: const Color(0xFFCC9999).withValues(alpha: 0.6)),
+                    ),
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 4),
+                // 展开箭头
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => _toggleExpand(lead.id),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(
+                        isExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                        color: const Color(0xFF8A7A80),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
 
+          // 展开：persona 列表
           if (isExpanded) ...[
             const Divider(height: 1, indent: 16, endIndent: 16),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
               child: Column(
                 children: [
-                  ...lead.personas.map((persona) => _PersonaTile(
-                        persona: persona,
-                        isActive: isActive && currentPersona?.id == persona.id,
-                        onTap: () => onSelectPersona(persona),
-                      )),
-                  _AddPersonaTile(leadId: lead.id),
+                  ...lead.personas.map((persona) => _buildPersonaTile(lead, persona)),
+                  _buildAddPersonaTile(lead),
                 ],
               ),
             ),
@@ -330,79 +368,72 @@ class _LeadCard extends StatelessWidget {
       ),
     );
   }
-}
 
-class _PersonaTile extends StatelessWidget {
-  final Persona persona;
-  final bool isActive;
-  final VoidCallback onTap;
-
-  const _PersonaTile({
-    required this.persona,
-    required this.isActive,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildPersonaTile(MaleLead lead, Persona persona) {
+    final isActive = widget.currentLead?.id == lead.id && widget.currentPersona?.id == persona.id;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Material(
-        color: isActive
-            ? const Color(0xFFE8A0B8).withValues(alpha: 0.2)
-            : Colors.transparent,
+        color: isActive ? const Color(0xFFE8A0B8).withValues(alpha: 0.2) : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
+          onTap: () => widget.onSelectPersona(MapEntry(lead, persona)),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             child: Row(
               children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isActive
-                        ? const Color(0xFFE8A0B8).withValues(alpha: 0.35)
-                        : Colors.white.withValues(alpha: 0.5),
-                    border: Border.all(
+                // 形象头像
+                GestureDetector(
+                  onTap: () => _pickPersonaAvatar(lead, persona),
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
                       color: isActive
-                          ? const Color(0xFFE8A0B8).withValues(alpha: 0.6)
-                          : Colors.white.withValues(alpha: 0.4),
-                      width: 1.5,
+                          ? const Color(0xFFE8A0B8).withValues(alpha: 0.35)
+                          : Colors.white.withValues(alpha: 0.5),
+                      border: Border.all(
+                        color: isActive
+                            ? const Color(0xFFE8A0B8).withValues(alpha: 0.6)
+                            : Colors.white.withValues(alpha: 0.4),
+                        width: 1.5,
+                      ),
                     ),
-                  ),
-                  child: Icon(
-                    Icons.face_6_outlined,
-                    size: 16,
-                    color: isActive
-                        ? const Color(0xFFB48296)
-                        : const Color(0xFF8A6A78),
+                    child: Icon(
+                      persona.avatarPath.isEmpty ? Icons.face_6_outlined : Icons.image_outlined,
+                      size: 16,
+                      color: isActive ? const Color(0xFFB48296) : const Color(0xFF8A6A78),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
-                Text(
-                  persona.name,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-                    color: isActive
-                        ? const Color(0xFF3D2C33)
-                        : const Color(0xFF5A4A52),
+                Expanded(
+                  child: Text(
+                    persona.name,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                      color: isActive ? const Color(0xFF3D2C33) : const Color(0xFF5A4A52),
+                    ),
+                  ),
+                ),
+                // 删除按钮
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () => _deletePersona(lead, persona),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(Icons.close_rounded, size: 16, color: const Color(0xFFCC9999).withValues(alpha: 0.5)),
+                    ),
                   ),
                 ),
                 if (isActive) ...[
-                  const Spacer(),
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Color(0xFFE8A0B8),
-                    ),
-                  ),
+                  const SizedBox(width: 4),
+                  Container(width: 6, height: 6, decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFFE8A0B8))),
                 ],
               ],
             ),
@@ -411,59 +442,8 @@ class _PersonaTile extends StatelessWidget {
       ),
     );
   }
-}
 
-class _AddPersonaTile extends StatefulWidget {
-  final String leadId;
-  const _AddPersonaTile({required this.leadId});
-
-  @override
-  State<_AddPersonaTile> createState() => _AddPersonaTileState();
-}
-
-class _AddPersonaTileState extends State<_AddPersonaTile> {
-  final _service = CharacterService();
-
-  Future<void> _addPersona() async {
-    final ctrl = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('新建形象'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: '如：校园版',
-            border: InputBorder.none,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('创建'),
-          ),
-        ],
-      ),
-    );
-    if (name != null && name.isNotEmpty) {
-      await _service.addPersona(widget.leadId, Persona(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        maleLeadId: widget.leadId,
-        name: name,
-      ));
-      if (mounted) setState(() {});
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildAddPersonaTile(MaleLead lead) {
     return Padding(
       padding: const EdgeInsets.only(top: 4),
       child: Material(
@@ -471,7 +451,34 @@ class _AddPersonaTileState extends State<_AddPersonaTile> {
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
-          onTap: _addPersona,
+          onTap: () async {
+            final ctrl = TextEditingController();
+            final name = await showDialog<String>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                backgroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                title: const Text('新建形象'),
+                content: TextField(
+                  controller: ctrl,
+                  autofocus: true,
+                  decoration: const InputDecoration(hintText: '如：校园版', border: InputBorder.none),
+                ),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+                  TextButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('创建')),
+                ],
+              ),
+            );
+            if (name != null && name.isNotEmpty) {
+              await _service.addPersona(lead.id, Persona(
+                id: DateTime.now().millisecondsSinceEpoch.toString(),
+                maleLeadId: lead.id,
+                name: name,
+              ));
+              if (mounted) setState(() {});
+            }
+          },
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             child: Row(
@@ -482,24 +489,12 @@ class _AddPersonaTileState extends State<_AddPersonaTile> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: const Color(0xFFE8A0B8).withValues(alpha: 0.15),
-                    border: Border.all(
-                      color: const Color(0xFFE8A0B8).withValues(alpha: 0.3),
-                    ),
+                    border: Border.all(color: const Color(0xFFE8A0B8).withValues(alpha: 0.3)),
                   ),
-                  child: Icon(
-                    Icons.add_rounded,
-                    size: 18,
-                    color: const Color(0xFFB48296),
-                  ),
+                  child: Icon(Icons.add_rounded, size: 18, color: const Color(0xFFB48296)),
                 ),
                 const SizedBox(width: 10),
-                Text(
-                  '新建身份',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: const Color(0xFFB48296),
-                  ),
-                ),
+                Text('新建身份', style: TextStyle(fontSize: 14, color: const Color(0xFFB48296))),
               ],
             ),
           ),
