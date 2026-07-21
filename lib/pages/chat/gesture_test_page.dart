@@ -218,8 +218,28 @@ class _GestureTestPageState extends State<GestureTestPage>
               width: side, bottom: 0,
               child: Container(
                 color: _colors[0],
-                alignment: Alignment.center,
-                child: Text(_labels[0], style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)),
+                child: Column(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 100, bottom: 12),
+                      child: Text('左页', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: 30,
+                        itemBuilder: (_, i) => Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text('左项 ${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 16)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             Positioned(
@@ -227,8 +247,28 @@ class _GestureTestPageState extends State<GestureTestPage>
               width: screenW, bottom: 0,
               child: Container(
                 color: _colors[1],
-                alignment: Alignment.center,
-                child: Text(_labels[1], style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)),
+                child: Column(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 100, bottom: 12),
+                      child: Text('聊天页', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: 50,
+                        itemBuilder: (_, i) => Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text('消息 ${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 16)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             Positioned(
@@ -236,8 +276,28 @@ class _GestureTestPageState extends State<GestureTestPage>
               width: side, bottom: 0,
               child: Container(
                 color: _colors[2],
-                alignment: Alignment.center,
-                child: Text(_labels[2], style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)),
+                child: Column(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 100, bottom: 12),
+                      child: Text('右页', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: 20,
+                        itemBuilder: (_, i) => Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text('右项 ${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 16)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
 
