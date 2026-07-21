@@ -15,13 +15,10 @@ import 'widgets/character_world_page.dart';
 /// 聊天主页面 —— 三页联动侧栏
 ///
 /// 像一张纸折了两下，分成左中右三页。
-/// 中间页占满屏幕时：
-///   左 1/3 区域右滑 → 露出左边页
-///   右 1/3 区域左滑 → 露出右边页
-/// 左边页展开时：
-///   全屏右滑 → 收回中间页（但这里用全屏往左滑收回去）
-/// 右边页展开时：
-///   全屏往右滑 → 收回中间页
+/// 全屏水平滑动：
+///   右滑 → 露出/收回左侧页
+///   左滑 → 露出/收回右侧页
+/// 侧栏展开后可全屏反方向滑动关闭。
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
 
@@ -39,7 +36,6 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
 
   bool _showPlusMenu = false;
 
-  // 侧边栏
   bool _showLeftSidebar = false;
   bool _showRightSidebar = false;
   late AnimationController _slideCtrl;
@@ -47,7 +43,6 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
   static const double _sidebarFraction = 0.65;
 
   // 手势状态
-  double _startX = 0;
   double _currentDrag = 0;
   bool _isDragging = false;
 
@@ -151,52 +146,27 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     return offset;
   }
 
-  // ========== 手势处理 ==========
+  // ========== 全屏手势处理 ==========
 
-
-  void _onPanUpdate(DragUpdateDetails details) {
+  void _onHorizontalDragUpdate(DragUpdateDetails details) {
     if (_showPlusMenu) return;
     if (details.primaryDelta == null) return;
 
-    // 如果尚未标记为拖动中，检查起始位置
     if (!_isDragging) {
-      final screenW = MediaQuery.of(context).size.width;
-      final thirdW = screenW / 3;
-
-      // 中间页占满屏幕时的触发条件
-      if (!_showLeftSidebar && !_showRightSidebar) {
-        // 左侧 1/3 区域右滑 → 左栏
-        if (_startX < thirdW && details.primaryDelta! > 0) {
-          _isDragging = true;
-          _currentDrag = 0;
-        }
-        // 右侧 1/3 区域左滑 → 右栏
-        else if (_startX > screenW - thirdW && details.primaryDelta! < 0) {
-          _isDragging = true;
-          _currentDrag = 0;
-        }
-        // 其他情况忽略
-        else {
-          return;
-        }
-      } else {
-        // 侧栏打开后，任何位置都可以反方向滑动关闭
-        _isDragging = true;
-      }
+      // 初次检测到水平滑动，开始拖动
+      _isDragging = true;
+      _currentDrag = 0;
     }
-
-    if (!_isDragging) return;
 
     setState(() {
       _currentDrag += details.primaryDelta!;
-      // 限制最大/最小偏移量
       final screenW = MediaQuery.of(context).size.width;
       final maxW = screenW * _sidebarFraction;
       _currentDrag = _currentDrag.clamp(-maxW, maxW);
     });
   }
 
-  void _onPanEnd(DragEndDetails details) {
+  void _onHorizontalDragEnd(DragEndDetails details) {
     if (!_isDragging) {
       _currentDrag = 0;
       return;
@@ -204,10 +174,10 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
 
     final screenW = MediaQuery.of(context).size.width;
     final baseW = screenW * _sidebarFraction;
-    final threshold = baseW * 0.35;
+    final threshold = baseW * 0.30;
 
-    // 关闭状态的松开 → 吸附打开
     if (!_showLeftSidebar && !_showRightSidebar) {
+      // 中间页占满 → 根据最后滑动的方向打开对应侧栏
       if (_currentDrag > threshold) {
         _showLeftSidebar = true;
         _slideCtrl.forward(from: (_currentDrag / baseW).clamp(0.0, 1.0));
@@ -215,34 +185,37 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
         _showRightSidebar = true;
         _slideCtrl.forward(from: (-_currentDrag / baseW).clamp(0.0, 1.0));
       }
-      // 没到阈值：弹回中间
+      // 没到阈值弹回
       _currentDrag = 0;
       _isDragging = false;
       return;
     }
 
-    // 侧栏打开的松开 → 反方向滑动关闭
+    // 左栏已展开
     if (_showLeftSidebar) {
-      // 左栏展开时，往左滑（negative）关闭
+      // 往左滑超过阈值 → 收回
       if (_currentDrag < -threshold) {
         _closeSidebar();
       } else {
         // 弹回完全展开
         _slideCtrl.forward();
+        _currentDrag = 0;
+        _isDragging = false;
       }
-    } else if (_showRightSidebar) {
-      // 右栏展开时，往右滑（positive）关闭
+      return;
+    }
+
+    // 右栏已展开
+    if (_showRightSidebar) {
+      // 往右滑超过阈值 → 收回
       if (_currentDrag > threshold) {
         _closeSidebar();
       } else {
         _slideCtrl.forward();
+        _currentDrag = 0;
+        _isDragging = false;
       }
     }
-
-    setState(() {
-      _currentDrag = 0;
-      _isDragging = false;
-    });
   }
 
   Future<void> _sendMessage(String text) async {
@@ -292,7 +265,6 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     final offset = _getOffset(screenW);
     final leftVisible = _showLeftSidebar || (_isDragging && _currentDrag > 0);
     final rightVisible = _showRightSidebar || (_isDragging && _currentDrag < 0);
-
     return SizedBox(
       width: double.infinity,
       height: double.infinity,
@@ -357,12 +329,9 @@ class _ChatPageState extends State<ChatPage> with TickerProviderStateMixin {
     return Scaffold(
       backgroundColor: const Color(0xFFF5EEF0),
       body: GestureDetector(
-        onHorizontalDragStart: (details) {
-          _startX = details.localPosition.dx;
-          _isDragging = false;
-        },
-        onHorizontalDragUpdate: _onPanUpdate,
-        onHorizontalDragEnd: _onPanEnd,
+        onHorizontalDragStart: (_) => _isDragging = false,
+        onHorizontalDragUpdate: _onHorizontalDragUpdate,
+        onHorizontalDragEnd: _onHorizontalDragEnd,
         child: SafeArea(
           child: Column(
             children: [
