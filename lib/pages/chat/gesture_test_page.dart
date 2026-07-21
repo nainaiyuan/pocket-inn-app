@@ -104,16 +104,12 @@ class _GestureTestPageState extends State<GestureTestPage>
 
     if (!_dragging) return;
 
-    // ★ 加速：展开状态往回滑时，手指 1px 对应页面多倍位移
+    // ★ 回滑加速：展开状态下往回收，factor 3x
     double factor = 1.0;
-    if (_dragBase.abs() > _sideW * 0.1) {
-      // 已展开，检测是否往回收的方向
-      final goingBack = (_dragBase > 0 && dx < 0) || (_dragBase < 0 && dx > 0);
-      if (goingBack) {
-        // 越靠近中心加速越大（最大 3x），越远越接近 1x
-        final dist = _dragBase.abs() / _sideW; // 0~1
-        factor = 1.0 + (1.0 - dist) * 2.0; // 1x ~ 3x
-      }
+    final isExpanded = _dragBase.abs() > _sideW * 0.5;
+    final goingBack = (_dragBase > 0 && dx < 0) || (_dragBase < 0 && dx > 0);
+    if (isExpanded && goingBack) {
+      factor = 3.0;
     }
 
     setState(() {
