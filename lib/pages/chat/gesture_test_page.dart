@@ -1,12 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
-/// 手势测试页面 —— 三页连续空间（最小修复版）
-///
-/// 纯色测试，不接入任何聊天逻辑。
+/// 手势测试页面 —— 三页连续空间（v3 修复版）
 class GestureTestPage extends StatefulWidget {
   const GestureTestPage({super.key});
-
   @override
   State<GestureTestPage> createState() => _GestureTestPageState();
 }
@@ -14,6 +10,9 @@ class GestureTestPage extends StatefulWidget {
 class _GestureTestPageState extends State<GestureTestPage>
     with TickerProviderStateMixin {
   static const double _sideFrac = 0.65;
+  static const double _snapThr = 0.40;
+  static const double _lockThr = 8.0;
+
   final List<Color> _colors = [
     Colors.red.shade300,
     Colors.blue.shade300,
@@ -21,30 +20,22 @@ class _GestureTestPageState extends State<GestureTestPage>
   ];
   final List<String> _labels = ['左页', '聊天页', '右页'];
 
-  // ---- 手势状态 ----
+  // ---- 唯一状态：页面偏移量 ----
+  double _offset = 0;
+
+  // ---- 拖拽状态 ----
+  bool _dragging = false;
+  double _dragBase = 0; // 开始拖拽时的 _offset（冻结动画后）
   double _startX = 0, _startY = 0;
-  bool _locked = false;
-  bool _horiz = false;
-  bool _wasHoriz = false;
+  bool _horizLocked = false; // 已锁定为水平拖拽
   int _pointerId = -1;
 
-  // ---- 偏移 ----
-  double _offset = 0;
-  double _dragStartOffset = 0; // 手指按下时的当前偏移（基准）
-  int _snapTarget = 0;
+  // ---- 动画 ----
   late AnimationController _anim;
-
-  static const double _snapThr = 0.40;
-  static const double _lockThr = 8.0;
+  double _animStart = 0; // 动画起始偏移
+  double _animEnd = 0;   // 动画结束偏移
 
   double get _sideW => MediaQuery.of(context).size.width * _sideFrac;
-
-  double get _currentOffset {
-    // 拖拽中或刚锁定时都用 _offset
-    if (_wasHoriz && _locked && _horiz) return _offset;
-    // 动画中或静止
-    return _snapTarget * _sideW * _anim.value;
-  }
 
   @override
   void initState() {
@@ -52,15 +43,27 @@ class _GestureTestPageState extends State<GestureTestPage>
     _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
-    )..addListener(() { if (mounted) setState(() {}); });
+    )..addListener(_onAnimTick);
   }
 
-  void _snapTo(int t) { _snapTarget = t; _anim.forward(from: 0); }
+  /// 动画 tick：从 _animStart 线性插值到 _animEnd
+  void _onAnimTick() {
+    if (_dragging) return; // ★ 拖拽期间不碰 _offset
+    setState(() {
+      _offset = _animStart + (_animEnd - _animStart) * _anim.value;
+    });
+  }
 
+  /// 启动动画：从当前 _offset 到目标
+  void _animateTo(double target) {
+    _animStart = _offset;
+    _animEnd = target;
+    _anim.forward(from: 0);
+  }
+
+  /// 返回中心
   void _snapBack() {
-    _snapTarget = 0;
-    _anim.value = _offset.abs() / _sideW;
-    _anim.reverse().then((_) { if (mounted) setState(() { _offset = 0; }); });
+    _animateTo(0);
   }
 
   // ---- 手势 ----
@@ -70,97 +73,91 @@ class _GestureTestPageState extends State<GestureTestPage>
     _pointerId = e.pointer;
     _startX = e.position.dx;
     _startY = e.position.dy;
-    _locked = false;
-    _horiz = false;
-    _wasHoriz = false;
-    _dragStartOffset = _currentOffset; // ★ 记录按下时的真实偏移
+
+    // ★ 冻结动画，把最后位置写入 _offset
     _anim.stop();
+    // 如果动画还在跑，把当前位置刷进 _offset
+    if (_anim.value > 0 && _anim.value < 1) {
+      _offset = _animStart + (_animEnd - _animStart) * _anim.value;
+    }
+
+    _dragBase = _offset;
+    _dragging = false;
+    _horizLocked = false;
   }
 
   void _onMove(PointerMoveEvent e) {
-    if (e.pointer != _pointerId) return; // ★ 过滤非当前 pointer
+    if (e.pointer != _pointerId) return;
 
     final dx = e.position.dx - _startX;
     final dy = e.position.dy - _startY;
 
-    if (!_locked) {
+    // 未锁定 → 判定方向
+    if (!_horizLocked) {
       if (dx.abs() < _lockThr && dy.abs() < _lockThr) return;
-      _locked = true;
-      _horiz = dx.abs() > dy.abs() * 1.3;
-      if (_horiz) {
-        _wasHoriz = true;
-        _offset = _dragStartOffset;
-        if (mounted) setState(() {});
-      }
-      return;
+      _horizLocked = dx.abs() > dy.abs() * 1.3;
+      if (!_horizLocked) return;
+      // ★ 锁定为水平后立刻进入拖拽模式
+      _dragging = true;
+      // 不 return——继续往下执行，不丢掉这一次的 dx
     }
 
-    if (!_horiz) return;
+    if (!_dragging) return;
 
-    // ★ 计算新偏移，带死区防止边界抖动
-    final newOff = (_dragStartOffset + (e.position.dx - _startX))
-        .clamp(-_sideW, _sideW);
-    // 边界附近且方向向外 → 不更新
-    if ((_offset <= -_sideW && newOff <= _offset) ||
-        (_offset >= _sideW && newOff >= _offset)) return;
-    _offset = newOff;
-    if (mounted) setState(() {});
+    // ★ 跟随手指（不依赖 _dragBase 以外的状态）
+    setState(() {
+      _offset = (_dragBase + (e.position.dx - _startX)).clamp(-_sideW, _sideW);
+    });
   }
 
   void _onUp(PointerUpEvent e) {
     if (_pointerId != e.pointer) return;
     _pointerId = -1;
 
-    if (!_wasHoriz) {
-      _locked = false;
-      _horiz = false;
-      _wasHoriz = false;
+    if (!_dragging) {
+      _horizLocked = false;
       return;
     }
 
+    _dragging = false;
+    _horizLocked = false;
+
     final sideW = _sideW;
     final absOff = _offset.abs();
-    final isLeft = _offset > 0;
 
-    if (_snapTarget == 0) {
-      if (absOff > sideW * _snapThr) {
-        _snapTo(isLeft ? 1 : -1);
-      } else {
-        _snapBack();
-      }
+    // 判断吸附方向（只根据 _offset 的正负）
+    if (absOff < sideW * _snapThr) {
+      _snapBack();
     } else {
-      if ((_snapTarget == 1 && _offset < sideW * (1 - _snapThr)) ||
-          (_snapTarget == -1 && _offset > -sideW * (1 - _snapThr))) {
-        _snapBack();
-      } else {
-        _snapTo(_snapTarget);
-        _offset = _snapTarget * sideW;
-      }
+      // 展开到对应的侧页
+      final target = _offset > 0 ? sideW : -sideW;
+      _animateTo(target);
     }
-
-    _locked = false;
-    _horiz = false;
-    _wasHoriz = false;
   }
 
   @override
-  void dispose() { _anim.dispose(); super.dispose(); }
+  void dispose() {
+    _anim.removeListener(_onAnimTick);
+    _anim.dispose();
+    super.dispose();
+  }
+
+  // ---- build ----
 
   @override
   Widget build(BuildContext context) {
     final screenW = MediaQuery.of(context).size.width;
     final sideW = screenW * _sideFrac;
-    final off = _currentOffset;
 
     return Material(
       color: Colors.white,
-      child: SizedBox.expand( // ★ 确保 Stack 铺满
+      child: SizedBox.expand(
         child: Stack(
           children: [
-            // 左页
+            // 左页：在中间页左边
             Positioned(
-              left: off - sideW, top: 0,
-              width: sideW, bottom: 0, // ★ bottom:0 确保高度
+              left: _offset - sideW, top: 0,
+              width: sideW, bottom: 0,
               child: Container(
                 color: _colors[0],
                 alignment: Alignment.center,
@@ -169,7 +166,7 @@ class _GestureTestPageState extends State<GestureTestPage>
             ),
             // 中间页
             Positioned(
-              left: off, top: 0,
+              left: _offset, top: 0,
               width: screenW, bottom: 0,
               child: Container(
                 color: _colors[1],
@@ -177,9 +174,9 @@ class _GestureTestPageState extends State<GestureTestPage>
                 child: Text(_labels[1], style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)),
               ),
             ),
-            // 右页
+            // 右页：在中间页右边
             Positioned(
-              left: screenW + off, top: 0,
+              left: screenW + _offset, top: 0,
               width: sideW, bottom: 0,
               child: Container(
                 color: _colors[2],
@@ -199,10 +196,9 @@ class _GestureTestPageState extends State<GestureTestPage>
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    'offset: ${(_locked && _horiz ? _offset : off).toStringAsFixed(0)}  '
-                    'snap: $_snapTarget  '
-                    '${_horiz ? "水平" : _locked ? "垂直" : "等待"}  '
-                    '${_locked ? "🔒" : "🔓"}',
+                    'offset: ${_offset.toStringAsFixed(0)}  '
+                    '${_dragging ? "拖拽" : _anim.isAnimating ? "动画" : "静止"}  '
+                    '${_horizLocked ? "🔒" : "🔓"}',
                     style: const TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 ),
