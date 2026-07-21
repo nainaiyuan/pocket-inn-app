@@ -319,39 +319,42 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           child: Material(
             color: Colors.transparent,
             child: SafeArea(
-              child: Stack(
+              child: Column(
                 children: [
-                  // 背景图（毛玻璃遮罩）
-                  Positioned.fill(
-                    child: _currentBg != null
-                        ? ClipRRect(
-                            child: Stack(
-                              children: [
-                                Image.file(_currentBg!, fit: BoxFit.cover, width: screenW, height: double.infinity),
-                                Positioned.fill(
-                                  child: BackdropFilter(
-                                    filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                                    child: Container(color: const Color(0xFFF5EEF0).withValues(alpha: 0.4)),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-                  // 聊天内容
-                  Column(children: [
-                    ChatTopBar(currentLead: _lead, currentPersona: _persona,
-                      onAvatarLongPress: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); }),
-                    Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
-                    ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
-                      onPlusTap: _togglePlus, onSendTap: _sendMsg),
-                  ]),
+                  ChatTopBar(currentLead: _lead, currentPersona: _persona,
+                    onAvatarLongPress: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); }),
+                  Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
+                  ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
+                    onPlusTap: _togglePlus, onSendTap: _sendMsg),
                 ],
               ),
             ),
           ),
         ),
+
+        // ===== 聊天背景图（毛玻璃，在中间页底层） =====
+        if (_currentBg != null)
+          IgnorePointer(
+            child: Positioned(
+              left: _offset,
+              top: 0,
+              width: screenW,
+              height: MediaQuery.of(context).size.height,
+              child: ClipRRect(
+                child: Stack(
+                  children: [
+                    Image.file(_currentBg!, fit: BoxFit.cover, width: screenW, height: MediaQuery.of(context).size.height),
+                    Positioned.fill(
+                      child: BackdropFilter(
+                        filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                        child: Container(color: const Color(0xFFF5EEF0).withValues(alpha: 0.4)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
 
         // ===== 右页 =====
         _pageWidget(
