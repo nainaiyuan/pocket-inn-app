@@ -10,7 +10,7 @@ class GestureTestPage extends StatefulWidget {
 class _GestureTestPageState extends State<GestureTestPage>
     with TickerProviderStateMixin {
   static const double _sideFrac = 0.65;
-  static const double _snapThr = 0.40;
+  static const double _snapThr = 0.30; // 吸附阈值降低（配合加速）
   static const double _lockThr = 8.0;
 
   final List<Color> _colors = [
@@ -104,9 +104,20 @@ class _GestureTestPageState extends State<GestureTestPage>
 
     if (!_dragging) return;
 
-    // ★ 跟随手指（不依赖 _dragBase 以外的状态）
+    // ★ 加速：展开状态往回滑时，手指 1px 对应页面多倍位移
+    double factor = 1.0;
+    if (_dragBase.abs() > _sideW * 0.1) {
+      // 已展开，检测是否往回收的方向
+      final goingBack = (_dragBase > 0 && dx < 0) || (_dragBase < 0 && dx > 0);
+      if (goingBack) {
+        // 越靠近中心加速越大（最大 3x），越远越接近 1x
+        final dist = _dragBase.abs() / _sideW; // 0~1
+        factor = 1.0 + (1.0 - dist) * 2.0; // 1x ~ 3x
+      }
+    }
+
     setState(() {
-      _offset = (_dragBase + (e.position.dx - _startX)).clamp(-_sideW, _sideW);
+      _offset = (_dragBase + dx * factor).clamp(-_sideW, _sideW);
     });
   }
 
