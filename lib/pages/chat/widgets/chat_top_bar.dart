@@ -1,19 +1,20 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../../models/male_lead.dart';
+import '../../../services/character_service.dart';
 
-/// 聊天页顶部栏
+/// 聊天页顶部栏 —— 无头像，角色名居中，长按可改名
 class ChatTopBar extends StatelessWidget {
   final MaleLead? currentLead;
   final Persona? currentPersona;
-  final VoidCallback onAvatarLongPress;
+  final VoidCallback onTapAvatar;
   final VoidCallback onMenuTap;
 
   const ChatTopBar({
     super.key,
     required this.currentLead,
     required this.currentPersona,
-    required this.onAvatarLongPress,
+    required this.onTapAvatar,
     required this.onMenuTap,
   });
 
@@ -38,71 +39,37 @@ class ChatTopBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // 男主头像（长按进秘密基地）
-          GestureDetector(
-            onLongPress: onAvatarLongPress,
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  colors: [
-                    const Color(0xFFE8A0B8).withValues(alpha: 0.2),
-                    const Color(0xFFC8A8D8).withValues(alpha: 0.2),
-                  ],
-                ),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.5),
-                  width: 1.5,
-                ),
-                image: (currentLead?.avatarPath.isNotEmpty == true && File(currentLead!.avatarPath).existsSync())
-                    ? DecorationImage(
-                        image: FileImage(File(currentLead!.avatarPath)),
-                        fit: BoxFit.cover,
-                      )
-                    : null,
-              ),
-              child: (currentLead?.avatarPath.isNotEmpty != true)
-                  ? Icon(
-                      Icons.person_outline_rounded,
-                      size: 22,
-                      color: const Color(0xFFB48296).withValues(alpha: 0.6),
-                    )
-                  : null,
-            ),
-          ),
-          const SizedBox(width: 12),
-
-          // 名字 + 当前形象
+          const SizedBox(width: 40), // 左侧留白平衡
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  name,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                    color: Color(0xFF6A4A5A),
-                    letterSpacing: 1,
-                  ),
-                ),
-                if (personaName.isNotEmpty)
+            child: GestureDetector(
+              onTap: onTapAvatar,   // 点击 → 秘密基地
+              onLongPress: () => _renameLead(context),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Text(
-                    '与 $personaName 聊天中',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: const Color(0xFF5A4A52).withValues(alpha: 0.3),
-                      letterSpacing: 0.5,
+                    name,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF6A4A5A),
+                      letterSpacing: 1,
                     ),
                   ),
-              ],
+                  if (personaName.isNotEmpty)
+                    Text(
+                      '与 $personaName 聊天中',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: const Color(0xFF5A4A52).withValues(alpha: 0.3),
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
-
-          // 更多按钮
           GestureDetector(
             onTap: onMenuTap,
             child: Padding(
@@ -112,6 +79,39 @@ class ChatTopBar extends StatelessWidget {
                 color: const Color(0xFF6A4A5A).withValues(alpha: 0.4),
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _renameLead(BuildContext context) {
+    final lead = currentLead;
+    if (lead == null) return;
+    final ctrl = TextEditingController(text: lead.name);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('修改角色名'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '输入新名字', border: InputBorder.none),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () {
+              final newName = ctrl.text.trim();
+              if (newName.isNotEmpty) {
+                lead.name = newName;
+                CharacterService().updateMaleLead(lead);
+              }
+              Navigator.pop(ctx);
+            },
+            child: const Text('确定'),
           ),
         ],
       ),

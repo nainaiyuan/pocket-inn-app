@@ -82,8 +82,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       await _charSvc.addMaleLead(MaleLead(id: 'd', name: '沈星回'));
       if (!mounted) return;
       await _charSvc.load();
-      if (_charSvc.leads.isNotEmpty && mounted)
-        setState(() { _lead = _charSvc.leads.first; _persona = _charSvc.leads.first.personas.isNotEmpty ? _charSvc.leads.first.personas.first : null; });
+      if (_charSvc.leads.isNotEmpty && mounted) {
+        final lead = _charSvc.leads.first;
+        // 给新角色自动建默认 persona
+        if (lead.personas.isEmpty) {
+          await _charSvc.addPersona(lead.id, Persona(id: '${lead.id}_default', maleLeadId: lead.id, name: '默认'));
+          await _charSvc.load();
+        }
+        setState(() { _lead = lead; _persona = lead.personas.isNotEmpty ? lead.personas.first : null; });
+      }
     }
   }
 
@@ -247,24 +254,50 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   // 选择聊天背景图（复制到 APP 内部存储）
   Future<void> _pickBgImage() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-    );
-    if (result == null || result.files.single.path == null) return;
-    final source = File(result.files.single.path!);
-    final lid = _lead?.id ?? '';
-    final pid = _persona?.id ?? 'default';
-    if (lid.isEmpty) return;
+    try {
+      final result = await FilePicker.platform.pickFiles(type: FileType.image);
+      if (result == null || result.files.single.path == null) return;
+      final source = File(result.files.single.path!);
+      final lid = _lead?.id ?? '';
+      final pid = _persona?.id ?? 'default';
+      if (lid.isEmpty) return;
 
-    final saved = await _localStore.saveBackground(lid, pid, source);
-    setState(() {
-      final img = File(saved);
-      if (pid == 'default') {
-        _bgImage = img;
-      } else {
-        _bgImages[pid] = img;
+      final saved = await _localStore.saveBackground(lid, pid, source);
+      setState(() {
+        final img = File(saved);
+        if (pid == 'default') {
+          _bgImage = img;
+        } else {
+          _bgImages[pid] = img;
+        }
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('背景设置失败：$e'), duration: const Duration(seconds: 2)),
+        );
       }
-    });
+    }
+  }
+
+  // 从加号菜单更换头像
+  Future<void> _pickAvatarFromPlus() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(type: FileType.image);
+      if (result == null || result.files.single.path == null) return;
+      final source = File(result.files.single.path!);
+      if (_lead == null) return;
+      await _localStore.saveLeadAvatar(_lead!.id, source);
+      if (mounted) {
+        setState(() {}); // 刷新（ChatTopBar 现在没头像了，但刷新 state）
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('头像设置失败：$e'), duration: const Duration(seconds: 2)),
+        );
+      }
+    }
   }
 
   // ---- 实时推算滚动归属 ----
@@ -322,7 +355,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               child: Column(
                 children: [
                   ChatTopBar(currentLead: _lead, currentPersona: _persona,
-                    onAvatarLongPress: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); }),
+                    onTapAvatar: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); }),
                   Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
                   ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
                     onPlusTap: _togglePlus, onSendTap: _sendMsg),
@@ -396,7 +429,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
         // ===== [+] 菜单 =====
         if (_showPlus)
-          Positioned.fill(child: PlusMenu(onDismiss: () => setState(() => _showPlus = false))),
+          Positioned.fill(child: PlusMenu(
+            onDismiss: () => setState(() => _showPlus = false),
+            onPickAvatar: _pickAvatarFromPlus,
+          )),
       ],
     );
   }

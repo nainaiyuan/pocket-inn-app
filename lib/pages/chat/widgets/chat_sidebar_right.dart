@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
 
@@ -183,6 +184,40 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
     if (confirm == true) {
       await _service.deletePersona(l.id, p.id);
       widget.onDelete();
+    }
+  }
+
+  // 删除所有聊天记录
+  Future<void> _confirmDeleteAllChats() async {
+    final pid = widget.currentPersona?.id ?? widget.currentLead?.id ?? '';
+    if (pid.isEmpty) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('删除所有聊天记录？'),
+        content: const Text('当前角色的聊天记录将被清空，不可恢复。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确定清空', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      // 用 ChatStorageService 清空
+      final prefs = await SharedPreferences.getInstance();
+      // 使用 ChatStorageService 的内部 key 格式
+      final key = 'chat_messages_$pid';
+      await prefs.remove(key);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('聊天记录已清空'), duration: Duration(seconds: 1)),
+        );
+      }
     }
   }
 
@@ -374,6 +409,33 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                               ),
                             ),
                           ),
+                        const SizedBox(height: 8),
+                        // 删除所有聊天记录
+                        SizedBox(
+                          width: double.infinity,
+                          child: Material(
+                            color: Colors.orange.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(12),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: _confirmDeleteAllChats,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.chat_bubble_outline_rounded, size: 16, color: Colors.orange.withValues(alpha: 0.6)),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      '删除所有聊天记录',
+                                      style: TextStyle(fontSize: 13, color: Colors.orange.withValues(alpha: 0.8)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
