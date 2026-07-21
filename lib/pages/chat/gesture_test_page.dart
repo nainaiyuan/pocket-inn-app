@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// 手势测试页面 —— 三页连续空间（v6 回退版）
+/// 手势测试页面 —— 三页连续空间（v7 触摸坐标版）
 ///
-/// 去掉 IgnorePointer，裸三页+ListView 测试横纵手势冲突
+/// 垂直锁定时，根据触摸坐标决定哪个 ListView 可以滚动。
 class GestureTestPage extends StatefulWidget {
   const GestureTestPage({super.key});
   @override
@@ -23,6 +23,8 @@ class _GestureTestPageState extends State<GestureTestPage>
     Colors.blue.shade300,
     Colors.green.shade300,
   ];
+
+  // ---- 唯一状态 ----
   double _offset = 0;
   Panel _currentPanel = Panel.center;
 
@@ -33,6 +35,9 @@ class _GestureTestPageState extends State<GestureTestPage>
   double _startX = 0, _startY = 0;
   bool _horizLocked = false;
   int _pointerId = -1;
+
+  // ---- 垂直滚动控制 ----
+  int _activeScrollPage = 1; // 0=左, 1=中, 2=右
 
   // ---- 动画 ----
   late AnimationController _anim;
@@ -88,6 +93,18 @@ class _GestureTestPageState extends State<GestureTestPage>
     _startPanel = _currentPanel;
     _dragging = false;
     _horizLocked = false;
+
+    // ★ 根据触摸坐标预判滚动归属
+    final tapX = e.position.dx;
+    final screenW = MediaQuery.of(context).size.width;
+    final side = screenW * _sideFrac;
+    if (_offset > 0 && tapX < _offset) {
+      _activeScrollPage = 0; // 左页露出区域
+    } else if (_offset < 0 && tapX > screenW + _offset) {
+      _activeScrollPage = 2; // 右页露出区域
+    } else {
+      _activeScrollPage = 1; // 中间页
+    }
   }
 
   void _onMove(PointerMoveEvent e) {
@@ -99,7 +116,20 @@ class _GestureTestPageState extends State<GestureTestPage>
     if (!_horizLocked) {
       if (dx.abs() < _lockThr && dy.abs() < _lockThr) return;
       _horizLocked = dx.abs() > dy.abs() * 1.3;
-      if (!_horizLocked) return;
+      if (!_horizLocked) {
+        // ★ 垂直锁定：确定触摸坐标对应的页面，只让该页滚动
+        final tapX = e.position.dx;
+        final screenW = MediaQuery.of(context).size.width;
+        final side = screenW * _sideFrac;
+        if (_offset > 0 && tapX < _offset) {
+          _activeScrollPage = 0;
+        } else if (_offset < 0 && tapX > screenW + _offset) {
+          _activeScrollPage = 2;
+        } else {
+          _activeScrollPage = 1;
+        }
+        return;
+      }
       _dragging = true;
     }
 
@@ -178,96 +208,9 @@ class _GestureTestPageState extends State<GestureTestPage>
       child: SizedBox.expand(
         child: Stack(
           children: [
-            // 左页
-            Positioned(
-              left: _offset - side, top: 0,
-              width: side, bottom: 0,
-              child: Container(
-                color: _colors[0],
-                child: Column(
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.only(top: 100, bottom: 12),
-                      child: Text('左页', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
-                    ),
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: 30,
-                        itemBuilder: (_, i) => Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.25),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text('左项 ${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 16)),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            // 中间页
-            Positioned(
-              left: _offset, top: 0,
-              width: screenW, bottom: 0,
-              child: Container(
-                color: _colors[1],
-                child: Column(
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.only(top: 100, bottom: 12),
-                      child: Text('消息', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
-                    ),
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: 50,
-                        itemBuilder: (_, i) => Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.25),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text('消息 ${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 16)),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            // 右页
-            Positioned(
-              left: screenW + _offset, top: 0,
-              width: side, bottom: 0,
-              child: Container(
-                color: _colors[2],
-                child: Column(
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.only(top: 100, bottom: 12),
-                      child: Text('右页', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
-                    ),
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: 20,
-                        itemBuilder: (_, i) => Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.25),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text('右项 ${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 16)),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            _pageWidget(0, _offset - side, side, _colors[0], '左页', 30),
+            _pageWidget(1, _offset, screenW, _colors[1], '消息', 50),
+            _pageWidget(2, screenW + _offset, side, _colors[2], '右页', 20),
 
             // 状态
             Positioned(
@@ -279,7 +222,8 @@ class _GestureTestPageState extends State<GestureTestPage>
                   child: Text(
                     'p:$_currentPanel  o:${_offset.toStringAsFixed(0)}  '
                     '${_dragging ? "拖" : _anim.isAnimating ? "动" : "停"}  '
-                    '${_horizLocked ? "🔒" : "🔓"}',
+                    '${_horizLocked ? "🔒" : "🔓"}  '
+                    '滚:$_activeScrollPage',
                     style: const TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 ),
@@ -293,6 +237,42 @@ class _GestureTestPageState extends State<GestureTestPage>
                 onPointerDown: _onDown,
                 onPointerMove: _onMove,
                 onPointerUp: _onUp,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _pageWidget(int index, double left, double width, Color color, String title, int count) {
+    return Positioned(
+      left: left, top: 0,
+      width: width, bottom: 0,
+      child: Container(
+        color: color,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 100, bottom: 12),
+              child: Text(title, style: const TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+            Expanded(
+              child: ListView.builder(
+                // ★ 非当前触摸页面的 ListView 不让滚动
+                physics: _activeScrollPage == index
+                    ? const AlwaysScrollableScrollPhysics()
+                    : const NeverScrollableScrollPhysics(),
+                itemCount: count,
+                itemBuilder: (_, i) => Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text('${title}${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 16)),
+                ),
               ),
             ),
           ],
