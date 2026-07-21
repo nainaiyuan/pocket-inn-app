@@ -88,7 +88,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
   @override
   void didUpdateWidget(ChatSidebarRight old) {
     super.didUpdateWidget(old);
-    if (old.currentPersona?.id != widget.currentPersona?.id) {
+    if (mounted) {
       _syncControllers();
     }
   }

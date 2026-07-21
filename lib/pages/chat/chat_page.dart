@@ -52,7 +52,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   final _localStore = LocalStorageService();
   File? _bgImage;
   final Map<String, File> _bgImages = {};
-  File? _avatarFile; // 当前角色的立绘文件
 
   // 获取当前聊天背景
   File? get _currentBg {
@@ -301,18 +300,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   // ---- 实时推算滚动归属 ----
-  int _calcScrollPage() {
-    if (_pointerId < 0) {
-      switch (_currentPanel) {
-        case Panel.left:   return 0;
-        case Panel.right:  return 2;
-        case Panel.center: return 1;
-      }
-    }
-    if (_offset > 0 && _startX < _offset) return 0;
-    if (_offset < 0 && _startX > MediaQuery.of(context).size.width + _offset) return 2;
-    return 1;
-  }
+  // (已废弃，保留作为参考)
 
   @override
   void dispose() {
@@ -444,16 +432,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     required Color color,
     required Widget child,
   }) {
-    final isActive = _calcScrollPage() == index;
     return Positioned(
       left: left, top: 0,
       width: width, bottom: 0,
       child: Container(
         color: color,
-        child: AbsorbPointer(
-          absorbing: !isActive,
-          child: child,
-        ),
+        child: child,
       ),
     );
   }

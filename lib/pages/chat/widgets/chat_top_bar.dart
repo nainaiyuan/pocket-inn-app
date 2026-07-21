@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
