@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../models/male_lead.dart';
 import '../../services/character_service.dart';
+import '../../services/local_storage_service.dart';
 import '../../models/chat_message.dart';
 import 'services/ai_chat_service.dart';
 import 'widgets/chat_sidebar_left.dart';
@@ -46,20 +47,24 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   Persona? _persona;
   bool _showPlus = false;
   final GlobalKey<ChatMessageAreaState> _msgKey = GlobalKey();
-  File? _bgImage; // 背景图（可选，按 persona id 存储）
 
-  // 获取当前背景图
+  // 图片存储
+  final _localStore = LocalStorageService();
+  File? _bgImage;
+  final Map<String, File> _bgImages = {};
+  File? _avatarFile; // 当前角色的立绘文件
+
+  // 获取当前聊天背景
   File? get _currentBg {
     final pid = _persona?.id;
     if (pid == null) return _bgImage;
     return _bgImages[pid] ?? _bgImage;
   }
 
-  final Map<String, File> _bgImages = {}; // personaId → 背景图
-
   @override
   void initState() {
     super.initState();
+    _localStore.init();
     _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
@@ -240,22 +245,26 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     ));
   }
 
-  // 选择聊天背景图
+  // 选择聊天背景图（复制到 APP 内部存储）
   Future<void> _pickBgImage() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.image,
     );
-    if (result != null && result.files.single.path != null) {
-      final img = File(result.files.single.path!);
-      setState(() {
-        final pid = _persona?.id;
-        if (pid != null) {
-          _bgImages[pid] = img;
-        } else {
-          _bgImage = img;
-        }
-      });
-    }
+    if (result == null || result.files.single.path == null) return;
+    final source = File(result.files.single.path!);
+    final lid = _lead?.id ?? '';
+    final pid = _persona?.id ?? 'default';
+    if (lid.isEmpty) return;
+
+    final saved = await _localStore.saveBackground(lid, pid, source);
+    setState(() {
+      final img = File(saved);
+      if (pid == 'default') {
+        _bgImage = img;
+      } else {
+        _bgImages[pid] = img;
+      }
+    });
   }
 
   // ---- 实时推算滚动归属 ----

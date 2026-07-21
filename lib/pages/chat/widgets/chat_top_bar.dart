@@ -56,7 +56,7 @@ class ChatTopBar extends StatelessWidget {
                   color: Colors.white.withValues(alpha: 0.5),
                   width: 1.5,
                 ),
-                image: (currentLead?.avatarPath.isNotEmpty == true)
+                image: (currentLead?.avatarPath.isNotEmpty == true && File(currentLead!.avatarPath).existsSync())
                     ? DecorationImage(
                         image: FileImage(File(currentLead!.avatarPath)),
                         fit: BoxFit.cover,

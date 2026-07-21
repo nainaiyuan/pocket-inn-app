@@ -1,6 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
+import '../../../services/local_storage_service.dart';
 
 /// 左滑侧边栏 —— 选择男主/形象
 class ChatSidebarLeft extends StatefulWidget {
@@ -97,17 +100,23 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
 
   // 上传立绘（placeholder — 后续接入 file picker）
   Future<void> _pickAvatar(MaleLead lead) async {
-    // TODO: 接入 image_picker 选本地图片
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('立绘上传功能准备中'), duration: Duration(seconds: 1)),
-    );
+    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    if (result == null || result.files.single.path == null) return;
+    final source = File(result.files.single.path!);
+    final savedPath = await LocalStorageService().saveLeadAvatar(lead.id, source);
+    lead.avatarPath = savedPath;
+    await _service.updateMaleLead(lead);
+    if (mounted) setState(() {});
   }
 
   Future<void> _pickPersonaAvatar(MaleLead lead, Persona persona) async {
-    // TODO: 接入 image_picker
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('形象头像上传功能准备中'), duration: Duration(seconds: 1)),
-    );
+    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    if (result == null || result.files.single.path == null) return;
+    final source = File(result.files.single.path!);
+    final savedPath = await LocalStorageService().savePersonaAvatar(lead.id, persona.id, source);
+    persona.avatarPath = savedPath;
+    await _service.updatePersona(lead.id, persona);
+    if (mounted) setState(() {});
   }
 
   @override
