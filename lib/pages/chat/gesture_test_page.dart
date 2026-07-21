@@ -109,7 +109,7 @@ class _GestureTestPageState extends State<GestureTestPage>
     final isExpanded = _dragBase.abs() > _sideW * 0.5;
     final goingBack = (_dragBase > 0 && dx < 0) || (_dragBase < 0 && dx > 0);
     if (isExpanded && goingBack) {
-      factor = 3.0;
+      factor = 2.5; // 可调：大屏 2.5~3，小屏 1.6~2
     }
 
     setState(() {
