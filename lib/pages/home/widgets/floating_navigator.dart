@@ -146,20 +146,27 @@ class _FloatingNavigatorState extends State<FloatingNavigator>
                 left: _position.dx,
                 top: _position.dy,
                 child: GestureDetector(
-                  onTap: () {
+                  onTapDown: (_) => _dragMoved = false,
+                  onTapUp: (_) {
                     if (!_dragMoved) _toggle();
                   },
-                  onPanStart: (_) => _dragMoved = false,
+                  onPanStart: (_) {
+                    _dragMoved = false;
+                    // 拖动开始，如果菜单打开则收起
+                    if (_isOpen) {
+                      _animCtrl.reverse();
+                      setState(() => _isOpen = false);
+                    }
+                  },
                   onPanUpdate: (details) {
-                    _dragMoved = true;
-                    final margin = 20.0;
                     setState(() {
                       _position = Offset(
                         (_position.dx + details.delta.dx)
-                            .clamp(margin, _screenSize.width - _orbSize - margin),
+                            .clamp(20.0, _screenSize.width - _orbSize - 20),
                         (_position.dy + details.delta.dy)
-                            .clamp(margin, _screenSize.height - _orbSize - margin),
+                            .clamp(20.0, _screenSize.height - _orbSize - 20),
                       );
+                      _dragMoved = true;
                     });
                   },
                   onPanEnd: (_) {
