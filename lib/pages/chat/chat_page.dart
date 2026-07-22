@@ -236,6 +236,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   Future<void> _pickBgImage() async {
+    await DebugLogger.log('BG', 'pickBgImage start');
     try {
       final result = await FilePicker.platform.pickFiles(type: FileType.image);
       if (result == null || result.files.single.path == null) return;
@@ -249,6 +250,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         saved = await _localStore.saveBackground(_state.leadId!, _state.personaId!, File(file.path!));
       }
       await _state.updateBackground(saved);
+      await DebugLogger.log('BG', 'pickBgImage done path=$saved');
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

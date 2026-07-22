@@ -117,6 +117,8 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     }
     lead.avatarPath = savedPath;
     await _service.updateMaleLead(lead);
+    // 等文件写完之后再触发 UI 刷新，避免 Image.file 竞争
+    await Future.delayed(const Duration(milliseconds: 50));
     if (mounted) setState(() {});
   }
 
@@ -136,6 +138,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     } else {
       persona.avatarPath = savedPath;
       await _service.updatePersona(lead.id, persona);
+      await Future.delayed(const Duration(milliseconds: 50));
       if (mounted) setState(() {});
     }
   }
