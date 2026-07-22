@@ -377,10 +377,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           ),
         ),
 
-        // ===== 聊天背景图（毛玻璃，在中间页顶层） =====
+        // ===== 聊天背景图（毛玻璃，在中间页消息区域底层） =====
         if (_currentBg != null)
-          Positioned.fill(
+          Positioned(
             left: _offset,
+            top: 0,
+            width: screenW,
+            // 高度只到输入栏上方，不覆盖输入栏
+            bottom: 90,
             child: IgnorePointer(
               child: ClipRRect(
                 child: Stack(
