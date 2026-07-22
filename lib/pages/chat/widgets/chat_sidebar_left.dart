@@ -277,6 +277,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
                                 fit: BoxFit.cover,
                                 width: 56,
                                 height: 72,
+                                key: ValueKey('lead_${lead.id}_${File(lead.avatarPath).lastModifiedSync().millisecondsSinceEpoch}'),
                               )
                             : Center(
                                 child: Icon(
@@ -465,6 +466,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
                                 fit: BoxFit.cover,
                                 width: 32,
                                 height: 32,
+                                key: ValueKey('persona_${persona.id}_${File(persona.avatarPath).lastModifiedSync().millisecondsSinceEpoch}'),
                               )
                             : Icon(
                                 Icons.face_6_outlined,

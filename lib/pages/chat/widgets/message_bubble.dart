@@ -247,6 +247,7 @@ class _Avatar extends StatelessWidget {
           fit: BoxFit.cover,
           width: 34,
           height: 34,
+          key: ValueKey('chat_avatar_${characterAvatarPath}_${File(characterAvatarPath!).lastModifiedSync().millisecondsSinceEpoch}'),
         ),
       );
     } else {

@@ -393,12 +393,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                     Image.file(_currentBg!, fit: BoxFit.cover,
                       width: screenW,
                       height: MediaQuery.of(context).size.height,
+                      key: ValueKey('bg_${_currentBg!.path}_${_currentBg!.lastModifiedSync().millisecondsSinceEpoch}'),
                     ),
-                    // 毛玻璃遮罩（更透的粉色）
+                    // 毛玻璃遮罩（半透明白色，保留原图色彩）
                     Positioned.fill(
                       child: BackdropFilter(
-                        filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                        child: Container(color: const Color(0xFFF5EEF0).withValues(alpha: 0.15)),
+                        filter: ui.ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+                        child: Container(color: Colors.black.withValues(alpha: 0.08)),
                       ),
                     ),
                   ],
