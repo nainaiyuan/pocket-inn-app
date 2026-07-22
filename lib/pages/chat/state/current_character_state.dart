@@ -85,16 +85,17 @@ class CurrentCharacterState extends ChangeNotifier {
     if (_persona == null || _lead == null) return;
     _persona!.avatarPath = path;
     await _charSvc.updatePersona(_lead!.id, _persona!);
-    notifyListeners();
     await DebugLogger.log('STATE', 'updateAvatar path=$path');
+    // 延迟一帧通知，避免 Image.file 加载与新文件写入竞争
+    Future.microtask(() => notifyListeners());
   }
 
-  // 背景：临时用 LocalStorageService 的 getBackground 读取
+  // 背景
   Future<void> updateBackground(String path) async {
     if (_persona == null || _lead == null) return;
     _bgFile = File(path);
-    notifyListeners();
     await DebugLogger.log('STATE', 'updateBackground path=$path');
+    Future.microtask(() => notifyListeners());
   }
 
   void clearCurrent() {
