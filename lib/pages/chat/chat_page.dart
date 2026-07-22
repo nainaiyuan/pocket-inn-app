@@ -70,8 +70,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       vsync: this,
       duration: const Duration(milliseconds: 300),
     )..addListener(_onAnimTick);
-    _state.addListener(() { if (mounted) setState(() {}); });
+    _state.addListener(_onStateChanged);
     _load();
+  }
+
+  void _onStateChanged() {
+    if (!mounted) return;
+    _lead = _state.lead;
+    _persona = _state.persona;
+    setState(() {});
   }
 
   Future<void> _load() async {
