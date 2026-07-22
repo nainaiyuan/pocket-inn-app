@@ -105,9 +105,11 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
 
   // 上传立绘（更新男主 avatarPath — 不经过 state，因为 lead 不是 state 管的）
   Future<void> _pickAvatar(MaleLead lead) async {
+    await DebugLogger.log('LEFT', '_pickAvatar start');
     final result = await FilePicker.platform.pickFiles(type: FileType.image);
     if (result == null || result.files.single.path == null) return;
     final file = result.files.single;
+    await DebugLogger.log('LEFT', '_pickAvatar picked file=${file.path}');
     final store = LocalStorageService();
     String savedPath;
     if (file.bytes != null) {
@@ -115,17 +117,22 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     } else {
       savedPath = await store.saveLeadAvatar(lead.id, File(file.path!));
     }
+    await DebugLogger.log('LEFT', '_pickAvatar saved=$savedPath');
     lead.avatarPath = savedPath;
     await _service.updateMaleLead(lead);
+    await DebugLogger.log('LEFT', '_pickAvatar updated service');
     // 等文件写完之后再触发 UI 刷新，避免 Image.file 竞争
     await Future.delayed(const Duration(milliseconds: 50));
     if (mounted) setState(() {});
+    await DebugLogger.log('LEFT', '_pickAvatar done');
   }
 
   Future<void> _pickPersonaAvatar(MaleLead lead, Persona persona) async {
+    await DebugLogger.log('LEFT', '_pickPersonaAvatar start');
     final result = await FilePicker.platform.pickFiles(type: FileType.image);
     if (result == null || result.files.single.path == null) return;
     final file = result.files.single;
+    await DebugLogger.log('LEFT', '_pickPersonaAvatar picked');
     final store = widget.characterState?.localStorageService ?? LocalStorageService();
     String savedPath;
     if (file.bytes != null) {
@@ -133,6 +140,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     } else {
       savedPath = await store.savePersonaAvatar(lead.id, persona.id, File(file.path!));
     }
+    await DebugLogger.log('LEFT', '_pickPersonaAvatar saved=$savedPath');
     if (widget.characterState != null) {
       await widget.characterState!.updateAvatar(savedPath);
     } else {
@@ -141,6 +149,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
       await Future.delayed(const Duration(milliseconds: 50));
       if (mounted) setState(() {});
     }
+    await DebugLogger.log('LEFT', '_pickPersonaAvatar done');
   }
 
   @override
