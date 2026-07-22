@@ -20,6 +20,7 @@ class DebugLogger {
     try {
       final appDir = await getApplicationDocumentsDirectory();
       _logPath = '${appDir.path}/debug_log.txt';
+      debugPrint('DebugLogger path: $_logPath');
       final f = File(_logPath);
       await f.parent.create(recursive: true);
       await f.writeAsString('');
@@ -28,7 +29,9 @@ class DebugLogger {
         await f.writeAsString(_pending.join('\n'));
         _pending.clear();
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('DebugLogger init error: $e');
+    }
   }
 
   /// 记录一次操作
