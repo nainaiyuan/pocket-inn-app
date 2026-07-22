@@ -58,8 +58,17 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       vsync: this,
       duration: const Duration(milliseconds: 300),
     )..addListener(_onAnimTick);
-    _state.addListener(() { if (mounted) setState(() {}); });
+    _state.addListener(_onStateChanged);
     _load();
+  }
+
+  void _onStateChanged() {
+    if (!mounted) return;
+    if (_state.needsGestureReset) {
+      _resetGestureState();
+      _state.consumeGestureReset();
+    }
+    setState(() {});
   }
 
   Future<void> _load() async {
@@ -110,6 +119,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   void _onDown(PointerDownEvent e) {
     if (_showPlus) return;
+    // 安全兜底：如果 _pointerId 已经被释放但状态残留，直接重置
+    if (_pointerId >= 0 && _pointerId != e.pointer) {
+      _pointerId = -1;
+      _dragging = false;
+      _horizLocked = false;
+    }
     if (_pointerId >= 0) return;
     _pointerId = e.pointer;
     _startX = e.position.dx;

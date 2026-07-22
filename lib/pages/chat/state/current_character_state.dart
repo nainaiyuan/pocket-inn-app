@@ -14,6 +14,10 @@ class CurrentCharacterState extends ChangeNotifier {
   Persona? _persona;
   File? _bgFile;
 
+  /// FilePicker 操作完毕后需要重置手势（由 ChatPage 监听并复位 _pointerId）
+  bool get needsGestureReset => _needsGestureReset;
+  bool _needsGestureReset = false;
+
   // ---- getter ----
   MaleLead? get lead => _lead;
   Persona? get persona => _persona;
@@ -86,8 +90,8 @@ class CurrentCharacterState extends ChangeNotifier {
     _persona!.avatarPath = path;
     await _charSvc.updatePersona(_lead!.id, _persona!);
     await DebugLogger.log('STATE', 'updateAvatar path=$path');
-    // 延迟一帧通知，避免 Image.file 加载与新文件写入竞争
-    Future.microtask(() => notifyListeners());
+    // 直接通知，然后在 widget 层做延迟 setState 避免竞争
+    notifyListeners();
   }
 
   // 背景
@@ -98,7 +102,7 @@ class CurrentCharacterState extends ChangeNotifier {
     _persona!.backgroundPath = path;
     await _charSvc.updatePersona(_lead!.id, _persona!);
     await DebugLogger.log('STATE', 'updateBackground path=$path');
-    Future.microtask(() => notifyListeners());
+    notifyListeners();
   }
 
   void clearCurrent() {
@@ -118,6 +122,22 @@ class CurrentCharacterState extends ChangeNotifier {
     _bgFile = null;
     notifyListeners();
     await DebugLogger.log('STATE', 'deleteCurrent lid=$lid');
+  }
+
+  /// 强制对外通知 UI 刷新（给左侧栏等外部组件用）
+  void notifyUI() {
+    notifyListeners();
+  }
+
+  /// 标记需要复位手势（左侧栏的 FilePicker 返回后调用）
+  void requestGestureReset() {
+    _needsGestureReset = true;
+    notifyListeners();
+  }
+
+  /// ChatPage 读取后自动消费
+  void consumeGestureReset() {
+    _needsGestureReset = false;
   }
 
   Future<MaleLead> createLeadWithDefaultPersona(String name) async {

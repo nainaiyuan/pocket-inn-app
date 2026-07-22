@@ -107,6 +107,8 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
   Future<void> _pickAvatar(MaleLead lead) async {
     await DebugLogger.log('LEFT', '_pickAvatar start');
     final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    // FilePicker 返回后复位手势
+    widget.characterState?.requestGestureReset();
     if (result == null || result.files.single.path == null) return;
     final file = result.files.single;
     await DebugLogger.log('LEFT', '_pickAvatar picked file=${file.path}');
@@ -123,6 +125,8 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     await DebugLogger.log('LEFT', '_pickAvatar updated service');
     // 等文件写完之后再触发 UI 刷新，避免 Image.file 竞争
     await Future.delayed(const Duration(milliseconds: 50));
+    // 通知中间页和 top bar 也刷新（lead.avatarPath 改了）
+    widget.characterState?.notifyUI();
     if (mounted) setState(() {});
     await DebugLogger.log('LEFT', '_pickAvatar done');
   }
@@ -132,6 +136,8 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     // 如果是从 bottomSheet 调用的，先等它关掉
     await Future.delayed(const Duration(milliseconds: 200));
     final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    // FilePicker 返回后复位手势
+    widget.characterState?.requestGestureReset();
     if (result == null || result.files.single.path == null) return;
     final file = result.files.single;
     await DebugLogger.log('LEFT', '_pickPersonaAvatar picked');
