@@ -7,6 +7,7 @@ import '../../models/male_lead.dart';
 import '../../services/character_service.dart';
 import '../../services/local_storage_service.dart';
 import '../../models/chat_message.dart';
+import '../../utils/debug_logger.dart';
 import 'services/ai_chat_service.dart';
 import 'state/current_character_state.dart';
 import 'widgets/chat_sidebar_left.dart';
@@ -18,11 +19,6 @@ import 'widgets/plus_menu.dart';
 import 'widgets/character_world_page.dart';
 
 /// 聊天主页面 —— 三页连续空间手势（v8 状态机版）
-///
-/// 手势系统：
-/// - 全屏 Listener（只读，不消费事件）
-/// - 方向锁定后分水平（切页）/ 垂直（滚 ListView）
-/// - 触摸坐标实时推算滚动归属
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
   @override
@@ -37,70 +33,44 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   static const double _lockThr = 8.0;
   static const double _closeFactor = 2.5;
 
-  // ---- 唯一状态 ----
+  // ---- 状态 ----
   double _offset = 0;
   Panel _currentPanel = Panel.center;
 
-  // ---- 角色 ----
-  final _charSvc = CharacterService();
+  // ---- 角色 —— 全部从 _state 读取 ----
   final _state = CurrentCharacterState();
   final _aiSvc = AiChatService();
-  MaleLead? _lead;
-  Persona? _persona;
   bool _showPlus = false;
   final GlobalKey<ChatMessageAreaState> _msgKey = GlobalKey();
-
-  // 图片存储
   final _localStore = LocalStorageService();
-  File? _bgImage;
-  final Map<String, File> _bgImages = {};
 
-  // 获取当前聊天背景
+  /// 当前聊天背景 — 从 _state 实时读
   File? get _currentBg {
-    final pid = _persona?.id;
-    if (pid == null) return _bgImage;
-    return _bgImages[pid] ?? _bgImage;
+    return _state.bgFile;
   }
 
   @override
   void initState() {
     super.initState();
     _localStore.init();
+    DebugLogger.init();
     _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
     )..addListener(_onAnimTick);
-    _state.addListener(_onStateChanged);
+    _state.addListener(() { if (mounted) setState(() {}); });
     _load();
   }
 
-  void _onStateChanged() {
-    if (!mounted) return;
-    _lead = _state.lead;
-    _persona = _state.persona;
-    setState(() {});
-  }
-
   Future<void> _load() async {
-    try { await _charSvc.load(); } catch (_) {}
+    await _state.init();
     if (!mounted) return;
-    final ls = _charSvc.leads;
-    if (ls.isNotEmpty) {
-      setState(() { _lead = ls.first; _persona = ls.first.personas.isNotEmpty ? ls.first.personas.first : null; });
-    } else {
-      await _charSvc.addMaleLead(MaleLead(id: 'd', name: '沈星回'));
-      if (!mounted) return;
-      await _charSvc.load();
-      if (_charSvc.leads.isNotEmpty && mounted) {
-        final lead = _charSvc.leads.first;
-        // 给新角色自动建默认 persona
-        if (lead.personas.isEmpty) {
-          await _charSvc.addPersona(lead.id, Persona(id: '${lead.id}_default', maleLeadId: lead.id, name: '默认'));
-          await _charSvc.load();
-        }
-        setState(() { _lead = lead; _persona = lead.personas.isNotEmpty ? lead.personas.first : null; });
-      }
+    if (_state.characterService.leads.isEmpty) {
+      await _state.createLeadWithDefaultPersona('沈星回');
     }
+    await _state.tryAutoSelect();
+    await DebugLogger.log('CHAT', '_load done, hasLead=${_state.hasLead}');
+    if (mounted) setState(() {});
   }
 
   // ---- 手势 ----
@@ -111,7 +81,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   bool _horizLocked = false;
   int _pointerId = -1;
 
-  // ---- 动画 ----
   late AnimationController _anim;
   double _animStart = 0, _animEnd = 0;
 
@@ -240,7 +209,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   void _selectPersona(MaleLead l, Persona p) {
-    setState(() { _lead = l; _persona = p; });
+    _state.setCurrent(l, p);
     _currentPanel = Panel.center;
     _animateTo(0);
     HapticFeedback.lightImpact();
@@ -248,44 +217,38 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   Future<void> _sendMsg(String t) async {
     _msgKey.currentState?.appendMessage(ChatMessage(id: DateTime.now().millisecondsSinceEpoch.toString(), text: t, isMe: true));
-    final r = await _aiSvc.generateReply(t, _persona?.id ?? 'd');
+    final r = await _aiSvc.generateReply(t, _state.personaId ?? 'd');
     _msgKey.currentState?.appendMessage(ChatMessage(id: '${DateTime.now().millisecondsSinceEpoch}_ai', text: r, isMe: false));
   }
 
   void _openWorld() {
-    if (_lead == null) return;
-    final pid = _persona?.id ?? '${_lead!.id}_default';
+    if (!_state.hasLead) return;
+    final lid = _state.lead!.id;
+    final pid = _state.persona?.id ?? '${lid}_default';
     Navigator.push(context, PageRouteBuilder(
-      pageBuilder: (_, __, ___) => CharacterWorldPage(lead: _lead!, persona: _persona ?? Persona(id: pid, maleLeadId: _lead!.id, name: '默认')),
+      pageBuilder: (_, __, ___) => CharacterWorldPage(
+        lead: _state.lead!,
+        persona: _state.persona ?? Persona(id: pid, maleLeadId: lid, name: '默认'),
+      ),
       transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c),
       transitionDuration: const Duration(milliseconds: 300),
     ));
   }
 
-  // 选择聊天背景图（复制到 APP 内部存储）
   Future<void> _pickBgImage() async {
     try {
       final result = await FilePicker.platform.pickFiles(type: FileType.image);
       if (result == null || result.files.single.path == null) return;
       final file = result.files.single;
-      final lid = _lead?.id ?? '';
-      final pid = _persona?.id ?? 'default';
-      if (lid.isEmpty) return;
+      if (!_state.hasLead || !_state.hasPersona) return;
 
       String saved;
       if (file.bytes != null) {
-        saved = await _localStore.saveBackgroundFromBytes(lid, pid, file.bytes!);
+        saved = await _localStore.saveBackgroundFromBytes(_state.leadId!, _state.personaId!, file.bytes!);
       } else {
-        saved = await _localStore.saveBackground(lid, pid, File(file.path!));
+        saved = await _localStore.saveBackground(_state.leadId!, _state.personaId!, File(file.path!));
       }
-      setState(() {
-        final img = File(saved);
-        if (pid == 'default') {
-          _bgImage = img;
-        } else {
-          _bgImages[pid] = img;
-        }
-      });
+      await _state.updateBackground(saved);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -301,21 +264,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       final result = await FilePicker.platform.pickFiles(type: FileType.image);
       if (result == null || result.files.single.path == null) return;
       final file = result.files.single;
-      if (_lead == null) return;
+      if (!_state.hasLead || !_state.hasPersona) return;
 
       String savedPath;
-      // 优先用 bytes（兼容 Android content:// URI）
       if (file.bytes != null) {
-        savedPath = await _localStore.saveLeadAvatarFromBytes(_lead!.id, file.bytes!);
+        savedPath = await _localStore.savePersonaAvatarFromBytes(_state.leadId!, _state.personaId!, file.bytes!);
       } else {
-        savedPath = await _localStore.saveLeadAvatar(_lead!.id, File(file.path!));
+        savedPath = await _localStore.savePersonaAvatar(_state.leadId!, _state.personaId!, File(file.path!));
       }
-      // 同时更新角色的 avatarPath
-      _lead!.avatarPath = savedPath;
-      await _charSvc.updateMaleLead(_lead!);
-      if (mounted) {
-        setState(() {}); // 触发刷新
-      }
+      await _state.updateAvatar(savedPath);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -324,9 +281,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       }
     }
   }
-
-  // ---- 实时推算滚动归属 ----
-  // (已废弃，保留作为参考)
 
   @override
   void dispose() {
@@ -349,8 +303,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           width: sideW,
           color: const Color(0xFFEED9DC),
           child: ChatSidebarLeft(
-            currentLead: _lead,
-            currentPersona: _persona,
+            currentLead: _state.lead,
+            currentPersona: _state.persona,
             onSelectPersona: (entry) => _selectPersona(entry.key, entry.value),
             onOpenSettings: () { _currentPanel = Panel.right; _animateTo(-sideW); },
             onSetBg: _pickBgImage,
@@ -369,11 +323,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             child: SafeArea(
               child: Column(
                 children: [
-                  ChatTopBar(currentLead: _lead, currentPersona: _persona,
+                  ChatTopBar(currentLead: _state.lead, currentPersona: _state.persona,
                     onTapAvatar: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); },
                     onNameChanged: () { if (mounted) setState(() {}); }),
-                  Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona,
-                    characterAvatarPath: _localStore.getLeadAvatarPath(_lead?.id ?? ''),
+                  Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _state.persona,
+                    characterAvatarPath: _state.effectiveAvatarPath,
                     onAvatarTap: _openWorld)),
                   ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
                     onPlusTap: _togglePlus, onSendTap: _sendMsg),
@@ -414,30 +368,23 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           width: sideW,
           color: const Color(0xFFDCE4EE),
           child: ChatSidebarRight(
-            currentLead: _lead,
-            currentPersona: _persona,
+            currentLead: _state.lead,
+            currentPersona: _state.persona,
             onDelete: () {
-              // 删完后切到第一个可用角色
-              final ls = _charSvc.leads;
-              if (ls.isNotEmpty) {
-                final firstLead = ls.first;
-                final firstPersona = firstLead.personas.isNotEmpty
-                    ? firstLead.personas.first
-                    : Persona(id: '${firstLead.id}_default', maleLeadId: firstLead.id, name: '默认');
-                setState(() {
-                  _lead = firstLead;
-                  _persona = firstPersona;
-                });
+              _state.deleteCurrent();
+              if (_state.characterService.leads.isEmpty) {
+                _state.createLeadWithDefaultPersona('沈星回');
+              } else {
+                _state.tryAutoSelect();
               }
               _currentPanel = Panel.center;
               _animateTo(0);
             },
+            characterState: _state,
           ),
         ),
 
         // ===== 全屏手势监听 =====
-        // behavior: translucent 曾拦截点击，改用 transparent 但不存在,
-        // 回退到 translucent + 在_onUp里检测点击手势
         Positioned.fill(
           child: Listener(
             behavior: HitTestBehavior.translucent,

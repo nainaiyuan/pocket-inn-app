@@ -3,18 +3,21 @@ import 'package:flutter/material.dart';
 import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
 import '../services/chat_storage_service.dart';
+import '../state/current_character_state.dart';
 
 /// 角色设置侧栏（右页）
 class ChatSidebarRight extends StatefulWidget {
   final MaleLead? currentLead;
   final Persona? currentPersona;
   final VoidCallback onDelete;
+  final CurrentCharacterState? characterState;
 
   const ChatSidebarRight({
     super.key,
     required this.currentLead,
     required this.currentPersona,
     required this.onDelete,
+    this.characterState,
   });
 
   @override
