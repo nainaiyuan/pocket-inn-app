@@ -5,6 +5,8 @@ import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
 import '../../../services/local_storage_service.dart';
 
+import '../state/current_character_state.dart';
+
 /// 左滑侧边栏 —— 选择男主/形象
 class ChatSidebarLeft extends StatefulWidget {
   final MaleLead? currentLead;
@@ -12,6 +14,7 @@ class ChatSidebarLeft extends StatefulWidget {
   final ValueChanged<MapEntry<MaleLead, Persona>> onSelectPersona;
   final VoidCallback? onOpenSettings;
   final VoidCallback? onSetBg;
+  final CurrentCharacterState? characterState;
 
   const ChatSidebarLeft({
     super.key,
@@ -20,6 +23,7 @@ class ChatSidebarLeft extends StatefulWidget {
     required this.onSelectPersona,
     this.onOpenSettings,
     this.onSetBg,
+    this.characterState,
   });
 
   @override
@@ -91,10 +95,11 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
 
   // 选中男主本体（用第一个 persona 或默认）
   void _selectLead(MaleLead lead) {
-    if (lead.personas.isNotEmpty) {
-      widget.onSelectPersona(MapEntry(lead, lead.personas.first));
+    final p = lead.personas.isNotEmpty ? lead.personas.first : _defaultPersona(lead);
+    if (widget.characterState != null) {
+      widget.characterState!.setCurrent(lead, p);
     } else {
-      widget.onSelectPersona(MapEntry(lead, _defaultPersona(lead)));
+      widget.onSelectPersona(MapEntry(lead, p));
     }
   }
 
@@ -119,16 +124,20 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     final result = await FilePicker.platform.pickFiles(type: FileType.image);
     if (result == null || result.files.single.path == null) return;
     final file = result.files.single;
-    final store = LocalStorageService();
+    final store = widget.characterState?.localStorageService ?? LocalStorageService();
     String savedPath;
     if (file.bytes != null) {
       savedPath = await store.savePersonaAvatarFromBytes(lead.id, persona.id, file.bytes!);
     } else {
       savedPath = await store.savePersonaAvatar(lead.id, persona.id, File(file.path!));
     }
-    persona.avatarPath = savedPath;
-    await _service.updatePersona(lead.id, persona);
-    if (mounted) setState(() {});
+    if (widget.characterState != null) {
+      await widget.characterState!.updateAvatar(savedPath);
+    } else {
+      persona.avatarPath = savedPath;
+      await _service.updatePersona(lead.id, persona);
+      if (mounted) setState(() {});
+    }
   }
 
   @override
