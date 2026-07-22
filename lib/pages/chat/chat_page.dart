@@ -366,9 +366,38 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                   ChatTopBar(currentLead: _state.lead, currentPersona: _state.persona,
                     onTapAvatar: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); },
                     onNameChanged: () { if (mounted) setState(() {}); }),
-                  Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _state.persona,
-                    characterAvatarPath: _state.effectiveAvatarPath,
-                    onAvatarTap: _openWorld)),
+                  // 聊天消息区域（背景图放在这里，精确对齐内容区）
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        // 聊天背景图（放在消息区域底层）
+                        if (_currentBg != null)
+                          Positioned.fill(
+                            child: ClipRRect(
+                              child: Stack(
+                                children: [
+                                  Image.file(_currentBg!, fit: BoxFit.cover,
+                                    width: screenW,
+                                    height: MediaQuery.of(context).size.height,
+                                    key: ValueKey('bg_${_currentBg!.path}_${_currentBg!.lastModifiedSync().millisecondsSinceEpoch}'),
+                                  ),
+                                  Positioned.fill(
+                                    child: BackdropFilter(
+                                      filter: ui.ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+                                      child: Container(color: Colors.black.withValues(alpha: 0.08)),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        // 消息列表在背景之上
+                        ChatMessageArea(key: _msgKey, currentPersona: _state.persona,
+                          characterAvatarPath: _state.effectiveAvatarPath,
+                          onAvatarTap: _openWorld),
+                      ],
+                    ),
+                  ),
                   ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
                     onPlusTap: _togglePlus, onSendTap: _sendMsg),
                 ],
@@ -376,37 +405,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             ),
           ),
         ),
-
-        // ===== 聊天背景图（毛玻璃，在中间页消息区域底层） =====
-        if (_currentBg != null)
-          Positioned(
-            left: _offset,
-            top: 0,
-            width: screenW,
-            // 高度只到输入栏上方，不覆盖输入栏
-            bottom: 90,
-            child: IgnorePointer(
-              child: ClipRRect(
-                child: Stack(
-                  children: [
-                    // 背景原图
-                    Image.file(_currentBg!, fit: BoxFit.cover,
-                      width: screenW,
-                      height: MediaQuery.of(context).size.height,
-                      key: ValueKey('bg_${_currentBg!.path}_${_currentBg!.lastModifiedSync().millisecondsSinceEpoch}'),
-                    ),
-                    // 毛玻璃遮罩（半透明白色，保留原图色彩）
-                    Positioned.fill(
-                      child: BackdropFilter(
-                        filter: ui.ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-                        child: Container(color: Colors.black.withValues(alpha: 0.08)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
 
         // ===== 右页 =====
         _pageWidget(
