@@ -56,4 +56,10 @@ class ChatStorageService {
     msgs.removeWhere((m) => messageIds.contains(m.id));
     await saveMessages(personaId, msgs);
   }
+
+  /// 删除某个角色的所有聊天记录
+  Future<void> deleteAllMessages(String personaId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_key(personaId));
+  }
 }

@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
+import '../services/chat_storage_service.dart';
 
 /// 角色设置侧栏（右页）
 class ChatSidebarRight extends StatefulWidget {
@@ -209,10 +209,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
     );
     if (confirm == true) {
       // 用 ChatStorageService 清空
-      final prefs = await SharedPreferences.getInstance();
-      // 使用 ChatStorageService 的内部 key 格式
-      final key = 'chat_messages_$pid';
-      await prefs.remove(key);
+      await ChatStorageService().deleteAllMessages(pid);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('聊天记录已清空'), duration: Duration(seconds: 1)),

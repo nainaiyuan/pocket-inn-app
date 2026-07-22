@@ -102,8 +102,14 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
   Future<void> _pickAvatar(MaleLead lead) async {
     final result = await FilePicker.platform.pickFiles(type: FileType.image);
     if (result == null || result.files.single.path == null) return;
-    final source = File(result.files.single.path!);
-    final savedPath = await LocalStorageService().saveLeadAvatar(lead.id, source);
+    final file = result.files.single;
+    final store = LocalStorageService();
+    String savedPath;
+    if (file.bytes != null) {
+      savedPath = await store.saveLeadAvatarFromBytes(lead.id, file.bytes!);
+    } else {
+      savedPath = await store.saveLeadAvatar(lead.id, File(file.path!));
+    }
     lead.avatarPath = savedPath;
     await _service.updateMaleLead(lead);
     if (mounted) setState(() {});
@@ -112,8 +118,14 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
   Future<void> _pickPersonaAvatar(MaleLead lead, Persona persona) async {
     final result = await FilePicker.platform.pickFiles(type: FileType.image);
     if (result == null || result.files.single.path == null) return;
-    final source = File(result.files.single.path!);
-    final savedPath = await LocalStorageService().savePersonaAvatar(lead.id, persona.id, source);
+    final file = result.files.single;
+    final store = LocalStorageService();
+    String savedPath;
+    if (file.bytes != null) {
+      savedPath = await store.savePersonaAvatarFromBytes(lead.id, persona.id, file.bytes!);
+    } else {
+      savedPath = await store.savePersonaAvatar(lead.id, persona.id, File(file.path!));
+    }
     persona.avatarPath = savedPath;
     await _service.updatePersona(lead.id, persona);
     if (mounted) setState(() {});
@@ -228,12 +240,22 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
                         ),
                         border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
                       ),
-                      child: Center(
-                        child: Icon(
-                          lead.avatarPath.isEmpty ? Icons.person_outline_rounded : Icons.image_outlined,
-                          size: 28,
-                          color: const Color(0xFF8A6A78),
-                        ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: lead.avatarPath.isNotEmpty && File(lead.avatarPath).existsSync()
+                            ? Image.file(
+                                File(lead.avatarPath),
+                                fit: BoxFit.cover,
+                                width: 56,
+                                height: 72,
+                              )
+                            : Center(
+                                child: Icon(
+                                  Icons.person_outline_rounded,
+                                  size: 28,
+                                  color: const Color(0xFF8A6A78),
+                                ),
+                              ),
                       ),
                     ),
                   ),
@@ -406,10 +428,20 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
                           width: 1.5,
                         ),
                       ),
-                      child: Icon(
-                        persona.avatarPath.isEmpty ? Icons.face_6_outlined : Icons.image_outlined,
-                        size: 16,
-                        color: isActive ? const Color(0xFFB48296) : const Color(0xFF8A6A78),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: persona.avatarPath.isNotEmpty && File(persona.avatarPath).existsSync()
+                            ? Image.file(
+                                File(persona.avatarPath),
+                                fit: BoxFit.cover,
+                                width: 32,
+                                height: 32,
+                              )
+                            : Icon(
+                                Icons.face_6_outlined,
+                                size: 16,
+                                color: isActive ? const Color(0xFFB48296) : const Color(0xFF8A6A78),
+                              ),
                       ),
                     ),
                   ),

@@ -257,12 +257,17 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     try {
       final result = await FilePicker.platform.pickFiles(type: FileType.image);
       if (result == null || result.files.single.path == null) return;
-      final source = File(result.files.single.path!);
+      final file = result.files.single;
       final lid = _lead?.id ?? '';
       final pid = _persona?.id ?? 'default';
       if (lid.isEmpty) return;
 
-      final saved = await _localStore.saveBackground(lid, pid, source);
+      String saved;
+      if (file.bytes != null) {
+        saved = await _localStore.saveBackgroundFromBytes(lid, pid, file.bytes!);
+      } else {
+        saved = await _localStore.saveBackground(lid, pid, File(file.path!));
+      }
       setState(() {
         final img = File(saved);
         if (pid == 'default') {
@@ -285,11 +290,21 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     try {
       final result = await FilePicker.platform.pickFiles(type: FileType.image);
       if (result == null || result.files.single.path == null) return;
-      final source = File(result.files.single.path!);
+      final file = result.files.single;
       if (_lead == null) return;
-      await _localStore.saveLeadAvatar(_lead!.id, source);
+
+      String savedPath;
+      // 优先用 bytes（兼容 Android content:// URI）
+      if (file.bytes != null) {
+        savedPath = await _localStore.saveLeadAvatarFromBytes(_lead!.id, file.bytes!);
+      } else {
+        savedPath = await _localStore.saveLeadAvatar(_lead!.id, File(file.path!));
+      }
+      // 同时更新角色的 avatarPath
+      _lead!.avatarPath = savedPath;
+      await _charSvc.updateMaleLead(_lead!);
       if (mounted) {
-        setState(() {}); // 刷新（ChatTopBar 现在没头像了，但刷新 state）
+        setState(() {}); // 触发刷新
       }
     } catch (e) {
       if (mounted) {
@@ -346,7 +361,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                   ChatTopBar(currentLead: _lead, currentPersona: _persona,
                     onTapAvatar: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); },
                     onNameChanged: () { if (mounted) setState(() {}); }),
-                  Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona)),
+                  Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona,
+                    characterAvatarPath: _localStore.getLeadAvatarPath(_lead?.id ?? ''))),
                   ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
                     onPlusTap: _togglePlus, onSendTap: _sendMsg),
                 ],
@@ -407,13 +423,26 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           ),
         ),
 
-        // ===== 全屏手势监听 =====
+        // ===== 全屏手势监听 — 只监听左右边缘（避免拦截中间区域点击） =====
         Positioned.fill(
-          child: Listener(
-            behavior: HitTestBehavior.translucent,
-            onPointerDown: _onDown,
-            onPointerMove: _onMove,
-            onPointerUp: _onUp,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final edgeWidth = 30.0; // 左右各30px的边缘区
+              return Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: (e) {
+                  // 只响应边缘区域的触摸
+                  if (e.position.dx < edgeWidth ||
+                      e.position.dx > constraints.maxWidth - edgeWidth) {
+                    _onDown(e);
+                  }
+                },
+                onPointerMove: (e) {
+                  if (_pointerId >= 0) _onMove(e);
+                },
+                onPointerUp: (e) => _onUp(e),
+              );
+            },
           ),
         ),
 

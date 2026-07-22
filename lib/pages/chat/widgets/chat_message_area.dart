@@ -7,10 +7,12 @@ import 'message_bubble.dart';
 /// 消息区域 —— 渲染消息列表 + 加载历史 + 多选删除
 class ChatMessageArea extends StatefulWidget {
   final Persona? currentPersona;
+  final String? characterAvatarPath;
 
   const ChatMessageArea({
     super.key,
     required this.currentPersona,
+    this.characterAvatarPath,
   });
 
   @override
@@ -252,6 +254,7 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
                           message: msg,
                           userSetting: null,
                           character: null,
+                          characterAvatarPath: widget.characterAvatarPath,
                           inputTapRegionGroupId: const Object(),
                           isLastUserMessageWithoutReply:
                               index == _messages.length - 1 && msg.isMe,

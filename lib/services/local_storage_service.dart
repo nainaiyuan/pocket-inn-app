@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
 
 /// 本地文件存储服务
@@ -41,6 +42,13 @@ class LocalStorageService {
     return dest;
   }
 
+  /// 从 bytes 保存立绘（用于 Android content:// URI 场景）
+  Future<String> saveLeadAvatarFromBytes(String leadId, Uint8List bytes) async {
+    final dest = _avatarPath(leadId);
+    await File(dest).writeAsBytes(bytes);
+    return dest;
+  }
+
   String getLeadAvatarPath(String leadId) => _avatarPath(leadId);
 
   Future<bool> leadAvatarExists(String leadId) async {
@@ -61,6 +69,12 @@ class LocalStorageService {
     return dest;
   }
 
+  Future<String> savePersonaAvatarFromBytes(String leadId, String personaId, Uint8List bytes) async {
+    final dest = _personaAvatarPath(leadId, personaId);
+    await File(dest).writeAsBytes(bytes);
+    return dest;
+  }
+
   String getPersonaAvatarPath(String leadId, String personaId) =>
       _personaAvatarPath(leadId, personaId);
 
@@ -74,6 +88,12 @@ class LocalStorageService {
   Future<String> saveBackground(String leadId, String personaId, File source) async {
     final dest = _bgPath(leadId, personaId);
     await source.copy(dest);
+    return dest;
+  }
+
+  Future<String> saveBackgroundFromBytes(String leadId, String personaId, Uint8List bytes) async {
+    final dest = _bgPath(leadId, personaId);
+    await File(dest).writeAsBytes(bytes);
     return dest;
   }
 

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../../models/chat_message.dart';
@@ -26,6 +28,7 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onImpersonate;
   final VoidCallback? onSelectPreviousVariant;
   final VoidCallback? onSelectNextVariant;
+  final String? characterAvatarPath;
 
   const MessageBubble({
     super.key,
@@ -49,6 +52,7 @@ class MessageBubble extends StatelessWidget {
     this.onImpersonate,
     this.onSelectPreviousVariant,
     this.onSelectNextVariant,
+    this.characterAvatarPath,
   });
 
   @override
@@ -71,7 +75,7 @@ class MessageBubble extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               if (!message.isMe) ...[
-                _Avatar(isUser: false),
+                _Avatar(isUser: false, characterAvatarPath: characterAvatarPath),
                 const SizedBox(width: 8),
               ],
               // 气泡
@@ -212,11 +216,33 @@ class _ActionButton extends StatelessWidget {
 
 class _Avatar extends StatelessWidget {
   final bool isUser;
+  final String? characterAvatarPath;
 
-  const _Avatar({required this.isUser});
+  const _Avatar({required this.isUser, this.characterAvatarPath});
 
   @override
   Widget build(BuildContext context) {
+    Widget avatarChild;
+    if (!isUser && characterAvatarPath != null && File(characterAvatarPath!).existsSync()) {
+      avatarChild = ClipRRect(
+        borderRadius: BorderRadius.circular(17),
+        child: Image.file(
+          File(characterAvatarPath!),
+          fit: BoxFit.cover,
+          width: 34,
+          height: 34,
+        ),
+      );
+    } else {
+      avatarChild = Icon(
+        isUser
+            ? Icons.person_outline_rounded
+            : Icons.auto_awesome_mosaic_outlined,
+        size: 18,
+        color: const Color(0xFFB48296).withValues(alpha: 0.4),
+      );
+    }
+
     return Container(
       width: 34,
       height: 34,
@@ -238,13 +264,7 @@ class _Avatar extends StatelessWidget {
           width: 1.5,
         ),
       ),
-      child: Icon(
-        isUser
-            ? Icons.person_outline_rounded
-            : Icons.auto_awesome_mosaic_outlined,
-        size: 18,
-        color: const Color(0xFFB48296).withValues(alpha: 0.4),
-      ),
+      child: avatarChild,
     );
   }
 }
