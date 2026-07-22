@@ -423,26 +423,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           ),
         ),
 
-        // ===== 全屏手势监听 — 只监听左右边缘（避免拦截中间区域点击） =====
+        // ===== 全屏手势监听 =====
+        // behavior: transparent 确保点击穿透到子组件
         Positioned.fill(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final edgeWidth = 30.0; // 左右各30px的边缘区
-              return Listener(
-                behavior: HitTestBehavior.translucent,
-                onPointerDown: (e) {
-                  // 只响应边缘区域的触摸
-                  if (e.position.dx < edgeWidth ||
-                      e.position.dx > constraints.maxWidth - edgeWidth) {
-                    _onDown(e);
-                  }
-                },
-                onPointerMove: (e) {
-                  if (_pointerId >= 0) _onMove(e);
-                },
-                onPointerUp: (e) => _onUp(e),
-              );
+          child: Listener(
+            behavior: HitTestBehavior.transparent,
+            onPointerDown: _onDown,
+            onPointerMove: (e) {
+              if (_pointerId >= 0) _onMove(e);
             },
+            onPointerUp: _onUp,
           ),
         ),
 
