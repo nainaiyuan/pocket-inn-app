@@ -129,6 +129,8 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
 
   Future<void> _pickPersonaAvatar(MaleLead lead, Persona persona) async {
     await DebugLogger.log('LEFT', '_pickPersonaAvatar start');
+    // 如果是从 bottomSheet 调用的，先等它关掉
+    await Future.delayed(const Duration(milliseconds: 200));
     final result = await FilePicker.platform.pickFiles(type: FileType.image);
     if (result == null || result.files.single.path == null) return;
     final file = result.files.single;
@@ -369,7 +371,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
               ),
               const SizedBox(height: 16),
               _MenuBtn(icon: Icons.image_outlined, label: '更换立绘', onTap: () { Navigator.pop(ctx); _pickAvatar(lead); }),
-              _MenuBtn(icon: Icons.wallpaper_outlined, label: '设置聊天背景', onTap: () { Navigator.pop(ctx); widget.onSetBg?.call(); }),
+              _MenuBtn(icon: Icons.wallpaper_outlined, label: '设置聊天背景', onTap: () async { Navigator.pop(ctx); await Future.delayed(const Duration(milliseconds: 250)); widget.onSetBg?.call(); }),
               const SizedBox(height: 8),
             ],
           ),

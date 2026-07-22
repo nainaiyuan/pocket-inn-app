@@ -94,6 +94,9 @@ class CurrentCharacterState extends ChangeNotifier {
   Future<void> updateBackground(String path) async {
     if (_persona == null || _lead == null) return;
     _bgFile = File(path);
+    // 持久化到 Persona 模型，页面重建后能恢复
+    _persona!.backgroundPath = path;
+    await _charSvc.updatePersona(_lead!.id, _persona!);
     await DebugLogger.log('STATE', 'updateBackground path=$path');
     Future.microtask(() => notifyListeners());
   }
@@ -136,7 +139,18 @@ class CurrentCharacterState extends ChangeNotifier {
 
   // ---- 背景文件 ----
   void _loadBgFile() {
-    // 当前模型没有 backgroundPath 字段，暂用 LocalStorageService 的路径
-    _bgFile = null;
+    if (_persona == null) {
+      _bgFile = null;
+      return;
+    }
+    // 优先用 Persona 上持久化的 backgroundPath
+    if (_persona!.backgroundPath.isNotEmpty) {
+      final f = File(_persona!.backgroundPath);
+      _bgFile = f.existsSync() ? f : null;
+    } else {
+      // 兼容旧数据：从 LocalStorageService 按规则路径找
+      final f = _localStore.getBackgroundFile(_lead!.id, _persona!.id);
+      _bgFile = f;
+    }
   }
 }

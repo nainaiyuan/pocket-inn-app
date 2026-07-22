@@ -50,6 +50,7 @@ class Persona {
   final String maleLeadId; // 所属男主 ID
   String name; // 形象名称（如"校园版"、"吸血鬼"）
   String avatarPath; // 形象头像（可选，不设则用男主头像）
+  String backgroundPath; // 聊天背景图片路径（可选）
   String prompt; // 该形象的 prompt
   String greeting; // 首次对话开场白
   String description; // 简短描述（卡片上用）
@@ -60,6 +61,7 @@ class Persona {
     required this.maleLeadId,
     required this.name,
     this.avatarPath = '',
+    this.backgroundPath = '',
     this.prompt = '',
     this.greeting = '',
     this.description = '',
@@ -71,6 +73,7 @@ class Persona {
     String? maleLeadId,
     String? name,
     String? avatarPath,
+    String? backgroundPath,
     String? prompt,
     String? greeting,
     String? description,
@@ -81,6 +84,7 @@ class Persona {
       maleLeadId: maleLeadId ?? this.maleLeadId,
       name: name ?? this.name,
       avatarPath: avatarPath ?? this.avatarPath,
+      backgroundPath: backgroundPath ?? this.backgroundPath,
       prompt: prompt ?? this.prompt,
       greeting: greeting ?? this.greeting,
       description: description ?? this.description,
@@ -93,6 +97,7 @@ class Persona {
         'maleLeadId': maleLeadId,
         'name': name,
         'avatarPath': avatarPath,
+        'backgroundPath': backgroundPath,
         'prompt': prompt,
         'greeting': greeting,
         'description': description,
@@ -104,6 +109,7 @@ class Persona {
         maleLeadId: json['maleLeadId'] as String,
         name: json['name'] as String,
         avatarPath: json['avatarPath'] as String? ?? '',
+        backgroundPath: json['backgroundPath'] as String? ?? '',
         prompt: json['prompt'] as String? ?? '',
         greeting: json['greeting'] as String? ?? '',
         description: json['description'] as String? ?? '',

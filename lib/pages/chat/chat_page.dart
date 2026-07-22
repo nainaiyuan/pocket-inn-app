@@ -101,6 +101,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       ..forward();
   }
 
+  /// 强制复位手势状态（在 FilePicker 返回后调用，防止 pointerId 残留导致手势卡死）
+  void _resetGestureState() {
+    _pointerId = -1;
+    _dragging = false;
+    _horizLocked = false;
+  }
+
   void _onDown(PointerDownEvent e) {
     if (_showPlus) return;
     if (_pointerId >= 0) return;
@@ -237,8 +244,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   Future<void> _pickBgImage() async {
     await DebugLogger.log('BG', 'pickBgImage start');
+    // 先关 plus 菜单（防止卡死）
+    _showPlus = false;
+    setState(() {});
+    // 给一帧让 UI 刷新，确保 plus 菜单完全消失
+    await Future.delayed(const Duration(milliseconds: 100));
     try {
       final result = await FilePicker.platform.pickFiles(type: FileType.image);
+      // FilePicker 返回后强制复位手势状态（防止 pointerId 残留）
+      _resetGestureState();
       if (result == null || result.files.single.path == null) return;
       final file = result.files.single;
       if (!_state.hasLead || !_state.hasPersona) return;
@@ -252,6 +266,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       await _state.updateBackground(saved);
       await DebugLogger.log('BG', 'pickBgImage done path=$saved');
     } catch (e) {
+      _resetGestureState();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('背景设置失败：$e'), duration: const Duration(seconds: 2)),
@@ -262,8 +277,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   // 从加号菜单更换头像
   Future<void> _pickAvatarFromPlus() async {
+    // 先关 plus 菜单（防止卡死）+ 复位手势
+    _showPlus = false;
+    _resetGestureState();
+    setState(() {});
+    await Future.delayed(const Duration(milliseconds: 100));
     try {
       final result = await FilePicker.platform.pickFiles(type: FileType.image);
+      // FilePicker 返回后强制复位手势状态
+      _resetGestureState();
       if (result == null || result.files.single.path == null) return;
       final file = result.files.single;
       if (!_state.hasLead || !_state.hasPersona) return;
@@ -276,6 +298,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       }
       await _state.updateAvatar(savedPath);
     } catch (e) {
+      _resetGestureState();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('头像设置失败：$e'), duration: const Duration(seconds: 2)),
@@ -339,22 +362,24 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           ),
         ),
 
-        // ===== 聊天背景图（毛玻璃，在中间页底层） =====
+        // ===== 聊天背景图（毛玻璃，在中间页顶层） =====
         if (_currentBg != null)
-          IgnorePointer(
-            child: Positioned(
-              left: _offset,
-              top: 0,
-              width: screenW,
-              height: MediaQuery.of(context).size.height,
+          Positioned.fill(
+            left: _offset,
+            child: IgnorePointer(
               child: ClipRRect(
                 child: Stack(
                   children: [
-                    Image.file(_currentBg!, fit: BoxFit.cover, width: screenW, height: MediaQuery.of(context).size.height),
+                    // 背景原图
+                    Image.file(_currentBg!, fit: BoxFit.cover,
+                      width: screenW,
+                      height: MediaQuery.of(context).size.height,
+                    ),
+                    // 毛玻璃遮罩（更透的粉色）
                     Positioned.fill(
                       child: BackdropFilter(
                         filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                        child: Container(color: const Color(0xFFF5EEF0).withValues(alpha: 0.4)),
+                        child: Container(color: const Color(0xFFF5EEF0).withValues(alpha: 0.15)),
                       ),
                     ),
                   ],

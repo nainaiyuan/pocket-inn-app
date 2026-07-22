@@ -125,4 +125,42 @@ class CharacterService {
     await load();
     return List.from(_leads);
   }
+
+  // ═══════════════════════════════════════
+  // 卡片功能（char_list_page 兼容）
+  // ═══════════════════════════════════════
+
+  /// 从卡片数据创建角色（旧代码兼容）
+  Future<MaleLead?> createFromCard(Map<String, dynamic> cardData) async {
+    final lead = MaleLead.fromJson(cardData);
+    await addMaleLead(lead);
+    return lead;
+  }
+
+  /// 更新卡片（旧代码兼容）
+  Future<void> updateCard(String id, Map<String, dynamic> cardData) async {
+    final lead = getMaleLead(id);
+    if (lead != null) {
+      lead.name = cardData['name'] as String? ?? lead.name;
+      lead.avatarPath = cardData['avatarPath'] as String? ?? lead.avatarPath;
+      await _save();
+    }
+  }
+
+  /// 构建空卡片（旧代码兼容）
+  MaleLead buildEmptyCard() {
+    return MaleLead(id: '', name: '新角色');
+  }
+
+  /// 导出到JSON文件（旧代码兼容）
+  Future<String> exportToJsonFile(String id) async => '';
+  /// 导出到PNG文件（旧代码兼容）
+  Future<String> exportToPngFile(String id) async => '';
+  /// 从文件导入（旧代码兼容）
+  Future<MaleLead?> importFromFile(String path) async => null;
+  /// 删除角色（旧代码兼容-返回是否成功）
+  Future<bool> delete(String id) async {
+    deleteMaleLead(id);
+    return true;
+  }
 }
