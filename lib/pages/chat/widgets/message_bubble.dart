@@ -29,6 +29,8 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onSelectPreviousVariant;
   final VoidCallback? onSelectNextVariant;
   final String? characterAvatarPath;
+  final VoidCallback? onAvatarTap;
+  final VoidCallback? onAvatarLongPress;
 
   const MessageBubble({
     super.key,
@@ -53,6 +55,8 @@ class MessageBubble extends StatelessWidget {
     this.onSelectPreviousVariant,
     this.onSelectNextVariant,
     this.characterAvatarPath,
+    this.onAvatarTap,
+    this.onAvatarLongPress,
   });
 
   @override
@@ -75,7 +79,12 @@ class MessageBubble extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               if (!message.isMe) ...[
-                _Avatar(isUser: false, characterAvatarPath: characterAvatarPath),
+                _Avatar(
+                  isUser: false,
+                  characterAvatarPath: characterAvatarPath,
+                  onTap: onAvatarTap,
+                  onLongPress: onAvatarLongPress,
+                ),
                 const SizedBox(width: 8),
               ],
               // 气泡
@@ -217,8 +226,15 @@ class _ActionButton extends StatelessWidget {
 class _Avatar extends StatelessWidget {
   final bool isUser;
   final String? characterAvatarPath;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
-  const _Avatar({required this.isUser, this.characterAvatarPath});
+  const _Avatar({
+    required this.isUser,
+    this.characterAvatarPath,
+    this.onTap,
+    this.onLongPress,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -243,7 +259,7 @@ class _Avatar extends StatelessWidget {
       );
     }
 
-    return Container(
+    final avatarWidget = Container(
       width: 34,
       height: 34,
       decoration: BoxDecoration(
@@ -266,5 +282,15 @@ class _Avatar extends StatelessWidget {
       ),
       child: avatarChild,
     );
+
+    // 只有男主头像才包 GestureDetector，用户头像不处理
+    if (!isUser && (onTap != null || onLongPress != null)) {
+      return GestureDetector(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: avatarWidget,
+      );
+    }
+    return avatarWidget;
   }
 }

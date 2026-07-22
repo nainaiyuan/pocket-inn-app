@@ -8,11 +8,13 @@ import 'message_bubble.dart';
 class ChatMessageArea extends StatefulWidget {
   final Persona? currentPersona;
   final String? characterAvatarPath;
+  final VoidCallback? onAvatarTap;
 
   const ChatMessageArea({
     super.key,
     required this.currentPersona,
     this.characterAvatarPath,
+    this.onAvatarTap,
   });
 
   @override
@@ -79,6 +81,16 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
   }
 
   // ─── 多选模式 ───
+
+  /// 进入多选模式并选中指定消息
+  void _enterSelectMode(String messageId) {
+    if (!_selecting) {
+      setState(() {
+        _selecting = true;
+        _selectedIds.add(messageId);
+      });
+    }
+  }
 
   void _exitSelectMode() {
     if (_selecting) {
@@ -255,6 +267,8 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
                           userSetting: null,
                           character: null,
                           characterAvatarPath: widget.characterAvatarPath,
+                          onAvatarTap: widget.onAvatarTap,
+                          onAvatarLongPress: () => _enterSelectMode(msg.id ?? ''),
                           inputTapRegionGroupId: const Object(),
                           isLastUserMessageWithoutReply:
                               index == _messages.length - 1 && msg.isMe,

@@ -362,7 +362,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                     onTapAvatar: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); },
                     onNameChanged: () { if (mounted) setState(() {}); }),
                   Expanded(child: ChatMessageArea(key: _msgKey, currentPersona: _persona,
-                    characterAvatarPath: _localStore.getLeadAvatarPath(_lead?.id ?? ''))),
+                    characterAvatarPath: _localStore.getLeadAvatarPath(_lead?.id ?? ''),
+                    onAvatarTap: _openWorld)),
                   ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
                     onPlusTap: _togglePlus, onSendTap: _sendMsg),
                 ],
@@ -424,10 +425,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         ),
 
         // ===== 全屏手势监听 =====
-        // behavior: transparent 确保点击穿透到子组件
+        // behavior: translucent 曾拦截点击，改用 transparent 但不存在,
+        // 回退到 translucent + 在_onUp里检测点击手势
         Positioned.fill(
           child: Listener(
-            behavior: HitTestBehavior.transparent,
+            behavior: HitTestBehavior.translucent,
             onPointerDown: _onDown,
             onPointerMove: (e) {
               if (_pointerId >= 0) _onMove(e);
