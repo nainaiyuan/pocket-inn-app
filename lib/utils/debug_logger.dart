@@ -1,8 +1,9 @@
 import 'dart:io';
+import 'dart:collection';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
-/// 调试日志引擎 — 写入文件，方便用户复制日志给 AI 分析
+/// 调试日志引擎 — 内存缓冲区 + 文件双写
 class DebugLogger {
   static final DebugLogger _instance = DebugLogger._();
   factory DebugLogger() => _instance;
@@ -14,7 +15,12 @@ class DebugLogger {
   static int _seq = 0;
   static Stopwatch? _watch;
 
-  /// 初始化（应 APP 启动时调用一次）
+  /// 内存缓冲区（最近 200 条，供页面显示）
+  static final Queue<String> _buffer = Queue();
+  static List<String> get recentLogs => _buffer.toList(growable: false);
+  static String get recentLogsText => _buffer.join('\n');
+
+  /// 初始化
   static Future<void> init() async {
     _watch = Stopwatch()..start();
     try {
@@ -26,7 +32,8 @@ class DebugLogger {
       await f.writeAsString('');
       _ready = true;
       if (_pending.isNotEmpty) {
-        await f.writeAsString(_pending.join('\n'));
+        final all = _pending.join('\n');
+        await f.writeAsString(all);
         _pending.clear();
       }
     } catch (e) {
@@ -44,8 +51,12 @@ class DebugLogger {
         '[$tag] $msg';
 
     debugPrint(line);
-
     final entry = '$line\n';
+
+    // 内存缓冲区（保留最近 200 条）
+    _buffer.add(line);
+    if (_buffer.length > 200) _buffer.removeFirst();
+
     if (!_ready) {
       _pending.add(entry);
       return;

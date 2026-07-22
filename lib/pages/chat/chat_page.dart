@@ -403,7 +403,60 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             onPickAvatar: _pickAvatarFromPlus,
             onPickBg: _pickBgImage,
           )),
+
+        // ===== 调试日志按钮（右上角） =====
+        Positioned(
+          right: 4, top: MediaQuery.of(context).padding.top + 4,
+          child: GestureDetector(
+            onTap: _showDebugLog,
+            child: Container(
+              width: 28, height: 28,
+              decoration: BoxDecoration(
+                color: Colors.black26, shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.bug_report, size: 16, color: Colors.white70),
+            ),
+          ),
+        ),
       ],
+    );
+  }
+
+  void _showDebugLog() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        minChildSize: 0.3,
+        builder: (ctx, scrollCtrl) => Container(
+          color: const Color(0xFF1A1A2E),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Text('🪲 调试日志', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭', style: TextStyle(color: Colors.white70))),
+                ],
+              ),
+              const Divider(color: Colors.white24),
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: scrollCtrl,
+                  child: SelectableText(
+                    DebugLogger.recentLogsText.isEmpty ? '暂无日志' : DebugLogger.recentLogsText,
+                    style: const TextStyle(color: Colors.greenAccent, fontSize: 11, fontFamily: 'monospace'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
