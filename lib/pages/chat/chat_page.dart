@@ -8,6 +8,7 @@ import '../../services/character_service.dart';
 import '../../services/local_storage_service.dart';
 import '../../models/chat_message.dart';
 import 'services/ai_chat_service.dart';
+import 'state/current_character_state.dart';
 import 'widgets/chat_sidebar_left.dart';
 import 'widgets/chat_sidebar_right.dart';
 import 'widgets/chat_top_bar.dart';
@@ -42,6 +43,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   // ---- 角色 ----
   final _charSvc = CharacterService();
+  final _state = CurrentCharacterState();
   final _aiSvc = AiChatService();
   MaleLead? _lead;
   Persona? _persona;
@@ -68,6 +70,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       vsync: this,
       duration: const Duration(milliseconds: 300),
     )..addListener(_onAnimTick);
+    _state.addListener(() { if (mounted) setState(() {}); });
     _load();
   }
 
@@ -344,6 +347,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             onSelectPersona: (entry) => _selectPersona(entry.key, entry.value),
             onOpenSettings: () { _currentPanel = Panel.right; _animateTo(-sideW); },
             onSetBg: _pickBgImage,
+            characterState: _state,
           ),
         ),
 
