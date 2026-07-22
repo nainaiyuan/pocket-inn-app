@@ -103,21 +103,26 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     }
   }
 
-  // 上传立绘（placeholder — 后续接入 file picker）
+  // 上传立绘（更新男主 avatarPath）
   Future<void> _pickAvatar(MaleLead lead) async {
     final result = await FilePicker.platform.pickFiles(type: FileType.image);
     if (result == null || result.files.single.path == null) return;
     final file = result.files.single;
-    final store = LocalStorageService();
+    final store = widget.characterState?.localStorageService ?? LocalStorageService();
     String savedPath;
     if (file.bytes != null) {
       savedPath = await store.saveLeadAvatarFromBytes(lead.id, file.bytes!);
     } else {
       savedPath = await store.saveLeadAvatar(lead.id, File(file.path!));
     }
-    lead.avatarPath = savedPath;
-    await _service.updateMaleLead(lead);
-    if (mounted) setState(() {});
+    // 走 state 统一更新 + 通知
+    if (widget.characterState != null && widget.characterState!.hasPersona) {
+      await widget.characterState!.updateAvatar(savedPath);
+    } else {
+      lead.avatarPath = savedPath;
+      await _service.updateMaleLead(lead);
+      if (mounted) setState(() {});
+    }
   }
 
   Future<void> _pickPersonaAvatar(MaleLead lead, Persona persona) async {

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 
 /// 调试日志引擎 — 写入文件，方便用户复制日志给 AI 分析
 class DebugLogger {
@@ -7,8 +8,7 @@ class DebugLogger {
   factory DebugLogger() => _instance;
   DebugLogger._();
 
-  static const String _logPath = '/storage/emulated/0/Android/data/com.example.app/files/debug_log.txt';
-
+  static String _logPath = '';
   static bool _ready = false;
   static final List<String> _pending = [];
   static int _seq = 0;
@@ -18,11 +18,12 @@ class DebugLogger {
   static Future<void> init() async {
     _watch = Stopwatch()..start();
     try {
+      final appDir = await getApplicationDocumentsDirectory();
+      _logPath = '${appDir.path}/debug_log.txt';
       final f = File(_logPath);
       await f.parent.create(recursive: true);
       await f.writeAsString('');
       _ready = true;
-      // 刷 pending
       if (_pending.isNotEmpty) {
         await f.writeAsString(_pending.join('\n'));
         _pending.clear();
