@@ -45,6 +45,10 @@ class _ChatTopBarState extends State<ChatTopBar> {
   String _resolveDisplayName() {
     // 优先显示当前 Persona 的名字
     if (widget.currentPersona != null && widget.currentPersona!.name.isNotEmpty) {
+      // 默认 Persona 显示立绘的名字而不是"默认"
+      if (widget.currentPersona!.isDefault && widget.currentLead != null) {
+        return widget.currentLead!.name;
+      }
       return widget.currentPersona!.name;
     }
     return widget.currentLead?.name ?? '沈星回';
@@ -106,14 +110,16 @@ class _ChatTopBarState extends State<ChatTopBar> {
     final persona = widget.currentPersona;
     final lead = widget.currentLead;
     if (persona == null && lead == null) return;
+    // 默认 Persona → 改立绘名字；非默认 Persona → 改角色名
+    final isDefaultPersona = persona != null && persona.isDefault;
+    final targetLead = lead!;
     final ctrl = TextEditingController(text: _displayName);
-    final isPersona = persona != null && persona.id != '${lead!.id}_default';
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(isPersona ? '修改角色名' : '修改默认角色名'),
+        title: const Text('修改角色名'),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -128,12 +134,12 @@ class _ChatTopBarState extends State<ChatTopBar> {
             onPressed: () {
               final newName = ctrl.text.trim();
               if (newName.isNotEmpty) {
-                if (isPersona) {
+                if (isDefaultPersona) {
+                  targetLead.name = newName;
+                  CharacterService().updateMaleLead(targetLead);
+                } else {
                   persona!.name = newName;
-                  CharacterService().updatePersona(lead!.id, persona);
-                } else if (lead != null) {
-                  lead.name = newName;
-                  CharacterService().updateMaleLead(lead);
+                  CharacterService().updatePersona(targetLead.id, persona);
                 }
                 setState(() => _displayName = newName);
                 widget.onNameChanged?.call();

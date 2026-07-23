@@ -62,6 +62,9 @@ class Persona {
   String description; // 简短描述（卡片上用）
   DateTime createdAt;
 
+  /// 是否是默认形象（id 以 _default 结尾）
+  bool get isDefault => id.endsWith('_default');
+
   Persona({
     required this.id,
     required this.maleLeadId,
