@@ -194,14 +194,16 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
       await _service.deletePersona(l.id, p.id);
       final updatedLead = _service.getMaleLead(l.id);
       if (updatedLead == null || updatedLead.personas.isEmpty) {
+        // 立绘空了 → 删立绘，万一没角色了就重建
         await _service.deleteMaleLead(l.id);
         if (_service.leads.isEmpty) {
           widget.characterState?.createLeadWithDefaultPersona('沈星回');
           await Future.delayed(const Duration(milliseconds: 100));
-          // 重建后强制刷新
-          widget.characterState?.notifyUI();
-          await Future.delayed(const Duration(milliseconds: 50));
         }
+      } else {
+        // 立绘下还有别的 Persona → 自动选第一个
+        final nextP = updatedLead.personas.first;
+        widget.characterState?.setCurrent(updatedLead, nextP);
       }
       widget.characterState?.notifyUI();
       widget.onClosePanel?.call();
