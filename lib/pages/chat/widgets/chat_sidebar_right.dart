@@ -143,31 +143,6 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
   }
 
   // ─── 删除 ───
-  Future<void> _confirmDelete() async {
-    final l = widget.currentLead;
-    if (l == null) return;
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('删除 "${l.name}"？'),
-        content: const Text('此操作不可恢复。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消', style: TextStyle(color: Color(0xFF8A7A80)))),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定删除', style: TextStyle(color: Color(0xFFE55050), fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
-    if (confirm == true) {
-      await _service.deleteMaleLead(l.id);
-      widget.onDelete();
-    }
-  }
-
   Future<void> _confirmDeletePersona() async {
     final l = widget.currentLead;
     final p = widget.currentPersona;
