@@ -436,6 +436,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             onClosePanel: () {
               _currentPanel = Panel.center;
               _animateTo(0);
+              // 删除 Persona 后强制重建（左页/右页/中间页状态一致）
+              WidgetsBinding.instance.addPostFrameCallback((_) => setState(() {}));
             },
             onClearChat: () => _msgKey.currentState?.reloadMessages(),
             characterState: _state,
