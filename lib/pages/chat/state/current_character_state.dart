@@ -89,6 +89,10 @@ class CurrentCharacterState extends ChangeNotifier {
     if (_persona == null || _lead == null) return;
     _persona!.avatarPath = path;
     await _charSvc.updatePersona(_lead!.id, _persona!);
+    // 调试：打印所有 Persona 的 avatarPath
+    for (final p in _lead!.personas) {
+      await DebugLogger.log('STATE', '  persona[${p.id}] avatarPath="${p.avatarPath}"');
+    }
     await DebugLogger.log('STATE', 'updateAvatar path=$path');
     // 直接通知，然后在 widget 层做延迟 setState 避免竞争
     notifyListeners();
