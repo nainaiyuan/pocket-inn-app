@@ -30,16 +30,24 @@ class _ChatTopBarState extends State<ChatTopBar> {
   @override
   void initState() {
     super.initState();
-    _displayName = widget.currentLead?.name ?? '沈星回';
+    _displayName = _resolveDisplayName();
   }
 
   @override
   void didUpdateWidget(ChatTopBar old) {
     super.didUpdateWidget(old);
-    if (old.currentLead?.id != widget.currentLead?.id ||
-        old.currentLead?.name != widget.currentLead?.name) {
-      _displayName = widget.currentLead?.name ?? '沈星回';
+    final newName = _resolveDisplayName();
+    if (_displayName != newName) {
+      _displayName = newName;
     }
+  }
+
+  String _resolveDisplayName() {
+    // 优先显示当前 Persona 的名字
+    if (widget.currentPersona != null && widget.currentPersona!.name.isNotEmpty) {
+      return widget.currentPersona!.name;
+    }
+    return widget.currentLead?.name ?? '沈星回';
   }
 
   @override
@@ -95,15 +103,17 @@ class _ChatTopBarState extends State<ChatTopBar> {
 
   void _renameLead(BuildContext context) {
     HapticFeedback.mediumImpact();
+    final persona = widget.currentPersona;
     final lead = widget.currentLead;
-    if (lead == null) return;
+    if (persona == null && lead == null) return;
     final ctrl = TextEditingController(text: _displayName);
+    final isPersona = persona != null && persona.id != '${lead!.id}_default';
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('修改角色名'),
+        title: Text(isPersona ? '修改角色名' : '修改默认角色名'),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -118,8 +128,13 @@ class _ChatTopBarState extends State<ChatTopBar> {
             onPressed: () {
               final newName = ctrl.text.trim();
               if (newName.isNotEmpty) {
-                lead.name = newName;
-                CharacterService().updateMaleLead(lead);
+                if (isPersona) {
+                  persona!.name = newName;
+                  CharacterService().updatePersona(lead!.id, persona);
+                } else if (lead != null) {
+                  lead.name = newName;
+                  CharacterService().updateMaleLead(lead);
+                }
                 setState(() => _displayName = newName);
                 widget.onNameChanged?.call();
               }

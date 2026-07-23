@@ -3,12 +3,14 @@ class MaleLead {
   final String id;
   String name;
   String avatarPath; // 头像图片路径（本地文件或 asset）
+  String backgroundPath; // 全局聊天背景（Persona 没有单独背景时继承此值）
   List<Persona> personas; // 该男主下的所有形象
 
   MaleLead({
     required this.id,
     required this.name,
     this.avatarPath = '',
+    this.backgroundPath = '',
     List<Persona>? personas,
   }) : personas = personas ?? [];
 
@@ -16,12 +18,14 @@ class MaleLead {
     String? id,
     String? name,
     String? avatarPath,
+    String? backgroundPath,
     List<Persona>? personas,
   }) {
     return MaleLead(
       id: id ?? this.id,
       name: name ?? this.name,
       avatarPath: avatarPath ?? this.avatarPath,
+      backgroundPath: backgroundPath ?? this.backgroundPath,
       personas: personas ?? List.from(this.personas),
     );
   }
@@ -30,6 +34,7 @@ class MaleLead {
         'id': id,
         'name': name,
         'avatarPath': avatarPath,
+        'backgroundPath': backgroundPath,
         'personas': personas.map((p) => p.toJson()).toList(),
       };
 
@@ -37,6 +42,7 @@ class MaleLead {
         id: json['id'] as String,
         name: json['name'] as String,
         avatarPath: json['avatarPath'] as String? ?? '',
+        backgroundPath: json['backgroundPath'] as String? ?? '',
         personas: (json['personas'] as List<dynamic>?)
                 ?.map((e) => Persona.fromJson(e as Map<String, dynamic>))
                 .toList() ??

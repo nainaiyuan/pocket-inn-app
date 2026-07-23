@@ -168,6 +168,37 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     await DebugLogger.log('LEFT', '_pickPersonaAvatar done');
   }
 
+  /// 为指定 Persona 单独设置聊天背景
+  Future<void> _pickPersonaBg(MaleLead lead, Persona persona) async {
+    await DebugLogger.log('LEFT', '_pickPersonaBg start');
+    await Future.delayed(const Duration(milliseconds: 200));
+    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    widget.characterState?.requestGestureReset();
+    if (result == null || result.files.single.path == null) return;
+    final file = result.files.single;
+    final store = LocalStorageService();
+    String savedPath;
+    if (file.bytes != null) {
+      savedPath = await store.saveBackgroundFromBytes(lead.id, persona.id, file.bytes!);
+    } else {
+      savedPath = await store.saveBackground(lead.id, persona.id, File(file.path!));
+    }
+    imageCache.clear();
+    imageCache.clearLiveImages();
+    await DebugLogger.log('LEFT', '_pickPersonaBg saved=$savedPath');
+    // 通知 state 刷新背景
+    if (widget.characterState != null &&
+        widget.characterState!.leadId == lead.id &&
+        widget.characterState!.personaId == persona.id) {
+      await widget.characterState!.updateBackground(savedPath);
+    } else {
+      // 设的是非当前角色背景，只持久化到模型
+      persona.backgroundPath = savedPath;
+      await _service.updatePersona(lead.id, persona);
+    }
+    await DebugLogger.log('LEFT', '_pickPersonaBg done');
+  }
+
   @override
   Widget build(BuildContext context) {
     final leads = _service.leads;
@@ -386,7 +417,6 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
               ),
               const SizedBox(height: 16),
               _MenuBtn(icon: Icons.image_outlined, label: '更换立绘', onTap: () { Navigator.pop(ctx); _pickAvatar(lead); }),
-              _MenuBtn(icon: Icons.wallpaper_outlined, label: '设置聊天背景', onTap: () async { Navigator.pop(ctx); await Future.delayed(const Duration(milliseconds: 250)); widget.onSetBg?.call(); }),
               const SizedBox(height: 8),
             ],
           ),
@@ -423,7 +453,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
               ),
               const SizedBox(height: 16),
               _MenuBtn(icon: Icons.image_outlined, label: '更换头像', onTap: () { Navigator.pop(ctx); _pickPersonaAvatar(lead, persona); }),
-              // 删除在右页危险操作区处理
+              _MenuBtn(icon: Icons.wallpaper_outlined, label: '设置聊天背景', onTap: () async { Navigator.pop(ctx); await Future.delayed(const Duration(milliseconds: 250)); _pickPersonaBg(lead, persona); }),
               const SizedBox(height: 8),
             ],
           ),

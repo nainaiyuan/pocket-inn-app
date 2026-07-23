@@ -163,14 +163,33 @@ class CurrentCharacterState extends ChangeNotifier {
       _bgFile = null;
       return;
     }
-    // 优先用 Persona 上持久化的 backgroundPath
+    // 1. Persona 有自己的背景 → 用 Persona 的
     if (_persona!.backgroundPath.isNotEmpty) {
       final f = File(_persona!.backgroundPath);
-      _bgFile = f.existsSync() ? f : null;
-    } else {
-      // 兼容旧数据：从 LocalStorageService 按规则路径找
-      final f = _localStore.getBackgroundFile(_lead!.id, _persona!.id);
-      _bgFile = f;
+      if (f.existsSync()) { _bgFile = f; return; }
     }
+    // 2. 兼容旧数据：从 LocalStorageService 按规则路径找
+    final personaBg = _localStore.getBackgroundFile(_lead!.id, _persona!.id);
+    if (personaBg != null && personaBg.existsSync()) { _bgFile = personaBg; return; }
+    // 3. 没有 → 继承立绘（MaleLead）的全局背景
+    if (_lead!.backgroundPath.isNotEmpty) {
+      final f = File(_lead!.backgroundPath);
+      if (f.existsSync()) { _bgFile = f; return; }
+    }
+    // 4. 都无
+    _bgFile = null;
+  }
+
+  /// 设置立绘全局背景（影响所有未单独设背景的 Persona）
+  Future<void> updateLeadBackground(String path) async {
+    if (_lead == null) return;
+    _lead!.backgroundPath = path;
+    await _charSvc.updateMaleLead(_lead!);
+    // 如果当前 Persona 没有自己的背景，直接显示
+    if (_persona != null && _persona!.backgroundPath.isEmpty) {
+      _bgFile = File(path);
+    }
+    await DebugLogger.log('STATE', 'updateLeadBackground path=$path');
+    notifyListeners();
   }
 }

@@ -7,7 +7,9 @@ import 'package:path_provider/path_provider.dart';
 /// APP 内部目录结构：
 /// {appDir}/
 ///   avatars/       ← 角色立绘（leadId.jpg）和形象头像（leadId_personaId.jpg）
-///   backgrounds/  ← 聊天背景图（leadId_personaId.jpg）
+///   backgrounds/  ← 聊天背景图
+///     leadId.jpg          ← 立绘全局背景
+///     leadId_personaId.jpg ← Persona 独立背景
 class LocalStorageService {
   static final LocalStorageService _instance = LocalStorageService._();
   factory LocalStorageService() => _instance;
@@ -32,6 +34,8 @@ class LocalStorageService {
       '${_appDir!.path}/avatars/${leadId}_$personaId.jpg';
   String _bgPath(String leadId, String personaId) =>
       '${_appDir!.path}/backgrounds/${leadId}_$personaId.jpg';
+  String _leadBgPath(String leadId) =>
+      '${_appDir!.path}/backgrounds/$leadId.jpg';
 
   // ─── 立绘 ───
 
@@ -85,6 +89,27 @@ class LocalStorageService {
 
   // ─── 聊天背景 ───
 
+  /// 保存立绘全局背景（影响所有未单独设背景的 Persona）
+  Future<String> saveLeadBackground(String leadId, File source) async {
+    final dest = _leadBgPath(leadId);
+    await source.copy(dest);
+    return dest;
+  }
+
+  Future<String> saveLeadBackgroundFromBytes(String leadId, Uint8List bytes) async {
+    final dest = _leadBgPath(leadId);
+    await File(dest).writeAsBytes(bytes);
+    return dest;
+  }
+
+  String getLeadBackgroundPath(String leadId) => _leadBgPath(leadId);
+
+  File? getLeadBackgroundFile(String leadId) {
+    final f = File(_leadBgPath(leadId));
+    return f.existsSync() ? f : null;
+  }
+
+  /// 保存 Persona 独立背景
   Future<String> saveBackground(String leadId, String personaId, File source) async {
     final dest = _bgPath(leadId, personaId);
     await source.copy(dest);

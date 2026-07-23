@@ -259,10 +259,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     ));
   }
 
+  // 从加号菜单设置全局聊天背景（影响立绘下所有未单独设背景的 Persona）
   Future<void> _pickBgImage() async {
     await DebugLogger.log('BG', 'pickBgImage start');
     // 先关 plus 菜单（防止卡死）
     _showPlus = false;
+    _resetGestureState();
     setState(() {});
     // 给一帧让 UI 刷新，确保 plus 菜单完全消失
     await Future.delayed(const Duration(milliseconds: 100));
@@ -272,18 +274,19 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       _resetGestureState();
       if (result == null || result.files.single.path == null) return;
       final file = result.files.single;
-      if (!_state.hasLead || !_state.hasPersona) return;
+      if (!_state.hasLead) return;
 
+      // 保存为立绘级别的背景文件
       String saved;
       if (file.bytes != null) {
-        saved = await _localStore.saveBackgroundFromBytes(_state.leadId!, _state.personaId!, file.bytes!);
+        saved = await _localStore.saveLeadBackgroundFromBytes(_state.leadId!, file.bytes!);
       } else {
-        saved = await _localStore.saveBackground(_state.leadId!, _state.personaId!, File(file.path!));
+        saved = await _localStore.saveLeadBackground(_state.leadId!, File(file.path!));
       }
       // 清 Flutter 图片缓存，强制背景重新解码
       imageCache.clear();
       imageCache.clearLiveImages();
-      await _state.updateBackground(saved);
+      await _state.updateLeadBackground(saved);
       await DebugLogger.log('BG', 'pickBgImage done path=$saved');
     } catch (e) {
       _resetGestureState();
