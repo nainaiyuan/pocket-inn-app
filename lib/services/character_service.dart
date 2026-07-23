@@ -1,8 +1,9 @@
 import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 import '../models/male_lead.dart';
 
-/// 角色数据服务 —— 存储所有男主及其形象
+/// 角色数据服务 —— 存储所有男主及其形象（文件存储）
 class CharacterService {
   static const _key = 'male_leads';
 
@@ -17,25 +18,37 @@ class CharacterService {
 
   List<MaleLead> get leads => List.unmodifiable(_leads);
 
+  Future<File> _getFile() async {
+    final dir = Directory('${(await getApplicationDocumentsDirectory()).path}/_data');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return File('${dir.path}/$_key.json');
+  }
+
   /// 加载数据
   Future<void> load() async {
     if (_loaded) return;
-    final prefs = await SharedPreferences.getInstance();
-    final json = prefs.getString(_key);
-    if (json != null && json.isNotEmpty) {
-      final list = jsonDecode(json) as List<dynamic>;
-      _leads = list
-          .map((e) => MaleLead.fromJson(e as Map<String, dynamic>))
-          .toList();
-    }
+    try {
+      final file = await _getFile();
+      if (await file.exists()) {
+        final json = await file.readAsString();
+        if (json.isNotEmpty) {
+          final list = jsonDecode(json) as List<dynamic>;
+          _leads = list
+              .map((e) => MaleLead.fromJson(e as Map<String, dynamic>))
+              .toList();
+        }
+      }
+    } catch (_) {}
     _loaded = true;
   }
 
   /// 保存数据
   Future<void> _save() async {
-    final prefs = await SharedPreferences.getInstance();
-    final json = jsonEncode(_leads.map((l) => l.toJson()).toList());
-    await prefs.setString(_key, json);
+    try {
+      final file = await _getFile();
+      final json = jsonEncode(_leads.map((l) => l.toJson()).toList());
+      await file.writeAsString(json);
+    } catch (_) {}
   }
 
   /// 添加男主
@@ -110,8 +123,10 @@ class CharacterService {
   /// 清除所有数据
   Future<void> clearAllData() async {
     _leads.clear();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_key);
+    try {
+      final file = await _getFile();
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
   }
 
   /// 根据ID加载角色（旧代码兼容）
