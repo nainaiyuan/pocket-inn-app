@@ -1,8 +1,9 @@
 import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 import '../../../models/chat_message.dart';
 
-/// 聊天消息持久化服务
+/// 聊天消息持久化服务（文件存储）
 class ChatStorageService {
   static final ChatStorageService _instance = ChatStorageService._();
   factory ChatStorageService() => _instance;
@@ -10,26 +11,38 @@ class ChatStorageService {
 
   String _key(String personaId) => 'chat_messages_$personaId';
 
+  Future<File> _getFile(String personaId) async {
+    final dir = Directory('${(await getApplicationDocumentsDirectory()).path}/_data');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return File('${dir.path}/${_key(personaId)}.json');
+  }
+
   /// 加载某个角色的聊天记录（最多200条）
   Future<List<ChatMessage>> loadMessages(String personaId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final json = prefs.getString(_key(personaId));
-    if (json == null) return [];
-    final list = jsonDecode(json) as List<dynamic>;
-    return list
-        .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-        .toList();
+    try {
+      final file = await _getFile(personaId);
+      if (!await file.exists()) return [];
+      final json = await file.readAsString();
+      final list = jsonDecode(json) as List<dynamic>;
+      return list
+          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      return [];
+    }
   }
 
   /// 保存消息列表
   Future<void> saveMessages(String personaId, List<ChatMessage> messages) async {
-    final prefs = await SharedPreferences.getInstance();
-    // 只保留最近200条
-    final trimmed = messages.length > 200
-        ? messages.sublist(messages.length - 200)
-        : messages;
-    final json = jsonEncode(trimmed.map((m) => m.toJson()).toList());
-    await prefs.setString(_key(personaId), json);
+    try {
+      final file = await _getFile(personaId);
+      // 只保留最近200条
+      final trimmed = messages.length > 200
+          ? messages.sublist(messages.length - 200)
+          : messages;
+      final json = jsonEncode(trimmed.map((m) => m.toJson()).toList());
+      await file.writeAsString(json);
+    } catch (_) {}
   }
 
   /// 追加一条消息
@@ -59,7 +72,9 @@ class ChatStorageService {
 
   /// 删除某个角色的所有聊天记录
   Future<void> deleteAllMessages(String personaId) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_key(personaId));
+    try {
+      final file = await _getFile(personaId);
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
   }
 }
