@@ -164,8 +164,10 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
       ),
     );
     if (confirm == true) {
-      // 如果是这个立绘下的最后一个形象，也是整个 APP 的最后一个角色
-      final isLastPersona = l.personas.length <= 1;
+      // 从 service 读最新数据判断（widget 传的可能已过期）
+      final currentLead = _service.getMaleLead(l.id);
+      final personaCount = currentLead?.personas.length ?? 0;
+      final isLastPersona = personaCount <= 1;
       final isLastLead = _service.leads.length <= 1;
 
       if (isLastPersona && isLastLead) {
@@ -196,6 +198,9 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
         if (_service.leads.isEmpty) {
           widget.characterState?.createLeadWithDefaultPersona('沈星回');
           await Future.delayed(const Duration(milliseconds: 100));
+          // 重建后强制刷新
+          widget.characterState?.notifyUI();
+          await Future.delayed(const Duration(milliseconds: 50));
         }
       }
       widget.characterState?.notifyUI();
