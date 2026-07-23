@@ -87,14 +87,19 @@ class CurrentCharacterState extends ChangeNotifier {
 
   Future<void> updateAvatar(String path) async {
     if (_persona == null || _lead == null) return;
-    _persona!.avatarPath = path;
-    await _charSvc.updatePersona(_lead!.id, _persona!);
-    // 调试：打印所有 Persona 的 avatarPath
-    for (final p in _lead!.personas) {
-      await DebugLogger.log('STATE', '  persona[${p.id}] avatarPath="${p.avatarPath}"');
+    // 从 lead.personas 列表中找到对应 id 的 Persona，确保写的是正确的对象
+    final idx = _lead!.personas.indexWhere((p) => p.id == _persona!.id);
+    if (idx >= 0) {
+      _lead!.personas[idx].avatarPath = path;
+      // 同步更新 state 的引用指向正确的对象
+      _persona = _lead!.personas[idx];
+      await _charSvc.updatePersona(_lead!.id, _lead!.personas[idx]);
+    } else {
+      // fallback: 直接改 _persona
+      _persona!.avatarPath = path;
+      await _charSvc.updatePersona(_lead!.id, _persona!);
     }
     await DebugLogger.log('STATE', 'updateAvatar path=$path');
-    // 直接通知，然后在 widget 层做延迟 setState 避免竞争
     notifyListeners();
   }
 
@@ -102,9 +107,16 @@ class CurrentCharacterState extends ChangeNotifier {
   Future<void> updateBackground(String path) async {
     if (_persona == null || _lead == null) return;
     _bgFile = File(path);
-    // 持久化到 Persona 模型，页面重建后能恢复
-    _persona!.backgroundPath = path;
-    await _charSvc.updatePersona(_lead!.id, _persona!);
+    // 从 lead.personas 列表中找到对应 id 的 Persona
+    final idx = _lead!.personas.indexWhere((p) => p.id == _persona!.id);
+    if (idx >= 0) {
+      _lead!.personas[idx].backgroundPath = path;
+      _persona = _lead!.personas[idx];
+      await _charSvc.updatePersona(_lead!.id, _lead!.personas[idx]);
+    } else {
+      _persona!.backgroundPath = path;
+      await _charSvc.updatePersona(_lead!.id, _persona!);
+    }
     await DebugLogger.log('STATE', 'updateBackground path=$path');
     notifyListeners();
   }

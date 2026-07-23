@@ -465,8 +465,6 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
 
   Widget _buildPersonaTile(MaleLead lead, Persona persona) {
     final isActive = widget.currentLead?.id == lead.id && widget.currentPersona?.id == persona.id;
-    // 调试：确认 tile 对应的 persona id
-    debugPrint('_buildPersonaTile: lead=${lead.id} persona=${persona.id} avatarPath="${persona.avatarPath}"');
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: GestureDetector(
@@ -483,10 +481,7 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
                 children: [
                   // 形象头像
                   GestureDetector(
-                    onTap: () {
-                      debugPrint('_buildPersonaTile.onTap: triggering _pickPersonaAvatar for persona=${persona.id}');
-                      _pickPersonaAvatar(lead, persona);
-                    },
+                    onTap: () => _pickPersonaAvatar(lead, persona),
                     child: Container(
                       width: 32,
                       height: 32,
