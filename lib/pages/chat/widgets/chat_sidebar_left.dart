@@ -457,6 +457,20 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
               _MenuBtn(icon: Icons.image_outlined, label: '更换头像', onTap: () { Navigator.pop(ctx); _pickPersonaAvatar(lead, persona); }),
               _MenuBtn(icon: Icons.wallpaper_outlined, label: '设置聊天背景', onTap: () async { Navigator.pop(ctx); await Future.delayed(const Duration(milliseconds: 250)); _pickPersonaBg(lead, persona); }),
               const SizedBox(height: 8),
+              // 删除立绘（只剩1个时禁止删除）
+              if (_service.leads.length <= 1)
+                _MenuBtn(
+                  icon: Icons.delete_forever_rounded, label: '至少保留一个角色',
+                  labelColor: Colors.grey, onTap: () { Navigator.pop(ctx); },
+                )
+              else
+                _MenuBtn(icon: Icons.delete_forever_rounded, label: '删除立绘「${lead.name}」及其所有形象',
+                  labelColor: Colors.redAccent, onTap: () async {
+                    Navigator.pop(ctx);
+                    await Future.delayed(const Duration(milliseconds: 250));
+                    _confirmDeleteLead(lead, _service, widget.characterState, context);
+                  }),
+              const SizedBox(height: 4),
             ],
           ),
         ),
@@ -599,6 +613,36 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
       ),
     );
   }
+}
+
+/// 确认删除立绘及所有形象
+Future<void> _confirmDeleteLead(MaleLead lead, CharacterService service, CurrentCharacterState? state, BuildContext context) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text('删除「${lead.name}」？'),
+      content: Text('将同时删除「${lead.name}」及其所有形象的聊天记录、头像和背景设置，此操作不可撤销。'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('确认删除', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w600)),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return;
+  final isLast = service.leads.length <= 1;
+  await service.deleteMaleLead(lead.id);
+  if (isLast) {
+    state?.createLeadWithDefaultPersona('沈星回');
+    await Future.delayed(const Duration(milliseconds: 100));
+  }
+  // 通知 state 切换
+  if (state != null) state.notifyUI();
+  await DebugLogger.log('LEFT', 'deleteLead lid=${lead.id} last=$isLast');
 }
 
 /// 底部菜单按钮
