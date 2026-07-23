@@ -479,9 +479,9 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               child: Row(
                 children: [
-                  // 形象头像
+                  // 形象头像（点按跳秘密基地，换头像走长按弹窗）
                   GestureDetector(
-                    onTap: () => _pickPersonaAvatar(lead, persona),
+                    onTap: () => widget.onSelectPersona(MapEntry(lead, persona)),
                     child: Container(
                       width: 32,
                       height: 32,
