@@ -226,7 +226,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
 
   @override
   Widget build(BuildContext context) {
-    final isLead = widget.currentPersona == null || widget.currentPersona?.name == '默认';
+    final isLead = widget.currentPersona == null || widget.currentPersona!.isDefault;
 
     return Container(
       color: const Color(0xFFF5EEF0),
