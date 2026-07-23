@@ -420,6 +420,34 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
               _MenuBtn(icon: Icons.image_outlined, label: '更换立绘', onTap: () { Navigator.pop(ctx); _pickAvatar(lead); }),
               _MenuBtn(icon: Icons.wallpaper_outlined, label: '设置全局聊天背景（所有角色继承）', onTap: () async { Navigator.pop(ctx); await Future.delayed(const Duration(milliseconds: 250)); widget.onSetBg?.call(); }),
               const SizedBox(height: 8),
+              // 删除立绘（只剩1个时禁止删除）
+              if (_service.leads.length <= 1)
+                _MenuBtn(
+                  icon: Icons.delete_forever_rounded,
+                  label: '至少保留一个角色',
+                  labelColor: Colors.grey,
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('至少保留一个角色，不能删除最后一个'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                    Navigator.pop(ctx);  // 关闭菜单，不删
+                  },
+                )
+              else
+                _MenuBtn(
+                  icon: Icons.delete_forever_rounded,
+                  label: '删除立绘「${lead.name}」及其所有形象',
+                  labelColor: Colors.redAccent,
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await Future.delayed(const Duration(milliseconds: 250));
+                    _confirmDeleteLead(lead, _service, widget.characterState, context);
+                  },
+                ),
+              const SizedBox(height: 4),
             ],
           ),
         ),
@@ -457,20 +485,6 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
               _MenuBtn(icon: Icons.image_outlined, label: '更换头像', onTap: () { Navigator.pop(ctx); _pickPersonaAvatar(lead, persona); }),
               _MenuBtn(icon: Icons.wallpaper_outlined, label: '设置聊天背景', onTap: () async { Navigator.pop(ctx); await Future.delayed(const Duration(milliseconds: 250)); _pickPersonaBg(lead, persona); }),
               const SizedBox(height: 8),
-              // 删除立绘（只剩1个时禁止删除）
-              if (_service.leads.length <= 1)
-                _MenuBtn(
-                  icon: Icons.delete_forever_rounded, label: '至少保留一个角色',
-                  labelColor: Colors.grey, onTap: () { Navigator.pop(ctx); },
-                )
-              else
-                _MenuBtn(icon: Icons.delete_forever_rounded, label: '删除立绘「${lead.name}」及其所有形象',
-                  labelColor: Colors.redAccent, onTap: () async {
-                    Navigator.pop(ctx);
-                    await Future.delayed(const Duration(milliseconds: 250));
-                    _confirmDeleteLead(lead, _service, widget.characterState, context);
-                  }),
-              const SizedBox(height: 4),
             ],
           ),
         ),
