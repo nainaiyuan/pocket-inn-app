@@ -11,6 +11,7 @@ class ChatSidebarRight extends StatefulWidget {
   final Persona? currentPersona;
   final VoidCallback onDelete;
   final VoidCallback? onClearChat;
+  final VoidCallback? onClosePanel;
   final CurrentCharacterState? characterState;
 
   const ChatSidebarRight({
@@ -19,6 +20,7 @@ class ChatSidebarRight extends StatefulWidget {
     required this.currentPersona,
     required this.onDelete,
     this.onClearChat,
+    this.onClosePanel,
     this.characterState,
   });
 
@@ -221,7 +223,8 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
           await Future.delayed(const Duration(milliseconds: 100));
         }
       }
-      widget.onDelete();
+      widget.characterState?.notifyUI();
+      widget.onClosePanel?.call();
     }
   }
 

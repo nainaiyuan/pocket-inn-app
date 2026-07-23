@@ -433,6 +433,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               _currentPanel = Panel.center;
               _animateTo(0);
             },
+            onClosePanel: () {
+              _currentPanel = Panel.center;
+              _animateTo(0);
+            },
             onClearChat: () => _msgKey.currentState?.reloadMessages(),
             characterState: _state,
           ),
