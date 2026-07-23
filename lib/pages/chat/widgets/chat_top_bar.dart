@@ -43,12 +43,8 @@ class _ChatTopBarState extends State<ChatTopBar> {
   }
 
   String _resolveDisplayName() {
-    // 优先显示当前 Persona 的名字
+    // 始终显示当前 Persona 的名字
     if (widget.currentPersona != null && widget.currentPersona!.name.isNotEmpty) {
-      // 默认 Persona 显示立绘的名字而不是"默认"
-      if (widget.currentPersona!.isDefault && widget.currentLead != null) {
-        return widget.currentLead!.name;
-      }
       return widget.currentPersona!.name;
     }
     return widget.currentLead?.name ?? '沈星回';
@@ -110,9 +106,6 @@ class _ChatTopBarState extends State<ChatTopBar> {
     final persona = widget.currentPersona;
     final lead = widget.currentLead;
     if (persona == null && lead == null) return;
-    // 默认 Persona → 改立绘名字；非默认 Persona → 改角色名
-    final isDefaultPersona = persona != null && persona.isDefault;
-    final targetLead = lead!;
     final ctrl = TextEditingController(text: _displayName);
     showDialog(
       context: context,
@@ -134,13 +127,9 @@ class _ChatTopBarState extends State<ChatTopBar> {
             onPressed: () {
               final newName = ctrl.text.trim();
               if (newName.isNotEmpty) {
-                if (isDefaultPersona) {
-                  targetLead.name = newName;
-                  CharacterService().updateMaleLead(targetLead);
-                } else {
-                  persona!.name = newName;
-                  CharacterService().updatePersona(targetLead.id, persona);
-                }
+                // 统一改 Persona 名字（包括默认 Persona）
+                persona!.name = newName;
+                CharacterService().updatePersona(lead!.id, persona);
                 setState(() => _displayName = newName);
                 widget.onNameChanged?.call();
               }
