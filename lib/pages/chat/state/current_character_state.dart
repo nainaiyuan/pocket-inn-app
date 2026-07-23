@@ -142,6 +142,7 @@ class CurrentCharacterState extends ChangeNotifier {
 
   /// 强制对外通知 UI 刷新（给左侧栏等外部组件用）
   void notifyUI() {
+    _loadBgFile();
     notifyListeners();
   }
 
