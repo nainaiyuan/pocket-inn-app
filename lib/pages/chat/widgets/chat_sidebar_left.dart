@@ -169,9 +169,6 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
       charState.notifyUI();
     }
     await DebugLogger.log('LEFT', '_pickPersonaAvatar done');
-      if (mounted) setState(() {});
-    }
-    await DebugLogger.log('LEFT', '_pickPersonaAvatar done');
   }
 
   /// 为指定 Persona 单独设置聊天背景
