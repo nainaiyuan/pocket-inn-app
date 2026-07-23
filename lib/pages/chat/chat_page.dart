@@ -520,12 +520,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     required Color color,
     required Widget child,
   }) {
+    // 中间页(index=1)：左/右页打开时禁用消息列表和输入栏
+    final isCenter = index == 1;
+    final panelOpen = _currentPanel != Panel.center;
     return Positioned(
       left: left, top: 0,
       width: width, bottom: 0,
       child: Container(
         color: color,
-        child: child,
+        child: (isCenter && panelOpen) ? IgnorePointer(child: child) : child,
       ),
     );
   }
