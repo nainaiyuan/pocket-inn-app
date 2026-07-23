@@ -202,10 +202,7 @@ class CurrentCharacterState extends ChangeNotifier {
     if (_lead == null) return;
     _lead!.backgroundPath = path;
     await _charSvc.updateMaleLead(_lead!);
-    // 如果当前 Persona 没有自己的背景，直接显示
-    if (_persona != null && _persona!.backgroundPath.isEmpty) {
-      _bgFile = File(path);
-    }
+    _loadBgFile();
     await DebugLogger.log('STATE', 'updateLeadBackground path=$path');
     notifyListeners();
   }
