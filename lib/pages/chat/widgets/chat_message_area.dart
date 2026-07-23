@@ -47,6 +47,11 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
     }
   }
 
+  /// 外部调用：重新加载消息（清空聊天记录后刷新）
+  Future<void> reloadMessages() async {
+    await _loadMessages();
+  }
+
   Future<void> _loadMessages() async {
     if (widget.currentPersona == null) {
       if (mounted) setState(() => _loading = false);

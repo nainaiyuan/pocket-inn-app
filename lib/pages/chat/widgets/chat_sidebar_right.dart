@@ -10,6 +10,7 @@ class ChatSidebarRight extends StatefulWidget {
   final MaleLead? currentLead;
   final Persona? currentPersona;
   final VoidCallback onDelete;
+  final VoidCallback? onClearChat;
   final CurrentCharacterState? characterState;
 
   const ChatSidebarRight({
@@ -17,6 +18,7 @@ class ChatSidebarRight extends StatefulWidget {
     required this.currentLead,
     required this.currentPersona,
     required this.onDelete,
+    this.onClearChat,
     this.characterState,
   });
 
@@ -213,6 +215,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
     if (confirm == true) {
       // 用 ChatStorageService 清空
       await ChatStorageService().deleteAllMessages(pid);
+      widget.onClearChat?.call();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('聊天记录已清空'), duration: Duration(seconds: 1)),
