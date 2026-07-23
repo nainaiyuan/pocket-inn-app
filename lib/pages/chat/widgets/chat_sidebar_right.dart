@@ -192,24 +192,24 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
       final isLastLead = _service.leads.length <= 1;
 
       if (isLastPersona && isLastLead) {
-        // 最后一个角色了，问用户是否重置
-        final reset = await showDialog<bool>(
+        // 最后一个形象弹框确认
+        final reallyDelete = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
             backgroundColor: Colors.white,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Text('只剩最后一个角色了'),
-            content: const Text('删除后所有数据将清空，系统会重建默认角色。相当于重置到初始状态，要继续吗？'),
+            title: const Text('删除后没有可以聊天的角色了'),
+            content: const Text('删掉这个形象后，系统会自动重建默认角色。确认删除吗？'),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('保留', style: TextStyle(color: Color(0xFF8A7A80)))),
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消', style: TextStyle(color: Color(0xFF8A7A80)))),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('重置', style: TextStyle(color: Color(0xFFE55050), fontWeight: FontWeight.w600)),
+                child: const Text('确认删除', style: TextStyle(color: Color(0xFFE55050), fontWeight: FontWeight.w600)),
               ),
             ],
           ),
         );
-        if (reset != true) return;
+        if (reallyDelete != true) return;
       }
 
       await _service.deletePersona(l.id, p.id);
