@@ -157,12 +157,18 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     // 清 Flutter 图片缓存
     imageCache.clear();
     imageCache.clearLiveImages();
-    if (widget.characterState != null) {
-      await widget.characterState!.updateAvatar(savedPath);
-    } else {
-      persona.avatarPath = savedPath;
-      await _service.updatePersona(lead.id, persona);
-      await Future.delayed(const Duration(milliseconds: 50));
+    // 直接改传入的 persona 对象并持久化（不经过 state，因为 state 可能指向不同的 Persona）
+    persona.avatarPath = savedPath;
+    await _service.updatePersona(lead.id, persona);
+    // 如果当前聊天的正是这个 Persona，额外通知 state 刷新
+    if (widget.characterState?.personaId == persona.id) {
+      // 更新 state 内部引用，确保 effectiveAvatarPath 返回新值
+      // 注意：updateAvatar 内部通过 _lead.personas.indexWhere 找，必须同步引用
+      // 直接调 notifyUI 让上层 rebuild，effectiveAvatarPath 会重新取
+      final charState = widget.characterState!;
+      charState.notifyUI();
+    }
+    await DebugLogger.log('LEFT', '_pickPersonaAvatar done');
       if (mounted) setState(() {});
     }
     await DebugLogger.log('LEFT', '_pickPersonaAvatar done');
@@ -186,15 +192,13 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     imageCache.clear();
     imageCache.clearLiveImages();
     await DebugLogger.log('LEFT', '_pickPersonaBg saved=$savedPath');
-    // 通知 state 刷新背景
-    if (widget.characterState != null &&
-        widget.characterState!.leadId == lead.id &&
-        widget.characterState!.personaId == persona.id) {
-      await widget.characterState!.updateBackground(savedPath);
-    } else {
-      // 设的是非当前角色背景，只持久化到模型
-      persona.backgroundPath = savedPath;
-      await _service.updatePersona(lead.id, persona);
+    // 直接改传入的 persona 对象并持久化
+    persona.backgroundPath = savedPath;
+    await _service.updatePersona(lead.id, persona);
+    // 如果当前聊天的正是这个 Persona，额外通知 state 刷新
+    if (widget.characterState?.personaId == persona.id) {
+      // 重新加载背景文件
+      widget.characterState!.notifyUI();
     }
     await DebugLogger.log('LEFT', '_pickPersonaBg done');
   }
