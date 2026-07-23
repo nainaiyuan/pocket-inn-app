@@ -420,33 +420,40 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
               _MenuBtn(icon: Icons.image_outlined, label: '更换立绘', onTap: () { Navigator.pop(ctx); _pickAvatar(lead); }),
               _MenuBtn(icon: Icons.wallpaper_outlined, label: '设置全局聊天背景（所有角色继承）', onTap: () async { Navigator.pop(ctx); await Future.delayed(const Duration(milliseconds: 250)); widget.onSetBg?.call(); }),
               const SizedBox(height: 8),
-              // 删除立绘（只剩1个时禁止删除）
-              if (_service.leads.length <= 1)
-                _MenuBtn(
-                  icon: Icons.delete_forever_rounded,
-                  label: '至少保留一个角色',
-                  labelColor: Colors.grey,
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('至少保留一个角色，不能删除最后一个'),
-                        duration: Duration(seconds: 2),
+              // 删除立绘
+              _MenuBtn(
+                icon: Icons.delete_forever_rounded,
+                label: _service.leads.length <= 1
+                    ? '删除并重置（只剩最后一个角色）'
+                    : '删除立绘「${lead.name}」及其所有形象',
+                labelColor: Colors.redAccent,
+                onTap: () async {
+                  final isLast = _service.leads.length <= 1;
+                  if (isLast) {
+                    // 最后一个，弹框确认重置
+                    final reset = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        backgroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        title: const Text('只剩最后一个立绘了'),
+                        content: const Text('删除后所有数据将清空，系统会重建默认角色。相当于重置到初始状态，要继续吗？'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('保留', style: TextStyle(color: Color(0xFF8A7A80)))),
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: const Text('重置', style: TextStyle(color: Color(0xFFE55050), fontWeight: FontWeight.w600)),
+                          ),
+                        ],
                       ),
                     );
-                    Navigator.pop(ctx);  // 关闭菜单，不删
-                  },
-                )
-              else
-                _MenuBtn(
-                  icon: Icons.delete_forever_rounded,
-                  label: '删除立绘「${lead.name}」及其所有形象',
-                  labelColor: Colors.redAccent,
-                  onTap: () async {
-                    Navigator.pop(ctx);
-                    await Future.delayed(const Duration(milliseconds: 250));
-                    _confirmDeleteLead(lead, _service, widget.characterState, context);
-                  },
-                ),
+                    if (reset != true) return;
+                  }
+                  Navigator.pop(ctx);
+                  await Future.delayed(const Duration(milliseconds: 250));
+                  _confirmDeleteLead(lead, _service, widget.characterState, context);
+                },
+              ),
               const SizedBox(height: 4),
             ],
           ),

@@ -187,11 +187,34 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
       ),
     );
     if (confirm == true) {
+      // 如果是这个立绘下的最后一个形象，也是整个 APP 的最后一个角色
+      final isLastPersona = l.personas.length <= 1;
+      final isLastLead = _service.leads.length <= 1;
+
+      if (isLastPersona && isLastLead) {
+        // 最后一个角色了，问用户是否重置
+        final reset = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Text('只剩最后一个角色了'),
+            content: const Text('删除后所有数据将清空，系统会重建默认角色。相当于重置到初始状态，要继续吗？'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('保留', style: TextStyle(color: Color(0xFF8A7A80)))),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('重置', style: TextStyle(color: Color(0xFFE55050), fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+        );
+        if (reset != true) return;
+      }
+
       await _service.deletePersona(l.id, p.id);
-      // 删完后判断立绘下还有没有其他 Persona
       final updatedLead = _service.getMaleLead(l.id);
       if (updatedLead == null || updatedLead.personas.isEmpty) {
-        // 没有 Persona 了，删整个立绘，重建沈星回
         await _service.deleteMaleLead(l.id);
         if (_service.leads.isEmpty) {
           widget.characterState?.createLeadWithDefaultPersona('沈星回');
