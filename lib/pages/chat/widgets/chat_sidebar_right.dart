@@ -188,6 +188,16 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
     );
     if (confirm == true) {
       await _service.deletePersona(l.id, p.id);
+      // 删完后判断立绘下还有没有其他 Persona
+      final updatedLead = _service.getMaleLead(l.id);
+      if (updatedLead == null || updatedLead.personas.isEmpty) {
+        // 没有 Persona 了，删整个立绘，重建沈星回
+        await _service.deleteMaleLead(l.id);
+        if (_service.leads.isEmpty) {
+          widget.characterState?.createLeadWithDefaultPersona('沈星回');
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
+      }
       widget.onDelete();
     }
   }
@@ -353,39 +363,12 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                     title: '危险操作',
                     child: Column(
                       children: [
-                        if (isLead)
-                          // 本体 → 删除角色（连带所有形象）
+                        // 删除当前形象（无论是默认还是分身，都只删当前 Persona）
+                        if (widget.currentPersona != null)
                           SizedBox(
                             width: double.infinity,
                             child: Material(
                               color: Colors.redAccent.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(12),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(12),
-                                onTap: _confirmDelete,
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.delete_forever_rounded, size: 16, color: Colors.redAccent.withValues(alpha: 0.6)),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        '删除角色「${widget.currentLead?.name ?? ''}」及其所有形象',
-                                        style: TextStyle(fontSize: 13, color: Colors.redAccent.withValues(alpha: 0.8)),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          )
-                        else if (widget.currentPersona != null)
-                          // 分身 → 只删除当前形象
-                          SizedBox(
-                            width: double.infinity,
-                            child: Material(
-                              color: Colors.redAccent.withValues(alpha: 0.06),
                               borderRadius: BorderRadius.circular(12),
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(12),
