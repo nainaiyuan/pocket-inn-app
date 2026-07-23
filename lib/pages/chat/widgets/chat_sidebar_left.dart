@@ -123,10 +123,15 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
     lead.avatarPath = savedPath;
     await _service.updateMaleLead(lead);
     await DebugLogger.log('LEFT', '_pickAvatar updated service');
-    // 等文件写完之后再触发 UI 刷新，避免 Image.file 竞争
+    // 清 Flutter 图片缓存，强制 Image.file 重新解码
+    imageCache.clear();
+    imageCache.clearLiveImages();
+    // 等文件写完之后再触发 UI 刷新
     await Future.delayed(const Duration(milliseconds: 50));
     // 通知中间页和 top bar 也刷新（lead.avatarPath 改了）
+    await DebugLogger.log('LEFT', '_pickAvatar notifyUI start');
     widget.characterState?.notifyUI();
+    await DebugLogger.log('LEFT', '_pickAvatar notifyUI done');
     if (mounted) setState(() {});
     await DebugLogger.log('LEFT', '_pickAvatar done');
   }
@@ -149,6 +154,9 @@ class _ChatSidebarLeftState extends State<ChatSidebarLeft> {
       savedPath = await store.savePersonaAvatar(lead.id, persona.id, File(file.path!));
     }
     await DebugLogger.log('LEFT', '_pickPersonaAvatar saved=$savedPath');
+    // 清 Flutter 图片缓存
+    imageCache.clear();
+    imageCache.clearLiveImages();
     if (widget.characterState != null) {
       await widget.characterState!.updateAvatar(savedPath);
     } else {

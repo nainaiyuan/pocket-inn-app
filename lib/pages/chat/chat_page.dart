@@ -65,9 +65,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   void _onStateChanged() {
     if (!mounted) return;
     if (_state.needsGestureReset) {
+      DebugLogger.log('GESTURE', 'reset from state');
       _resetGestureState();
       _state.consumeGestureReset();
     }
+    DebugLogger.log('CHAT', 'rebuild from state notify');
     setState(() {});
   }
 
@@ -278,6 +280,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       } else {
         saved = await _localStore.saveBackground(_state.leadId!, _state.personaId!, File(file.path!));
       }
+      // 清 Flutter 图片缓存，强制背景重新解码
+      imageCache.clear();
+      imageCache.clearLiveImages();
       await _state.updateBackground(saved);
       await DebugLogger.log('BG', 'pickBgImage done path=$saved');
     } catch (e) {
