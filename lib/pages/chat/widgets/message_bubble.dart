@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../models/chat_message.dart';
 import '../../../models/user_setting.dart';
 import '../../../services/chat_character_resolver.dart';
+import '../state/chat_presence.dart';
 
 /// 消息气泡
 class MessageBubble extends StatelessWidget {
@@ -69,13 +70,15 @@ class MessageBubble extends StatelessWidget {
         bottom: 2,
       ),
       child: Column(
-        crossAxisAlignment:
-            message.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: message.isMe
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
           // 头像 + 气泡
           Row(
-            mainAxisAlignment:
-                message.isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+            mainAxisAlignment: message.isMe
+                ? MainAxisAlignment.end
+                : MainAxisAlignment.start,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               if (!message.isMe) ...[
@@ -184,7 +187,45 @@ class MessageBubble extends StatelessWidget {
               ],
             ],
           ),
+          // 时间戳 + 已读状态（微信风格小字）
+          _MetaLine(message: message),
         ],
+      ),
+    );
+  }
+}
+
+/// 气泡下方的小字：时间戳 + 已读/未读
+/// 只有记录了时间的消息才显示（旧数据没有时间戳自动隐藏）
+class _MetaLine extends StatelessWidget {
+  final ChatMessage message;
+
+  const _MetaLine({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final presence = ChatPresence.instance;
+    final time = presence.timestampOf(message.id);
+    final read = presence.isRead(message.id);
+
+    // 都没有就不显示（保持界面干净）
+    if (time == null && read == null) {
+      return const SizedBox.shrink();
+    }
+
+    final parts = <String>[
+      if (time != null) ChatPresence.formatTime(time),
+      if (read != null) (read ? '已读' : '未读'),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 3, right: 4, left: 4),
+      child: Text(
+        parts.join(' · '),
+        style: TextStyle(
+          fontSize: 10,
+          color: const Color(0xFF6A4A5A).withValues(alpha: 0.35),
+        ),
       ),
     );
   }
@@ -195,10 +236,7 @@ class _ActionButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
 
-  const _ActionButton({
-    required this.icon,
-    required this.onTap,
-  });
+  const _ActionButton({required this.icon, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -239,7 +277,9 @@ class _Avatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Widget avatarChild;
-    if (!isUser && characterAvatarPath != null && File(characterAvatarPath!).existsSync()) {
+    if (!isUser &&
+        characterAvatarPath != null &&
+        File(characterAvatarPath!).existsSync()) {
       avatarChild = ClipRRect(
         borderRadius: BorderRadius.circular(17),
         child: Image.file(
@@ -247,7 +287,9 @@ class _Avatar extends StatelessWidget {
           fit: BoxFit.cover,
           width: 34,
           height: 34,
-          key: ValueKey('chat_avatar_${characterAvatarPath}_${File(characterAvatarPath!).lastModifiedSync().millisecondsSinceEpoch}'),
+          key: ValueKey(
+            'chat_avatar_${characterAvatarPath}_${File(characterAvatarPath!).lastModifiedSync().millisecondsSinceEpoch}',
+          ),
         ),
       );
     } else {

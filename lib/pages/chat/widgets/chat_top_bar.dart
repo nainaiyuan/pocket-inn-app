@@ -5,6 +5,7 @@ import '../../../ai_provider/ai_provider_manager.dart';
 import '../../../ai_provider/models.dart';
 import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
+import '../state/chat_presence.dart';
 
 /// 聊天页顶部栏 —— 角色名居中，点击进秘密基地，长按改名；
 /// 名字下方显示当前 AI（明显、可点击进 AI 设置）。
@@ -50,7 +51,8 @@ class _ChatTopBarState extends State<ChatTopBar> {
 
   String _resolveDisplayName() {
     // 始终显示当前 Persona 的名字
-    if (widget.currentPersona != null && widget.currentPersona!.name.isNotEmpty) {
+    if (widget.currentPersona != null &&
+        widget.currentPersona!.name.isNotEmpty) {
       return widget.currentPersona!.name;
     }
     return widget.currentLead?.name ?? '沈星回';
@@ -94,7 +96,30 @@ class _ChatTopBarState extends State<ChatTopBar> {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  _AiBadge(personaId: _personaId, onTap: widget.onAiTap),
+                  // 拟人化状态：男主正在输入/查看
+                  ListenableBuilder(
+                    listenable: ChatPresence.instance,
+                    builder: (context, _) {
+                      if (ChatPresence.instance.isTyping) {
+                        return const _TypingIndicator();
+                      }
+                      if (ChatPresence.instance.isViewing) {
+                        return Text(
+                          '正在查看…',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: const Color(
+                              0xFF6A4A5A,
+                            ).withValues(alpha: 0.35),
+                          ),
+                        );
+                      }
+                      return _AiBadge(
+                        personaId: _personaId,
+                        onTap: widget.onAiTap,
+                      );
+                    },
+                  ),
                 ],
               ),
             ),
@@ -129,7 +154,10 @@ class _ChatTopBarState extends State<ChatTopBar> {
         content: TextField(
           controller: ctrl,
           autofocus: true,
-          decoration: const InputDecoration(hintText: '输入新名字', border: InputBorder.none),
+          decoration: const InputDecoration(
+            hintText: '输入新名字',
+            border: InputBorder.none,
+          ),
         ),
         actions: [
           TextButton(
@@ -148,7 +176,13 @@ class _ChatTopBarState extends State<ChatTopBar> {
               }
               Navigator.pop(ctx);
             },
-            child: const Text('确定', style: TextStyle(color: Color(0xFFE8A0B8), fontWeight: FontWeight.w600)),
+            child: const Text(
+              '确定',
+              style: TextStyle(
+                color: Color(0xFFE8A0B8),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
         ],
       ),
@@ -180,7 +214,8 @@ class _AiBadge extends StatelessWidget {
         }
         final anyUsable = manager.hasUsable(personaId);
         // 当前这个 AI 是否真能用（本地 Provider 不需要 Key）
-        final currentReady = current != null &&
+        final currentReady =
+            current != null &&
             (current.type == ProviderType.local ||
                 current.apiKey.trim().isNotEmpty);
         final Color color;
@@ -222,6 +257,71 @@ class _AiBadge extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// "正在输入…" 打字指示器（三个跳动圆点，仿微信）
+class _TypingIndicator extends StatefulWidget {
+  const _TypingIndicator();
+
+  @override
+  State<_TypingIndicator> createState() => _TypingIndicatorState();
+}
+
+class _TypingIndicatorState extends State<_TypingIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1200),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '正在输入',
+          style: TextStyle(
+            fontSize: 11,
+            color: const Color(0xFF6A4A5A).withValues(alpha: 0.35),
+          ),
+        ),
+        const SizedBox(width: 4),
+        AnimatedBuilder(
+          animation: _controller,
+          builder: (context, _) {
+            final t = _controller.value;
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(3, (i) {
+                // 三个点依次跳动：每个点相位差 120°
+                final phase = (t - i * 0.33) % 1.0;
+                final height =
+                    3.0 + 3.0 * (phase < 0.5 ? phase * 2 : (1 - phase) * 2);
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 1.5),
+                  child: Container(
+                    width: 4,
+                    height: height,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6A4A5A).withValues(alpha: 0.35),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                );
+              }),
+            );
+          },
+        ),
+      ],
     );
   }
 }

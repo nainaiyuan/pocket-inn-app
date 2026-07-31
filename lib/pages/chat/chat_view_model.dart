@@ -19,6 +19,7 @@ import '../../services/openai_compatible_api_service.dart';
 import '../../services/preset_service.dart';
 import '../../services/voice_chat_service.dart' as voice;
 import '../../services/world_book_service.dart';
+import 'state/chat_presence.dart';
 import 'widgets/message_edit_dialog.dart';
 
 /// 聊天页面的视图模型。
@@ -418,6 +419,8 @@ class ChatViewModel extends ChangeNotifier {
     if (sessionId == _activeSession?.id) {
       return false;
     }
+    // 切换会话：清空上一个会话的已读/时间/输入状态
+    ChatPresence.instance.reset();
     _isSwitchingSession = true;
     notifyListeners();
     _loadSession(preferredSessionId: sessionId);
@@ -508,8 +511,7 @@ class ChatViewModel extends ChangeNotifier {
     final result = await getIt<OpenAICompatibleApiService>().testConnection(
       config,
     );
-    if (_isDisposed ||
-        selectedApiModelIdNotifier.value != _apiStatusModelId) {
+    if (_isDisposed || selectedApiModelIdNotifier.value != _apiStatusModelId) {
       return;
     }
 
@@ -549,9 +551,14 @@ class ChatViewModel extends ChangeNotifier {
     final cancellationToken = ChatCompletionCancelToken();
     _activeCompletionCancelToken = cancellationToken;
     _isSending = true;
-    _pendingUserMessage = ChatMessage(text: text, isMe: true);
+    // 发送中的消息用临时 id 标记"未读"，重载后迁移到真实 id
+    final pendingId = 'pending_${DateTime.now().millisecondsSinceEpoch}';
+    _pendingUserMessage = ChatMessage(id: pendingId, text: text, isMe: true);
     _streamingAssistantText = '';
     _streamingThinkingChain = '';
+    // 拟人化状态：用户发消息 → 男主"正在查看" → 回复时"正在输入"
+    ChatPresence.instance.setViewing(true);
+    ChatPresence.instance.markUnread(pendingId);
     notifyListeners();
 
     ChatSession? persistedSession;
@@ -571,6 +578,8 @@ class ChatViewModel extends ChangeNotifier {
           if (_isDisposed) {
             return;
           }
+          // 男主开始吐字 = 正在输入（顶部显示"正在输入…"）
+          ChatPresence.instance.setTyping(true);
           if (progress.textDelta.isNotEmpty) {
             _streamingAssistantText += progress.textDelta;
           }
@@ -596,6 +605,17 @@ class ChatViewModel extends ChangeNotifier {
       if (reloadSessionId != null || !_isDraftSession) {
         await _loadSession(preferredSessionId: reloadSessionId ?? session.id);
       }
+      // 拟人化状态：把发送中临时消息的"未读"状态迁移到真实消息，
+      // 回复结束 → 停止"正在输入"，用户消息全部已读
+      final realUserMessage = _messages.lastWhere(
+        (m) => m.isMe && m.text == text,
+        orElse: () => _messages.isEmpty ? _pendingUserMessage! : _messages.last,
+      );
+      if (realUserMessage.id != null) {
+        ChatPresence.instance.transferState(pendingId, realUserMessage.id!);
+      }
+      ChatPresence.instance.setTyping(false);
+      ChatPresence.instance.markAllRead();
       if (!_isDisposed) {
         _isSending = false;
         if (identical(_activeCompletionCancelToken, cancellationToken)) {
@@ -623,7 +643,10 @@ class ChatViewModel extends ChangeNotifier {
   }) async {
     final session = _activeSession;
     final character = _activeCharacter;
-    if (session == null || character == null || _isSending || _isImpersonating) {
+    if (session == null ||
+        character == null ||
+        _isSending ||
+        _isImpersonating) {
       return;
     }
     if (userMessageIndex < 0 || userMessageIndex >= _messages.length) {

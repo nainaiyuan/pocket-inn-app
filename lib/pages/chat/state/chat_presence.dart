@@ -1,0 +1,154 @@
+import 'package:flutter/foundation.dart';
+
+/// 聊天拟人化状态中心 — "已读/未读/正在输入/时间戳"单独放一块，方便管理
+///
+/// 职责（模仿微信的聊天体验）：
+/// 1. 消息时间戳：消息 id → 发送时间，气泡下方显示（今天 14:30 / 昨天 21:00 / 3月2日）
+/// 2. 已读/未读：用户消息 → 男主是否已读（男主回复完成 = 全部已读）
+/// 3. 正在输入：男主回复流式期间，顶部显示"正在输入…"
+///
+/// 用法：
+/// - 加载历史消息时：`ChatPresence.instance.recordTimestamps(messages)`
+/// - 用户发消息：`ChatPresence.instance.markUnread(id)`（可选，默认未读）
+/// - 男主回复开始：`ChatPresence.instance.setTyping(true)`
+/// - 男主回复完成：`ChatPresence.instance.setTyping(false); markAllRead()`
+///
+/// 是 ChangeNotifier，UI 用 ValueListenableBuilder / ListenableBuilder 监听。
+class ChatPresence extends ChangeNotifier {
+  ChatPresence._();
+
+  static final ChatPresence instance = ChatPresence._();
+
+  /// 消息 id → 发送时间
+  final Map<String, DateTime> _timestamps = {};
+
+  /// 用户消息 id → 男主是否已读（null = 非用户消息/未知）
+  final Map<String, bool> _readState = {};
+
+  /// 男主是否正在输入
+  bool _isTyping = false;
+
+  /// 男主是否正在查看（已读但还没开始输入）
+  bool _isViewing = false;
+
+  bool get isTyping => _isTyping;
+  bool get isViewing => _isViewing;
+
+  /// 消息时间（无记录返回 null，UI 自动隐藏）
+  DateTime? timestampOf(String? messageId) {
+    if (messageId == null) return null;
+    return _timestamps[messageId];
+  }
+
+  /// 男主是否已读该消息（用户消息专用）
+  bool? isRead(String? messageId) {
+    if (messageId == null) return null;
+    return _readState[messageId];
+  }
+
+  /// 记录一批消息的时间戳（加载历史/发送完成后调用）
+  /// [idOf] 取消息 id，[timeOf] 取消息时间
+  void recordTimestamps(
+    Iterable<dynamic> messages, {
+    required String? Function(dynamic m) idOf,
+    required DateTime? Function(dynamic m) timeOf,
+  }) {
+    var changed = false;
+    for (final m in messages) {
+      final id = idOf(m);
+      final time = timeOf(m);
+      if (id != null && time != null) {
+        _timestamps[id] = time;
+        changed = true;
+      }
+    }
+    if (changed) notifyListeners();
+  }
+
+  /// 记录单条消息时间戳
+  void recordTimestamp(String id, DateTime time) {
+    _timestamps[id] = time;
+    notifyListeners();
+  }
+
+  /// 标记消息未读（用户刚发出，男主还没看）
+  void markUnread(String messageId) {
+    _readState[messageId] = false;
+    notifyListeners();
+  }
+
+  /// 迁移已读状态：发送中的临时消息（pending_xxx）重载后变成真实消息，
+  /// 把临时 id 的已读状态搬给真实 id
+  void transferState(String fromId, String toId) {
+    if (!_readState.containsKey(fromId)) return;
+    _readState[toId] = _readState[fromId]!;
+    _readState.remove(fromId);
+    notifyListeners();
+  }
+
+  /// 标记某条消息已读
+  void markRead(String messageId) {
+    _readState[messageId] = true;
+    notifyListeners();
+  }
+
+  /// 全部已读（男主回复完成时调用）
+  void markAllRead() {
+    var changed = false;
+    for (final key in _readState.keys) {
+      if (_readState[key] == false) {
+        _readState[key] = true;
+        changed = true;
+      }
+    }
+    _isViewing = false;
+    if (changed) notifyListeners();
+  }
+
+  /// 男主开始回复：正在查看 → 正在输入
+  void setTyping(bool typing) {
+    final changed = _isTyping != typing;
+    _isTyping = typing;
+    if (typing) _isViewing = true;
+    if (changed) notifyListeners();
+  }
+
+  /// 男主开始看消息（还没输入）—— 预留：延迟模拟"先看到再打字"
+  void setViewing(bool viewing) {
+    final changed = _isViewing != viewing;
+    _isViewing = viewing;
+    if (changed) notifyListeners();
+  }
+
+  /// 清空所有状态（切换会话时调用）
+  void reset() {
+    _timestamps.clear();
+    _readState.clear();
+    _isTyping = false;
+    _isViewing = false;
+    notifyListeners();
+  }
+
+  /// 微信风格时间格式化：
+  /// - 今天：14:30
+  /// - 昨天：昨天 21:00
+  /// - 今年：3月2日 14:30
+  /// - 更早：2025年12月1日 14:30
+  static String formatTime(DateTime time) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final thatDay = DateTime(time.year, time.month, time.day);
+    final diffDays = today.difference(thatDay).inDays;
+
+    final hm =
+        '${time.hour.toString().padLeft(2, '0')}:'
+        '${time.minute.toString().padLeft(2, '0')}';
+
+    if (diffDays <= 0) return hm;
+    if (diffDays == 1) return '昨天 $hm';
+    if (time.year == now.year) {
+      return '${time.month}月${time.day}日 $hm';
+    }
+    return '${time.year}年${time.month}月${time.day}日 $hm';
+  }
+}

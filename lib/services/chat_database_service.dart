@@ -9,6 +9,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../models/chat_memory.dart';
 import '../models/chat_message.dart';
 import '../models/chat_session.dart';
+import '../pages/chat/state/chat_presence.dart';
 
 class ChatDatabaseService {
   ChatDatabaseService._();
@@ -773,6 +774,13 @@ class ChatDatabaseService {
       currentId = node.parentId;
     }
     final orderedPath = path.reversed.toList(growable: false);
+
+    // 记录消息时间戳到 ChatPresence（聊天界面"已读/时间"展示用）
+    ChatPresence.instance.recordTimestamps(
+      orderedPath,
+      idOf: (m) => (m as ChatNode).id,
+      timeOf: (m) => (m as ChatNode).createdAt,
+    );
 
     final result = <ChatMessage>[];
     for (final node in orderedPath) {
