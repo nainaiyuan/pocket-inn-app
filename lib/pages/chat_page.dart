@@ -1,0 +1,839 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../data/app_settings.dart';
+import '../data/mock_user_settings.dart';
+import '../models/chat_message.dart';
+import '../models/chat_session.dart';
+import 'ai_config_page.dart';
+import '../services/tts/tts_service.dart';
+import '../services/voice_chat_service.dart' as voice;
+import '../pages/api_request_log_page.dart';
+import '../pages/butler_task_page.dart';
+import '../pages/vault_page.dart';
+import '../pages/music_player_page.dart';
+import '../pages/chat/chat_view_model.dart';
+import '../pages/chat/widgets/api_selector_sheet.dart';
+import '../pages/chat/widgets/chat_input_area.dart';
+import '../pages/chat/widgets/chat_message_list.dart';
+import '../pages/chat/widgets/chat_selector_menus.dart';
+import '../pages/chat/widgets/chat_title_dialog.dart';
+import '../pages/chat/widgets/memory_tree_page.dart';
+import '../pages/chat/widgets/message_edit_dialog.dart';
+import '../pages/chat_sidebar_page.dart';
+import '../pages/preset_edit_page.dart';
+import '../pages/user_settings_page.dart';
+import '../services/preset_service.dart';
+import '../services/storage_service.dart';
+import '../services/world_book_service.dart';
+
+/// 聊天页面
+class ChatPage extends StatefulWidget {
+  final String? sessionId;
+  final String? draftCharacterId;
+  final String? draftTitle;
+  final String? draftSelectedUserSettingId;
+  final String? draftSelectedPresetId;
+  final List<String> draftSelectedWorldBookIds;
+  final List<String> draftOpeningAssistantMessages;
+
+  const ChatPage({super.key, this.sessionId})
+    : draftCharacterId = null,
+      draftTitle = null,
+      draftSelectedUserSettingId = null,
+      draftSelectedPresetId = null,
+      draftSelectedWorldBookIds = const [],
+      draftOpeningAssistantMessages = const [];
+
+  const ChatPage.draft({
+    super.key,
+    required String characterId,
+    required String title,
+    String? selectedUserSettingId,
+    String? selectedPresetId,
+    List<String> selectedWorldBookIds = const [],
+    List<String> openingAssistantMessages = const [],
+  }) : sessionId = null,
+       draftCharacterId = characterId,
+       draftTitle = title,
+       draftSelectedUserSettingId = selectedUserSettingId,
+       draftSelectedPresetId = selectedPresetId,
+       draftSelectedWorldBookIds = selectedWorldBookIds,
+       draftOpeningAssistantMessages = openingAssistantMessages;
+
+  @override
+  State<ChatPage> createState() => _ChatPageState();
+}
+
+class _ChatPageState extends State<ChatPage> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  final TextEditingController _textController = TextEditingController();
+  final FocusNode _inputFocusNode = FocusNode();
+  final Object _inputTapRegionGroupId = Object();
+  final ScrollController _scrollController = ScrollController(
+    keepScrollOffset: false,
+  );
+  String _inputText = '';
+
+  /// 草稿存储 key（按会话 ID 区分）
+  String? get _draftKey => widget.sessionId != null ? 'chat_draft_${widget.sessionId}' : null;
+
+  late final ChatViewModel _viewModel;
+
+  @override
+  void initState() {
+    super.initState();
+    _viewModel = ChatViewModel(
+      preferredSessionId: widget.sessionId,
+      draftCharacterId: widget.draftCharacterId,
+      draftTitle: widget.draftTitle,
+      draftSelectedUserSettingId: widget.draftSelectedUserSettingId,
+      draftSelectedPresetId: widget.draftSelectedPresetId,
+      draftSelectedWorldBookIds: widget.draftSelectedWorldBookIds,
+      initialDraftOpeningMessages: widget.draftOpeningAssistantMessages,
+    );
+    _textController.addListener(_onTextChanged);
+    _viewModel.onSessionReloaded = _clearInputIfNonEmpty;
+    _viewModel.initialize();
+
+    // 恢复草稿
+    _restoreDraft();
+  }
+
+  /// 恢复之前未发送的草稿
+  void _restoreDraft() {
+    final key = _draftKey;
+    if (key == null) return;
+    final draft = StorageService.instance.getString(key);
+    if (draft != null && draft.isNotEmpty) {
+      _textController.text = draft;
+      _inputText = draft;
+    }
+  }
+
+  /// 保存草稿（切换到别的页面前自动调用）
+  void _saveDraft() {
+    final key = _draftKey;
+    if (key == null) return;
+    final text = _textController.text;
+    if (text.isNotEmpty) {
+      StorageService.instance.setString(key, text);
+    } else {
+      StorageService.instance.setString(key, '');
+    }
+  }
+
+  /// 选择并发送图片
+  Future<void> _onImagePressed() async {
+    // TODO: 未来 → 通过 WebView 打开小Q模型家（3D 互动空间）
+    // 或者用 file_picker 选图片发给男主
+    // 当前：只在输入框插入 [图片] 占位
+    _textController.text = _textController.text + '[图片] ';
+    _textController.selection = TextSelection.fromPosition(
+      TextPosition(offset: _textController.text.length),
+    );
+  }
+
+
+
+  void _onTextChanged() {
+    if (_inputText == _textController.text) {
+      return;
+    }
+    setState(() {
+      _inputText = _textController.text;
+    });
+  }
+
+  /// 会话重新加载后清空输入框（匹配原 _loadSession 末尾行为）。
+  void _clearInputIfNonEmpty() {
+    if (_textController.text.isNotEmpty) {
+      _textController.clear();
+    }
+  }
+
+  @override
+  void dispose() {
+    _saveDraft();
+    _textController.dispose();
+    _inputFocusNode.dispose();
+    _scrollController.dispose();
+    _viewModel.dispose();
+    super.dispose();
+  }
+
+  void _dismissInputKeyboard() {
+    _inputFocusNode.unfocus();
+    FocusManager.instance.primaryFocus?.unfocus();
+    SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+  }
+
+  // --- 侧边栏 / 会话切换 ---
+
+  void _onChatListPressed() {
+    _dismissInputKeyboard();
+    _scaffoldKey.currentState?.openDrawer();
+  }
+
+  Future<void> _selectSessionFromSidebar(ChatSessionSummary summary) async {
+    _dismissInputKeyboard();
+    if (_viewModel.isSending || _viewModel.isImpersonating) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('回复生成中，稍后再切换聊天')));
+      return;
+    }
+    final started = _viewModel.selectSession(summary.id);
+    if (started) {
+      _textController.clear();
+    }
+  }
+
+  // --- API 状态 / 配置 ---
+
+  Future<void> _openApiConfigPage() async {
+    // 旧版 api_config_page 已移入 legacy/，配置统一走新的 AI 配置页
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const AiConfigPage()),
+    );
+    await _viewModel.onApiConfigsChanged();
+  }
+
+  Future<void> _openApiRequestLogPage() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const ApiRequestLogPage()));
+  }
+
+  Future<void> _openMemoryManager() async {
+    final session = _viewModel.activeSession;
+    if (session == null) return;
+    final activeLeafId = _viewModel.messages.isNotEmpty
+        ? _viewModel.messages.last.id
+        : null;
+    final jumpedTo = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => MemoryTreePage(
+          sessionId: session.id,
+          activeLeafMessageId: activeLeafId,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (jumpedTo != null || _viewModel.activeSession?.id == session.id) {
+      await _viewModel.onChatDatabaseChanged();
+    }
+  }
+
+  Future<void> _showApiSelectorSheet() async {
+    await showApiSelectorSheet(
+      context: context,
+      statusProvider: () => ApiStatusInfo(
+        isChecking: _viewModel.isCheckingApiStatus,
+        modelId: _viewModel.apiStatusModelId,
+        result: _viewModel.apiStatusResult,
+      ),
+      useStreamingProvider: () => _viewModel.useStreaming,
+      isSendingProvider: () => _viewModel.isSending,
+      onStreamingChanged: _viewModel.setUseStreaming,
+      onSelectModel: _viewModel.selectApiModel,
+      onRefreshStatus: _viewModel.onApiConfigsChanged,
+      onOpenConfigPage: _openApiConfigPage,
+      onOpenRequestLogPage: _openApiRequestLogPage,
+      onOpenMemoryManager: _openMemoryManager,
+    );
+  }
+
+  // --- 标题 / 重置 ---
+
+  Future<void> _renameChatTitle() async {
+    final session = _viewModel.activeSession;
+    if (session == null) {
+      return;
+    }
+
+    final result = await showDialog<ChatTitleDialogResult>(
+      context: context,
+      builder: (_) => ChatTitleDialog(initialTitle: session.title),
+    );
+
+    if (!mounted || result == null) {
+      return;
+    }
+
+    final normalizedTitle = result.title.trim();
+    if (result.action == ChatTitleDialogAction.reset) {
+      final nextTitle = normalizedTitle.isEmpty
+          ? session.title
+          : normalizedTitle;
+      await _confirmAndResetChat(nextTitle);
+      return;
+    }
+
+    await _viewModel.renameChatTitle(normalizedTitle);
+  }
+
+  Future<void> _confirmAndResetChat(String nextTitle) async {
+    final session = _viewModel.activeSession;
+    final character = _viewModel.activeCharacter;
+    if (session == null || character == null || _viewModel.isSending) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('重置聊天'),
+          content: const Text('将清空当前聊天记录，并按当前选择重新初始化聊天。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('重置'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted || confirmed != true) {
+      return;
+    }
+
+    _textController.clear();
+    setState(() {
+      _inputText = '';
+    });
+
+    try {
+      await _viewModel.resetChat(nextTitle);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('已按当前选择重置聊天')));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    }
+  }
+
+  // --- 选择菜单（用户设定 / 世界书 / 预设） ---
+
+
+  Future<void> _onUserSettingEditPressed(String settingId) async {
+    final settings = userSettingsNotifier.value;
+    final setting = settings.firstWhere((s) => s.id == settingId);
+    final result = await showEditUserSettingDialog(context, setting);
+    if (result == null || !mounted) return;
+
+    if (result.deleted) {
+      await _viewModel.handleUserSettingDeleted(settingId);
+    } else {
+      await _viewModel.handleUserSettingUpdated(result.setting);
+    }
+  }
+
+  Future<void> _onPresetEditPressed(String presetId) async {
+    final preset = await PresetService.instance.loadById(presetId);
+    if (preset == null || !mounted) return;
+
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => PresetEditPage(preset: preset)),
+    );
+
+    if (saved == true && mounted) {
+      await _viewModel.onPresetsChanged();
+    }
+  }
+
+  void _onUserSettingsPressed(BuildContext context) {
+    showUserSettingMenu(
+      context: context,
+      settings: userSettingsNotifier.value,
+      selectedId: _viewModel.selectedUserSettingId,
+      inputTapRegionGroupId: _inputTapRegionGroupId,
+      onSelected: (value) async {
+        await _viewModel.setSelectedUserSettingId(value);
+      },
+      onEdit: _onUserSettingEditPressed,
+    );
+  }
+
+
+  void _onPresetPressed(BuildContext context) {
+    showPresetMenu(
+      context: context,
+      presets: _viewModel.presets,
+      selectedId: _viewModel.selectedPresetId,
+      inputTapRegionGroupId: _inputTapRegionGroupId,
+      onSelected: (value) async {
+        await _viewModel.setSelectedPresetId(value);
+      },
+      onEdit: _onPresetEditPressed,
+    );
+  }
+
+  // --- 发送 / 终止 ---
+
+  Future<void> _onSendPressed() async {
+    final text = _inputText.trim();
+    if (text.isEmpty ||
+        _viewModel.isSwitchingSession ||
+        _viewModel.isSending ||
+        _viewModel.activeSession == null) {
+      return;
+    }
+
+    _textController.clear();
+    try {
+      await _viewModel.sendMessage(text);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    }
+  }
+
+  void _onStopGeneratingPressed() {
+    _viewModel.stopStreaming();
+  }
+
+  // --- 消息操作 ---
+
+  void _onCopyMessage(ChatMessage msg) {
+    Clipboard.setData(ClipboardData(text: msg.text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已复制到剪贴板'), duration: Duration(seconds: 1)),
+    );
+  }
+
+  Future<void> _onEditMessage(int index) async {
+    final character = _viewModel.activeCharacter;
+    final message = index >= 0 && index < _viewModel.messages.length
+        ? _viewModel.messages[index]
+        : null;
+    if (message == null || message.id == null || _viewModel.isSending) {
+      return;
+    }
+    final editingMessage = message;
+
+    final result = await showDialog<MessageEditDialogResult>(
+      context: context,
+      builder: (context) => MessageEditDialog(
+        initialText: editingMessage.text,
+        title: editingMessage.isMe ? '编辑用户消息' : '编辑角色消息',
+        canSaveAndSend: editingMessage.isMe && character != null,
+      ),
+    );
+
+    if (result == null || !mounted) {
+      return;
+    }
+    final normalizedText = result.text.trim();
+    if (normalizedText.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('消息不能为空')));
+      return;
+    }
+
+    try {
+      await _viewModel.editMessage(index, normalizedText, result.action);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    }
+  }
+
+  Future<void> _onEditDraftOpeningMessage() async {
+    if (!_viewModel.isDraftSession ||
+        _viewModel.isSending ||
+        _viewModel.draftOpeningAssistantMessages.isEmpty) {
+      return;
+    }
+
+    final result = await showDialog<MessageEditDialogResult>(
+      context: context,
+      builder: (context) => MessageEditDialog(
+        initialText:
+            _viewModel.draftOpeningAssistantMessages[_viewModel
+                .draftOpeningMessageIndex
+                .clamp(0, _viewModel.draftOpeningAssistantMessages.length - 1)],
+        title: '编辑角色消息',
+        canSaveAndSend: false,
+      ),
+    );
+
+    if (result == null || !mounted) {
+      return;
+    }
+    final normalizedText = result.text.trim();
+    if (normalizedText.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('消息不能为空')));
+      return;
+    }
+
+    await _viewModel.editDraftOpeningMessage(normalizedText);
+  }
+
+  Future<void> _onDeleteMessage(int index) async {
+    final message = index >= 0 && index < _viewModel.messages.length
+        ? _viewModel.messages[index]
+        : null;
+    if (message?.id == null || _viewModel.isSending) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('删除消息'),
+          content: Text(message!.isMe ? '确定删除这条用户消息吗？' : '确定删除这条角色消息吗？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('删除'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) {
+      return;
+    }
+
+    await _viewModel.deleteMessage(index);
+  }
+
+  Future<void> _onRegenerateMessage(int assistantMessageIndex) async {
+    try {
+      await _viewModel.regenerateMessage(assistantMessageIndex);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    }
+  }
+
+  Future<void> _onContinueMessage(int assistantMessageIndex) async {
+    try {
+      await _viewModel.continueAssistantMessage(assistantMessageIndex);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    }
+  }
+
+  Future<void> _onImpersonate() async {
+    try {
+      final reply = await _viewModel.generateUserReply(
+        onProgress: (text) {
+          if (!mounted) return;
+          _textController.text = text;
+          _textController.selection = TextSelection.fromPosition(
+            TextPosition(offset: text.length),
+          );
+        },
+      );
+      if (reply == null || reply.isEmpty || !mounted) {
+        return;
+      }
+      _textController.text = reply;
+      _textController.selection = TextSelection.fromPosition(
+        TextPosition(offset: reply.length),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    }
+  }
+
+  Future<void> _onRegenerateFromUserMessage(int userMessageIndex) async {
+    try {
+      await _viewModel.regenerateFromUserMessage(
+        userMessageIndex: userMessageIndex,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    }
+  }
+
+  Future<void> _onSwitchMessageVariant(ChatMessage message, int delta) async {
+    await _viewModel.switchMessageVariant(message, delta);
+  }
+
+  // --- 构建 ---
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final drawerEdgeDragWidth = (MediaQuery.sizeOf(context).width * 0.45).clamp(
+      128.0,
+      320.0,
+    );
+    final topContentPadding =
+        MediaQuery.paddingOf(context).top + kToolbarHeight;
+    final overlayStyle = theme.brightness == Brightness.dark
+        ? SystemUiOverlayStyle.light
+        : SystemUiOverlayStyle.dark;
+
+    return Scaffold(
+      key: _scaffoldKey,
+      extendBodyBehindAppBar: true,
+      drawerEnableOpenDragGesture: true,
+      drawerEdgeDragWidth: drawerEdgeDragWidth,
+      onDrawerChanged: (isOpened) {
+        if (isOpened) {
+          _dismissInputKeyboard();
+        }
+      },
+      drawer: Drawer(
+        child: SafeArea(
+          child: ChatSidebarPage(
+            activeSessionId: _viewModel.activeSession?.id,
+            onChatSelected: _selectSessionFromSidebar,
+          ),
+        ),
+      ),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        systemOverlayStyle: overlayStyle,
+        leading: IconButton(
+          icon: const Icon(Icons.format_list_bulleted),
+          onPressed: _onChatListPressed,
+          tooltip: '聊天列表',
+        ),
+        title: ListenableBuilder(
+          listenable: _viewModel,
+          builder: (context, _) {
+            final session = _viewModel.activeSession;
+            return InkWell(
+              onTap: session == null ? null : _renameChatTitle,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                child: Text(
+                  session?.title ?? '聊天',
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            );
+          },
+        ),
+        centerTitle: true,
+        actions: [
+          // ─── TTS 自动朗读开关 ───
+          ListenableBuilder(
+            listenable: _viewModel,
+            builder: (context, _) {
+              final vo = voice.VoiceChatService.instance;
+              return IconButton(
+                icon: Icon(
+                  vo.autoSpeak ? Icons.record_voice_over : Icons.voice_over_off,
+                  color: vo.autoSpeak
+                      ? Theme.of(context).colorScheme.primary
+                      : null,
+                ),
+                onPressed: () {
+                  vo.autoSpeak = !vo.autoSpeak;
+                  (context as Element).markNeedsBuild();
+                },
+                tooltip: vo.autoSpeak ? '自动朗读：开' : '自动朗读：关',
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.support_agent),
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => const ButlerTaskPage(),
+              ));
+            },
+            tooltip: '管家',
+          ),
+          IconButton(
+            icon: const Icon(Icons.lock_outline),
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => const VaultPage(),
+              ));
+            },
+            tooltip: '保险箱',
+          ),
+          IconButton(
+            icon: const Icon(Icons.music_note_outlined),
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => const MusicPlayerPage(),
+              ));
+            },
+            tooltip: '音乐',
+          ),
+          ListenableBuilder(
+            listenable: _viewModel,
+            builder: (context, _) {
+              return ApiStatusActionButton(
+                status: ApiStatusInfo(
+                  isChecking: _viewModel.isCheckingApiStatus,
+                  modelId: _viewModel.apiStatusModelId,
+                  result: _viewModel.apiStatusResult,
+                ),
+                onPressed: _showApiSelectorSheet,
+              );
+            },
+          ),
+        ],
+      ),
+      body: ValueListenableBuilder<AppSettings>(
+        valueListenable: appSettingsNotifier,
+        builder: (context, settings, _) {
+          return ListenableBuilder(
+            listenable: _viewModel,
+            builder: (context, _) {
+              final session = _viewModel.activeSession;
+              final character = _viewModel.activeCharacter;
+              final backgroundPath = character?.imagePath ?? '';
+              final hasBackground = backgroundPath.isNotEmpty;
+              if (_viewModel.isLoading) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (session == null) {
+                return const Center(child: Text('暂无聊天记录'));
+              }
+              final isSendEnabled =
+                  !_viewModel.isSwitchingSession &&
+                  !_viewModel.isSending &&
+                  !_viewModel.isImpersonating &&
+                  _inputText.trim().isNotEmpty;
+              return Stack(
+                children: [
+                  if (hasBackground)
+                    Positioned.fill(
+                      child: character?.isAssetImage == true
+                          ? Image.asset(
+                              backgroundPath,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return const SizedBox.shrink();
+                              },
+                            )
+                          : Image.file(
+                              File(backgroundPath),
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return const SizedBox.shrink();
+                              },
+                            ),
+                    ),
+                  if (hasBackground)
+                    Positioned.fill(
+                      child: Container(
+                        color: Theme.of(context).colorScheme.surface.withValues(
+                          alpha: settings.backgroundOpacity,
+                        ),
+                      ),
+                    ),
+                  Column(
+                    children: [
+                      Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.only(top: topContentPadding),
+                          child: ChatMessageList(
+                            visibleMessages: _viewModel.visibleMessages,
+                            scrollController: _scrollController,
+                            inputTapRegionGroupId: _inputTapRegionGroupId,
+                            isSending: _viewModel.isSending,
+                            isImpersonating: _viewModel.isImpersonating,
+                            regeneratingUserMessageId:
+                                _viewModel.regeneratingUserMessageId,
+                            isDraftSession: _viewModel.isDraftSession,
+                            activeCharacter: _viewModel.activeCharacter,
+                            currentUserSetting: _viewModel.currentUserSetting(),
+                            sessionId: session.id,
+                            onCopyMessage: _onCopyMessage,
+                            onEditMessage: _onEditMessage,
+                            onEditDraftOpeningMessage:
+                                _onEditDraftOpeningMessage,
+                            onDeleteMessage: _onDeleteMessage,
+                            onRegenerateFromUserMessage:
+                                _onRegenerateFromUserMessage,
+                            onRegenerateMessage: _onRegenerateMessage,
+                            onContinueMessage: _onContinueMessage,
+                            onImpersonate: _onImpersonate,
+                            onSwitchMessageVariant: _onSwitchMessageVariant,
+                          ),
+                        ),
+                      ),
+                      ChatInputArea(
+                        textController: _textController,
+                        focusNode: _inputFocusNode,
+                        inputTapRegionGroupId: _inputTapRegionGroupId,
+                        sessionKey: ValueKey(_viewModel.activeSession?.id),
+                        isSendEnabled: isSendEnabled,
+                        isSending: _viewModel.isSending,
+                        hasBackground: hasBackground,
+                        settings: settings,
+                        currentUserSetting: _viewModel.currentUserSetting(),
+                        onUserSettingsPressed: _onUserSettingsPressed,
+                        onPresetPressed: _onPresetPressed,
+                        onSendPressed: _onSendPressed,
+                        onStopGeneratingPressed: _onStopGeneratingPressed,
+                        onImagePressed: _onImagePressed,
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
