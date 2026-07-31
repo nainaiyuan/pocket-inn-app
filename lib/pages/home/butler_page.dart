@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../ai_provider/ai_provider_manager.dart';
+import '../../butler/modules/butler_module_hub.dart';
 import '../ai_config_page.dart';
+import '../butler_modules_page.dart';
 import '../chat/widgets/debug_log_sheet.dart';
 
 /// 管家页面（设置中心）：AI 配置入口 + 管家能力卡片。
@@ -78,6 +80,37 @@ class ButlerPage extends StatelessWidget {
                     ),
                     onTap: (context) => Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const AiConfigPage()),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // ---- 管家模块（真功能）----
+                  _EntryCard(
+                    icon: Icons.widgets_outlined,
+                    iconColor: const Color(0xFFC896B4),
+                    title: '管家模块',
+                    subtitleBuilder: (context) {
+                      final hub = ButlerModuleHub();
+                      final modules = hub.registry.all;
+                      final activeCount =
+                          modules.where((m) => m.isActive).length;
+                      return Text(
+                        '$activeCount/${modules.length} 个模块运行中：'
+                        '${modules.map((m) => m.name).join('、')}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: const Color(0xFF5A4A52).withValues(alpha: 0.5),
+                        ),
+                      );
+                    },
+                    onTap: (context) => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ButlerModulesPage(
+                          hub: ButlerModuleHub(),
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 10),

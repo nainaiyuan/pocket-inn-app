@@ -126,6 +126,58 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
     );
   }
 
+  /// 填 / 改 API Key（预设厂商地址和模型已内置，只差 Key）。
+  Future<void> _editKey(AIProviderConfig config) async {
+    final controller = TextEditingController(text: config.apiKey);
+    final key = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('${config.name} 的 API Key'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${config.baseUrl}\n模型：${config.model}',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'API Key',
+                hintText: 'sk-...',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (key == null) return;
+    await manager.setApiKey(config.id, key);
+    if (mounted) {
+      DebugLogger.log('AI管理', '已更新 ${config.name} 的 API Key');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('API Key 已保存')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final personaId = widget.personaId;
@@ -145,6 +197,10 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
       if (!lastConfig.enabled) {
         return cs.outline;
       }
+      if (lastConfig.apiKey.trim().isEmpty &&
+          lastConfig.type != ProviderType.local) {
+        return Colors.orange;
+      }
       switch (lastState?.health) {
         case ProviderHealth.healthy:
           return Colors.green;
@@ -161,6 +217,10 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
       }
       if (!lastConfig.enabled) {
         return '已禁用';
+      }
+      if (lastConfig.apiKey.trim().isEmpty &&
+          lastConfig.type != ProviderType.local) {
+        return '未填 Key';
       }
       switch (lastState?.health) {
         case ProviderHealth.healthy:
@@ -311,11 +371,35 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
             ),
             const SizedBox(height: 4),
             Expanded(
-              child: ListView(
-                children: [
-                  for (final config in manager.providers) _buildRow(config, candidates),
-                ],
-              ),
+              child: manager.providers.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.hub_outlined,
+                            size: 40,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .outline
+                                .withValues(alpha: 0.5),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '还没有 AI，去管家页添加',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: Theme.of(context).colorScheme.outline,
+                                ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView(
+                      children: [
+                        for (final config in manager.providers)
+                          _buildRow(config, candidates),
+                      ],
+                    ),
             ),
             const SizedBox(height: 8),
 
@@ -413,6 +497,18 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (config.type != ProviderType.local)
+            IconButton(
+              icon: Icon(
+                Icons.key,
+                size: 18,
+                color: config.apiKey.trim().isEmpty
+                    ? Colors.orange
+                    : Colors.grey.shade400,
+              ),
+              tooltip: config.apiKey.trim().isEmpty ? '填 API Key' : '修改 API Key',
+              onPressed: () => _editKey(config),
+            ),
           Container(
             width: 8,
             height: 8,

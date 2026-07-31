@@ -128,10 +128,23 @@ class _FloatingNavigatorState extends State<FloatingNavigator>
     return LayoutBuilder(
       builder: (context, constraints) {
         _screenSize = Size(constraints.maxWidth, constraints.maxHeight);
+        // 可拖动范围（小窗/分屏尺寸变化后可能比球还小，下限保底 20）
+        final maxX = math.max(20.0, _screenSize.width - _orbSize - 20);
+        final maxY = math.max(20.0, _screenSize.height - _orbSize - 20);
         if (_position == Offset.zero && _screenSize.width > 0) {
           _position = Offset(
             _screenSize.width - _orbSize - 20,
             _screenSize.height - 160,
+          );
+        }
+        // 窗口尺寸变化（全屏 ↔ 小窗）后，球位置可能已出界 → 拉回屏幕内
+        if (_position.dx < 20 ||
+            _position.dy < 20 ||
+            _position.dx > maxX ||
+            _position.dy > maxY) {
+          _position = Offset(
+            maxX,
+            math.max(20.0, _screenSize.height - 160),
           );
         }
 
@@ -162,9 +175,9 @@ class _FloatingNavigatorState extends State<FloatingNavigator>
                     setState(() {
                       _position = Offset(
                         (_position.dx + details.delta.dx)
-                            .clamp(20.0, _screenSize.width - _orbSize - 20),
+                            .clamp(20.0, maxX),
                         (_position.dy + details.delta.dy)
-                            .clamp(20.0, _screenSize.height - _orbSize - 20),
+                            .clamp(20.0, maxY),
                       );
                       _dragMoved = true;
                     });

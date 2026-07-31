@@ -109,7 +109,9 @@ class _ComboStats {
     rangeJoy = _stdDev(_joySamples);
     rangeAttachment = _stdDev(_attachmentSamples);
 
-    confidence = (1.0 - 1.0 / (1 + count * 0.25)).clamp(0.0, 0.95);
+    // 置信度：样本越多越可信。
+    // 设计目标：3 次样本即可确认（count=3 → 0.6 > 0.5）
+    confidence = (1.0 - 1.0 / (1 + count * 0.5)).clamp(0.0, 0.95);
     if (count >= 3 && confidence > 0.5) confirmed = true;
   }
 

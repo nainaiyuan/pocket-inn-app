@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'butler_memory.dart';
+import 'storage/storage_registry.dart';
 
 /// 管家记忆数据库
 /// SQLite 存储，只存真实信息，永不上传
@@ -32,6 +33,10 @@ class ButlerDatabase {
       version: 4,
       onCreate: (db, version) async {
         await _createTables(db);
+        // 各 Store 的表（IF NOT EXISTS，幂等）
+        for (final store in StorageRegistry.instance.all) {
+          await store.createTables(db);
+        }
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -40,9 +45,6 @@ class ButlerDatabase {
         }
         if (oldVersion < 3) {
           await _createVaultIndexTable(db);
-        }
-        if (oldVersion < 4) {
-          await _createTriggerTable(db);
         }
         if (oldVersion < 4) {
           await _createTriggerTable(db);
@@ -174,6 +176,10 @@ class ButlerDatabase {
       )
     ''');
   }
+
+  /// 原始数据库连接（给 ButlerStore 子类用）
+  /// 未初始化时返回 null
+  Database? get rawDatabase => _db;
 
   /// 检查表是否存在
   Future<bool> _tableExists(String tableName) async {

@@ -1,0 +1,113 @@
+/// 假面层模块 — 把敏感内容替换成男主能看的安全版本
+///
+/// 从 ButlerEngine 迁移过来的既有逻辑，行为不变：
+/// 1. 假面层替换（真实人物 → 代号）
+/// 2. 敏感词 PRIVACY_MARK 替换 + 心情标签
+///
+/// 这是阶段 0 的验证模块：确认管线骨架不改变现有行为。
+library;
+
+import '../butler_config.dart';
+import '../mask_engine.dart';
+import '../modules/butler_module.dart';
+
+/// 假面层模块
+class MaskModule extends ButlerModule {
+  final MaskEngine _maskEngine;
+  final ButlerConfig _config;
+
+  MaskModule({MaskEngine? maskEngine, ButlerConfig? config})
+    : _maskEngine = maskEngine ?? MaskEngine(),
+      _config = config ?? ButlerConfig();
+
+  @override
+  String get id => 'mask';
+
+  @override
+  String get name => '假面层';
+
+  @override
+  String get description => '把敏感内容替换成安全版本，男主只看到代号';
+
+  @override
+  ButlerModuleStage get stage => ButlerModuleStage.guard;
+
+  @override
+  bool get enabled => _config.maskLayerEnabled || _config.keywordReplaceEnabled;
+
+  @override
+  Future<ButlerModuleResult> onUserMessage(
+    ButlerContext context,
+    String text,
+  ) async {
+    var current = text;
+    final fragments = <String>[];
+
+    // 1. 假面层替换
+    if (_config.maskLayerEnabled) {
+      final maskResult = _maskEngine.replaceSensitive(
+        text: current,
+        characterId: context.characterId,
+        sessionId: context.sessionId,
+      );
+      current = maskResult.text;
+    }
+
+    // 2. 关键词替换（PRIVACY_MARK）
+    if (_config.keywordReplaceEnabled) {
+      final sensitiveWords = _detectSensitiveWords(current);
+      if (sensitiveWords.isNotEmpty) {
+        final privacyResult = _maskEngine.applyPrivacyMark(
+          text: current,
+          sensitiveWords: sensitiveWords,
+        );
+        current = privacyResult.text;
+
+        // 3. 有替换时 → 心情标签助理解读
+        final moodContext = _maskEngine.buildMoodContextString(text);
+        if (moodContext.isNotEmpty) {
+          fragments.add(moodContext);
+        }
+      }
+    }
+
+    return ButlerModuleResult(
+      text: current,
+      contextFragments: fragments,
+    );
+  }
+
+  @override
+  Future<ButlerModuleResult> onAssistantReply(
+    ButlerContext context,
+    String text,
+  ) async {
+    if (!_config.maskLayerEnabled) {
+      return ButlerModuleResult.pass(text);
+    }
+    final restored = _maskEngine.restoreSensitive(
+      text: text,
+      sessionId: context.sessionId,
+    );
+    return ButlerModuleResult(text: restored);
+  }
+
+  /// 简单敏感词检测（与 ButlerEngine 保持一致）
+  List<String> _detectSensitiveWords(String text) {
+    const baseSensitive = [
+      '亲', '吻', '抱', '摸', '舔', '咬',
+      '揉', '捏', '含', '吸', '啃',
+      '胸', '腿', '臀', '腰', '口', '唇', '舌',
+      '插', '入', '抽', '送', '顶', '进', '塞',
+      '脱', '裸', '湿', '流', '颤',
+    ];
+
+    final found = <String>[];
+    for (final word in baseSensitive) {
+      if (text.contains(word)) {
+        found.add(word);
+      }
+    }
+    return found;
+  }
+}

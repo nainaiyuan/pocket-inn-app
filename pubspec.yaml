@@ -2,7 +2,7 @@ name: pocket_inn
 description: "PocketInn - A Flutter application."
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
-version: 1.2.4+50
+version: 1.2.4+51
 
 environment:
   sdk: ^3.11.5
@@ -36,6 +36,9 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
+  # 纯 Dart 测试（无 Flutter SDK 环境也能跑：dart test）
+  test: ^1.25.0
 
   flutter_lints: ^6.0.0
   build_runner: ^2.4.13

@@ -16,6 +16,7 @@ class AIProviderPreset {
     required this.type,
     required this.baseUrl,
     required this.model,
+    this.models = const [],
     this.apiKeyHint = '',
     this.capabilities = const {AICapability.chat},
     this.note = '',
@@ -25,7 +26,13 @@ class AIProviderPreset {
   final String name;
   final ProviderType type;
   final String baseUrl;
+
+  /// 默认模型名（列表里的第一个）。
   final String model;
+
+  /// 该厂商常用的模型名列表（添加/编辑时下拉可选，也可手填）。
+  final List<String> models;
+
   final String apiKeyHint;
 
   /// 预留：后续某些预设可带识图等能力
@@ -34,15 +41,21 @@ class AIProviderPreset {
 }
 
 /// 开箱即用的预设厂商。
+/// 注意：模型名会随厂商更新变化，这里只列「当前常用」，
+/// 添加/编辑时用户可下拉选择，也可直接手填最新模型名。
 const List<AIProviderPreset> kAIProviderPresets = [
   AIProviderPreset(
     id: 'preset-deepseek',
     name: 'DeepSeek',
     type: ProviderType.cloud,
     baseUrl: 'https://api.deepseek.com',
-    model: 'deepseek-chat',
+    model: 'deepseek-v4-flash',
+    models: [
+      'deepseek-v4-flash', // 对话，快且便宜（deepseek-chat 已于 2026-07-24 停用）
+      'deepseek-v4-pro', // 推理，更强（deepseek-reasoner 已于 2026-07-24 停用）
+    ],
     apiKeyHint: 'sk-...',
-    note: '便宜、推理强，官方直连',
+    note: '官方直连，v4 系列（旧 deepseek-chat/reasoner 已停用）',
   ),
   AIProviderPreset(
     id: 'preset-qwen',
@@ -50,6 +63,13 @@ const List<AIProviderPreset> kAIProviderPresets = [
     type: ProviderType.cloud,
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen-plus',
+    models: [
+      'qwen-plus',
+      'qwen-max',
+      'qwen-turbo',
+      'qwen-flash',
+      'qwen-long',
+    ],
     apiKeyHint: 'sk-...',
     note: '阿里云百炼，注册送免费额度',
   ),
@@ -59,6 +79,12 @@ const List<AIProviderPreset> kAIProviderPresets = [
     type: ProviderType.cloud,
     baseUrl: 'https://api.moonshot.cn/v1',
     model: 'moonshot-v1-8k',
+    models: [
+      'moonshot-v1-8k',
+      'moonshot-v1-32k',
+      'moonshot-v1-128k',
+      'kimi-k2-0711-preview',
+    ],
     apiKeyHint: 'sk-...',
     note: '月之暗面，长上下文',
   ),
@@ -68,6 +94,13 @@ const List<AIProviderPreset> kAIProviderPresets = [
     type: ProviderType.cloud,
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     model: 'glm-4-flash',
+    models: [
+      'glm-4-flash', // 免费档
+      'glm-4-plus',
+      'glm-4-air',
+      'glm-4-long',
+      'glm-4-0520',
+    ],
     apiKeyHint: '填入智谱 API Key',
     note: 'glm-4-flash 免费档',
   ),
@@ -77,6 +110,12 @@ const List<AIProviderPreset> kAIProviderPresets = [
     type: ProviderType.cloud,
     baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
     model: 'doubao-1-5-pro-32k-250115',
+    models: [
+      'doubao-1-5-pro-32k-250115',
+      'doubao-1-5-lite-32k-250115',
+      'doubao-seed-1-6-250615',
+      'doubao-seed-1-6-thinking-250615',
+    ],
     apiKeyHint: '填入方舟 API Key',
     note: '模型 ID 以火山方舟控制台为准',
   ),
@@ -86,6 +125,14 @@ const List<AIProviderPreset> kAIProviderPresets = [
     type: ProviderType.cloud,
     baseUrl: 'https://api.siliconflow.cn/v1',
     model: 'deepseek-ai/DeepSeek-V3',
+    models: [
+      'deepseek-ai/DeepSeek-V3',
+      'deepseek-ai/DeepSeek-R1',
+      'Qwen/Qwen2.5-72B-Instruct',
+      'Qwen/Qwen2.5-7B-Instruct',
+      'THUDM/GLM-4-9B-Chat',
+      'meta-llama/Llama-3.3-70B-Instruct',
+    ],
     apiKeyHint: 'sk-...',
     note: '聚合开源模型，注册送额度',
   ),
@@ -95,6 +142,14 @@ const List<AIProviderPreset> kAIProviderPresets = [
     type: ProviderType.local,
     baseUrl: 'http://127.0.0.1:11434/v1',
     model: 'qwen2.5:7b',
+    models: [
+      'qwen2.5:7b',
+      'qwen2.5:14b',
+      'qwen2.5:32b',
+      'llama3.1:8b',
+      'gemma2:9b',
+      'deepseek-r1:7b',
+    ],
     apiKeyHint: '本地无需 Key',
     note: '电脑/平板装 Ollama 后可用',
   ),

@@ -171,23 +171,30 @@ class _AiBadge extends StatelessWidget {
       valueListenable: manager.changeNotifier,
       builder: (context, _, __) {
         final id = manager.lastProviderFor(personaId);
-        String? name;
-        var usable = manager.hasUsable(personaId);
+        AIProviderConfig? current;
         for (final config in manager.providers) {
           if (config.id == id) {
-            name = config.name;
+            current = config;
             break;
           }
         }
-        final configured = name != null;
-        final color = !configured
-            ? const Color(0xFFE07A7A)
-            : (usable
-                ? const Color(0xFF7AA87A)
-                : const Color(0xFFE0A050));
-        final label = !configured
-            ? 'AI 未配置'
-            : (usable ? 'AI · $name' : 'AI · $name（异常）');
+        final anyUsable = manager.hasUsable(personaId);
+        // 当前这个 AI 是否真能用（本地 Provider 不需要 Key）
+        final currentReady = current != null &&
+            (current.type == ProviderType.local ||
+                current.apiKey.trim().isNotEmpty);
+        final Color color;
+        final String label;
+        if (current == null || !anyUsable) {
+          color = const Color(0xFFE07A7A);
+          label = '未配置';
+        } else if (!currentReady) {
+          color = const Color(0xFFE0A050);
+          label = '${current.name}（未填 Key）';
+        } else {
+          color = const Color(0xFF7AA87A);
+          label = current.name;
+        }
         return GestureDetector(
           onTap: onTap,
           child: Container(

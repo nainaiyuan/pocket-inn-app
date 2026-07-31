@@ -125,16 +125,50 @@ class UserMemoryManager {
   }
 
   /// 按关键词/标签搜索记忆
+  ///
+  /// 双向匹配：
+  /// 1. 整句/拆词 contains 匹配记忆内容
+  /// 2. 记忆的 tags（关键词）出现在输入里 → 命中（如记忆 tag=咖啡，输入"想喝咖啡"命中）
   List<UserMemory> search(String query) {
     final q = query.toLowerCase();
-    return _memories.where((m) =>
-      m.action.contains(q) ||
-      (m.withWhom?.contains(q) ?? false) ||
-      (m.feeling?.contains(q) ?? false) ||
-      m.tags.any((t) => t.contains(q)) ||
-      m.category.contains(q)
-    ).toList()
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+
+    final scored = <({UserMemory memory, int hits})>[];
+    for (final m in _memories) {
+      var hits = 0;
+
+      // 方向1：记忆内容 contains 查询词（整句直接匹配）
+      if (_match(m, q)) hits += 2;
+
+      // 方向2：查询拆词，逐词匹配记忆内容
+      final words = q
+          .split(RegExp(r'[，。！？、,.!?\s]+'))
+          .where((w) => w.length >= 2)
+          .toList();
+      for (final w in words) {
+        if (_match(m, w)) hits++;
+      }
+
+      // 方向3：记忆 tags 出现在查询里（关键词命中，最重要）
+      final tagHits = m.tags.where((t) => t.isNotEmpty && q.contains(t)).length;
+      hits += tagHits * 3;
+
+      if (hits > 0) scored.add((memory: m, hits: hits));
+    }
+
+    scored.sort((a, b) {
+      final byHits = b.hits.compareTo(a.hits);
+      if (byHits != 0) return byHits;
+      return b.memory.updatedAt.compareTo(a.memory.updatedAt);
+    });
+    return scored.map((s) => s.memory).toList();
+  }
+
+  bool _match(UserMemory m, String q) {
+    return m.action.contains(q) ||
+        (m.withWhom?.contains(q) ?? false) ||
+        (m.feeling?.contains(q) ?? false) ||
+        m.tags.any((t) => t.contains(q)) ||
+        m.category.contains(q);
   }
 
   /// 多条件筛选记忆（给可视化页面用）

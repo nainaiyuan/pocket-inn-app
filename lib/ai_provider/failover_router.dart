@@ -39,7 +39,11 @@ class AIProviderState {
     return false;
   }
 
-  bool get isUsable => isEnabled && !isInCooldown;
+  /// 可用 = 启用 + 不在冷却 + 已填 API Key（本地 Provider 不需要 Key）。
+  bool get isUsable =>
+      isEnabled &&
+      !isInCooldown &&
+      (config.type == ProviderType.local || config.apiKey.trim().isNotEmpty);
 
   void markFailure(Object error, Duration cooldown) {
     consecutiveFailures++;

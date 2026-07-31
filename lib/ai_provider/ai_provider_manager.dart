@@ -62,8 +62,7 @@ class AIProviderManager {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_storageKey);
-      _configs =
-          (raw == null || raw.isEmpty) ? defaultProviderConfigs() : _decodeConfigs(raw);
+      _configs = (raw == null || raw.isEmpty) ? [] : _decodeConfigs(raw);
       // 一次性迁移：旧版「API 设置」里已配置的 Key，导入为自定义 Provider
       if (customProvider == null) {
         await _migrateLegacyConfig();
@@ -300,9 +299,66 @@ class AIProviderManager {
     await _persist();
   }
 
-  /// 一键恢复出厂（全部预设、默认顺序、清空绑定）。
+  /// 从预设模板添加一个 AI（地址 / 模型由模板填好，用户只命名 + 填 Key）。
+  /// 同一模板只能添加一次（id 即模板 id）。
+  Future<void> addProviderFromPreset(
+    AIProviderPreset preset, {
+    required String name,
+    String apiKey = '',
+  }) async {
+    for (final config in _configs) {
+      if (config.id == preset.id) {
+        return;
+      }
+    }
+    final config = AIProviderConfig(
+      id: preset.id,
+      name: name.trim().isEmpty ? preset.name : name.trim(),
+      type: preset.type,
+      baseUrl: preset.baseUrl,
+      apiKey: apiKey.trim(),
+      model: preset.model,
+      enabled: true,
+      priority: 100 + _configs.length * 10,
+      note: preset.note,
+    );
+    _configs = [..._configs, config];
+    _syncRouter();
+    await _persist();
+    DebugLogger.log('AI管理', '已添加 AI: ${config.name} (${config.id})');
+  }
+
+  /// 通用保存：新增或整体更新一个 AI（编辑表单用，全字段可改）。
+  Future<void> saveProvider(AIProviderConfig config) async {
+    final index = _configs.indexWhere((item) => item.id == config.id);
+    if (index >= 0) {
+      _configs = [..._configs]..[index] = config;
+    } else {
+      _configs = [..._configs, config];
+    }
+    _syncRouter();
+    await _persist();
+    DebugLogger.log('AI管理', '已保存 AI: ${config.name}');
+  }
+
+  /// 删除一个 AI（同时清理男主绑定里的引用）。
+  Future<void> removeProvider(String id) async {
+    _configs = [
+      for (final item in _configs)
+        if (item.id != id) item,
+    ];
+    for (final binding in _bindings) {
+      binding.providerIds.remove(id);
+    }
+    _bindings.removeWhere((binding) => binding.providerIds.isEmpty);
+    _syncRouter();
+    await _persist();
+    DebugLogger.log('AI管理', '已删除 AI: $id');
+  }
+
+  /// 一键清空所有 AI 配置（含绑定）。
   Future<void> resetToDefaults() async {
-    _configs = defaultProviderConfigs();
+    _configs = [];
     _bindings.clear();
     _syncRouter();
     await _persist();
@@ -585,15 +641,20 @@ class AIProviderManager {
     try {
       final decoded = jsonDecode(raw);
       if (decoded is! List) {
-        return defaultProviderConfigs();
+        return const [];
       }
+      // 过滤未配置的：云端没填 Key = 未配置，不显示（本地模型不需要 Key）。
       return [
         for (final item in decoded)
           if (item is Map<String, dynamic>)
             AIProviderConfig.fromJson(item),
-      ];
+      ].where(
+        (config) =>
+            config.type == ProviderType.local ||
+            config.apiKey.trim().isNotEmpty,
+      ).toList();
     } on Object {
-      return defaultProviderConfigs();
+      return const [];
     }
   }
 
