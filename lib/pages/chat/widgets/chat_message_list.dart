@@ -4,7 +4,6 @@ import '../../../models/chat_message.dart';
 import '../../../models/user_setting.dart';
 import '../../../services/chat_character_resolver.dart';
 import '../../../widgets/scroll_float_button.dart';
-import '../state/chat_presence.dart';
 import 'message_bubble.dart';
 
 /// 聊天消息列表（含滚动浮动按钮）。
@@ -163,13 +162,10 @@ class ChatMessageList extends StatelessWidget {
   }
 
   /// 两条消息是否属于同一组（一个头像多个气泡）
-  /// 规则：同侧 && 时间差 < 5 分钟（时间都有的情况下）；
-  /// 时间缺失时保守处理：只要同侧就归组（旧数据没有时间戳）
+  /// 规则：只看用户有没有插话 —— 同侧连续（中间没有对方消息）就是一组，
+  /// 与时间无关（男主连说几句就一个头像）
   static bool _inSameGroup(ChatMessage a, ChatMessage? b) {
-    if (b == null || a.isMe != b.isMe) return false;
-    final ta = ChatPresence.instance.timestampOf(a.id);
-    final tb = ChatPresence.instance.timestampOf(b.id);
-    if (ta == null || tb == null) return true; // 无时间 → 同侧即同组
-    return ta.difference(tb).abs() < const Duration(minutes: 5);
+    if (b == null) return false;
+    return a.isMe == b.isMe;
   }
 }

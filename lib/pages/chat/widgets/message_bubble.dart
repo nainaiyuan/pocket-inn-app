@@ -34,7 +34,7 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onAvatarLongPress;
 
   /// 连续对话分组：本消息是否在组内（组内不显示头像，气泡连一起）
-  /// [isGroupStart] 组内第一条（顶部圆角大），[isGroupEnd] 组内最后一条（显示头像）
+  /// [isGroupStart] 组内第一条（显示头像 + 尾巴），[isGroupEnd] 组内最后一条（底角收尾）
   final bool isGrouped;
   final bool isGroupStart;
   final bool isGroupEnd;
@@ -91,7 +91,8 @@ class MessageBubble extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               // 分组模式：只有组内最后一条才显示头像（仿微信连续对话）
-              if (!message.isMe && (!isGrouped || isGroupEnd)) ...[
+              // 分组模式：只有组内第一条才显示头像（用户没插话 = 连着说）
+              if (!message.isMe && (!isGrouped || isGroupStart)) ...[
                 _Avatar(
                   isUser: false,
                   characterAvatarPath: characterAvatarPath,
@@ -112,7 +113,8 @@ class MessageBubble extends StatelessWidget {
                         ? const Color(0xFFE8A0B8).withValues(alpha: 0.15)
                         : Colors.white.withValues(alpha: 0.5),
                     borderRadius: BorderRadius.only(
-                      // 分组时：组内第一条顶角大、组内中间小、最后一条恢复尾巴
+                      // 分组：组首顶角大 + 头像侧尾巴，中间小圆角，组尾底角收尾
+                      // 头像在男主左侧（BL 是尾巴侧）/ 用户右侧（BR 是尾巴侧）
                       topLeft: isGrouped && !isGroupStart
                           ? const Radius.circular(6)
                           : const Radius.circular(18),
@@ -120,15 +122,25 @@ class MessageBubble extends StatelessWidget {
                           ? const Radius.circular(6)
                           : const Radius.circular(18),
                       bottomLeft: message.isMe
-                          ? const Radius.circular(18)
-                          : isGrouped && !isGroupEnd
-                          ? const Radius.circular(6)
+                          ? const Radius.circular(18) // 用户左侧恒 18
+                          : isGrouped
+                          ? isGroupStart
+                                ? Radius
+                                      .zero // 组首尾巴指向头像
+                                : isGroupEnd
+                                ? const Radius.circular(18)
+                                : const Radius.circular(6)
                           : Radius.zero,
                       bottomRight: message.isMe
-                          ? isGrouped && !isGroupEnd
-                                ? const Radius.circular(6)
+                          ? isGrouped
+                                ? isGroupStart
+                                      ? Radius
+                                            .zero // 组首尾巴指向头像
+                                      : isGroupEnd
+                                      ? const Radius.circular(18)
+                                      : const Radius.circular(6)
                                 : Radius.zero
-                          : const Radius.circular(18),
+                          : const Radius.circular(18), // 男主右侧恒 18
                     ),
                     border: Border.all(
                       color: Colors.white.withValues(alpha: 0.4),
@@ -200,7 +212,7 @@ class MessageBubble extends StatelessWidget {
                   ),
                 ),
               ),
-              if (message.isMe && (!isGrouped || isGroupEnd)) ...[
+              if (message.isMe && (!isGrouped || isGroupStart)) ...[
                 const SizedBox(width: 8),
                 _Avatar(isUser: true),
               ],
