@@ -33,6 +33,12 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onAvatarTap;
   final VoidCallback? onAvatarLongPress;
 
+  /// 连续对话分组：本消息是否在组内（组内不显示头像，气泡连一起）
+  /// [isGroupStart] 组内第一条（顶部圆角大），[isGroupEnd] 组内最后一条（显示头像）
+  final bool isGrouped;
+  final bool isGroupStart;
+  final bool isGroupEnd;
+
   const MessageBubble({
     super.key,
     required this.message,
@@ -58,6 +64,9 @@ class MessageBubble extends StatelessWidget {
     this.characterAvatarPath,
     this.onAvatarTap,
     this.onAvatarLongPress,
+    this.isGrouped = false,
+    this.isGroupStart = false,
+    this.isGroupEnd = false,
   });
 
   @override
@@ -81,7 +90,8 @@ class MessageBubble extends StatelessWidget {
                 : MainAxisAlignment.start,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              if (!message.isMe) ...[
+              // 分组模式：只有组内最后一条才显示头像（仿微信连续对话）
+              if (!message.isMe && (!isGrouped || isGroupEnd)) ...[
                 _Avatar(
                   isUser: false,
                   characterAvatarPath: characterAvatarPath,
@@ -102,13 +112,22 @@ class MessageBubble extends StatelessWidget {
                         ? const Color(0xFFE8A0B8).withValues(alpha: 0.15)
                         : Colors.white.withValues(alpha: 0.5),
                     borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(18),
-                      topRight: const Radius.circular(18),
+                      // 分组时：组内第一条顶角大、组内中间小、最后一条恢复尾巴
+                      topLeft: isGrouped && !isGroupStart
+                          ? const Radius.circular(6)
+                          : const Radius.circular(18),
+                      topRight: isGrouped && !isGroupStart
+                          ? const Radius.circular(6)
+                          : const Radius.circular(18),
                       bottomLeft: message.isMe
                           ? const Radius.circular(18)
+                          : isGrouped && !isGroupEnd
+                          ? const Radius.circular(6)
                           : Radius.zero,
                       bottomRight: message.isMe
-                          ? Radius.zero
+                          ? isGrouped && !isGroupEnd
+                                ? const Radius.circular(6)
+                                : Radius.zero
                           : const Radius.circular(18),
                     ),
                     border: Border.all(
@@ -181,7 +200,7 @@ class MessageBubble extends StatelessWidget {
                   ),
                 ),
               ),
-              if (message.isMe) ...[
+              if (message.isMe && (!isGrouped || isGroupEnd)) ...[
                 const SizedBox(width: 8),
                 _Avatar(isUser: true),
               ],
@@ -197,6 +216,7 @@ class MessageBubble extends StatelessWidget {
 
 /// 气泡下方的小字：时间戳 + 已读/未读
 /// 只有记录了时间的消息才显示（旧数据没有时间戳自动隐藏）
+/// 颜色：已读 = 柔和绿（安心），未读 = 柔和琥珀（提醒，不吓人）
 class _MetaLine extends StatelessWidget {
   final ChatMessage message;
 
@@ -213,18 +233,47 @@ class _MetaLine extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final parts = <String>[
-      if (time != null) ChatPresence.formatTime(time),
-      if (read != null) (read ? '已读' : '未读'),
-    ];
+    // 只有已读/未读时给颜色；时间戳保持灰色
+    final Color? statusColor;
+    if (read == true) {
+      statusColor = const Color(0xFF7BA88F); // 柔和绿
+    } else if (read == false) {
+      statusColor = const Color(0xFFC8966A); // 柔和琥珀（不吓人的"未读"）
+    } else {
+      statusColor = null;
+    }
 
     return Padding(
       padding: const EdgeInsets.only(top: 3, right: 4, left: 4),
-      child: Text(
-        parts.join(' · '),
-        style: TextStyle(
-          fontSize: 10,
-          color: const Color(0xFF6A4A5A).withValues(alpha: 0.35),
+      child: Text.rich(
+        TextSpan(
+          children: [
+            if (time != null)
+              TextSpan(
+                text: ChatPresence.formatTime(time),
+                style: TextStyle(
+                  fontSize: 10,
+                  color: const Color(0xFF6A4A5A).withValues(alpha: 0.35),
+                ),
+              ),
+            if (time != null && read != null)
+              TextSpan(
+                text: ' · ',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: const Color(0xFF6A4A5A).withValues(alpha: 0.35),
+                ),
+              ),
+            if (read != null)
+              TextSpan(
+                text: read ? '已读' : '未读',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: statusColor,
+                ),
+              ),
+          ],
         ),
       ),
     );

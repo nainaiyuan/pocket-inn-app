@@ -83,44 +83,30 @@ class _ChatTopBarState extends State<ChatTopBar> {
             child: GestureDetector(
               onTap: widget.onTapAvatar,
               onLongPress: () => _renameLead(context),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _displayName,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                      color: Color(0xFF6A4A5A),
-                      letterSpacing: 1,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  // 拟人化状态：男主正在输入/查看
-                  ListenableBuilder(
-                    listenable: ChatPresence.instance,
-                    builder: (context, _) {
-                      if (ChatPresence.instance.isTyping) {
-                        return const _TypingIndicator();
-                      }
-                      if (ChatPresence.instance.isViewing) {
-                        return Text(
-                          '正在查看…',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: const Color(
-                              0xFF6A4A5A,
-                            ).withValues(alpha: 0.35),
-                          ),
-                        );
-                      }
-                      return _AiBadge(
-                        personaId: _personaId,
-                        onTap: widget.onAiTap,
-                      );
-                    },
-                  ),
-                ],
+              // 拟人化状态：男主输入中 → 顶部只显示"正在输入"（仿微信，不显示名字）
+              child: ListenableBuilder(
+                listenable: ChatPresence.instance,
+                builder: (context, _) {
+                  if (ChatPresence.instance.isTyping) {
+                    return const _TypingIndicator();
+                  }
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _displayName,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF6A4A5A),
+                          letterSpacing: 1,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      _AiBadge(personaId: _personaId, onTap: widget.onAiTap),
+                    ],
+                  );
+                },
               ),
             ),
           ),

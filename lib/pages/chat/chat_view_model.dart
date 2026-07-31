@@ -556,8 +556,7 @@ class ChatViewModel extends ChangeNotifier {
     _pendingUserMessage = ChatMessage(id: pendingId, text: text, isMe: true);
     _streamingAssistantText = '';
     _streamingThinkingChain = '';
-    // 拟人化状态：用户发消息 → 男主"正在查看" → 回复时"正在输入"
-    ChatPresence.instance.setViewing(true);
+    // 拟人化状态：用户发消息 → 气泡下"未读" → 男主回复时"已读+正在输入"
     ChatPresence.instance.markUnread(pendingId);
     notifyListeners();
 
@@ -578,9 +577,10 @@ class ChatViewModel extends ChangeNotifier {
           if (_isDisposed) {
             return;
           }
-          // 男主开始吐字 = 正在输入（顶部显示"正在输入…"）
-          ChatPresence.instance.setTyping(true);
+          // 男主开始吐字：消息已读（气泡下"未读"→"已读"）+ 正在输入
           if (progress.textDelta.isNotEmpty) {
+            ChatPresence.instance.markAllRead();
+            ChatPresence.instance.setTyping(true);
             _streamingAssistantText += progress.textDelta;
           }
           if (progress.thinkingDelta.isNotEmpty) {
@@ -596,6 +596,11 @@ class ChatViewModel extends ChangeNotifier {
               }
             : null,
       );
+
+      // 非流式模式：没有逐字回调，回复拿到 = 已读
+      if (!_useStreaming) {
+        ChatPresence.instance.markAllRead();
+      }
     } on ChatCompletionCancelledException {
       // 用户主动终止，不弹错误提示。
     } finally {

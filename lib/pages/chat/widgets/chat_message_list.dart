@@ -4,6 +4,7 @@ import '../../../models/chat_message.dart';
 import '../../../models/user_setting.dart';
 import '../../../services/chat_character_resolver.dart';
 import '../../../widgets/scroll_float_button.dart';
+import '../state/chat_presence.dart';
 import 'message_bubble.dart';
 
 /// 聊天消息列表（含滚动浮动按钮）。
@@ -86,6 +87,21 @@ class ChatMessageList extends StatelessWidget {
             final canEditMessage =
                 (hasPersistedMessage || hasDraftOpeningActions) && !isSending;
             final canDeleteMessage = hasPersistedMessage && !isSending;
+
+            // 连续对话分组：同侧相邻消息 → 一个头像多个气泡（仿微信）
+            // 规则：同侧 && 时间差 < 5 分钟（时间都有的情况下）
+            final prev = messageIndex > 0
+                ? visibleMessages[messageIndex - 1]
+                : null;
+            final next = messageIndex < visibleMessages.length - 1
+                ? visibleMessages[messageIndex + 1]
+                : null;
+            final groupedWithPrev = _inSameGroup(msg, prev);
+            final groupedWithNext = _inSameGroup(msg, next);
+            final isGrouped = groupedWithPrev || groupedWithNext;
+            final isGroupStart = !groupedWithPrev && groupedWithNext;
+            final isGroupEnd = groupedWithPrev && !groupedWithNext;
+
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: MessageBubble(
@@ -96,6 +112,9 @@ class ChatMessageList extends StatelessWidget {
                 inputTapRegionGroupId: inputTapRegionGroupId,
                 isLastUserMessageWithoutReply: isLastUserMessageWithoutReply,
                 isLastCharacterMessage: isLastCharacterMessage,
+                isGrouped: isGrouped,
+                isGroupStart: isGroupStart,
+                isGroupEnd: isGroupEnd,
                 showActions: showActions,
                 canEdit: canEditMessage,
                 canDelete: canDeleteMessage,
@@ -141,5 +160,16 @@ class ChatMessageList extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  /// 两条消息是否属于同一组（一个头像多个气泡）
+  /// 规则：同侧 && 时间差 < 5 分钟（时间都有的情况下）；
+  /// 时间缺失时保守处理：只要同侧就归组（旧数据没有时间戳）
+  static bool _inSameGroup(ChatMessage a, ChatMessage? b) {
+    if (b == null || a.isMe != b.isMe) return false;
+    final ta = ChatPresence.instance.timestampOf(a.id);
+    final tb = ChatPresence.instance.timestampOf(b.id);
+    if (ta == null || tb == null) return true; // 无时间 → 同侧即同组
+    return ta.difference(tb).abs() < const Duration(minutes: 5);
   }
 }
