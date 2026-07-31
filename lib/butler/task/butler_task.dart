@@ -91,6 +91,9 @@ enum TaskStatus {
 
   /// 已取消/关闭
   cancelled,
+
+  /// 超时（等待男主响应超时，防阻塞）
+  timeout,
 }
 
 /// 任务执行结果

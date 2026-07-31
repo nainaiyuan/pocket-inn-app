@@ -16,6 +16,8 @@
 ///
 /// 男主每次聊到时可以看到这些 → 显得他记得用户的事。
 
+import '../storage/user_memory_store.dart';
+
 /// 用户记忆模板字段
 class UserMemory {
   final String id;
@@ -93,9 +95,33 @@ class UserMemory {
 class UserMemoryManager {
   final List<UserMemory> _memories = [];
 
+  /// 持久化存储（可空 = 纯内存模式）
+  UserMemoryStore? _store;
+
+  /// 关联持久化存储
+  void attachStore(UserMemoryStore store) {
+    _store = store;
+  }
+
+  /// 从存储加载（APP 启动时调用）
+  Future<void> loadFromStore() async {
+    final store = _store;
+    if (store == null) return;
+    try {
+      final loaded = await store.loadAll();
+      _memories.clear();
+      _memories.addAll(loaded);
+      print('[UserMemory] 从存储加载 ${_memories.length} 条记忆');
+    } catch (e) {
+      print('[UserMemory] 加载记忆存储失败: $e');
+    }
+  }
+
   /// 添加一条记忆（男主总结或用户手动）
   void add(UserMemory memory) {
     _memories.add(memory);
+    _store?.save(memory).catchError(
+        (e) => print('[UserMemory] 保存记忆失败: $e'));
   }
 
   /// 修改一条记忆
@@ -103,7 +129,7 @@ class UserMemoryManager {
     final idx = _memories.indexWhere((m) => m.id == id);
     if (idx >= 0) {
       final old = _memories[idx];
-      _memories[idx] = UserMemory(
+      final updated = UserMemory(
         id: old.id,
         subject: old.subject,
         withWhom: withWhom ?? old.withWhom,
@@ -116,12 +142,17 @@ class UserMemoryManager {
         updatedAt: DateTime.now(),
         isUserCreated: true, // 用户改过就标记为用户创建的
       );
+      _memories[idx] = updated;
+      _store?.save(updated).catchError(
+          (e) => print('[UserMemory] 更新记忆失败: $e'));
     }
   }
 
   /// 删除一条记忆
   void delete(String id) {
     _memories.removeWhere((m) => m.id == id);
+    _store?.deleteById(id).catchError(
+        (e) => print('[UserMemory] 删除记忆失败: $e'));
   }
 
   /// 按关键词/标签搜索记忆

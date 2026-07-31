@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../butler/modules/butler_module.dart';
 import '../../butler/modules/butler_module_hub.dart';
+import 'mask_rules_page.dart';
 
 /// 管家模块管理页 — 显示所有模块 + 开关
 ///
@@ -140,6 +141,7 @@ class _ModuleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final active = module.isActive;
+    final canManage = module.id == 'mask';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
@@ -151,63 +153,73 @@ class _ModuleCard extends StatelessWidget {
               : Colors.black12,
         ),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: _iconColor(module).withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: canManage
+            ? () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => MaskRulesPage(hub: hub)))
+            : null,
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: _iconColor(module).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(_icon(module), color: _iconColor(module), size: 22),
             ),
-            child: Icon(_icon(module), color: _iconColor(module), size: 22),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      module.name,
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: active
-                            ? const Color(0xFF5A4A52)
-                            : const Color(0xFF5A4A52).withValues(alpha: 0.4),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        module.name,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: active
+                              ? const Color(0xFF5A4A52)
+                              : const Color(0xFF5A4A52).withValues(alpha: 0.4),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _stageLabel(module.stage),
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: const Color(0xFF5A4A52).withValues(alpha: 0.35),
+                      const SizedBox(width: 8),
+                      Text(
+                        _stageLabel(module.stage),
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: const Color(
+                            0xFF5A4A52,
+                          ).withValues(alpha: 0.35),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  module.description,
-                  style: TextStyle(
-                    fontSize: 12,
-                    height: 1.4,
-                    color: const Color(0xFF5A4A52).withValues(alpha: 0.5),
+                    ],
                   ),
-                ),
-              ],
+                  const SizedBox(height: 4),
+                  Text(
+                    module.description,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.4,
+                      color: const Color(0xFF5A4A52).withValues(alpha: 0.5),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          Switch(
-            value: active,
-            activeTrackColor: const Color(0xFFC896B4),
-            onChanged: onChanged,
-          ),
-        ],
+            const SizedBox(width: 8),
+            Switch(
+              value: active,
+              activeTrackColor: const Color(0xFFC896B4),
+              onChanged: onChanged,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -220,6 +232,8 @@ class _ModuleCard extends StatelessWidget {
         return Icons.face_retouching_natural_outlined;
       case 'mood':
         return Icons.sentiment_satisfied_alt_outlined;
+      case 'calibrator':
+        return Icons.thermostat_outlined;
       default:
         return Icons.extension_outlined;
     }
@@ -233,6 +247,8 @@ class _ModuleCard extends StatelessWidget {
         return const Color(0xFFA8C8E0);
       case 'mood':
         return const Color(0xFFC896B4);
+      case 'calibrator':
+        return const Color(0xFFE0A060);
       default:
         return const Color(0xFFA0C8A0);
     }

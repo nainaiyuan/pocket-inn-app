@@ -13,11 +13,11 @@ import '../modules/butler_module.dart';
 
 /// 假面层模块
 class MaskModule extends ButlerModule {
-  final MaskEngine _maskEngine;
+  final MaskEngine maskEngine;
   final ButlerConfig _config;
 
   MaskModule({MaskEngine? maskEngine, ButlerConfig? config})
-    : _maskEngine = maskEngine ?? MaskEngine(),
+    : maskEngine = maskEngine ?? MaskEngine(),
       _config = config ?? ButlerConfig();
 
   @override
@@ -45,7 +45,7 @@ class MaskModule extends ButlerModule {
 
     // 1. 假面层替换
     if (_config.maskLayerEnabled) {
-      final maskResult = _maskEngine.replaceSensitive(
+      final maskResult = maskEngine.replaceSensitive(
         text: current,
         characterId: context.characterId,
         sessionId: context.sessionId,
@@ -57,24 +57,21 @@ class MaskModule extends ButlerModule {
     if (_config.keywordReplaceEnabled) {
       final sensitiveWords = _detectSensitiveWords(current);
       if (sensitiveWords.isNotEmpty) {
-        final privacyResult = _maskEngine.applyPrivacyMark(
+        final privacyResult = maskEngine.applyPrivacyMark(
           text: current,
           sensitiveWords: sensitiveWords,
         );
         current = privacyResult.text;
 
         // 3. 有替换时 → 心情标签助理解读
-        final moodContext = _maskEngine.buildMoodContextString(text);
+        final moodContext = maskEngine.buildMoodContextString(text);
         if (moodContext.isNotEmpty) {
           fragments.add(moodContext);
         }
       }
     }
 
-    return ButlerModuleResult(
-      text: current,
-      contextFragments: fragments,
-    );
+    return ButlerModuleResult(text: current, contextFragments: fragments);
   }
 
   @override
@@ -85,7 +82,7 @@ class MaskModule extends ButlerModule {
     if (!_config.maskLayerEnabled) {
       return ButlerModuleResult.pass(text);
     }
-    final restored = _maskEngine.restoreSensitive(
+    final restored = maskEngine.restoreSensitive(
       text: text,
       sessionId: context.sessionId,
     );
@@ -95,11 +92,36 @@ class MaskModule extends ButlerModule {
   /// 简单敏感词检测（与 ButlerEngine 保持一致）
   List<String> _detectSensitiveWords(String text) {
     const baseSensitive = [
-      '亲', '吻', '抱', '摸', '舔', '咬',
-      '揉', '捏', '含', '吸', '啃',
-      '胸', '腿', '臀', '腰', '口', '唇', '舌',
-      '插', '入', '抽', '送', '顶', '进', '塞',
-      '脱', '裸', '湿', '流', '颤',
+      '亲',
+      '吻',
+      '抱',
+      '摸',
+      '舔',
+      '咬',
+      '揉',
+      '捏',
+      '含',
+      '吸',
+      '啃',
+      '胸',
+      '腿',
+      '臀',
+      '腰',
+      '口',
+      '唇',
+      '舌',
+      '插',
+      '入',
+      '抽',
+      '送',
+      '顶',
+      '进',
+      '塞',
+      '脱',
+      '裸',
+      '湿',
+      '流',
+      '颤',
     ];
 
     final found = <String>[];

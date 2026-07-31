@@ -4,7 +4,10 @@ import '../../ai_provider/ai_provider_manager.dart';
 import '../../butler/modules/butler_module_hub.dart';
 import '../ai_config_page.dart';
 import '../butler_modules_page.dart';
+import '../butler_task_page.dart';
 import '../chat/widgets/debug_log_sheet.dart';
+import '../mood_analysis_page.dart';
+import '../pattern_memory_page.dart';
 
 /// 管家页面（设置中心）：AI 配置入口 + 管家能力卡片。
 class ButlerPage extends StatelessWidget {
@@ -90,7 +93,7 @@ class ButlerPage extends StatelessWidget {
                     iconColor: const Color(0xFFC896B4),
                     title: '管家模块',
                     subtitleBuilder: (context) {
-                      final hub = ButlerModuleHub();
+                      final hub = ButlerModuleHub.instance;
                       final modules = hub.registry.all;
                       final activeCount =
                           modules.where((m) => m.isActive).length;
@@ -108,7 +111,7 @@ class ButlerPage extends StatelessWidget {
                     onTap: (context) => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => ButlerModulesPage(
-                          hub: ButlerModuleHub(),
+                          hub: ButlerModuleHub.instance,
                         ),
                       ),
                     ),
@@ -120,24 +123,44 @@ class ButlerPage extends StatelessWidget {
                     icon: Icons.auto_awesome_outlined,
                     iconColor: const Color(0xFFC896B4),
                     title: '情绪分析',
-                    subtitle: '自动识别你说话时的情绪（即将上线）',
-                    onTap: null,
+                    subtitle: '输入一句话，看管家怎么理解你的情绪',
+                    onTap: (context) => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const MoodAnalysisPage()),
+                    ),
                   ),
                   const SizedBox(height: 10),
                   _EntryCard(
                     icon: Icons.route_outlined,
                     iconColor: const Color(0xFFC8A8D8),
                     title: '规律与记忆',
-                    subtitle: '管家记住你的习惯，主动帮忙（即将上线）',
-                    onTap: null,
+                    subtitleBuilder: (context) {
+                      return Text(
+                        '管家发现的情绪规律 + 男主记住的事，可看可改',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: const Color(0xFF5A4A52).withValues(alpha: 0.5),
+                        ),
+                      );
+                    },
+                    onTap: (context) => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => PatternMemoryPage(
+                          hub: ButlerModuleHub.instance,
+                        ),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 10),
                   _EntryCard(
                     icon: Icons.task_alt_outlined,
                     iconColor: const Color(0xFFA0C8E0),
                     title: '任务',
-                    subtitle: '管家帮你做的事，都在这里（即将上线）',
-                    onTap: null,
+                    subtitle: '管家帮你做的事（温控、关键词收集等）',
+                    onTap: (context) => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const ButlerTaskPage()),
+                    ),
                   ),
                   const SizedBox(height: 10),
 

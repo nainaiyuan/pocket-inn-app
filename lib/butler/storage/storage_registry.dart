@@ -14,7 +14,9 @@ import 'butler_store.dart';
 import 'identity_store.dart';
 import 'interaction_store.dart';
 import 'memory_store.dart';
+import 'pattern_store.dart';
 import 'trigger_store.dart';
+import 'user_memory_store.dart';
 import 'vault_store.dart';
 
 /// 存储注册中心（单例）
@@ -29,6 +31,8 @@ class StorageRegistry {
       TriggerStore(),
       VaultStore(),
       IdentityStore(),
+      PatternStore(),
+      UserMemoryStore(),
     ];
   }
 
@@ -53,6 +57,12 @@ class StorageRegistry {
 
   IdentityStore get identity =>
       _store<IdentityStore>('identity');
+
+  PatternStore get patterns =>
+      _store<PatternStore>('patterns');
+
+  UserMemoryStore get userMemory =>
+      _store<UserMemoryStore>('user_memory');
 
   // ========== 通用 ==========
 

@@ -25,6 +25,10 @@ enum TaskType {
   characterDelete,    // 删除角色
   exportData,         // 导出数据
   importData,         // 导入数据
+  keywordCollect,     // 温控校准：情绪偏离基线，问男主要关键词（回复格式 #keywords 词1,词2）
+  arcConfirm,         // 温控校准：情绪回归基线，确认完整弧线（回复格式 #arc_end）
+  patternMerge,       // 温控校准：情感区间高度重叠的组合，问男主是否同一类（回复格式 #same yes）
+  conversationSummary,// 对话总结：对话结束，问男主要关键词（回复格式 #summary 词1,词2）
   other,              // 其他
 }
 
@@ -196,6 +200,15 @@ class TaskManager {
   /// 获取历史记录
   List<Task> getHistory({int limit = 50}) {
     return _completedTasks.reversed.take(limit).toList();
+  }
+
+  /// 清空所有任务（测试用，避免单例跨测试污染）
+  void clearAll() {
+    _taskQueue.clear();
+    _completedTasks.clear();
+    _pendingButlerTasks.clear();
+    _completedButlerTasks.clear();
+    _currentTask = null;
   }
 
   /// 生成唯一ID

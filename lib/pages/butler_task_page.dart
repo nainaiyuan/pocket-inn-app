@@ -201,6 +201,10 @@ class _ButlerTaskPageState extends State<ButlerTaskPage> {
         case TaskType.characterDelete: return '删除角色';
         case TaskType.exportData: return '导出数据';
         case TaskType.importData: return '导入数据';
+        case TaskType.keywordCollect: return '关键词收集';
+        case TaskType.arcConfirm: return '弧线确认';
+        case TaskType.patternMerge: return '规律合并';
+        case TaskType.conversationSummary: return '对话总结';
         case TaskType.other: return '其他';
       }
     }

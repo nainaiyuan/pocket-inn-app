@@ -18,6 +18,8 @@
 
 import 'dart:math';
 
+import 'storage/identity_store.dart' show IdentityEntry, IdentityStore;
+
 /// 处理结果
 class ProcessResult {
   final String text;
@@ -61,29 +63,43 @@ class MaskEngine {
       '长辈（用户又爱又烦的一位女性长辈）',
       '用户的女性长辈（关系紧密，常有互动）',
     ],
-    'family_dad': [
-      '一位男性长辈（关系亲近，用户尊重他）',
-      '家里的长辈（严肃但关心用户）',
-      '男性长辈（用户和他话不多但感情深）',
-    ],
-    'friend_close': [
-      '用户的好朋友（关系很好）',
-      '一位密友（用户可以倾诉的那种）',
-      '用户亲近的朋友（经常联系）',
-    ],
-    'work_boss': [
-      '用户的上司（工作上有压力）',
-      '用户的领导（用户有些怕他）',
-      '工作上的上级（用户想讨好他）',
-    ],
-    'work_colleague': [
-      '用户的同事',
-      '一个工作上的人',
-      '用户的同行',
-    ],
+    'family_dad': ['一位男性长辈（关系亲近，用户尊重他）', '家里的长辈（严肃但关心用户）', '男性长辈（用户和他话不多但感情深）'],
+    'friend_close': ['用户的好朋友（关系很好）', '一位密友（用户可以倾诉的那种）', '用户亲近的朋友（经常联系）'],
+    'work_boss': ['用户的上司（工作上有压力）', '用户的领导（用户有些怕他）', '工作上的上级（用户想讨好他）'],
+    'work_colleague': ['用户的同事', '一个工作上的人', '用户的同行'],
   };
 
   final Random _random = Random();
+
+  // ── 持久化存储（可空 = 纯内存）──
+  IdentityStore? _store;
+
+  /// 关联持久化存储
+  void attachStore(IdentityStore store) {
+    _store = store;
+  }
+
+  /// 从存储加载身份（APP 启动时调用）
+  Future<void> loadFromStore() async {
+    final store = _store;
+    if (store == null) return;
+    try {
+      final entries = await store.all();
+      for (final entry in entries) {
+        _identities[entry.id] = entry;
+        _assignCode(entry);
+      }
+      print('[MaskEngine] 从存储加载 ${_identities.length} 个身份');
+    } catch (e) {
+      print('[MaskEngine] 加载身份存储失败: $e');
+    }
+  }
+
+  /// 已注册的全部身份（给管理页用）
+  List<IdentityEntry> get allIdentities => _identities.values.toList();
+
+  /// 身份对应的代号（给管理页用）
+  String? codeFor(String identityId) => _identityCodes[identityId];
 
   // ── 身份管理 ──
 
@@ -91,6 +107,7 @@ class MaskEngine {
   void registerIdentity(IdentityEntry entry) {
     _identities[entry.id] = entry;
     _assignCode(entry);
+    _store?.save(entry).catchError((e) => print('[MaskEngine] 保存身份失败: $e'));
   }
 
   /// 批量注册
@@ -104,6 +121,9 @@ class MaskEngine {
   void unregisterIdentity(String id) {
     _identities.remove(id);
     _identityCodes.remove(id);
+    _store
+        ?.delete(IdentityStore.table, where: 'id = ?', whereArgs: [id])
+        .catchError((e) => print('[MaskEngine] 删除身份失败: $e'));
   }
 
   /// 获取已注册的所有身份标签
@@ -162,10 +182,7 @@ class MaskEngine {
   }
 
   /// 恢复敏感信息（男主回复 → 显示给用户）
-  String restoreSensitive({
-    required String text,
-    required String sessionId,
-  }) {
+  String restoreSensitive({required String text, required String sessionId}) {
     final sessionMap = _sessionMappings[sessionId];
     if (sessionMap == null) return text;
 
@@ -174,7 +191,9 @@ class MaskEngine {
     final reverseEntries = <MapEntry<String, String>>[];
     for (final id in _identities.keys) {
       if (sessionMap.containsKey(id)) {
-        reverseEntries.add(MapEntry(sessionMap[id]!, _identities[id]!.realLabel));
+        reverseEntries.add(
+          MapEntry(sessionMap[id]!, _identities[id]!.realLabel),
+        );
       }
     }
     reverseEntries.sort((a, b) => b.key.length.compareTo(a.key.length));
@@ -215,10 +234,7 @@ class MaskEngine {
       replaceCount++;
     }
 
-    return ProcessResult(
-      text: modified,
-      wasModified: replaceCount > 0,
-    );
+    return ProcessResult(text: modified, wasModified: replaceCount > 0);
   }
 
   /// 构建心情标签上下文字符串
@@ -279,23 +295,4 @@ class BlocklistResult {
   final List<String> matchedLabels;
 
   BlocklistResult({required this.isBlocked, this.matchedLabels = const []});
-}
-
-/// 身份条目
-class IdentityEntry {
-  final String id;           // 'family_mom'
-  final String realLabel;    // '妈妈'
-  final String category;     // 'family' | 'friend' | 'work'
-  final String relationType; // 'family_mom' | 'friend_close' | 'work_colleague'
-  final String importance;   // 'core' | 'normal' | 'temp'
-  final String? attitude;    // 用户态度标签
-
-  IdentityEntry({
-    required this.id,
-    required this.realLabel,
-    required this.category,
-    required this.relationType,
-    this.importance = 'normal',
-    this.attitude,
-  });
 }

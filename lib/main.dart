@@ -4,6 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'ai_provider/ai_provider_manager.dart';
 import 'core/error_handler.dart';
 import 'core/service_locator.dart';
+import 'butler/modules/butler_module_hub.dart';
 import 'data/app_settings.dart';
 import 'pages/home/home_page.dart';
 
@@ -65,7 +66,11 @@ class _BootstrapPageState extends State<_BootstrapPage> {
       setState(() => _status = '正在初始化 AI 路由…');
       await AIProviderManager.instance.initialize();
 
-      setState(() => _status = '正在加载设置…');
+      setState(() => _status = '正在加载管家数据…');
+      // 管家模块共享实例（规律/记忆/假面层持久化数据）
+      final hub = ButlerModuleHub.instance;
+      await hub.loadPersistentData();
+      await hub.loadSettings();
 
       if (!mounted) return;
       // 初始化完成，进入主界面

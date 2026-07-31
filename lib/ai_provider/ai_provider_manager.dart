@@ -300,19 +300,22 @@ class AIProviderManager {
   }
 
   /// 从预设模板添加一个 AI（地址 / 模型由模板填好，用户只命名 + 填 Key）。
-  /// 同一模板只能添加一次（id 即模板 id）。
+  /// 同一模板可以添加多次（比如两个 DeepSeek：一个官方、一个中转站），
+  /// id 自动加后缀保证唯一。
   Future<void> addProviderFromPreset(
     AIProviderPreset preset, {
     required String name,
     String apiKey = '',
   }) async {
-    for (final config in _configs) {
-      if (config.id == preset.id) {
-        return;
-      }
+    // 生成唯一 id：同模板重复添加时加数字后缀
+    var id = preset.id;
+    var suffix = 2;
+    while (_configs.any((c) => c.id == id)) {
+      id = '${preset.id}_$suffix';
+      suffix++;
     }
     final config = AIProviderConfig(
-      id: preset.id,
+      id: id,
       name: name.trim().isEmpty ? preset.name : name.trim(),
       type: preset.type,
       baseUrl: preset.baseUrl,

@@ -21,24 +21,28 @@ class MoodBaseline {
   /// 最后一次更新的时间
   DateTime _lastUpdated = DateTime.now();
 
-  /// 情绪维度的完整列表
-  static const List<String> emotionDimensions = [
-    '喜悦', '幸福', '满足', '安心',
-    '平静', '放松',
-    '愤怒', '烦躁', '厌烦',
-    '悲伤', '脆弱', '失望', '委屈',
-    '恐惧', '焦虑',
-    '渴望', '依恋', '思念', '爱意',
-  ];
+  /// 维度集合是**动态**的：模型/分析器输出什么维度，就注册什么维度。
+  ///
+  /// 不写死维度列表的原因（butler_algorithm.md 第 10 节）：
+  /// - 情绪模型会更新换代，新模型输出新维度名
+  /// - 管家没见过的维度 = 和男主一起"重新认识用户"（通过校准任务）
+  /// - 旧维度靠 60 天半衰期自然衰减，不污染新体系
+  ///
+  /// [knownDimensions] 返回当前已注册的所有维度。
+  List<String> get knownDimensions => List.unmodifiable(_values.keys);
 
   /// 用一次对话的结束情绪更新基线
   void update(Map<String, double> endMood) {
     _sampleCount++;
     _lastUpdated = DateTime.now();
 
-    for (final dim in emotionDimensions) {
-      final current = endMood[dim] ?? 50;
-      _values[dim] = _rollingAvg(_values[dim] ?? 50, current, _sampleCount);
+    // 动态注册：endMood 里出现的每个维度都进基线。
+    // 新维度首次出现 → 直接用当前值作为初始基线（而不是默认 50），
+    // 这样新维度第二次出现时就能正常比较偏离。
+    for (final entry in endMood.entries) {
+      final dim = entry.key;
+      final current = entry.value;
+      _values[dim] = _rollingAvg(_values[dim] ?? current, current, _sampleCount);
     }
   }
 
@@ -61,18 +65,34 @@ class MoodBaseline {
   }
 
   /// 整体效价（正面-负面，-100~100）
+  /// 动态计算：根据已知维度自动判断正负向。
+  /// 正面维度：喜悦/幸福/满足/安心/平静/放松/依恋/爱意/渴望/期待/开心/信任/享受
+  /// 负面维度：愤怒/烦躁/厌烦/悲伤/脆弱/失望/委屈/恐惧/焦虑/生气/难过/害怕/疲惫/无聊/需要空间/负面情绪
   double get valence {
-    final pos = (_values['喜悦'] ?? 50) +
-        (_values['幸福'] ?? 50) +
-        (_values['满足'] ?? 50) +
-        (_values['安心'] ?? 50) +
-        (_values['依恋'] ?? 50);
-    final neg = (_values['愤怒'] ?? 50) +
-        (_values['悲伤'] ?? 50) +
-        (_values['恐惧'] ?? 50) +
-        (_values['焦虑'] ?? 50) +
-        (_values['烦躁'] ?? 50);
-    return pos / 5 - neg / 5;
+    const positiveDims = {
+      '喜悦', '幸福', '满足', '安心', '平静', '放松',
+      '依恋', '爱意', '渴望', '期待', '开心', '信任', '享受', '情绪高涨',
+    };
+    const negativeDims = {
+      '愤怒', '烦躁', '厌烦', '悲伤', '脆弱', '失望', '委屈',
+      '恐惧', '焦虑', '生气', '难过', '害怕', '疲惫', '无聊',
+      '需要空间', '负面情绪', '抗拒', '需要安慰', '渴望关注',
+    };
+    double pos = 0, neg = 0;
+    int posCount = 0, negCount = 0;
+    for (final entry in _values.entries) {
+      if (positiveDims.contains(entry.key)) {
+        pos += entry.value;
+        posCount++;
+      } else if (negativeDims.contains(entry.key)) {
+        neg += entry.value;
+        negCount++;
+      }
+    }
+    if (posCount == 0 && negCount == 0) return 0;
+    final posAvg = posCount > 0 ? pos / posCount : 50.0;
+    final negAvg = negCount > 0 ? neg / negCount : 50.0;
+    return posAvg - negAvg;
   }
 
   /// 检测当前情绪是否异常偏离基线
@@ -85,9 +105,14 @@ class MoodBaseline {
     String maxDim = '';
     final details = <String, double>{};
 
-    for (final dim in emotionDimensions) {
-      final baseline = _values[dim] ?? 50;
-      final current = currentMood[dim] ?? 50;
+    for (final dim in _values.keys) {
+      // 只比较双方都"认识"的维度：
+      // - 基线里必须有该维度（否则默认 50 会误判）
+      // - 当前情绪里必须有该维度（否则拿 50 对比没意义）
+      final baseline = _values[dim];
+      final current = currentMood[dim];
+      if (baseline == null || current == null) continue;
+
       final deviation = current - baseline;
       details[dim] = deviation;
 
@@ -146,8 +171,9 @@ class MoodBaseline {
 
   String toContext() {
     if (!isReliable) return '（用户情感基线：样本不足，暂不可用）';
-    final pos = (_values['喜悦'] ?? 0) > 50 ? '正面' : '中性偏负';
-    return '（用户情感基线：${pos}，效价${valence.toStringAsFixed(0)}，样本${_sampleCount}次）';
+    final v = valence;
+    final pos = v > 10 ? '正面' : (v < -10 ? '负面' : '中性');
+    return '（用户情感基线：${pos}，效价${v.toStringAsFixed(0)}，样本${_sampleCount}次，维度${_values.length}个）';
   }
 }
 
@@ -171,15 +197,29 @@ class DeviationResult {
 
   /// 偏离的方向（正向=更正面，负向=更负面）
   double get valenceShift {
+    const positiveDims = {
+      '喜悦', '幸福', '满足', '安心', '平静', '放松',
+      '依恋', '爱意', '渴望', '期待', '开心', '信任', '享受', '情绪高涨',
+    };
+    const negativeDims = {
+      '愤怒', '烦躁', '厌烦', '悲伤', '脆弱', '失望', '委屈',
+      '恐惧', '焦虑', '生气', '难过', '害怕', '疲惫', '无聊',
+      '需要空间', '负面情绪', '抗拒', '需要安慰', '渴望关注',
+    };
     double pos = 0, neg = 0;
+    int posCount = 0, negCount = 0;
     for (final entry in details.entries) {
-      if (['喜悦', '幸福', '满足', '安心', '依恋'].contains(entry.key)) {
+      if (positiveDims.contains(entry.key)) {
         pos += entry.value;
-      } else if (['愤怒', '悲伤', '恐惧', '焦虑', '烦躁'].contains(entry.key)) {
+        posCount++;
+      } else if (negativeDims.contains(entry.key)) {
         neg += entry.value.abs();
+        negCount++;
       }
     }
-    return pos / 5 - neg / 5;
+    if (posCount == 0 && negCount == 0) return 0;
+    return (posCount > 0 ? pos / posCount : 0) -
+        (negCount > 0 ? neg / negCount : 0);
   }
 }
 

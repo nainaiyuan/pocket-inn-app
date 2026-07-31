@@ -397,12 +397,13 @@ class _AiConfigPageState extends State<AiConfigPage> {
   // ---------------------------------------------------------------------------
 
   Future<void> _openAddSheet() async {
-    final addedIds = {for (final p in manager.providers) p.id};
+    // 预设可以重复添加（如两个 DeepSeek：官方 + 中转站），
+    // 所以这里不再按 preset.id 禁用已添加的模板。
     final selected = await showModalBottomSheet<Object>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (ctx) => _TemplatePickerSheet(addedIds: addedIds),
+      builder: (ctx) => const _TemplatePickerSheet(),
     );
     if (selected == null || !mounted) return;
     if (selected is AIProviderPreset) {
@@ -473,9 +474,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
 
 /// 添加时的模板选择：预设列表（已添加的置灰）+ 自定义。
 class _TemplatePickerSheet extends StatelessWidget {
-  const _TemplatePickerSheet({required this.addedIds});
-
-  final Set<String> addedIds;
+  const _TemplatePickerSheet();
 
   @override
   Widget build(BuildContext context) {
@@ -492,7 +491,7 @@ class _TemplatePickerSheet extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              '预设 = 地址和模型已帮你填好，只需命名 + Key',
+              '预设 = 地址和模型已帮你填好，只需命名 + Key；\n同一预设可添加多个（比如官方 + 中转站）',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -511,10 +510,8 @@ class _TemplatePickerSheet extends StatelessWidget {
                       title: preset.name,
                       subtitle: '${preset.model} · ${preset.baseUrl}',
                       note: preset.note,
-                      added: addedIds.contains(preset.id),
-                      onTap: addedIds.contains(preset.id)
-                          ? null
-                          : () => Navigator.of(context).pop(preset),
+                      added: false,
+                      onTap: () => Navigator.of(context).pop(preset),
                     ),
                   const Divider(height: 24),
                   _templateTile(

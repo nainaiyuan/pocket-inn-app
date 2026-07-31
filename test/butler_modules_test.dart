@@ -14,6 +14,7 @@ import 'package:test/test.dart';
 import 'package:pocket_inn/butler/modules/blocklist_module.dart';
 import 'package:pocket_inn/butler/modules/butler_module.dart';
 import 'package:pocket_inn/butler/modules/butler_module_hub.dart';
+import 'package:pocket_inn/butler/modules/calibrator_module.dart';
 import 'package:pocket_inn/butler/modules/mask_module.dart';
 import 'package:pocket_inn/butler/modules/mood_module.dart';
 import 'package:pocket_inn/butler/modules/module_registry.dart';
@@ -192,13 +193,14 @@ void main() {
   });
 
   group('模块注册表', () {
-    test('Hub 注册了 4 个默认模块', () {
+    test('Hub 注册了 5 个默认模块', () {
       final hub = ButlerModuleHub(enableDbRetrieval: false);
-      expect(hub.count, 4);
+      expect(hub.count, 5);
       expect(hub.module<BlocklistModule>('blocklist'), isNotNull);
       expect(hub.module<MoodModule>('mood'), isNotNull);
       expect(hub.module<MaskModule>('mask'), isNotNull);
       expect(hub.module<RetrievalModule>('retrieval'), isNotNull);
+      expect(hub.module<CalibratorModule>('calibrator'), isNotNull);
     });
   });
 }

@@ -1,4 +1,5 @@
 import 'mask_engine.dart';
+import 'storage/identity_store.dart' show IdentityEntry;
 import 'butler_engine.dart';
 import 'butler_config.dart';
 import 'butler_database.dart';

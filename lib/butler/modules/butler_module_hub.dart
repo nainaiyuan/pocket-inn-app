@@ -17,6 +17,7 @@ import '../prompt/prompt_source_registry.dart';
 import '../storage/storage_registry.dart';
 import 'blocklist_module.dart';
 import 'butler_module.dart';
+import 'calibrator_module.dart';
 import 'mask_module.dart';
 import 'module_registry.dart';
 import 'module_settings_store.dart';
@@ -27,6 +28,13 @@ import 'retrieval_module.dart';
 /// 管家模块组装器
 /// 负责创建、注册所有模块，并提供管线执行入口
 class ButlerModuleHub {
+  /// 全局共享实例（懒加载）
+  /// 温控/检索/管理页共用同一份，保证规律、记忆、假面层数据一致
+  static ButlerModuleHub? _sharedInstance;
+
+  static ButlerModuleHub get instance =>
+      _sharedInstance ??= ButlerModuleHub();
+
   /// 注册表（单例）
   final ModuleRegistry registry;
 
@@ -70,26 +78,43 @@ class ButlerModuleHub {
        enableDbRetrieval = enableDbRetrieval {
     final effectiveConfig = config ?? ButlerConfig();
 
+    // 共享的规律引擎（基线与规律只有一份，温控和检索共用）
+    final sharedPatternEngine =
+        patternEngine ?? PatternEngine(UserElementStore());
+    // 规律持久化（SQLite，重启不丢）
+    sharedPatternEngine.attachStore(StorageRegistry.instance.patterns);
+
     // ===== 注册全部模块（按执行顺序） =====
 
     // ① 禁区拦截（guard，最先）
     _register(BlocklistModule());
 
     // ② 假面层（guard，第二位）
+    final sharedMaskEngine = maskEngine ?? MaskEngine();
+    // 身份持久化（SQLite，重启不丢）
+    sharedMaskEngine.attachStore(StorageRegistry.instance.identity);
     _register(MaskModule(
-      maskEngine: maskEngine ?? MaskEngine(),
+      maskEngine: sharedMaskEngine,
       config: effectiveConfig,
     ));
 
     // ③ 情绪分析（analyze）
     _register(MoodModule(analyzer: MoodAnalyzerImpl()));
 
-    // ④ 检索调度（analyze）— 六路检索拼上下文
+    // ④ 温控校准（analyze）— 检测情绪偏离基线，创建 keywordCollect 任务
+    _register(CalibratorModule(
+      patternEngine: sharedPatternEngine,
+    ));
+
+    // ⑤ 检索调度（analyze）— 六路检索拼上下文
     final db = database ?? ButlerDatabase.instance;
     final interactionStore = StorageRegistry.instance.interaction;
+    final sharedMemoryManager = memoryManager ?? UserMemoryManager();
+    // 用户记忆持久化（SQLite，重启不丢）
+    sharedMemoryManager.attachStore(StorageRegistry.instance.userMemory);
     _register(RetrievalModule(
-      patternEngine: patternEngine ?? PatternEngine(UserElementStore()),
-      memoryManager: memoryManager ?? UserMemoryManager(),
+      patternEngine: sharedPatternEngine,
+      memoryManager: sharedMemoryManager,
       elementEngine: elementEngine ?? UserElementEngine(UserElementStore()),
       insightEngine: enableDbRetrieval
           ? (insightEngine ?? InsightEngine(db: db))
@@ -103,7 +128,6 @@ class ButlerModuleHub {
     ));
 
     // 未来在这里加：
-    // ⑤ 温控引擎（analyze）— CalibratorModule
     // ⑥ 碎片系统（analyze）— FragmentModule
 
     // ===== 注册 Prompt 来源（检索结果拼进男主 Prompt）=====
@@ -122,6 +146,39 @@ class ButlerModuleHub {
     for (final entry in map.entries) {
       modules[entry.key]?.setUserEnabled(entry.value);
     }
+  }
+
+  /// 加载全部持久化数据：规律、用户记忆、假面层身份（APP 启动时调用）
+  Future<void> loadPersistentData() async {
+    await Future.wait([
+      if (sharedPatternEngine != null) sharedPatternEngine!.loadFromStore(),
+      if (sharedMemoryManager != null) sharedMemoryManager!.loadFromStore(),
+      if (sharedMaskEngine != null) sharedMaskEngine!.loadFromStore(),
+    ]);
+  }
+
+  /// 共享规律引擎（温控/检索/管理页共用同一份）
+  /// 从注册的模块里取，保证和运行时用的是同一个实例
+  PatternEngine? get sharedPatternEngine {
+    final calibrator = modules['calibrator'];
+    if (calibrator is CalibratorModule) return calibrator.patternEngine;
+    final retrieval = modules['retrieval'];
+    if (retrieval is RetrievalModule) return retrieval.patternEngine;
+    return null;
+  }
+
+  /// 共享假面层引擎（禁区/检索/管理页共用同一份）
+  MaskEngine? get sharedMaskEngine {
+    final mask = modules['mask'];
+    if (mask is MaskModule) return mask.maskEngine;
+    return null;
+  }
+
+  /// 共享用户记忆管理器（检索/管理页共用同一份）
+  UserMemoryManager? get sharedMemoryManager {
+    final retrieval = modules['retrieval'];
+    if (retrieval is RetrievalModule) return retrieval.memoryManager;
+    return null;
   }
 
   /// 切换某模块开关（UI 调用，持久化）

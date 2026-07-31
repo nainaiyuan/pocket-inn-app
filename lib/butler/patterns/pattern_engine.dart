@@ -28,6 +28,7 @@ import '../memory/emotion_arc.dart';
 import 'mood_baseline.dart';
 import '../memory/user_element.dart';
 import '../memory/user_element_store.dart';
+import '../storage/pattern_store.dart';
 
 /// 关键词组合的情绪偏移统计
 class _ComboStats {
@@ -47,6 +48,9 @@ class _ComboStats {
   /// 逐次命中的完整记录（存基线快照，用于基线变化后复盘）
   final List<_ComboHit> hits;
 
+  /// 规律来源：auto=管家发现，manual=用户手动添加
+  String source = 'auto';
+
   List<double> _angerSamples = [], _sadSamples = [], _joySamples = [], _attachmentSamples = [];
 
   _ComboStats({
@@ -58,8 +62,24 @@ class _ComboStats {
     DateTime? lastSeen,
     this.confirmed = false,
     List<_ComboHit>? hits,
+    this.source = 'auto',
   }) : lastSeen = lastSeen ?? DateTime.now(),
        hits = hits ?? [];
+
+  /// 转公开视图（给 UI 用）
+  PatternStats toStats() => PatternStats(
+    comboKey: comboKey,
+    keywords: List.from(keywords),
+    count: count,
+    confidence: confidence,
+    confirmed: confirmed,
+    lastSeen: lastSeen,
+    shiftAnger: shiftAnger,
+    shiftSad: shiftSad,
+    shiftJoy: shiftJoy,
+    shiftAttachment: shiftAttachment,
+    source: source,
+  );
 
   /// 组合的唯一key（排序后用逗号连接）
   String get comboKey => (List.from(keywords)..sort()).join(',');
@@ -251,6 +271,35 @@ class _ComboHit {
   };
 }
 
+/// 规律的公开视图（给 UI 展示用，不暴露内部统计细节）
+class PatternStats {
+  final String comboKey;
+  final List<String> keywords;
+  final int count;
+  final double confidence;
+  final bool confirmed;
+  final DateTime lastSeen;
+  final double shiftAnger;
+  final double shiftSad;
+  final double shiftJoy;
+  final double shiftAttachment;
+  final String source;
+
+  PatternStats({
+    required this.comboKey,
+    required this.keywords,
+    required this.count,
+    required this.confidence,
+    required this.confirmed,
+    required this.lastSeen,
+    required this.shiftAnger,
+    required this.shiftSad,
+    required this.shiftJoy,
+    required this.shiftAttachment,
+    this.source = 'auto',
+  });
+}
+
 /// 规律引擎
 class PatternEngine {
   final IUserElementStore _elementStore;
@@ -258,8 +307,83 @@ class PatternEngine {
   final Map<String, _ComboStats> _combos = {};
   final List<EmotionArc> _arcs = [];
 
-  PatternEngine(this._elementStore, {MoodBaseline? baseline})
-      : baseline = baseline ?? MoodBaseline();
+  /// 规律持久化存储（可空 = 不持久化，纯内存模式）
+  PatternStore? _store;
+
+  PatternEngine(this._elementStore, {MoodBaseline? baseline, PatternStore? store})
+      : baseline = baseline ?? MoodBaseline(),
+        _store = store;
+
+  /// 启用持久化（关联 SQLite 存储）
+  void attachStore(PatternStore store) {
+    _store = store;
+  }
+
+  /// 从存储加载全部规律（APP 启动时调用）
+  Future<void> loadFromStore() async {
+    final store = _store;
+    if (store == null) return;
+    try {
+      final rows = await store.loadAll();
+      for (final row in rows) {
+        try {
+          final keywords = (jsonDecode(row['keywords'] as String) as List)
+              .map((e) => e.toString())
+              .toList();
+          final shifts = _decodeShiftMap(row['shifts']);
+          final ranges = _decodeShiftMap(row['ranges']);
+          final stats = _ComboStats(
+            keywords: keywords,
+            count: (row['count'] as num?)?.toInt() ?? 0,
+            shiftAnger: shifts['愤怒'] ?? 0,
+            shiftSad: shifts['悲伤'] ?? 0,
+            shiftJoy: shifts['喜悦'] ?? 0,
+            shiftAttachment: shifts['依恋'] ?? 0,
+            confidence: (row['confidence'] as num?)?.toDouble() ?? 0,
+            lastSeen: DateTime.tryParse(row['last_seen'] as String? ?? '') ?? DateTime.now(),
+            confirmed: (row['confirmed'] as num?)?.toInt() == 1,
+          );
+          stats.rangeAnger = ranges['愤怒'] ?? 0;
+          stats.rangeSad = ranges['悲伤'] ?? 0;
+          stats.rangeJoy = ranges['喜悦'] ?? 0;
+          stats.rangeAttachment = ranges['依恋'] ?? 0;
+          _combos[stats.comboKey] = stats;
+        } catch (e) {
+          print('[PatternEngine] 加载规律失败: $e');
+        }
+      }
+      print('[PatternEngine] 从存储加载 ${_combos.length} 条规律');
+    } catch (e) {
+      print('[PatternEngine] 加载规律存储失败: $e');
+    }
+  }
+
+  Map<String, double> _decodeShiftMap(dynamic raw) {
+    if (raw == null) return {};
+    try {
+      final map = jsonDecode(raw as String) as Map<String, dynamic>;
+      return map.map((k, v) => MapEntry(k, (v as num).toDouble()));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// 持久化某条规律（fire-and-forget）
+  void _persist(_ComboStats stats, {String source = 'auto'}) {
+    final store = _store;
+    if (store == null) return;
+    store.savePattern(
+      comboKey: stats.comboKey,
+      keywords: stats.keywords,
+      count: stats.count,
+      shifts: {'愤怒': stats.shiftAnger, '悲伤': stats.shiftSad, '喜悦': stats.shiftJoy, '依恋': stats.shiftAttachment},
+      ranges: {'愤怒': stats.rangeAnger, '悲伤': stats.rangeSad, '喜悦': stats.rangeJoy, '依恋': stats.rangeAttachment},
+      confidence: stats.confidence,
+      confirmed: stats.confirmed,
+      lastSeen: stats.lastSeen,
+      source: source,
+    ).catchError((e) => print('[PatternEngine] 持久化规律失败: $e'));
+  }
 
   /// 加入情绪弧线事件
   Future<List<_ComboStats>> addArc(EmotionArc arc) async {
@@ -300,6 +424,7 @@ class PatternEngine {
           final stats = _getOrCreate([keywords[i], keywords[j]]);
           stats.addArc(arc, baselineAtTime: baselineSnapshot);
           updatedStats.add(stats);
+          _persist(stats);
         }
       }
     }
@@ -312,6 +437,7 @@ class PatternEngine {
             final stats = _getOrCreate([keywords[i], keywords[j], keywords[k]]);
             stats.addArc(arc, baselineAtTime: baselineSnapshot);
             updatedStats.add(stats);
+            _persist(stats);
           }
         }
       }
@@ -451,6 +577,57 @@ class PatternEngine {
   /// 用户要求删除某条规律
   void deletePattern(String comboKey) {
     _combos.remove(comboKey);
+    _store?.deletePattern(comboKey).catchError(
+        (e) => print('[PatternEngine] 删除规律持久化失败: $e'));
+  }
+
+  /// 全部规律（公开视图）
+  List<PatternStats> get patterns =>
+      _combos.values.map((s) => s.toStats()).toList();
+
+  /// 已确认的规律（置信度达标）
+  List<PatternStats> get confirmedPatterns =>
+      _combos.values.where((s) => s.confirmed).map((s) => s.toStats()).toList();
+
+  /// 用户手动添加规律（用户说了算，直接确认）
+  /// [keywords] 关键词组合（至少2个）
+  /// [shifts] 情绪偏移 {维度: 偏移量}，如 {'愤怒': 40, '悲伤': 10}
+  /// 返回创建的规律 key（已存在则更新并返回原 key）
+  String addManualPattern(
+    List<String> keywords, {
+    Map<String, double>? shifts,
+  }) {
+    if (keywords.length < 2) {
+      throw ArgumentError('规律至少需要 2 个关键词');
+    }
+    final cleaned = keywords.map((k) => k.trim()).where((k) => k.isNotEmpty).toSet().toList();
+    if (cleaned.length < 2) {
+      throw ArgumentError('规律至少需要 2 个不同的关键词');
+    }
+    cleaned.sort();
+
+    final key = cleaned.join(',');
+    final stats = _combos.putIfAbsent(
+      key,
+      () => _ComboStats(keywords: cleaned),
+    );
+
+    // 手动添加 = 用户确认，直接标记已确认 + 高置信度
+    stats.confirmed = true;
+    stats.confidence = 0.95;
+    stats.count = stats.count < 3 ? 3 : stats.count; // 至少3次，满足确认门槛
+    stats.lastSeen = DateTime.now();
+
+    if (shifts != null) {
+      if (shifts.containsKey('愤怒')) stats.shiftAnger = shifts['愤怒']!;
+      if (shifts.containsKey('悲伤')) stats.shiftSad = shifts['悲伤']!;
+      if (shifts.containsKey('喜悦')) stats.shiftJoy = shifts['喜悦']!;
+      if (shifts.containsKey('依恋')) stats.shiftAttachment = shifts['依恋']!;
+    }
+
+    _persist(stats, source: 'manual');
+
+    return key;
   }
 
   /// 用户要求删除某个关键词相关的所有数据（包括规律、hits、弧线）
