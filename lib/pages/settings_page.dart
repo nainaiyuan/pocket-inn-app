@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'about_page.dart';
-import 'api_config_page.dart';
+import 'ai_config_page.dart';
 import 'character_content_page.dart';
 import 'companion_tools_page.dart';
 import 'data_management_page.dart';
@@ -27,8 +27,9 @@ class SettingsPage extends StatelessWidget {
           MaterialPageRoute(builder: (_) => const MemorySettingsPage()),
         );
       case _SettingsItemType.api:
+        // AI 配置已统一到「管家 → AI 配置」页（新 AIProvider 系统）
         await navigator.push(
-          MaterialPageRoute(builder: (_) => const OpenAICompatibleConfigPage()),
+          MaterialPageRoute(builder: (_) => const AiConfigPage()),
         );
       case _SettingsItemType.data:
         await navigator.push(

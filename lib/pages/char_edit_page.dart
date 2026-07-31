@@ -3,10 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../models/world_book.dart';
-import '../services/world_book_service.dart';
 import '../widgets/expanded_text_editor_field.dart';
-import 'world_book_edit_page.dart';
 
 class RoleEditPage extends StatefulWidget {
   const RoleEditPage({
@@ -51,8 +48,6 @@ class _RoleEditPageState extends State<RoleEditPage> {
   String? _pendingImagePath;
   bool _removeImage = false;
   late final ImageProvider? _initialBackgroundImage;
-  List<WorldBook> _worldBooks = [];
-  String? _selectedWorldBookId;
 
   @override
   void initState() {
@@ -94,22 +89,9 @@ class _RoleEditPageState extends State<RoleEditPage> {
       alternateGreetings = [''];
     }
     tags = List<String>.from(data['tags'] as List? ?? const []);
-    _selectedWorldBookId = widget.initialWorldBookId;
     _initialBackgroundImage = _imageProviderForPath(widget.imagePath);
-    _loadWorldBooks();
   }
 
-  Future<void> _loadWorldBooks() async {
-    final books = await WorldBookService.instance.loadAll();
-    if (!mounted) return;
-    setState(() {
-      _worldBooks = books;
-      if (_selectedWorldBookId != null &&
-          !_worldBooks.any((book) => book.id == _selectedWorldBookId)) {
-        _selectedWorldBookId = null;
-      }
-    });
-  }
 
   @override
   void dispose() {
@@ -188,7 +170,7 @@ class _RoleEditPageState extends State<RoleEditPage> {
           cardJson: updatedCard,
           imageSourcePath: _pendingImagePath,
           removeImage: _removeImage,
-          selectedWorldBookId: _selectedWorldBookId,
+          selectedWorldBookId: null,
         ),
       );
     }
@@ -208,73 +190,7 @@ class _RoleEditPageState extends State<RoleEditPage> {
     }
   }
 
-  Future<void> _pickWorldBook() async {
-    final selectedId = await showModalBottomSheet<String?>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return SafeArea(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.75,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.link_off_outlined),
-                  title: const Text('不关联世界书'),
-                  onTap: () => Navigator.pop(context, ''),
-                ),
-                const Divider(height: 1),
-                Flexible(
-                  child: _worldBooks.isEmpty
-                      ? const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 24),
-                          child: Center(child: Text('暂无可选世界书')),
-                        )
-                      : ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: _worldBooks.length,
-                          itemBuilder: (context, index) {
-                            final book = _worldBooks[index];
-                            return ListTile(
-                              leading: Icon(
-                                _selectedWorldBookId == book.id
-                                    ? Icons.radio_button_checked
-                                    : Icons.radio_button_off,
-                                color: book.color,
-                              ),
-                              title: Text(book.name),
-                              subtitle: Text('${book.entries.length} 个条目'),
-                              onTap: () => Navigator.pop(context, book.id),
-                            );
-                          },
-                        ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
 
-    if (!mounted || selectedId == null) return;
-    setState(() {
-      _selectedWorldBookId = selectedId.isEmpty ? null : selectedId;
-    });
-  }
-
-  Future<void> _editWorldBook(String worldBookId) async {
-    final book = await WorldBookService.instance.loadById(worldBookId);
-    if (!mounted || book == null) return;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => WorldBookEditPage(worldBook: book),
-      ),
-    );
-  }
 
   Future<void> _pickImage() async {
     final result = await FilePicker.platform.pickFiles(
@@ -808,21 +724,6 @@ class _RoleEditPageState extends State<RoleEditPage> {
                             ),
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.menu_book_outlined),
-                          title: const Text('选择世界书'),
-                          subtitle: Text(_selectedWorldBookLabel),
-                          trailing: _selectedWorldBookId != null
-                              ? IconButton(
-                                  icon: const Icon(Icons.edit_outlined),
-                                  tooltip: '编辑世界书',
-                                  onPressed: () => _editWorldBook(_selectedWorldBookId!),
-                                )
-                              : const Icon(Icons.chevron_right),
-                          onTap: _pickWorldBook,
-                        ),
                       ],
                     ),
                   ),
@@ -869,16 +770,6 @@ class _RoleEditPageState extends State<RoleEditPage> {
 
   bool get _hasPortrait => _currentImagePath.isNotEmpty;
 
-  String get _selectedWorldBookLabel {
-    if (_selectedWorldBookId == null) {
-      return '未关联';
-    }
-    final book = _worldBooks.cast<WorldBook?>().firstWhere(
-      (item) => item?.id == _selectedWorldBookId,
-      orElse: () => null,
-    );
-    return book?.name ?? '未关联';
-  }
 }
 
 class RoleEditSavePayload {

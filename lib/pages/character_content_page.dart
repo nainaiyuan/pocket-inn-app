@@ -4,7 +4,6 @@ import '../data/mock_user_settings.dart';
 import 'char_list_page.dart';
 import 'preset_page.dart';
 import 'user_settings_page.dart';
-import 'world_book_page.dart';
 
 class CharacterContentPage extends StatelessWidget {
   const CharacterContentPage({super.key});
@@ -50,18 +49,6 @@ class CharacterContentPage extends StatelessWidget {
                   selectedId: result.selectedId,
                 );
               }
-            },
-          ),
-          const SizedBox(height: 12),
-          _EntryCard(
-            title: '世界书管理',
-            subtitle: '管理世界书与知识条目',
-            icon: Icons.menu_book_outlined,
-            colorScheme: colorScheme,
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const WorldBookPage()),
-              );
             },
           ),
           const SizedBox(height: 12),

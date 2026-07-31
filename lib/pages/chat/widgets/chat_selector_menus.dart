@@ -83,66 +83,6 @@ Future<void> showUserSettingMenu({
   }
 }
 
-/// 显示世界书选择菜单。切换选中状态后回调 [onToggle]，编辑图标回调 [onEdit]。
-Future<void> showWorldBookMenu({
-  required BuildContext context,
-  required List<WorldBook> worldBooks,
-  required Set<String> selectedIds,
-  required Object inputTapRegionGroupId,
-  required ValueChanged<String> onToggle,
-  required ValueChanged<String> onEdit,
-}) async {
-  final colorScheme = Theme.of(context).colorScheme;
-  await showMenu<String>(
-    context: context,
-    requestFocus: false,
-    position: PopupMenuPositioning.positionAbove(context, worldBooks.length),
-    constraints: PopupMenuPositioning.constraintsAbove(context),
-    items: worldBooks.map((worldBook) {
-      final isSelected = selectedIds.contains(worldBook.id);
-      return PopupMenuItem<String>(
-        value: worldBook.id,
-        padding: EdgeInsets.zero,
-        onTap: () => onToggle(worldBook.id),
-        child: _TapRegionWrap(
-          groupId: inputTapRegionGroupId,
-          child: Container(
-            decoration: isSelected
-                ? BoxDecoration(
-                    color: colorScheme.primary.withValues(alpha: 0.12),
-                  )
-                : null,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(worldBook.name, overflow: TextOverflow.ellipsis),
-                ),
-                const SizedBox(width: 4),
-                InkWell(
-                  onTap: () {
-                    Navigator.pop(context);
-                    onEdit(worldBook.id);
-                  },
-                  borderRadius: BorderRadius.circular(16),
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Icon(
-                      Icons.edit_outlined,
-                      size: 18,
-                      color: Colors.grey.shade600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }).toList(),
-  );
-}
-
 /// 显示预设选择菜单。选中后回调 [onSelected]，编辑图标回调 [onEdit]。
 Future<void> showPresetMenu({
   required BuildContext context,

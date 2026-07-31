@@ -3,20 +3,24 @@ import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../ai_provider/models.dart';
 import '../../models/male_lead.dart';
 import '../../services/character_service.dart';
 import '../../services/local_storage_service.dart';
 import '../../models/chat_message.dart';
 import '../../utils/debug_logger.dart';
+import '../ai_config_page.dart';
 import 'services/ai_chat_service.dart';
 import 'state/current_character_state.dart';
+import 'widgets/ai_provider_sheet.dart';
 import 'widgets/chat_sidebar_left.dart';
 import 'widgets/chat_sidebar_right.dart';
 import 'widgets/chat_top_bar.dart';
 import 'widgets/chat_message_area.dart';
-import 'widgets/chat_input_bar.dart';
-import 'widgets/plus_menu.dart';
 import 'widgets/character_world_page.dart';
+import 'widgets/chat_input_bar.dart';
+import 'widgets/debug_log_sheet.dart';
+import 'widgets/plus_menu.dart';
 
 /// 聊天主页面 —— 三页连续空间手势（v8 状态机版）
 class ChatPage extends StatefulWidget {
@@ -241,9 +245,123 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   Future<void> _sendMsg(String t) async {
     _msgKey.currentState?.appendMessage(ChatMessage(id: DateTime.now().millisecondsSinceEpoch.toString(), text: t, isMe: true));
-    final r = await _aiSvc.generateReply(t, _state.personaId ?? 'd');
-    _msgKey.currentState?.appendMessage(ChatMessage(id: '${DateTime.now().millisecondsSinceEpoch}_ai', text: r, isMe: false));
+    final lid = _state.leadId;
+    final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
+    final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
+    try {
+      final result = await _aiSvc.generateReply(t, personaId, personaName: personaName);
+      _msgKey.currentState?.appendMessage(ChatMessage(
+        id: '${DateTime.now().millisecondsSinceEpoch}_ai',
+        text: result.text.trim(),
+        isMe: false,
+      ));
+      if (result.failedProviders.isNotEmpty) {
+        // 自动切换发生了，告诉用户一声（不打断）
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${result.failedProviders.join('、')} 不可用，已自动切换到 ${result.providerName ?? '下一个'}'),
+          duration: const Duration(seconds: 3),
+        ));
+      }
+    } on AIProviderUnavailableException catch (e) {
+      // 用户关了自动切换 → 弹窗，不偷偷换人
+      DebugLogger.log('AI路由', '❌ ${e.providerName} 不可用（自动切换已关闭）: ${e.cause}');
+      await _showAiUnavailableDialog(e);
+    } on AIAllProvidersFailedException catch (e) {
+      DebugLogger.log('AI路由', '❌ 所有候选都失败: ${e.tried.join('、')}');
+      await _showAllAiFailedDialog(e);
+    } on Object catch (e) {
+      DebugLogger.log('AI路由', '❌ 聊天请求失败: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('发送失败：$e'),
+          duration: const Duration(seconds: 3),
+        ));
+      }
+    }
   }
+
+  /// 自动切换关闭时的弹窗：告诉用户当前 AI 不可用，让 ta 检查。
+  Future<void> _showAiUnavailableDialog(AIProviderUnavailableException e) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('当前 AI 不可用'),
+        content: Text(
+          '「${e.providerName}」连不上或出错了：\n\n${e.cause}\n\n'
+          '你可以去「管家 → AI 配置」检查 Key / 地址，或在这里开启自动切换。',
+          style: const TextStyle(fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('再试一次'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _openAiConfig();
+            },
+            child: const Text('去检查配置'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 全部候选都失败时的弹窗。
+  Future<void> _showAllAiFailedDialog(AIAllProvidersFailedException e) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('所有 AI 都不可用'),
+        content: Text(
+          e.tried.isEmpty
+              ? '当前没有可用的 AI Provider。\n请去「管家 → AI 配置」检查或配置。'
+              : '试了这些都不行：${e.tried.join('、')}\n\n'
+                  '请去「管家 → AI 配置」检查 Key / 地址。',
+          style: const TextStyle(fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _openAiConfig();
+            },
+            child: const Text('去检查配置'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openAiConfig() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const AiConfigPage()),
+    );
+  }
+
+  /// 打开 AI 设置弹层（当前 AI / 自动切换 / 候选勾选）。
+  Future<void> _openAiSheet() async {
+    final lid = _state.leadId;
+    final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
+    final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
+    await showAiProviderSheet(
+      context: context,
+      personaId: personaId,
+      personaName: personaName,
+    );
+  }
+
 
   void _openWorld() {
     if (!_state.hasLead) return;
@@ -373,6 +491,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                 children: [
                   ChatTopBar(currentLead: _state.lead, currentPersona: _state.persona,
                     onTapAvatar: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); },
+                    onAiTap: _openAiSheet,
                     onNameChanged: () { if (mounted) setState(() {}); }),
                   // 聊天消息区域（背景图放在这里，精确对齐内容区）
                   Expanded(
@@ -402,7 +521,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                         // 消息列表在背景之上
                         ChatMessageArea(key: _msgKey, currentPersona: _state.persona,
                           characterAvatarPath: _state.effectiveAvatarPath,
-                          onAvatarTap: _openWorld),
+                          onAvatarTap: _openWorld,
+                          ),
                       ],
                     ),
                   ),
@@ -483,41 +603,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   void _showDebugLog() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        maxChildSize: 0.9,
-        minChildSize: 0.3,
-        builder: (ctx, scrollCtrl) => Container(
-          color: const Color(0xFF1A1A2E),
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Text('🪲 调试日志', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                  const Spacer(),
-                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭', style: TextStyle(color: Colors.white70))),
-                ],
-              ),
-              const Divider(color: Colors.white24),
-              Expanded(
-                child: SingleChildScrollView(
-                  controller: scrollCtrl,
-                  child: SelectableText(
-                    DebugLogger.recentLogsText.isEmpty ? '暂无日志' : DebugLogger.recentLogsText,
-                    style: const TextStyle(color: Colors.greenAccent, fontSize: 11, fontFamily: 'monospace'),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    showDebugLogSheet(context);
   }
 
   Widget _pageWidget({

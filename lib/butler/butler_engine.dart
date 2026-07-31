@@ -134,9 +134,7 @@ class ButlerEngine {
   /// [maskedText] 脱敏后的文本（发给 AI 的版本）
   /// 返回分析结果，包括指令、情绪、是否需要回复
   Future<ButlerAIResult> analyzeWithAI(String userText, String maskedText) async {
-    if (!_config.butlerAIEnabled ||
-        _config.butlerAIApiEndpoint.isEmpty ||
-        _config.butlerAIApiKey.isEmpty) {
+    if (!_config.butlerAIEnabled) {
       return ButlerAIResult(
         reply: '',
         intents: [],
@@ -145,12 +143,9 @@ class ButlerEngine {
       );
     }
 
-    final aiService = ButlerAIService(
-      apiEndpoint: _config.butlerAIApiEndpoint,
-      apiKey: _config.butlerAIApiKey,
-      model: _config.butlerAIModel,
-    );
-
+    // 实际调用走 AIProviderManager（personaId = 'butler'），
+    // 旧配置里的 endpoint/key/model 字段已不再使用。
+    final aiService = ButlerAIService();
     return aiService.analyze(maskedText);
   }
 

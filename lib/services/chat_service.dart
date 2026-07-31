@@ -1,22 +1,20 @@
 import 'dart:async';
 
-import 'package:get_it/get_it.dart';
-
+import '../ai_provider/ai_provider_manager.dart';
+import '../ai_provider/models.dart';
 import '../butler/butler.dart';
 import '../butler/task/task_manager.dart';
-import '../data/api_configs.dart';
 import '../data/mock_user_settings.dart';
-import '../models/api_config.dart';
 import '../models/chat_message.dart';
 import '../models/chat_session.dart';
 import '../models/preset.dart';
 import '../models/prompt_assembly.dart';
 import '../models/world_book.dart';
+import '../utils/debug_logger.dart';
 import 'chat_character_resolver.dart';
 import 'chat_database_service.dart';
 import 'chat_memory_service.dart';
 import 'chat_variable_service.dart';
-import 'i_openai_api_service.dart';
 import 'openai_compatible_api_service.dart';
 import 'preset_service.dart';
 import 'prompt_assembler.dart';
@@ -101,12 +99,8 @@ class ChatService {
       }
     }
 
-    final config = resolvedSelectedApi;
-    if (config == null) {
-      throw StateError('当前未选择 API 模型');
-    }
-    if (config.model.trim().isEmpty) {
-      throw const FormatException('当前选中的模型未填写 Model ID');
+    if (!AIProviderManager.instance.hasUsable(character.id)) {
+      throw StateError('当前没有可用的 AI Provider，请先在设置里配置 API');
     }
 
     final preset = await _resolvePreset(
@@ -153,7 +147,7 @@ class ChatService {
 
     try {
       final completion = await _createCompletion(
-        config,
+        character.id,
         promptAssembly: promptAssembly,
         preset: preset,
         useStreaming: useStreaming,
@@ -231,12 +225,8 @@ class ChatService {
       throw StateError('只能基于用户消息重新生成回复');
     }
 
-    final config = resolvedSelectedApi;
-    if (config == null) {
-      throw StateError('当前未选择 API 模型');
-    }
-    if (config.model.trim().isEmpty) {
-      throw const FormatException('当前选中的模型未填写 Model ID');
+    if (!AIProviderManager.instance.hasUsable(character.id)) {
+      throw StateError('当前没有可用的 AI Provider，请先在设置里配置 API');
     }
 
     final preset = await _resolvePreset(
@@ -273,7 +263,7 @@ class ChatService {
 
     try {
       final completion = await _createCompletion(
-        config,
+        character.id,
         promptAssembly: promptAssembly,
         preset: preset,
         useStreaming: useStreaming,
@@ -355,12 +345,8 @@ class ChatService {
       throw StateError('角色消息缺少 ID，无法继续');
     }
 
-    final config = resolvedSelectedApi;
-    if (config == null) {
-      throw StateError('当前未选择 API 模型');
-    }
-    if (config.model.trim().isEmpty) {
-      throw const FormatException('当前选中的模型未填写 Model ID');
+    if (!AIProviderManager.instance.hasUsable(character.id)) {
+      throw StateError('当前没有可用的 AI Provider，请先在设置里配置 API');
     }
 
     final preset = await _resolvePreset(
@@ -413,7 +399,7 @@ class ChatService {
 
     try {
       final completion = await _createCompletionFromMessages(
-        config,
+        character.id,
         messages: requestMessages,
         preset: preset,
         useStreaming: useStreaming,
@@ -449,12 +435,8 @@ class ChatService {
     ChatCompletionCancelToken? cancellationToken,
     void Function(ChatCompletionProgress progress)? onStreamProgress,
   }) async {
-    final config = resolvedSelectedApi;
-    if (config == null) {
-      throw StateError('当前未选择 API 模型');
-    }
-    if (config.model.trim().isEmpty) {
-      throw const FormatException('当前选中的模型未填写 Model ID');
+    if (!AIProviderManager.instance.hasUsable(character.id)) {
+      throw StateError('当前没有可用的 AI Provider，请先在设置里配置 API');
     }
 
     final preset = await _resolvePreset(
@@ -507,7 +489,7 @@ class ChatService {
 
     try {
       final completion = await _createCompletionFromMessages(
-        config,
+        character.id,
         messages: requestMessages,
         preset: preset,
         useStreaming: useStreaming,
@@ -570,7 +552,7 @@ class ChatService {
   }
 
   Future<ChatCompletionResult> _createCompletion(
-    ResolvedApiConfig config, {
+    String personaId, {
     required PromptAssemblyResult promptAssembly,
     required Preset preset,
     required bool useStreaming,
@@ -583,7 +565,7 @@ class ChatService {
     ];
 
     return _createCompletionFromMessages(
-      config,
+      personaId,
       messages: requestMessages,
       preset: preset,
       useStreaming: useStreaming,
@@ -592,41 +574,66 @@ class ChatService {
     );
   }
 
+  /// 统一入口：所有聊天请求都走 AIProviderManager（按男主路由 + 故障切换）。
+  /// [personaId] = 男主 id（character.id），用于男主级 Provider 绑定。
   Future<ChatCompletionResult> _createCompletionFromMessages(
-    ResolvedApiConfig config, {
+    String personaId, {
     required List<Map<String, dynamic>> messages,
     required Preset preset,
     required bool useStreaming,
     ChatCompletionCancelToken? cancellationToken,
     void Function(ChatCompletionProgress progress)? onStreamProgress,
   }) async {
-    final api = GetIt.instance<IOpenAiApiService>();
+    final manager = AIProviderManager.instance;
+    final aiMessages = [
+      for (final message in messages)
+        AIChatMessage(
+          role: (message['role'] as String?) ?? 'user',
+          content: (message['content'] as String?) ?? '',
+        ),
+    ];
+
     if (!useStreaming) {
-      return api.createChatCompletion(
-        config,
-        messages: messages,
+      final result = await manager.chat(
+        personaId,
+        aiMessages,
         defaults: _buildCompletionDefaults(preset, useStreaming: false),
         cancellationToken: cancellationToken,
+      );
+      final text = result.text.trim();
+      if (text.isEmpty) {
+        throw const FormatException('聊天接口返回了空回复');
+      }
+      final thinking = result.thinking.trim();
+      return ChatCompletionResult(
+        text: text,
+        thinkingChain: thinking.isEmpty ? null : thinking,
+        usage: result.usage,
       );
     }
 
     final textBuffer = StringBuffer();
     final thinkingBuffer = StringBuffer();
     try {
-      await for (final progress
-          in api.createStreamingChatCompletion(
-            config,
-            messages: messages,
-            defaults: _buildCompletionDefaults(preset, useStreaming: true),
-            cancellationToken: cancellationToken,
-          )) {
-        if (progress.textDelta.isNotEmpty) {
-          textBuffer.write(progress.textDelta);
+      await for (final chunk in manager.chatStream(
+        personaId,
+        aiMessages,
+        defaults: _buildCompletionDefaults(preset, useStreaming: true),
+        cancellationToken: cancellationToken,
+      )) {
+        if (chunk.text.isNotEmpty) {
+          textBuffer.write(chunk.text);
         }
-        if (progress.thinkingDelta.isNotEmpty) {
-          thinkingBuffer.write(progress.thinkingDelta);
+        if (chunk.thinking.isNotEmpty) {
+          thinkingBuffer.write(chunk.thinking);
         }
-        onStreamProgress?.call(progress);
+        onStreamProgress?.call(
+          ChatCompletionProgress(
+            textDelta: chunk.text,
+            thinkingDelta: chunk.thinking,
+            done: chunk.done,
+          ),
+        );
       }
     } on ChatCompletionCancelledException {
       final partialText = textBuffer.toString().trim();
@@ -763,23 +770,23 @@ class ChatService {
             final taskResult = await TaskManager.instance.execute(task.id);
             if (taskResult.success) {
               // 执行成功，通知用户
-              print('[管家] 任务 #${task.id} 已完成: ${task.description}');
+              DebugLogger.log('管家', '任务 #${task.id} 已完成: ${task.description}');
             } else {
               // 执行失败，记录错误
-              print('[管家] 任务 #${task.id} 失败: ${taskResult.error}');
+              DebugLogger.log('管家', '任务 #${task.id} 失败: ${taskResult.error}');
             }
           } else {
             // 需要用户确认的任务
-            print('[管家] 新任务 #${task.id}: ${task.description}');
+            DebugLogger.log('管家', '新任务 #${task.id}: ${task.description}');
           }
         }
       } else if (result.shouldReply) {
         // 纯安慰/回复，显示在聊天界面
-        print('[管家] ${result.reply}');
+        DebugLogger.log('管家', '回复: ${result.reply}');
       }
     } catch (e) {
       // 管家 AI 失败不影响主流程
-      print('[管家] AI 分析失败: $e');
+      DebugLogger.log('管家', 'AI 分析失败: $e');
     }
   }
 

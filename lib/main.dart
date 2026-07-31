@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'ai_provider/ai_provider_manager.dart';
 import 'core/error_handler.dart';
 import 'core/service_locator.dart';
 import 'data/app_settings.dart';
@@ -60,6 +61,9 @@ class _BootstrapPageState extends State<_BootstrapPage> {
       // 逐步初始化，每一步都带状态更新
       setState(() => _status = '正在初始化服务…');
       await setupServiceLocator();
+
+      setState(() => _status = '正在初始化 AI 路由…');
+      await AIProviderManager.instance.initialize();
 
       setState(() => _status = '正在加载设置…');
 

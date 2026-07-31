@@ -1,41 +1,49 @@
-import 'dart:math';
+import '../../../ai_provider/ai_provider_manager.dart';
+import '../../../ai_provider/models.dart';
+import '../../../utils/debug_logger.dart';
 
-/// 模拟AI回复（开发阶段用，以后替换为真实API调用）
+/// 聊天页的 AI 门面 —— 走 AIProviderManager（男主级路由 + 故障切换）。
+///
+/// 不再返回模拟句子；未配置 / 全部失败时会抛异常，由聊天页弹窗提示。
 class AiChatService {
   static final AiChatService _instance = AiChatService._();
   factory AiChatService() => _instance;
   AiChatService._();
 
-  final _rng = Random();
-  final _greetings = [
-    '嗯，我在听呢。',
-    '你今天看起来心情不错。',
-    '我在想你说过的话。',
-    '你来了。',
-    '我一直在等你。',
-  ];
-
-  final _responses = [
-    '这样啊…我明白了。',
-    '你能这么想，我很开心。',
-    '让我想想该怎么回答你。',
-    '你总是能让我意外。',
-    '这个问题的答案…可能你自己心里已经有数了。',
-    '我记在心里了。',
-    '你相信缘分吗？',
-    '有时候沉默也是一种回答。',
-    '我会一直在这里。',
-    '今天的月色真美。',
-  ];
-
-  /// 模拟回复（按文本长度做点变化）
-  Future<String> generateReply(String message, String personaId) async {
-    // 模拟网络延迟
-    await Future.delayed(const Duration(milliseconds: 800));
-
-    if (message.length < 3) {
-      return _greetings[_rng.nextInt(_greetings.length)];
+  /// 真实 AI 回复。
+  ///
+  /// [personaId] 决定用哪个男主的 Provider 绑定与自动切换设置；
+  /// [personaName] 用于组装人设提示词。
+  /// 返回完整结果（含实际用的 Provider 与切换痕迹，供 UI 展示）。
+  Future<AIProviderResult> generateReply(
+    String message,
+    String personaId, {
+    String personaName = '角色',
+  }) async {
+    final manager = AIProviderManager.instance;
+    if (!manager.hasUsable(personaId)) {
+      DebugLogger.log(
+        'AI路由',
+        '❌ 发送前检查：$personaId 没有可用 Provider',
+      );
+      throw const AIAllProvidersFailedException();
     }
-    return _responses[_rng.nextInt(_responses.length)];
+    final result = await manager.chat(
+      personaId,
+      [
+        AIChatMessage(
+          role: 'system',
+          content: '你是「$personaName」，一个正在和用户聊天的角色。'
+              '请始终以这个身份自然、温柔地回复，保持人设与说话风格，'
+              '不要说"作为AI"之类的话，也不要提及模型或技术细节。'
+              '回复要口语化、有情绪、有代入感，一般不超过 200 字。',
+        ),
+        AIChatMessage(role: 'user', content: message),
+      ],
+    );
+    if (result.text.trim().isEmpty) {
+      throw const FormatException('AI 返回了空回复');
+    }
+    return result;
   }
 }

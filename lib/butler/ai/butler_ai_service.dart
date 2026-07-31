@@ -2,13 +2,12 @@
 ///
 /// 职责：
 /// 1. 接收用户脱敏后的文本
-/// 2. 发给管家专用 AI（独立 API Key，便宜模型）
+/// 2. 发给管家专用 AI（通过 AIProviderManager 路由，personaId 固定为 'butler'）
 /// 3. AI 返回结构化 JSON（指令 + 回复 + 情绪）
 /// 4. 管家执行指令，显示回复
 ///
 /// 和男主 AI 的区别：
-/// - 独立 API，互不影响
-/// - 模型更小更便宜（gpt-4o-mini / deepseek-chat 级别即可）
+/// - 走同一个 AIProviderManager，但 personaId 不同，可单独绑定 Provider
 /// - Prompt 固定，不参与角色扮演
 /// - 输出强制 JSON 格式
 ///
@@ -16,8 +15,20 @@
 /// - 训练数据：用户吐槽+指令 → 结构化意图
 /// - 不需要角色扮演能力，只需要理解能力
 /// - 目标是让模型知道：自己是管家，不是男主
+library;
+
+import 'dart:convert';
+
+import '../../ai_provider/ai_provider_manager.dart';
+import '../../ai_provider/models.dart';
+import '../../utils/debug_logger.dart';
 
 class ButlerAIService {
+  /// 管家在 AIProviderManager 里的固定 personaId。
+  /// 用户可以在设置里给管家单独绑定 Provider。
+  static const String butlerPersonaId = 'butler';
+
+  // 兼容旧配置字段（保留，实际调用走 AIProviderManager）
   final String apiEndpoint;
   final String apiKey;
   final String model;
@@ -76,8 +87,8 @@ class ButlerAIService {
 ''';
 
   ButlerAIService({
-    required this.apiEndpoint,
-    required this.apiKey,
+    this.apiEndpoint = '',
+    this.apiKey = '',
     this.model = 'gpt-4o-mini',
   });
 
@@ -85,26 +96,57 @@ class ButlerAIService {
   /// [userText] 用户的原始输入（已脱敏）
   /// 返回结构化结果
   Future<ButlerAIResult> analyze(String userText) async {
-    // TODO: 实际 API 调用
-    // final messages = [
-    //   {"role": "system", "content": systemPrompt},
-    //   {"role": "user", "content": userText},
-    // ];
-    // final response = await http.post(
-    //   Uri.parse(apiEndpoint),
-    //   headers: {"Authorization": "Bearer $apiKey"},
-    //   body: jsonEncode({"model": model, "messages": messages, "response_format": {"type": "json_object"}}),
-    // );
-    // final data = jsonDecode(response.body);
-    // return ButlerAIResult.fromJson(jsonDecode(data['choices'][0]['message']['content']));
+    final manager = AIProviderManager.instance;
 
-    // 占位：模拟一个返回
-    return ButlerAIResult(
-      reply: '',
-      intents: [],
-      mood: '平静',
-      needsComfort: false,
-    );
+    if (!manager.hasUsable(butlerPersonaId)) {
+      DebugLogger.log(
+        '管家AI',
+        '没有可用的 AI Provider，跳过意图分析（请先在设置里配置 API）',
+      );
+      return ButlerAIResult(
+        reply: '',
+        intents: [],
+        mood: '平静',
+        needsComfort: false,
+      );
+    }
+
+    try {
+      final result = await manager.chat(
+        butlerPersonaId,
+        [
+          const AIChatMessage(role: 'system', content: systemPrompt),
+          AIChatMessage(role: 'user', content: userText),
+        ],
+        defaults: const {
+          'response_format': {'type': 'json_object'},
+          'temperature': 0.2,
+          'max_tokens': 800,
+        },
+      );
+
+      final decoded = jsonDecode(result.text);
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('管家 AI 返回的不是 JSON 对象');
+      }
+      final butlerResult = ButlerAIResult.fromJson(decoded);
+      DebugLogger.log(
+        '管家AI',
+        '分析完成: mood=${butlerResult.mood} '
+        'intents=${butlerResult.intents.length} '
+        'needsComfort=${butlerResult.needsComfort} '
+        '(provider: ${result.providerName})',
+      );
+      return butlerResult;
+    } on Object catch (error) {
+      DebugLogger.log('管家AI', '分析失败: $error');
+      return ButlerAIResult(
+        reply: '',
+        intents: [],
+        mood: '平静',
+        needsComfort: false,
+      );
+    }
   }
 
   /// 批量分析（考虑后续合并多条短消息）

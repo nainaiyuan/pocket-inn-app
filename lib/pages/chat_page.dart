@@ -7,7 +7,7 @@ import '../data/app_settings.dart';
 import '../data/mock_user_settings.dart';
 import '../models/chat_message.dart';
 import '../models/chat_session.dart';
-import '../pages/api_config_page.dart';
+import 'ai_config_page.dart';
 import '../services/tts/tts_service.dart';
 import '../services/voice_chat_service.dart' as voice;
 import '../pages/api_request_log_page.dart';
@@ -25,7 +25,6 @@ import '../pages/chat/widgets/message_edit_dialog.dart';
 import '../pages/chat_sidebar_page.dart';
 import '../pages/preset_edit_page.dart';
 import '../pages/user_settings_page.dart';
-import '../pages/world_book_edit_page.dart';
 import '../services/preset_service.dart';
 import '../services/storage_service.dart';
 import '../services/world_book_service.dart';
@@ -195,8 +194,9 @@ class _ChatPageState extends State<ChatPage> {
   // --- API 状态 / 配置 ---
 
   Future<void> _openApiConfigPage() async {
+    // 旧版 api_config_page 已移入 legacy/，配置统一走新的 AI 配置页
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const OpenAICompatibleConfigPage()),
+      MaterialPageRoute(builder: (_) => const AiConfigPage()),
     );
     await _viewModel.onApiConfigsChanged();
   }
@@ -329,18 +329,6 @@ class _ChatPageState extends State<ChatPage> {
 
   // --- 选择菜单（用户设定 / 世界书 / 预设） ---
 
-  Future<void> _onWorldBookEditPressed(String worldBookId) async {
-    final worldBook = await WorldBookService.instance.loadById(worldBookId);
-    if (worldBook == null || !mounted) return;
-
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => WorldBookEditPage(worldBook: worldBook),
-      ),
-    );
-
-    await _viewModel.loadWorldBooks();
-  }
 
   Future<void> _onUserSettingEditPressed(String settingId) async {
     final settings = userSettingsNotifier.value;
@@ -382,16 +370,6 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  void _onWorldBookPressed(BuildContext context) {
-    showWorldBookMenu(
-      context: context,
-      worldBooks: _viewModel.worldBooks,
-      selectedIds: _viewModel.selectedWorldBookIds,
-      inputTapRegionGroupId: _inputTapRegionGroupId,
-      onToggle: (id) => _viewModel.toggleWorldBook(id),
-      onEdit: _onWorldBookEditPressed,
-    );
-  }
 
   void _onPresetPressed(BuildContext context) {
     showPresetMenu(
@@ -841,11 +819,8 @@ class _ChatPageState extends State<ChatPage> {
                         isSending: _viewModel.isSending,
                         hasBackground: hasBackground,
                         settings: settings,
-                        worldBooks: _viewModel.worldBooks,
-                        selectedWorldBookIds: _viewModel.selectedWorldBookIds,
                         currentUserSetting: _viewModel.currentUserSetting(),
                         onUserSettingsPressed: _onUserSettingsPressed,
-                        onWorldBookPressed: _onWorldBookPressed,
                         onPresetPressed: _onPresetPressed,
                         onSendPressed: _onSendPressed,
                         onStopGeneratingPressed: _onStopGeneratingPressed,

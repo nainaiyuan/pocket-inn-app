@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import '../../../ai_provider/ai_provider_manager.dart';
+import '../../../ai_provider/models.dart';
 import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
 
-/// 聊天页顶部栏 —— 角色名居中，点击进秘密基地，长按改名
+/// 聊天页顶部栏 —— 角色名居中，点击进秘密基地，长按改名；
+/// 名字下方显示当前 AI（明显、可点击进 AI 设置）。
 class ChatTopBar extends StatefulWidget {
   final MaleLead? currentLead;
   final Persona? currentPersona;
   final VoidCallback onTapAvatar;
   final VoidCallback onMenuTap;
+  final VoidCallback onAiTap;
   final VoidCallback? onNameChanged; // 改名后通知上层刷新
 
   const ChatTopBar({
@@ -17,6 +22,7 @@ class ChatTopBar extends StatefulWidget {
     required this.currentPersona,
     required this.onTapAvatar,
     required this.onMenuTap,
+    required this.onAiTap,
     this.onNameChanged,
   });
 
@@ -50,6 +56,8 @@ class _ChatTopBarState extends State<ChatTopBar> {
     return widget.currentLead?.name ?? '沈星回';
   }
 
+  String? get _personaId => widget.currentPersona?.id;
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -73,16 +81,21 @@ class _ChatTopBarState extends State<ChatTopBar> {
             child: GestureDetector(
               onTap: widget.onTapAvatar,
               onLongPress: () => _renameLead(context),
-              child: Center(
-                child: Text(
-                  _displayName,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                    color: Color(0xFF6A4A5A),
-                    letterSpacing: 1,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _displayName,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF6A4A5A),
+                      letterSpacing: 1,
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 2),
+                  _AiBadge(personaId: _personaId, onTap: widget.onAiTap),
+                ],
               ),
             ),
           ),
@@ -139,6 +152,69 @@ class _ChatTopBarState extends State<ChatTopBar> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 「当前 AI」小徽章：显示这个男主现在用的是哪家，点击进 AI 设置。
+/// 没配置时显示醒目的"AI 未配置"。
+class _AiBadge extends StatelessWidget {
+  const _AiBadge({required this.personaId, required this.onTap});
+
+  final String? personaId;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final manager = AIProviderManager.instance;
+    return ValueListenableBuilder<int>(
+      valueListenable: manager.changeNotifier,
+      builder: (context, _, __) {
+        final id = manager.lastProviderFor(personaId);
+        String? name;
+        var usable = manager.hasUsable(personaId);
+        for (final config in manager.providers) {
+          if (config.id == id) {
+            name = config.name;
+            break;
+          }
+        }
+        final configured = name != null;
+        final color = !configured
+            ? const Color(0xFFE07A7A)
+            : (usable
+                ? const Color(0xFF7AA87A)
+                : const Color(0xFFE0A050));
+        final label = !configured
+            ? 'AI 未配置'
+            : (usable ? 'AI · $name' : 'AI · $name（异常）');
+        return GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: color.withValues(alpha: 0.35)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.auto_awesome, size: 10, color: color),
+                const SizedBox(width: 4),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

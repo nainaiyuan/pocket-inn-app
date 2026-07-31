@@ -17,11 +17,8 @@ class ChatInputArea extends StatelessWidget {
     required this.isSending,
     required this.hasBackground,
     required this.settings,
-    required this.worldBooks,
-    required this.selectedWorldBookIds,
     required this.currentUserSetting,
     required this.onUserSettingsPressed,
-    required this.onWorldBookPressed,
     required this.onPresetPressed,
     required this.onSendPressed,
     required this.onStopGeneratingPressed,
@@ -36,11 +33,8 @@ class ChatInputArea extends StatelessWidget {
   final bool isSending;
   final bool hasBackground;
   final AppSettings settings;
-  final List<WorldBook> worldBooks;
-  final Set<String> selectedWorldBookIds;
   final UserSetting? currentUserSetting;
   final ValueChanged<BuildContext> onUserSettingsPressed;
-  final ValueChanged<BuildContext> onWorldBookPressed;
   final ValueChanged<BuildContext> onPresetPressed;
   final VoidCallback onSendPressed;
   final VoidCallback onStopGeneratingPressed;
@@ -53,18 +47,6 @@ class ChatInputArea extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final hasWorldBooks = worldBooks.isNotEmpty;
-    final selectedWorldBooks = worldBooks
-        .where((item) => selectedWorldBookIds.contains(item.id))
-        .toList();
-    final worldBookDisplayText = selectedWorldBooks.isEmpty
-        ? '世界书'
-        : selectedWorldBooks.length == 1
-        ? selectedWorldBooks.first.name
-        : '${selectedWorldBooks.length} 本世界书';
-    final worldBookColor = selectedWorldBooks.isNotEmpty
-        ? colorScheme.primary
-        : colorScheme.onSurfaceVariant;
     final useGlassEffect = hasBackground && settings.inputGlassEffect;
     final sendButtonBackgroundColor = isSending
         ? colorScheme.errorContainer
@@ -153,33 +135,6 @@ class ChatInputArea extends StatelessWidget {
                       ),
                     );
                   },
-                ),
-              ),
-              Builder(
-                builder: (context) => ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 120),
-                  child: TextButton.icon(
-                    onPressed: hasWorldBooks
-                        ? () => onWorldBookPressed(context)
-                        : null,
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      minimumSize: const Size(40, 40),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    icon: Icon(
-                      Icons.menu_book_rounded,
-                      size: 20,
-                      color: worldBookColor,
-                    ),
-                    label: Text(
-                      worldBookDisplayText,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
                 ),
               ),
               Builder(
