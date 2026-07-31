@@ -1,6 +1,7 @@
 name: Build APK
 
 # 手动触发编译（Actions 页面 → Run workflow），不随 push 自动跑
+# APK 通过 GitHub Releases 交付（固定 tag: latest-apk），不占 artifact 配额
 on:
   workflow_dispatch:
     inputs:
@@ -12,6 +13,9 @@ on:
         options:
           - release
           - debug
+
+permissions:
+  contents: write
 
 jobs:
   build-apk:
@@ -43,9 +47,16 @@ jobs:
       - name: Build APK
         run: flutter build apk --${{ github.event.inputs.mode }}
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: pocket-inn-apk-${{ github.event.inputs.mode }}
-          path: build/app/outputs/flutter-apk/app-${{ github.event.inputs.mode }}.apk
-          retention-days: 14
+      # 上传到固定 Release（latest-apk），下载链接永远不变
+      - name: Upload APK to Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK="build/app/outputs/flutter-apk/app-${{ github.event.inputs.mode }}.apk"
+          REPO="${{ github.repository }}"
+          if gh release view latest-apk --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload latest-apk "$APK" --repo "$REPO" --clobber
+          else
+            gh release create latest-apk "$APK" --repo "$REPO" --title "最新 APK" --notes "手动触发编译的最新 APK"
+          fi
+          echo "下载地址: https://github.com/$REPO/releases/tag/latest-apk"
