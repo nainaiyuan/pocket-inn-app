@@ -11,6 +11,7 @@ import '../../models/chat_message.dart';
 import '../../utils/debug_logger.dart';
 import '../ai_config_page.dart';
 import 'services/ai_chat_service.dart';
+import 'state/chat_presence.dart';
 import 'state/current_character_state.dart';
 import 'widgets/ai_provider_sheet.dart';
 import 'widgets/chat_sidebar_left.dart';
@@ -244,10 +245,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   Future<void> _sendMsg(String t) async {
-    _msgKey.currentState?.appendMessage(ChatMessage(id: DateTime.now().millisecondsSinceEpoch.toString(), text: t, isMe: true));
+    final userMsgId = DateTime.now().millisecondsSinceEpoch.toString();
+    _msgKey.currentState?.appendMessage(ChatMessage(id: userMsgId, text: t, isMe: true));
     final lid = _state.leadId;
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
+    // 拟人化：用户消息未读 → 男主开始"正在输入"
+    ChatPresence.instance.markUnread(userMsgId);
+    ChatPresence.instance.setTyping(true);
     try {
       final result = await _aiSvc.generateReply(t, personaId, personaName: personaName);
       _msgKey.currentState?.appendMessage(ChatMessage(
@@ -255,6 +260,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         text: result.text.trim(),
         isMe: false,
       ));
+      // 男主回复完成：全部已读 + 停止输入
+      ChatPresence.instance.markAllRead();
       if (result.failedProviders.isNotEmpty) {
         // 自动切换发生了，告诉用户一声（不打断）
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -277,6 +284,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           duration: const Duration(seconds: 3),
         ));
       }
+    } finally {
+      // 无论如何：停止"正在输入"（失败则保持未读，男主没读到）
+      ChatPresence.instance.setTyping(false);
     }
   }
 

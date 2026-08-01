@@ -65,6 +65,13 @@ class ChatPresence extends ChangeNotifier {
     if (changed) notifyListeners();
   }
 
+  /// 记录一批时间戳（消息 id → 时间，数据库加载用）
+  void recordTimestampsMap(Map<String, DateTime> timestamps) {
+    if (timestamps.isEmpty) return;
+    _timestamps.addAll(timestamps);
+    notifyListeners();
+  }
+
   /// 记录单条消息时间戳
   void recordTimestamp(String id, DateTime time) {
     _timestamps[id] = time;

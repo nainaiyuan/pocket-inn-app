@@ -15,6 +15,7 @@ import '../pages/butler_task_page.dart';
 import '../pages/vault_page.dart';
 import '../pages/music_player_page.dart';
 import '../pages/chat/chat_view_model.dart';
+import '../pages/chat/state/chat_presence.dart';
 import '../pages/chat/widgets/api_selector_sheet.dart';
 import '../pages/chat/widgets/chat_input_area.dart';
 import '../pages/chat/widgets/chat_message_list.dart';
@@ -648,8 +649,21 @@ class _ChatPageState extends State<ChatPage> {
           tooltip: '聊天列表',
         ),
         title: ListenableBuilder(
-          listenable: _viewModel,
+          listenable: Listenable.merge([
+            _viewModel,
+            ChatPresence.instance,
+          ]),
           builder: (context, _) {
+            // 拟人化：男主输入中 → 顶部只显示"正在输入…"（仿微信）
+            if (ChatPresence.instance.isTyping) {
+              return const Text(
+                '正在输入…',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              );
+            }
             final session = _viewModel.activeSession;
             return InkWell(
               onTap: session == null ? null : _renameChatTitle,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../models/male_lead.dart';
 import '../../../models/chat_message.dart';
 import '../services/chat_storage_service.dart';
+import '../state/chat_presence.dart';
 import 'message_bubble.dart';
 
 /// 消息区域 —— 渲染消息列表 + 加载历史 + 多选删除
@@ -43,6 +44,8 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
     super.didUpdateWidget(old);
     if (old.currentPersona?.id != widget.currentPersona?.id) {
       _exitSelectMode();
+      // 切换角色：清掉"正在输入"状态
+      ChatPresence.instance.setTyping(false);
       _loadMessages();
     }
   }

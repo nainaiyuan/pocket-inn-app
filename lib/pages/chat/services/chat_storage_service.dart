@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import '../../../models/chat_message.dart';
+import '../state/chat_presence.dart';
 
 /// 聊天消息持久化服务（SQLite）
 ///
@@ -75,6 +76,16 @@ class ChatStorageService {
         orderBy: 'created_at ASC',
         limit: 200,
       );
+      // 记录消息时间戳（聊天界面"时间/已读"展示用）
+      final ts = <String, DateTime>{};
+      for (final r in rows) {
+        final id = r['id'] as String?;
+        final created = r['created_at'] as int?;
+        if (id != null && created != null) {
+          ts[id] = DateTime.fromMillisecondsSinceEpoch(created);
+        }
+      }
+      ChatPresence.instance.recordTimestampsMap(ts);
       return rows.map((r) => _rowToMessage(r)).toList();
     } catch (_) {
       return [];
@@ -100,6 +111,10 @@ class ChatStorageService {
     try {
       final d = await db;
       await d.insert('messages', _messageToRow(personaId, message));
+      // 新消息时间戳立即可用（聊天界面展示）
+      ChatPresence.instance.recordTimestampsMap({
+        if (message.id != null) message.id!: DateTime.now(),
+      });
     } catch (_) {}
   }
 
