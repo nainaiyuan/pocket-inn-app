@@ -2,6 +2,7 @@ import 'package:get_it/get_it.dart';
 
 import '../butler/butler.dart';
 import '../butler/butler_database.dart';
+import '../butler/modules/butler_module_hub.dart';
 import '../data/api_configs.dart' as api_configs;
 import '../data/app_settings.dart' as app_settings;
 import '../data/mock_user_settings.dart' as mock_user_settings;
@@ -80,7 +81,10 @@ Future<void> setupServiceLocator() async {
   getIt.registerSingleton<ChatService>(ChatService.instance);
 
   // ── 管家 ──
-  final butler = Butler();
+  // 关键：Butler 必须复用 ButlerModuleHub 的共享假面层引擎，
+  // 否则假面层页面配置的身份词与聊天时用的不是同一份 → 替换不生效
+  final hub = ButlerModuleHub.instance;
+  final butler = Butler(sharedMaskEngine: hub.sharedMaskEngine);
   await _tryInit('ButlerDatabase', () => ButlerDatabase.instance.initialize());
   getIt.registerSingleton<Butler>(butler);
   _tryInitSync('ChatService.initButler', () => getIt<ChatService>().initButler(butler));

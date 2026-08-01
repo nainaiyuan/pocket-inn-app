@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import '../../ai_provider/models.dart';
 import '../../models/male_lead.dart';
 import '../../services/character_service.dart';
+import '../../services/chat_database_service.dart';
+import '../../services/chat_memory_service.dart';
 import '../../services/chat_service.dart';
 import '../../services/local_storage_service.dart';
 import '../../models/chat_message.dart';
@@ -254,6 +256,20 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     // 拟人化：用户消息未读 → 男主开始"正在输入"
     ChatPresence.instance.markUnread(userMsgId);
     ChatPresence.instance.setTyping(true);
+    // 管家对话记录：隐式会话 + 消息落库（记忆提取的数据源）
+    await _ensureChatSession(personaId, personaName);
+    if (_chatSessionId != null) {
+      try {
+        final userNode = await ChatDatabaseService.instance.appendUserMessage(
+          sessionId: _chatSessionId!,
+          parentMessageId: _chatLeafId,
+          text: t,
+        );
+        _chatLeafId = userNode.id;
+      } catch (e) {
+        DebugLogger.log('管家流程', '✖ 对话落库失败（用户消息）: $e');
+      }
+    }
     try {
       // ===== 管家管线：技能触发 → 假面替换 → 情绪记录（流程树可见）=====
       String sendText = t;
@@ -276,6 +292,23 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         personaName: personaName,
         skillContext: skillInjection,
       );
+      // 男主回复落库 + 每 3 轮提取一次记忆（管家"记得"的数据源）
+      if (_chatSessionId != null) {
+        try {
+          final aiNode = await ChatDatabaseService.instance.appendAssistantMessage(
+            sessionId: _chatSessionId!,
+            parentMessageId: _chatLeafId,
+            text: result.text.trim(),
+          );
+          _chatLeafId = aiNode.id;
+          _chatRound++;
+          if (_chatRound % 3 == 0) {
+            await _tryExtractMemory(personaName);
+          }
+        } catch (e) {
+          DebugLogger.log('管家流程', '✖ 对话落库失败（男主回复）: $e');
+        }
+      }
       _msgKey.currentState?.appendMessage(ChatMessage(
         id: '${DateTime.now().millisecondsSinceEpoch}_ai',
         text: result.text.trim(),
@@ -650,6 +683,45 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   void _showDebugLog() {
     showDebugLogSheet(context);
+  }
+
+  // ===== 管家对话记录（隐式会话 + 记忆提取）=====
+
+  String? _chatSessionId;
+  String? _chatLeafId;
+  int _chatRound = 0;
+
+  /// 懒创建隐式会话（每个男主一个，跨页面进入复用）
+  Future<void> _ensureChatSession(String personaId, String personaName) async {
+    if (_chatSessionId != null || personaId.isEmpty) return;
+    try {
+      final s = await ChatDatabaseService.instance.createSession(
+        characterId: personaId,
+        title: '与 $personaName 的聊天（自动记录）',
+      );
+      _chatSessionId = s.id;
+      DebugLogger.log('管家流程', '📝 隐式会话已创建: ${s.id}');
+    } catch (e) {
+      DebugLogger.log('管家流程', '✖ 隐式会话创建失败: $e');
+    }
+  }
+
+  /// 每 3 轮对话提取一次记忆（LLM 总结 → 用户记忆库 → 记忆检索技能可查）
+  Future<void> _tryExtractMemory(String personaName) async {
+    try {
+      final msgArea = _msgKey.currentState;
+      if (msgArea == null || msgArea.messages.length < 4) return;
+      await ChatMemoryService.instance.tryExtractAndSave(
+        sessionId: _chatSessionId!,
+        branchLeafId: _chatLeafId!,
+        messages: msgArea.messages,
+        characterName: personaName,
+        userName: '我',
+      );
+      DebugLogger.log('管家流程', '🧠 记忆提取完成（每3轮自动）');
+    } catch (e) {
+      DebugLogger.log('管家流程', '✖ 记忆提取失败: $e');
+    }
   }
 
   /// 查看最近一次发给男主的完整 prompt（透明化：男主"知道什么"一目了然）

@@ -29,6 +29,9 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
   List<ChatMessage> _messages = [];
   bool _loading = true;
 
+  /// 当前消息列表（管家记忆提取用）
+  List<ChatMessage> get messages => List.unmodifiable(_messages);
+
   // 多选模式
   bool _selecting = false;
   final Set<String> _selectedIds = {};

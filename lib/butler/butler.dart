@@ -18,8 +18,10 @@ class Butler {
   int _totalPromptTokens = 0;
   int _lastPromptTokens = 0;
 
-  Butler() {
-    maskEngine = MaskEngine();
+  Butler({MaskEngine? sharedMaskEngine}) {
+    // 必须用 ButlerModuleHub 的共享引擎（身份词/规律在这里加载），
+    // 否则假面层页面配置的身份词与聊天时用的引擎不是同一份 → 替换不生效
+    maskEngine = sharedMaskEngine ?? MaskEngine();
     config = ButlerConfig();
     butlerEngine = ButlerEngine(maskEngine: maskEngine, config: config);
     insightEngine = InsightEngine(db: ButlerDatabase.instance);
