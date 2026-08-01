@@ -33,6 +33,18 @@ jobs:
       - name: pub get
         run: flutter pub get
 
+      # 下载语义情绪模型（154MB int8 量化，托管在 model-assets Release；
+      # 超过 GitHub 单文件 100MB 限制，不能进 git 仓库）
+      - name: Download emotion model assets
+        run: |
+          mkdir -p assets/models
+          REPO="${{ github.repository }}"
+          gh release download model-assets --repo "$REPO" \
+            --pattern "model_int8.onnx" --dir assets/models --clobber
+          gh release download model-assets --repo "$REPO" \
+            --pattern "tokenizer.json" --dir assets/models --clobber
+          ls -la assets/models/
+
       # Gradle 缓存：第二次起跳过下载，大幅加速
       - name: Cache Gradle
         uses: actions/cache@v4

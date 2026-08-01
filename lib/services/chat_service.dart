@@ -7,6 +7,7 @@ import '../butler/flow/butler_flow.dart';
 import '../butler/modules/butler_module_hub.dart';
 import '../butler/memory/emotion_arc.dart';
 import '../butler/mood_analysis/mood_analyzer_keyword.dart';
+import '../butler/mood_analysis/semantic_mood_analyzer.dart';
 import '../butler/storage/storage_registry.dart';
 import '../butler/task/task_manager.dart';
 import '../data/mock_user_settings.dart';
@@ -53,6 +54,8 @@ class ChatService {
     // 注入规律引擎：假面层据此生成"规律联动描述"
     // （男主发现提到某身份时情绪总是什么样 → 下次提到附上这条规律）
     b.maskEngine.patternEngine = ButlerModuleHub.instance.sharedPatternEngine;
+    // 预热语义情绪模型（后台加载，不阻塞聊天）
+    SemanticMoodAnalyzer.instance.warmUp();
   }
 
   // ========== 频率限制 ==========
@@ -859,8 +862,12 @@ class ChatService {
       final patternEngine = ButlerModuleHub.instance.sharedPatternEngine;
       if (patternEngine == null) return;
 
-      // 关键词分析（不依赖 ONNX 模型文件，结果可预测）
+      // 情绪分析：先关键词兜底（同步、即时）；模型就绪后由
+      // _recordSemanticMood 异步补录语义级弧线（覆盖关键词结果）
       final result = KeywordMoodAnalyzer().analyze(userText);
+      final dimensions = result.dimensions;
+      final isAnomaly = result.isAnomaly;
+      const analyzerName = '关键词';
       final keywords = KeywordMoodAnalyzer.matchKeywords(userText);
       // 追加命中的身份称呼（如"妈妈""老板"）→ 规律引擎会长出
       // "妈妈+烦 → 烦躁上升"这类组合，假面层据此生成规律联动描述
@@ -874,7 +881,7 @@ class ChatService {
           }
         }
       } catch (_) {}
-      if (result.dimensions.isEmpty) return;
+      if (dimensions.isEmpty) return;
 
       final now = DateTime.now();
       final arc = EmotionArc(
@@ -883,9 +890,9 @@ class ChatService {
         characterId: characterId,
         triggerKeywords: keywords,
         startMood: patternEngine.baseline.allValues,
-        peakMood: result.dimensions,
-        endMood: result.dimensions,
-        returnedToBaseline: !(result.isAnomaly ?? false),
+        peakMood: dimensions,
+        endMood: dimensions,
+        returnedToBaseline: !(isAnomaly ?? false),
         durationMinutes: 1,
       );
 
@@ -894,15 +901,57 @@ class ChatService {
       // 落库：情感基线视图的数据源
       StorageRegistry.instance.emotionArcs.save(arc);
 
-      final moodStr = result.dimensions.entries
+      final moodStr = dimensions.entries
           .map((e) => '${e.key} ${e.value.round()}')
           .join(' ');
       DebugLogger.log(
         '管家情绪',
-        '弧线已记录：关键词[${keywords.isEmpty ? '无' : keywords.join('、')}] → $moodStr',
+        '[$analyzerName]弧线已记录：关键词[${keywords.isEmpty ? '无' : keywords.join('、')}] → $moodStr',
       );
+
+      // 语义级分析（模型就绪后异步补录，覆盖关键词结果）
+      unawaited(_recordSemanticMood(characterId: characterId, userText: userText));
     } catch (e) {
       DebugLogger.log('管家情绪', '情绪记录失败: $e');
+    }
+  }
+
+  /// 语义级情绪补录：模型就绪后分析原文，覆盖关键词弧线
+  Future<void> _recordSemanticMood({
+    required String characterId,
+    required String userText,
+  }) async {
+    try {
+      final patternEngine = ButlerModuleHub.instance.sharedPatternEngine;
+      if (patternEngine == null) return;
+      final dimensions = await SemanticMoodAnalyzer.instance.analyze(
+        userText,
+        waitMs: 2000, // 首次等模型加载，之后秒回
+      );
+      if (dimensions == null) return;
+
+      final keywords = KeywordMoodAnalyzer.matchKeywords(userText);
+      final now = DateTime.now();
+      final arc = EmotionArc(
+        id: 'arc_sem_${now.millisecondsSinceEpoch}',
+        time: now,
+        characterId: characterId,
+        triggerKeywords: keywords,
+        startMood: patternEngine.baseline.allValues,
+        peakMood: dimensions,
+        endMood: dimensions,
+        returnedToBaseline: true,
+        durationMinutes: 1,
+      );
+      patternEngine.addArc(arc);
+      StorageRegistry.instance.emotionArcs.save(arc);
+
+      final moodStr = dimensions.entries
+          .map((e) => '${e.key} ${e.value.round()}')
+          .join(' ');
+      DebugLogger.log('管家情绪', '[语义模型]弧线已记录 → $moodStr');
+    } catch (e) {
+      DebugLogger.log('管家情绪', '语义补录失败: $e');
     }
   }
 
