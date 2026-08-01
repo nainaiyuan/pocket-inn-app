@@ -1,4 +1,5 @@
 import '../../../ai_provider/models.dart';
+import '../../../butler/context/context_tracker.dart';
 import '../../../models/chat_session.dart';
 import '../../../services/chat_database_service.dart';
 import '../../../utils/debug_logger.dart';
@@ -27,11 +28,33 @@ class ContextManager {
   static ContextManager get instance => _instance;
   ContextManager._();
 
-  /// 当前话题原文预算（字符数，中文 1 字 ≈ 1 token，保守）→ 触发总结
-  static const int topicTokenBudget = 4000;
+  /// 当前话题原文预算：模型窗口的 8%（token）
+  static const double topicWindowRatio = 0.08;
+
+  /// 摘要区预算：模型窗口的 15%（token）
+  static const double summaryWindowRatio = 0.15;
+
+  /// 中文 1 字 ≈ 0.75 token → 字符预算 = token 预算 × 1.33
+  static const double tokenToChar = 1.33;
+
+  /// 无窗口信息时的兜底窗口（deepseek 查表失败用）
+  static const int fallbackWindow = 65536;
+
+  /// 当前模型窗口（token）：已确认用确认值，否则查表，再兜底
+  int _windowTokens(String personaId) {
+    final w = ContextTracker.instance.windowOf(personaId);
+    if (w > 0) return w;
+    final hint = ContextTracker.instance.windowByModelHint('deepseek-chat');
+    return hint > 0 ? hint : fallbackWindow;
+  }
+
+  /// 当前话题原文预算（字符数）→ 触发总结（窗口越大，原文窗口越大）
+  int topicBudgetChars(String personaId) =>
+      (_windowTokens(personaId) * topicWindowRatio * tokenToChar).round();
 
   /// 摘要区预算（字符数）→ 触发合并缩减
-  static const int summaryTokenBudget = 8000;
+  int summaryBudgetChars(String personaId) =>
+      (_windowTokens(personaId) * summaryWindowRatio * tokenToChar).round();
 
   /// 话题切换的相似度阈值（关键词 Jaccard 低于此值视为换话题）
   static const double topicSwitchThreshold = 0.15;
@@ -96,7 +119,7 @@ class ContextManager {
       // 从尾部取（保留最近），预算内
       for (var i = t.raw.length - 1; i >= 0; i--) {
         total += t.raw[i].length;
-        if (total > topicTokenBudget) break;
+        if (total > topicBudgetChars(personaId)) break;
         final line = t.raw[i];
         out.insert(1, line.startsWith('男主：')
             ? AIChatMessage(role: 'assistant', content: line.substring(3))
@@ -114,7 +137,7 @@ class ContextManager {
     for (final line in t.raw) {
       total += line.length;
     }
-    return total >= topicTokenBudget;
+    return total >= topicBudgetChars(personaId);
   }
 
   /// 取走全部待总结原文（当前话题原文），并清空。
@@ -136,7 +159,7 @@ class ContextManager {
       }
       if (sessionId != null) {
         final lines = await ChatDatabaseService.instance
-            .loadRecentChatLines(sessionId, maxChars: topicTokenBudget);
+            .loadRecentChatLines(sessionId, maxChars: topicBudgetChars(personaId));
         if (lines.isNotEmpty) {
           final t = _topics.putIfAbsent(personaId, TopicState.new);
           for (final (role, text) in lines) {
@@ -171,7 +194,7 @@ class ContextManager {
     for (final s in list) {
       total += s.length;
     }
-    return total >= summaryTokenBudget;
+    return total >= summaryBudgetChars(personaId);
   }
 
   /// 取走摘要区全文并清空（供缩减轮使用）——同步清 DB
