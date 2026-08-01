@@ -269,7 +269,12 @@ class PromptAssembler {
       case 'worldInfoAfter':
         return worldInfoAfter;
       case 'longTermMemory':
-        return ChatMemoryService.formatMemoryContext(context.memoryContext);
+        final mem = ChatMemoryService.formatMemoryContext(context.memoryContext);
+        final skill = context.skillContext?.trim();
+        if (skill == null || skill.isEmpty) return mem;
+        // 技能注入的实时上下文（情绪洞察等）：放在记忆之后，男主回复前会看到
+        final skillBlock = '以下是管家刚刚实时检索到的状态（本次对话前的最新信息）：\n$skill';
+        return [mem, skillBlock].where((s) => s.isNotEmpty).join('\n');
       case 'main':
       case 'jailbreak':
       case 'post_history_instructions':

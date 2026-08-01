@@ -6,6 +6,10 @@ import '../butler/butler.dart';
 import '../butler/flow/butler_flow.dart';
 import '../butler/modules/butler_module_hub.dart';
 import '../butler/memory/emotion_arc.dart';
+import '../butler/skills/butler_skill.dart';
+import '../butler/skills/butler_skill_registry.dart';
+import '../butler/skills/chat_skill.dart';
+import '../butler/skills/mood_status_skill.dart';
 import '../butler/mood_analysis/mood_analyzer_keyword.dart';
 import '../butler/mood_analysis/semantic_mood_analyzer.dart';
 import '../butler/storage/storage_registry.dart';
@@ -56,6 +60,9 @@ class ChatService {
     b.maskEngine.patternEngine = ButlerModuleHub.instance.sharedPatternEngine;
     // 预热语义情绪模型（后台加载，不阻塞聊天）
     SemanticMoodAnalyzer.instance.warmUp();
+    // 注册内置技能（幂等）
+    ButlerSkillRegistry.instance
+      ..registerAll([MoodStatusSkill(), ChatSkill()]);
   }
 
   // ========== 频率限制 ==========
@@ -97,20 +104,60 @@ class ChatService {
       throw const FormatException('消息不能为空');
     }
 
-    // === 流程记录：聊天流程（组合Prompt → 发送 → 等待 → 存储 → 记录情绪）===
+    // === 流程记录：聊天流程（技能触发 → 组合Prompt → 发送 → 等待 → 存储 → 记录情绪）===
     final sessionId = session.id;
-    final flow = ButlerFlowRunner.instance.startRecording(
+    ButlerFlowRunner.instance.startRecording(
       id: 'chat_flow',
       name: '聊天流程',
       stepIds: const [
+        'skill_trigger',
         'mask_replace',
         'assemble_prompt',
         'send_to_lead',
         'split_store',
         'record_mood',
       ],
-      stepNames: const ['假面替换', '组合 Prompt', '发送男主并等待回复', '拆分存储多条', '记录情绪与规律'],
+      stepNames: const [
+        '技能触发',
+        '假面替换',
+        '组合 Prompt',
+        '发送男主并等待回复',
+        '拆分存储多条',
+        '记录情绪与规律',
+      ],
     );
+
+    // === 技能触发：匹配技能 → 执行 → 产出注入 Prompt ===
+    String? skillInjection;
+    try {
+      final skill = ButlerSkillRegistry.instance.match(normalizedInput);
+      if (skill != null && !skill.isFallback) {
+        final result = await skill.execute(
+          ButlerSkillContext(
+            userText: normalizedInput,
+            characterId: character.id,
+            characterName: character.name,
+            sessionId: sessionId,
+          ),
+        );
+        skillInjection = result.promptInjection;
+        ButlerFlowRunner.instance.stepDone(
+          'skill_trigger',
+          result: '触发技能【${skill.name}】'
+              '${skillInjection == null ? '（无注入）' : '（已注入洞察）'}',
+        );
+      } else {
+        ButlerFlowRunner.instance.stepDone(
+          'skill_trigger',
+          result: '无技能触发，走聊天流程',
+        );
+      }
+    } catch (e) {
+      ButlerFlowRunner.instance.stepDone(
+        'skill_trigger',
+        result: '技能触发失败: $e',
+      );
+    }
 
     // === 管家介入：假面层替换 ===
     if (butler != null && butler!.config.maskLayerEnabled) {
@@ -164,6 +211,7 @@ class ChatService {
         chatMessages: chatMessages,
         currentInput: normalizedInput,
         memoryContext: memoryContext,
+        skillContext: skillInjection,
       ),
     );
     DebugLogger.log(
@@ -892,7 +940,7 @@ class ChatService {
         startMood: patternEngine.baseline.allValues,
         peakMood: dimensions,
         endMood: dimensions,
-        returnedToBaseline: !(isAnomaly ?? false),
+        returnedToBaseline: !isAnomaly,
         durationMinutes: 1,
       );
 

@@ -13,6 +13,7 @@ class PromptAssemblyContext {
     required this.chatMessages,
     required this.currentInput,
     this.memoryContext = const [],
+    this.skillContext,
   });
 
   final String characterName;
@@ -24,6 +25,9 @@ class PromptAssemblyContext {
   final List<ChatMessage> chatMessages;
   final String currentInput;
   final List<String> memoryContext;
+
+  /// 技能注入的上下文（如情绪洞察），进 Prompt 的长期记忆区
+  final String? skillContext;
 }
 
 class PromptSegment {
