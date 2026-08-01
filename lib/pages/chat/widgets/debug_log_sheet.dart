@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../butler/flow/butler_flow.dart';
 import '../../../utils/debug_logger.dart';
+import '../../butler/butler_skill_library_page.dart';
 
 /// 调试日志弹层（黑底终端风格，可滚动、可选中复制、可按标签筛选）。
 /// 两个视图：日志（散行） / 流程（管家流程树，看每步是否顺利）。
@@ -92,6 +93,23 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
                   child: const Text('关闭', style: TextStyle(color: Colors.white70)),
+                ),
+                const SizedBox(width: 6),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    Navigator.push(
+                      ctx,
+                      MaterialPageRoute(
+                        builder: (_) => const ButlerSkillLibraryPage(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.extension, size: 14, color: Color(0xFFC896B4)),
+                  label: const Text(
+                    '技能库',
+                    style: TextStyle(color: Color(0xFFC896B4), fontSize: 12),
+                  ),
                 ),
               ],
             ),
@@ -318,6 +336,81 @@ class _FlowCard extends StatelessWidget {
                 ],
               ),
             ),
+          // 工具调用链：技能执行时调用了哪些工具、输入输出
+          if (flow.toolCalls.isNotEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                '🔧 工具调用',
+                style: TextStyle(color: Color(0xFFC896B4), fontSize: 10),
+              ),
+            ),
+            for (final call in flow.toolCalls)
+              Padding(
+                padding: const EdgeInsets.only(top: 3, left: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      call.error != null ? '✖' : '✔',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: call.error != null
+                            ? const Color(0xFFFF8A8A)
+                            : const Color(0xFF9CE8A8),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            call.toolName,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (call.argsSummary.isNotEmpty)
+                            Text(
+                              '入: ${call.argsSummary}',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.35),
+                                fontSize: 9,
+                              ),
+                            ),
+                          if (call.resultSummary != null)
+                            Text(
+                              '出: ${call.resultSummary}',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.5),
+                                fontSize: 9,
+                              ),
+                            ),
+                          if (call.error != null)
+                            Text(
+                              '错: ${call.error}',
+                              style: const TextStyle(
+                                color: Color(0xFFFF8A8A),
+                                fontSize: 9,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    Text(
+                      call.elapsedMs > 0 ? '${call.elapsedMs}ms' : '',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.35),
+                        fontSize: 9,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
         ],
       ),
     );

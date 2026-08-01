@@ -10,6 +10,9 @@ import '../butler/skills/butler_skill.dart';
 import '../butler/skills/butler_skill_registry.dart';
 import '../butler/skills/chat_skill.dart';
 import '../butler/skills/mood_status_skill.dart';
+import '../butler/tools/butler_tool_registry.dart';
+import '../butler/tools/query_tools.dart';
+import '../butler/tools/semantic_mood_tool.dart';
 import '../butler/mood_analysis/mood_analyzer_keyword.dart';
 import '../butler/mood_analysis/semantic_mood_analyzer.dart';
 import '../butler/storage/storage_registry.dart';
@@ -63,6 +66,13 @@ class ChatService {
     // 注册内置技能（幂等）
     ButlerSkillRegistry.instance
       ..registerAll([MoodStatusSkill(), ChatSkill()]);
+    // 注册内置工具（幂等）：管家模块 = 工具，技能通过工具干活
+    ButlerToolRegistry.instance.registerAll([
+      EmotionArcsQueryTool(),
+      PatternQueryTool(),
+      BaselineQueryTool(),
+      SemanticMoodTool(),
+    ]);
   }
 
   // ========== 频率限制 ==========

@@ -1,6 +1,7 @@
 library;
 
 import '../../utils/debug_logger.dart';
+import '../tools/butler_tool.dart';
 
 /// 管家流程引擎 — 把管家操作抽象成"流程"
 ///
@@ -36,6 +37,9 @@ class ButlerFlow {
   final String id; // 'chat_flow'
   final String name; // '聊天流程'
   final List<ButlerFlowStep> steps;
+
+  /// 本流程中的工具调用链（技能执行时挂上来的，日志页展示）
+  final List<ButlerToolCall> toolCalls = [];
 
   ButlerFlowStatus status = ButlerFlowStatus.pending;
   DateTime startedAt = DateTime.now();
@@ -202,6 +206,17 @@ class ButlerFlowRunner {
     DebugLogger.log(
       '管家流程',
       failed ? '■ 流程失败：${flow.name}' : '■ 流程完成 ✓：${flow.name} 共 ${flow.totalElapsedMs}ms',
+    );
+  }
+
+  /// 把一次工具调用挂到当前流程上（技能执行工具时自动调用）
+  void attachToolCall(ButlerToolCall call) {
+    final flow = current;
+    if (flow == null) return;
+    flow.toolCalls.add(call);
+    DebugLogger.log(
+      '管家工具',
+      '🔧 ${call.toolName}(${call.argsSummary}) 开始',
     );
   }
 }

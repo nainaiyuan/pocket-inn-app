@@ -56,6 +56,9 @@ abstract class ButlerSkill {
   /// 是否兜底技能（所有技能都没命中时接管；聊天流程）
   bool get isFallback => false;
 
+  /// 流程图步骤（技能库页面展示；可选，默认无）
+  List<String> get flowSteps => const [];
+
   /// 是否被当前输入触发
   bool matches(String userText) => triggers.any(userText.contains);
 
