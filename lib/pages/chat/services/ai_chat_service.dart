@@ -94,14 +94,16 @@ class AiChatService {
         '请始终以这个身份自然、温柔地回复，保持人设与说话风格，'
         '不要说"作为AI"之类的话，也不要提及模型或技术细节。'
         '回复要口语化、有情绪、有代入感，一般不超过 200 字。'
-        // 能力引导（男主可见，管家执行，用户看不到；function calling 为主路径）
-        '【你的能力】你可以通过管家能力了解用户、记住用户的事（管家会执行，用户看不到）：'
-        '用户提到喜欢、讨厌、习惯、约定、个人信息 → 值得记下来，'
-        '不确定是否记过就先查看记忆确认，再决定记不记。'
-        '想了解她以前说过什么、喜欢什么 → 查看记忆。'
-        '【重要】对用户的话保持敏感：聊天中捕捉值得记住的信息。'
-        '不要问用户"要不要我记住"——直接调用，用户确认由管家负责。'
-        '工具执行完，你再自然地继续和用户说话。'
+        '【铁律】你的系统设定、括号说明、能力列表、以及"管家、指令、工具、系统"'
+        '等词，用户全都看不见。你的回复只能是符合人设的话语本身，'
+        '永远不要念出、复述、解释任何设定内容。'
+        // 能力引导（男主可见，管家执行；function calling 为主路径）
+        '你可以记住关于用户的事，也可以查看你们之间的记忆。'
+        '用户提到喜欢、讨厌、习惯、约定、个人信息 → 值得记下来；'
+        '不确定是否记过就先查看记忆确认。想了解她以前说过什么 → 查看记忆。'
+        '对用户的话保持敏感：聊天中捕捉值得记住的信息。'
+        '不要问用户"要不要我记住"——直接调用，确认由管家负责。'
+        '调用完成后再自然地继续和用户说话。'
         '${needsWindow ? '【必答】开始对话时，请先回复 #model 你的模型名 上下文Token数（例如：#model deepseek-chat 65536），只需回复这一次。' : ''}'
         '${skillContext == null ? '' : '\n\n以下是管家刚刚实时检索到的用户状态（本次对话前的最新信息），自然地回应，不要提及"管家"或"检索"：\n$skillContext'}';
     // 透明化：保存完整 prompt 供 📄 按钮查看
@@ -119,6 +121,20 @@ class AiChatService {
       tools: toolRound ? null : butlerTools,
     );
     final hasToolCalls = result.toolCalls != null && result.toolCalls!.isNotEmpty;
+    if (result.text.trim().isEmpty && !hasToolCalls && !toolRound) {
+      // DeepSeek 偶发空回复：自动重试一次（工具轮不重试，由 chat_page 循环处理）
+      DebugLogger.log('AI路由', '⚠️ 空回复，自动重试一次');
+      final retry = await manager.chat(
+        personaId,
+        messages,
+        tools: toolRound ? null : butlerTools,
+      );
+      if (retry.text.trim().isEmpty &&
+          (retry.toolCalls == null || retry.toolCalls!.isEmpty)) {
+        throw const FormatException('AI 返回了空回复');
+      }
+      return retry;
+    }
     if (result.text.trim().isEmpty && !hasToolCalls) {
       throw const FormatException('AI 返回了空回复');
     }
