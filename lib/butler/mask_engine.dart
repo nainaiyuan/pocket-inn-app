@@ -19,6 +19,7 @@
 import 'dart:math';
 
 import 'storage/identity_store.dart' show IdentityEntry, IdentityStore;
+import 'patterns/pattern_engine.dart' show PatternEngine;
 
 /// 处理结果
 class ProcessResult {
@@ -42,6 +43,16 @@ class MaskEngine {
 
   // ── 会话映射缓存 <sessionId, <identityId, 代号>> ──
   final Map<String, Map<String, String>> _sessionMappings = {};
+
+  // ── 会话内"已描述过"记录 <sessionId, <identityId, 首次描述时间>> ──
+  // 说一次机制：男主已经知道代号对应谁之后，不再重复附描述，
+  // 除非管家发现了该身份的新情绪规律（男主需要知道情绪变了）。
+  final Map<String, Map<String, DateTime>> _sessionDescribed = {};
+
+  /// 规律引擎（可空，由外部注入）：用于生成"规律联动描述"。
+  /// 男主发现用户提到某身份时情绪总是什么样 → 下次提到时附上这条规律；
+  /// 规律变化了 → 重新附一次，让男主知道情绪变了。
+  PatternEngine? patternEngine;
 
   // ── 唯一标识符序号池 ──
   final Map<String, int> _codeCounters = {};
@@ -146,6 +157,11 @@ class MaskEngine {
   }
 
   /// 替换敏感信息（用户消息 → 发给男主的版本）
+  ///
+  /// 描述策略（说一次机制）：
+  /// - 会话内首次提到某身份 → 附一条描述（用户描述池随机 / 规律联动 / 内置模板）
+  /// - 之后只替换为纯代号（男主已记住映射，不再重复描述 → 降低泄露风险）
+  /// - 例外：管家发现该身份的新情绪规律 → 重新附一条规律描述（男主知道情绪变了）
   ProcessResult replaceSensitive({
     required String text,
     required String characterId,
@@ -163,17 +179,30 @@ class MaskEngine {
     for (final entry in sortedIdentities) {
       if (!modified.contains(entry.realLabel)) continue;
 
-      // 复用或生成会话映射
+      final isFirstTime = !sessionMap.containsKey(entry.id);
       String code;
-      if (sessionMap.containsKey(entry.id)) {
-        code = sessionMap[entry.id]!;
-      } else {
-        final uniqueId = _identityCodes[entry.id] ?? '[其他]';
-        final relationSummary = _getRandomRelation(entry);
-        code = relationSummary != null
-            ? '$uniqueId（$relationSummary）'
-            : uniqueId;
+
+      if (isFirstTime) {
+        // 首次：分配纯代号（描述不固化进映射，避免"每次描述都一样"）
+        code = _identityCodes[entry.id] ?? '[其他]';
         sessionMap[entry.id] = code;
+        final desc = _pickDescription(entry);
+        if (desc != null) {
+          code = '$code（$desc）';
+          _sessionDescribed.putIfAbsent(sessionId, () => {})[entry.id] =
+              DateTime.now();
+        }
+      } else {
+        code = sessionMap[entry.id]!;
+        // 已有映射 → 说一次机制：默认不再附描述
+        // 例外：该身份出现了新确认的规律（情绪变了）→ 附规律描述
+        if (_hasNewPattern(entry, sessionId)) {
+          final desc = _buildPatternDescription(entry);
+          if (desc != null) {
+            code = '$code（$desc）';
+            _sessionDescribed[sessionId]![entry.id] = DateTime.now();
+          }
+        }
       }
 
       modified = modified.replaceAll(entry.realLabel, code);
@@ -205,19 +234,28 @@ class MaskEngine {
     reverseEntries.sort((a, b) => b.key.length.compareTo(a.key.length));
 
     for (final entry in reverseEntries) {
+      // 先还原"代号（描述）"完整形式（男主可能整串引用）
+      final withDesc = RegExp(
+        '${RegExp.escape(entry.key)}\\s*（[^）]*）',
+      );
+      restored = restored.replaceAll(withDesc, entry.value);
+      // 再还原纯代号
       restored = restored.replaceAll(entry.key, entry.value);
     }
     return restored;
   }
 
-  /// 获取随机关系概述：
-  /// 1. 优先：身份自己的描述池（用户写的经历/情感，随机轮换）
-  /// 2. 回退：relationType 内置模板（旧数据兼容）
-  /// 3. 再回退：分类级内置模板
-  String? _getRandomRelation(IdentityEntry entry) {
+  /// 挑选本次附给男主的描述：
+  /// 1. 优先：用户写的描述池（随机轮换）
+  /// 2. 其次：规律联动描述（管家发现的情绪规律，动态生成）
+  /// 3. 回退：relationType 内置模板（旧数据兼容）
+  /// 4. 再回退：分类级内置模板
+  String? _pickDescription(IdentityEntry entry) {
     if (entry.descriptions.isNotEmpty) {
       return entry.descriptions[_random.nextInt(entry.descriptions.length)];
     }
+    final patternDesc = _buildPatternDescription(entry);
+    if (patternDesc != null) return patternDesc;
     final byRelation = _relationTemplates[entry.relationType];
     if (byRelation != null && byRelation.isNotEmpty) {
       return byRelation[_random.nextInt(byRelation.length)];
@@ -227,6 +265,61 @@ class MaskEngine {
       return byCategory[_random.nextInt(byCategory.length)];
     }
     return null;
+  }
+
+  /// 规律联动描述：从规律引擎找该身份相关的已确认规律，
+  /// 生成中性描述（不提具体称呼，只说情绪关联），如：
+  /// "最近聊到这位家人时，你的情绪上升12%的烦躁（和唠叨有关）"
+  String? _buildPatternDescription(IdentityEntry entry) {
+    final engine = patternEngine;
+    if (engine == null) return null;
+    final matches = engine.confirmedPatterns
+        .where((p) => p.keywords.contains(entry.realLabel))
+        .toList();
+    if (matches.isEmpty) return null;
+    matches.sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
+    final p = matches.first;
+
+    final parts = <String>[];
+    void add(double v, String label) {
+      if (v.abs() >= 5) parts.add('${v > 0 ? '上升' : '下降'}${v.abs().round()}%的$label');
+    }
+
+    add(p.shiftJoy, '开心');
+    add(p.shiftSad, '悲伤');
+    add(p.shiftAnger, '生气');
+    add(p.shiftAttachment, '依恋');
+    if (parts.isEmpty) return null;
+
+    final others =
+        p.keywords.where((k) => k != entry.realLabel).toList();
+    final tail = others.isEmpty ? '' : '（和${others.join('、')}有关）';
+    return '最近聊到这位${_categoryLabel(entry.category)}时，你的情绪${parts.join('，')}$tail';
+  }
+
+  /// 该身份是否有"新确认的规律"（在本次会话首次描述之后出现的）
+  bool _hasNewPattern(IdentityEntry entry, String sessionId) {
+    final engine = patternEngine;
+    if (engine == null) return false;
+    final describedAt = _sessionDescribed[sessionId]?[entry.id];
+    if (describedAt == null) return false; // 还没描述过 → 由首次逻辑处理
+    return engine.confirmedPatterns
+        .any((p) =>
+            p.keywords.contains(entry.realLabel) &&
+            p.lastSeen.isAfter(describedAt));
+  }
+
+  String _categoryLabel(String category) {
+    switch (category) {
+      case 'family':
+        return '家人';
+      case 'friend':
+        return '朋友';
+      case 'work':
+        return '工作伙伴';
+      default:
+        return '人';
+    }
   }
 
   /// 生成随机代号（给 AI 回复时用）

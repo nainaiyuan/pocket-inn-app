@@ -49,6 +49,9 @@ class ChatService {
   /// 初始化管家
   void initButler(Butler b) {
     butler = b;
+    // 注入规律引擎：假面层据此生成"规律联动描述"
+    // （男主发现提到某身份时情绪总是什么样 → 下次提到附上这条规律）
+    b.maskEngine.patternEngine = ButlerModuleHub.instance.sharedPatternEngine;
   }
 
   // ========== 频率限制 ==========
@@ -819,6 +822,18 @@ class ChatService {
       // 关键词分析（不依赖 ONNX 模型文件，结果可预测）
       final result = KeywordMoodAnalyzer().analyze(userText);
       final keywords = KeywordMoodAnalyzer.matchKeywords(userText);
+      // 追加命中的身份称呼（如"妈妈""老板"）→ 规律引擎会长出
+      // "妈妈+烦 → 烦躁上升"这类组合，假面层据此生成规律联动描述
+      try {
+        final labels =
+            butler?.maskEngine.allIdentities.map((e) => e.realLabel).toList() ??
+                const <String>[];
+        for (final label in labels) {
+          if (userText.contains(label) && !keywords.contains(label)) {
+            keywords.add(label);
+          }
+        }
+      } catch (_) {}
       if (result.dimensions.isEmpty) return;
 
       final now = DateTime.now();

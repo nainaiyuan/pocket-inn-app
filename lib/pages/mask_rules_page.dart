@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ai_provider/ai_provider_manager.dart';
+import '../ai_provider/models.dart';
 import '../butler/modules/butler_module_hub.dart';
 import '../butler/storage/identity_store.dart';
 
@@ -148,6 +150,7 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
     final labelCtrl = TextEditingController();
     String category = 'family';
     final descCtrls = <TextEditingController>[];
+    var generating = false;
 
     void addDescField() {
       descCtrls.add(TextEditingController());
@@ -158,7 +161,77 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
+        builder: (ctx, setDialogState) {
+          // 让管家问 AI 生成中性描述（替代真实称呼的第三方描述）
+          Future<void> generateDescriptions() async {
+            final label = labelCtrl.text.trim();
+            if (label.isEmpty) {
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                const SnackBar(content: Text('先填真实称呼，管家才知道要生成谁的描述')),
+              );
+              return;
+            }
+            if (!AIProviderManager.instance.hasUsable(null)) {
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                const SnackBar(content: Text('还没配置 AI，去设置里配置后再试')),
+              );
+              return;
+            }
+            setDialogState(() => generating = true);
+            try {
+              final result = await AIProviderManager.instance.chat(
+                null,
+                [
+                  AIChatMessage(
+                    role: 'system',
+                    content:
+                        '你是关系描述生成助手。用户会给你一个真实称呼（如"妈妈"、"老板"），'
+                        '请生成 5 条中性的第三人称关系描述，用于聊天时代替真实称呼。'
+                        '要求：1) 每条不超过 30 字 2) 绝对不出现真实称呼本身 3) 中性客观，不提具体人名地名'
+                        ' 4) 覆盖关系、性格、相处方式、对用户情绪的影响 5) 每条单独一行，不要编号、不要引号。',
+                  ),
+                  AIChatMessage(role: 'user', content: '真实称呼：$label'),
+                ],
+              );
+              final lines = result.text
+                  .split('\n')
+                  .map(
+                    (s) => s
+                        .trim()
+                        .replaceFirst(RegExp(r'^\d+[.、)）]\s*'), '')
+                        .replaceAll(
+                          RegExp('^["\'「『]|["\'」』]\$'),
+                          '',
+                        ),
+                  )
+                  .where((s) => s.isNotEmpty && s.length > 3)
+                  .take(5)
+                  .toList();
+              if (lines.isEmpty) throw Exception('AI 返回内容无法解析');
+              setDialogState(() {
+                // 保留用户已填的，清掉空输入框，填入生成的
+                final nonEmpty = descCtrls
+                    .where((c) => c.text.trim().isNotEmpty)
+                    .toList();
+                descCtrls
+                  ..clear()
+                  ..addAll(nonEmpty);
+                for (final line in lines) {
+                  descCtrls.add(TextEditingController(text: line));
+                }
+                generating = false;
+              });
+            } catch (e) {
+              setDialogState(() => generating = false);
+              if (ctx.mounted) {
+                ScaffoldMessenger.of(
+                  ctx,
+                ).showSnackBar(SnackBar(content: Text('生成失败：$e')));
+              }
+            }
+          }
+
+          return AlertDialog(
           backgroundColor: const Color(0xFFFDF7F9),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
@@ -234,17 +307,42 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
                   ],
                   Align(
                     alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () => setDialogState(addDescField),
-                      icon: const Icon(Icons.add, size: 16),
-                      label: const Text(
-                        '再加一条描述',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                      style: TextButton.styleFrom(
-                        foregroundColor: const Color(0xFFC896B4),
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                      ),
+                    child: Row(
+                      children: [
+                        TextButton.icon(
+                          onPressed: () => setDialogState(addDescField),
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text(
+                            '再加一条描述',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFFC896B4),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: generating ? null : generateDescriptions,
+                          icon: generating
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Color(0xFFC896B4),
+                                  ),
+                                )
+                              : const Icon(Icons.auto_fix_high, size: 16),
+                          label: Text(
+                            generating ? '生成中…' : '让管家生成',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFFC896B4),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -294,7 +392,8 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
               ),
             ),
           ],
-        ),
+        );
+        },
       ),
     );
   }
