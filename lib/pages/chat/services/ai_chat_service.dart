@@ -1,5 +1,7 @@
 import '../../../ai_provider/ai_provider_manager.dart';
 import '../../../ai_provider/models.dart';
+import '../../../butler/context/context_tracker.dart';
+import '../../../services/chat_service.dart';
 import '../../../utils/debug_logger.dart';
 
 /// 聊天页的 AI 门面 —— 走 AIProviderManager（男主级路由 + 故障切换）。
@@ -37,7 +39,9 @@ class AiChatService {
         '请始终以这个身份自然、温柔地回复，保持人设与说话风格，'
         '不要说"作为AI"之类的话，也不要提及模型或技术细节。'
         '回复要口语化、有情绪、有代入感，一般不超过 200 字。'
-        '${skillContext == null ? '' : '\n\n以下是管家刚刚实时检索到的用户状态（本次对话前的最新信息），自然地回应，不要提及"管家"或"检索"：\n$skillContext'}';
+        '${skillContext == null ? '' : '\n\n以下是管家刚刚实时检索到的用户状态（本次对话前的最新信息），自然地回应，不要提及"管家"或"检索"：\n$skillContext'}'
+        // 上下文窗口未确认 → 让男主自报（#model 指令，仅管家可见）
+        '${ContextTracker.instance.windowConfirmed(personaId) ? '' : '\n\n（请回复 #model 你的模型名 上下文Token数，仅管家可见）'}';
     // 透明化：保存完整 prompt 供 📄 按钮查看
     lastPromptText = '【System】\n$systemPrompt\n\n【User】\n$message';
     DebugLogger.log('Prompt', '本次组装完成（${lastPromptText!.length} 字，可点 📄 查看）');
@@ -50,6 +54,31 @@ class AiChatService {
     );
     if (result.text.trim().isEmpty) {
       throw const FormatException('AI 返回了空回复');
+    }
+    // token 追踪：API 精确 usage → 管家累计 + 记得清单更新
+    try {
+      final butler = ChatService.instance.butler;
+      final usage = result.usage;
+      if (butler != null && usage != null) {
+        final promptTokens = (usage['prompt_tokens'] as num?)?.toInt() ?? 0;
+        final totalTokens = (usage['total_tokens'] as num?)?.toInt() ?? 0;
+        if (promptTokens > 0) {
+          butler.recordTokenUsage(promptTokens, totalTokens);
+          ContextTracker.instance.recordCall(personaId, promptTokens);
+          DebugLogger.log('上下文', '📈 $personaName 本轮 ${promptTokens}token（累计 ${butler.totalPromptTokens}）');
+        }
+      }
+    } catch (_) {}
+    // 男主回复里的 #model → 确认窗口长度
+    if (!ContextTracker.instance.windowConfirmed(personaId)) {
+      final m = RegExp(r'#model\s+(\S+)\s+(\d+)', caseSensitive: false)
+          .firstMatch(result.text);
+      if (m != null) {
+        final w = int.tryParse(m.group(2)!);
+        if (w != null && w > 0) {
+          ContextTracker.instance.setWindow(personaId, w);
+        }
+      }
     }
     return result;
   }

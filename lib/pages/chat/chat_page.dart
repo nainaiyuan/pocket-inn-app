@@ -8,7 +8,10 @@ import '../../models/male_lead.dart';
 import '../../services/character_service.dart';
 import '../../services/chat_database_service.dart';
 import '../../services/chat_memory_service.dart';
+import '../../models/chat_memory.dart';
 import '../../services/chat_service.dart';
+import '../../services/butler_command.dart';
+import '../../butler/context/context_tracker.dart';
 import '../../services/local_storage_service.dart';
 import '../../models/chat_message.dart';
 import '../../utils/debug_logger.dart';
@@ -253,6 +256,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final lid = _state.leadId;
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
+    // 男主正在被调用（同一男主连续对话 → 上下文延续）
+    if (personaId.isNotEmpty) {
+      ContextTracker.instance.touch(personaId);
+    }
     // 拟人化：用户消息未读 → 男主开始"正在输入"
     ChatPresence.instance.markUnread(userMsgId);
     ChatPresence.instance.setTyping(true);
@@ -292,16 +299,29 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         sendText,
         personaId,
         personaName: personaName,
-        // 技能注入 + 温控询问指令都拼进 system（后者让男主在回复末尾附 #keywords）
+        // 技能注入 + 温控询问 + 审批反馈 + 获准记忆 都拼进 system
         skillContext: [
           if (skillInjection != null) skillInjection,
           if (keywordAsk != null) keywordAsk,
+          if (_pendingFeedback != null) _pendingFeedback!,
+          if (_pendingRecall != null) ..._buildRecallInjection(_pendingRecall!),
         ].join('\n'),
       );
+      // 用完即清（反馈/记忆只注入一次）
+      _pendingFeedback = null;
+      _pendingRecall = null;
       // 剥离 #keywords（仅管家可见）→ 显示/落库用干净文本
       var displayText = ButlerPipelineResult.extractKeywordsFromReply(
         result.text.trim(),
       );
+      // 指令模块：解析男主输出（#记录/#查记忆/#定时/#帮助/#model）→ 审批弹窗
+      final commands =
+          ButlerCommandParser.instance.parse(result.text.trim());
+      for (final cmd in commands) {
+        await _handleButlerCommand(cmd);
+      }
+      // 剥离所有指令（#…#）→ 用户只看到男主自然的回复
+      displayText = ButlerCommandParser.instance.strip(displayText);
       // 假面层反向还原：男主回复里的代号 → 真名（"妈妈"不再显示为 [家人1]）
       try {
         final butler = ChatService.instance.butler;
@@ -712,6 +732,153 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   String? _chatSessionId;
   String? _chatLeafId;
   int _chatRound = 0;
+
+  /// 待反馈给男主的审批结果（下轮注入 prompt：确认/拒绝/帮助文本）
+  String? _pendingFeedback;
+
+  /// 男主获准调取的记忆查询词（下轮注入检索到的记忆）
+  String? _pendingRecall;
+
+  /// 处理男主指令（#记录/#查记忆/#定时/#帮助/#model）→ 审批弹窗 → 反馈
+  Future<void> _handleButlerCommand(ParsedCommand cmd) async {
+    try {
+      switch (cmd.type) {
+        case ButlerCommandParser.cmdRecord:
+          await _approveRecord(cmd.arg);
+        case ButlerCommandParser.cmdRecall:
+          await _approveRecall(cmd.arg);
+        case ButlerCommandParser.cmdTimer:
+          _pendingFeedback =
+              '（用户说定时功能还在路上，先记下这个需求：${cmd.arg}）';
+        case ButlerCommandParser.cmdHelp:
+          _pendingFeedback = ButlerCommandParser.helpText;
+        case ButlerCommandParser.cmdModel:
+          final m = RegExp(r'(\S+)\s+(\d+)').firstMatch(cmd.arg);
+          if (m != null) {
+            final w = int.tryParse(m.group(2)!);
+            if (w != null && w > 0) {
+              ContextTracker.instance
+                  .setWindow(_state.personaId ?? '', w);
+            }
+          }
+      }
+    } catch (e) {
+      DebugLogger.log('指令模块', '✖ 指令处理失败: $e');
+    }
+  }
+
+  /// 记录审批：男主想记用户喜好 → 用户确认/拒绝 → 反馈男主
+  Future<void> _approveRecord(String content) async {
+    if (content.isEmpty) return;
+    if (!mounted) return;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('💌 男主想记住这个'),
+        content: Text(
+          '「$content」\n\n要让他记住吗？',
+          style: const TextStyle(fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('不记', style: TextStyle(color: Color(0xFF8A7A80))),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('让他记住'),
+          ),
+        ],
+      ),
+    );
+    if (approved == true) {
+      // 写入记忆库（用户确认的"记录"）
+      if (_chatSessionId != null) {
+        await ChatDatabaseService.instance.insertMemoriesInTx([
+          MemoryNode(
+            id: 'mem_${DateTime.now().millisecondsSinceEpoch}',
+            sessionId: _chatSessionId!,
+            branchLeafId: _chatLeafId ?? '',
+            content: content,
+            sourceMessageIds: const [],
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+          ),
+        ]);
+      }
+      DebugLogger.log('指令模块', '✅ 用户确认记录: $content');
+      _pendingFeedback = '（用户确认了你的记录请求：「$content」，已经记下了）';
+    } else {
+      DebugLogger.log('指令模块', '⛔ 用户拒绝记录: $content');
+      _pendingFeedback =
+          '（用户拒绝了你的记录请求：「$content」，你可以自然地问问为什么）';
+    }
+  }
+
+  /// 查记忆授权：男主申请调记忆 → 用户允许/拒绝 → 反馈
+  Future<void> _approveRecall(String query) async {
+    if (!mounted) return;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('🔍 男主想翻你的记忆'),
+        content: Text(
+          query.isEmpty
+              ? '他想看看你们之间的记忆，允许吗？'
+              : '他想查关于「$query」的记忆，允许吗？',
+          style: const TextStyle(fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('不允许', style: TextStyle(color: Color(0xFF8A7A80))),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('允许'),
+          ),
+        ],
+      ),
+    );
+    if (approved == true) {
+      _pendingRecall = query;
+      _pendingFeedback = query.isEmpty
+          ? '（用户允许你查看你们的记忆了）'
+          : '（用户允许你查看关于「$query」的记忆了）';
+      DebugLogger.log('指令模块', '✅ 用户授权查记忆: $query');
+    } else {
+      _pendingFeedback = query.isEmpty
+          ? '（用户暂时不想让你看记忆，别追问）'
+          : '（用户拒绝了查「$query」记忆的请求，别追问）';
+      DebugLogger.log('指令模块', '⛔ 用户拒绝查记忆: $query');
+    }
+  }
+
+  /// 男主获准调取记忆 → 检索相关记忆生成注入文本
+  List<String> _buildRecallInjection(String query) {
+    try {
+      final memories = _msgKey.currentState?.messages
+              .where((m) => !m.isMe && m.text.isNotEmpty)
+              .toList() ??
+          const <ChatMessage>[];
+      final recent = memories.length > 6
+          ? memories.sublist(memories.length - 6)
+          : memories;
+      if (recent.isEmpty) return const [];
+      return [
+        '（用户允许你查看记忆。以下是你们最近的对话，自然接住：\n'
+        '- ${recent.map((m) => m.text).join('\n- ')}）',
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
 
   /// 懒创建隐式会话（每个男主一个，跨页面进入复用）
   Future<void> _ensureChatSession(String personaId, String personaName) async {
