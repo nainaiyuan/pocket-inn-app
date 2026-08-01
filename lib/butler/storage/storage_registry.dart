@@ -11,6 +11,7 @@ library;
 
 import 'blocklist_store.dart';
 import 'butler_store.dart';
+import 'emotion_arc_store.dart';
 import 'identity_store.dart';
 import 'interaction_store.dart';
 import 'memory_store.dart';
@@ -33,6 +34,7 @@ class StorageRegistry {
       IdentityStore(),
       PatternStore(),
       UserMemoryStore(),
+      EmotionArcStore(),
     ];
   }
 
@@ -63,6 +65,9 @@ class StorageRegistry {
 
   UserMemoryStore get userMemory =>
       _store<UserMemoryStore>('user_memory');
+
+  EmotionArcStore get emotionArcs =>
+      _store<EmotionArcStore>('emotion_arcs');
 
   // ========== 通用 ==========
 

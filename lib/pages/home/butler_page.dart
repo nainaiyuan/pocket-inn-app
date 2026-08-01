@@ -122,8 +122,8 @@ class ButlerPage extends StatelessWidget {
                   _EntryCard(
                     icon: Icons.auto_awesome_outlined,
                     iconColor: const Color(0xFFC896B4),
-                    title: '情绪分析',
-                    subtitle: '输入一句话，看管家怎么理解你的情绪',
+                    title: '情感基线',
+                    subtitle: '你的整体情绪状态、月度趋势、触发因素',
                     onTap: (context) => Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const MoodAnalysisPage()),
                     ),

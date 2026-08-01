@@ -3,6 +3,10 @@ import 'dart:async';
 import '../ai_provider/ai_provider_manager.dart';
 import '../ai_provider/models.dart';
 import '../butler/butler.dart';
+import '../butler/modules/butler_module_hub.dart';
+import '../butler/memory/emotion_arc.dart';
+import '../butler/mood_analysis/mood_analyzer_keyword.dart';
+import '../butler/storage/storage_registry.dart';
 import '../butler/task/task_manager.dart';
 import '../data/mock_user_settings.dart';
 import '../models/chat_message.dart';
@@ -192,6 +196,9 @@ class ChatService {
       if (butler != null && butler!.config.butlerAIEnabled) {
         unawaited(_runButlerAI(input: input, userNode: userNode));
       }
+
+      // 管家情绪闭环：记录情绪弧线 → 更新基线/规律 → 落库（情感基线视图数据源）
+      _recordMoodData(characterId: character.id, userText: input);
 
       // 记录 Token 用量到上下文缓存
       if (butler != null && completion.usage != null) {
@@ -786,6 +793,54 @@ class ChatService {
         .where((s) => s.isNotEmpty)
         .toList();
     return segments.isEmpty ? [trimmed] : segments;
+  }
+
+  /// 管家情绪闭环：分析用户消息情绪 → 情绪弧线 → 更新基线/规律 → 落库
+  ///
+  /// 情感基线视图（情绪分析页）的数据就来自这里：
+  /// - arcs 落库（按时间/按男主聚合 → 趋势 + 各男主基线）
+  /// - 规律引擎（关键词组合 → 情绪偏移 = 触发因素）
+  void _recordMoodData({
+    required String characterId,
+    required String userText,
+  }) {
+    try {
+      final patternEngine = ButlerModuleHub.instance.sharedPatternEngine;
+      if (patternEngine == null) return;
+
+      // 关键词分析（不依赖 ONNX 模型文件，结果可预测）
+      final result = KeywordMoodAnalyzer().analyze(userText);
+      final keywords = KeywordMoodAnalyzer.matchKeywords(userText);
+      if (result.dimensions.isEmpty) return;
+
+      final now = DateTime.now();
+      final arc = EmotionArc(
+        id: 'arc_${now.millisecondsSinceEpoch}',
+        time: now,
+        characterId: characterId,
+        triggerKeywords: keywords,
+        startMood: patternEngine.baseline.allValues,
+        peakMood: result.dimensions,
+        endMood: result.dimensions,
+        returnedToBaseline: !(result.isAnomaly ?? false),
+        durationMinutes: 1,
+      );
+
+      // 更新基线 + 规律统计（关键词组合 → 情绪偏移）
+      patternEngine.addArc(arc);
+      // 落库：情感基线视图的数据源
+      StorageRegistry.instance.emotionArcs.save(arc);
+
+      final moodStr = result.dimensions.entries
+          .map((e) => '${e.key} ${e.value.round()}')
+          .join(' ');
+      DebugLogger.log(
+        '管家情绪',
+        '弧线已记录：关键词[${keywords.isEmpty ? '无' : keywords.join('、')}] → $moodStr',
+      );
+    } catch (e) {
+      DebugLogger.log('管家情绪', '情绪记录失败: $e');
+    }
   }
 
   /// 管家 AI：异步分析用户意图并管理任务

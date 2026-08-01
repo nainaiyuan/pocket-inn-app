@@ -9,12 +9,15 @@
 ///
 /// 检索时直接推给男主看，男主自己判断。
 
+import 'dart:convert';
+
 import '../mood_analysis/mood_interface.dart';
 
 /// 情绪弧线事件
 class EmotionArc {
   final String id;
   final DateTime time;
+  final String? characterId;        // 和哪个男主聊天时发生的（情感基线按男主维度）
   final List<String> triggerKeywords;  // 触发关键词（老板、下雨、加班…）
   final String? topic;                  // 话题（工作、天气…）
   final Map<String, double> startMood; // 初始情绪分布
@@ -27,6 +30,7 @@ class EmotionArc {
   EmotionArc({
     required this.id,
     required this.time,
+    this.characterId,
     this.triggerKeywords = const [],
     this.topic,
     required this.startMood,
@@ -36,6 +40,57 @@ class EmotionArc {
     this.durationMinutes = 0,
     this.summary,
   });
+
+  /// 序列化（落库用）
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'time': time.toIso8601String(),
+    'characterId': characterId,
+    'triggerKeywords': const JsonEncoder().convert(triggerKeywords),
+    'topic': topic,
+    'startMood': const JsonEncoder().convert(startMood),
+    'peakMood': const JsonEncoder().convert(peakMood),
+    'endMood': const JsonEncoder().convert(endMood),
+    'returnedToBaseline': returnedToBaseline ? 1 : 0,
+    'durationMinutes': durationMinutes,
+    'summary': summary,
+  };
+
+  static Map<String, double> _decodeJsonMap(dynamic raw) {
+    if (raw == null) return {};
+    try {
+      final decoded = const JsonDecoder().convert(raw.toString());
+      if (decoded is Map) {
+        return decoded.map(
+          (k, v) => MapEntry(k.toString(), (v as num).toDouble()),
+        );
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  static List<String> _decodeKeywords(dynamic raw) {
+    if (raw == null) return const [];
+    try {
+      final decoded = const JsonDecoder().convert(raw.toString());
+      if (decoded is List) return decoded.whereType<String>().toList();
+    } catch (_) {}
+    return const [];
+  }
+
+  factory EmotionArc.fromJson(Map<String, dynamic> json) => EmotionArc(
+    id: json['id'] as String,
+    time: DateTime.tryParse(json['time'] as String? ?? '') ?? DateTime.now(),
+    characterId: json['characterId'] as String?,
+    triggerKeywords: _decodeKeywords(json['triggerKeywords']),
+    topic: json['topic'] as String?,
+    startMood: _decodeJsonMap(json['startMood']),
+    peakMood: _decodeJsonMap(json['peakMood']),
+    endMood: _decodeJsonMap(json['endMood']),
+    returnedToBaseline: (json['returnedToBaseline'] as int? ?? 1) == 1,
+    durationMinutes: json['durationMinutes'] as int? ?? 0,
+    summary: json['summary'] as String?,
+  );
 
   /// 这条事件的"关键词+情绪偏移"特征
   /// 规律引擎靠这个做匹配

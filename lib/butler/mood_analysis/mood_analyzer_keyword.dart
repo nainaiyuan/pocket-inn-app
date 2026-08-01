@@ -34,6 +34,15 @@ class KeywordMoodAnalyzer implements IMoodAnalyzer {
     '晚安': {'放松': 60, '依恋': 40, '疲惫': 30},
   };
 
+  /// 从文本中匹配出命中的情绪关键词（触发因素提取用）
+  static List<String> matchKeywords(String text) {
+    final lowerText = text.toLowerCase();
+    return [
+      for (final key in _keywordToMood.keys)
+        if (lowerText.contains(key)) key,
+    ];
+  }
+
   @override
   MoodResult analyze(String text) {
     final dimensions = <String, double>{};
