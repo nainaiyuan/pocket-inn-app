@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../butler/flow/butler_flow.dart';
 import '../../../utils/debug_logger.dart';
+import '../../butler/butler_self_test_page.dart';
 import '../../butler/butler_skill_library_page.dart';
 
 /// 调试日志弹层（黑底终端风格，可滚动、可选中复制、可按标签筛选）。
@@ -108,6 +109,23 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
                   icon: const Icon(Icons.extension, size: 14, color: Color(0xFFC896B4)),
                   label: const Text(
                     '技能库',
+                    style: TextStyle(color: Color(0xFFC896B4), fontSize: 12),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    Navigator.push(
+                      ctx,
+                      MaterialPageRoute(
+                        builder: (_) => const ButlerSelfTestPage(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.healing, size: 14, color: Color(0xFFC896B4)),
+                  label: const Text(
+                    '一键自检',
                     style: TextStyle(color: Color(0xFFC896B4), fontSize: 12),
                   ),
                 ),

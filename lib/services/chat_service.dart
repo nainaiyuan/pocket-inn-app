@@ -20,11 +20,13 @@ import '../butler/task/task_manager.dart';
 import '../data/mock_user_settings.dart';
 import '../models/chat_message.dart';
 import '../models/chat_session.dart';
+import '../models/male_lead.dart';
 import '../models/preset.dart';
 import '../models/prompt_assembly.dart';
 import '../models/world_book.dart';
 import '../utils/debug_logger.dart';
 import 'chat_character_resolver.dart';
+import 'character_service.dart';
 import 'chat_database_service.dart';
 import 'chat_memory_service.dart';
 import 'chat_variable_service.dart';
@@ -103,6 +105,9 @@ class ChatService {
     ChatCompletionCancelToken? cancellationToken,
     void Function(ChatCompletionProgress progress)? onStreamProgress,
     Future<ChatSession> Function()? persistSession,
+    /// 自检模式：不真实调用 AI（模拟回复），不写情绪落库，其余流程全跑。
+    /// 用于"一键自检"——不手动聊天也能验证技能/工具/Prompt 组装等管家流程。
+    bool selfTest = false,
   }) async {
     // 频率限制
     if (!_checkRateLimit()) {
@@ -245,14 +250,18 @@ class ChatService {
     );
 
     try {
-      final completion = await _createCompletion(
-        character.id,
-        promptAssembly: promptAssembly,
-        preset: preset,
-        useStreaming: useStreaming,
-        cancellationToken: cancellationToken,
-        onStreamProgress: onStreamProgress,
-      );
+      final completion = selfTest
+          ? ChatCompletionResult(
+              text: '（自检模拟回复）我收到你说的话了：$normalizedInput',
+            )
+          : await _createCompletion(
+              character.id,
+              promptAssembly: promptAssembly,
+              preset: preset,
+              useStreaming: useStreaming,
+              cancellationToken: cancellationToken,
+              onStreamProgress: onStreamProgress,
+            );
       ButlerFlowRunner.instance.stepDone(
         'send_to_lead',
         result: '收到回复 ${completion.text.length} 字'
@@ -276,34 +285,55 @@ class ChatService {
         result: '拆成 ${segments.length} 条消息，已链式存储',
       );
 
-      unawaited(
-        _tryAutoExtractMemories(
-          sessionId: activeSession.id,
-          branchLeafId: assistantNode.id,
-          chatMessages: chatMessages,
-          userMessage: ChatMessage(
-            id: userNode.id,
-            text: userNode.text,
-            isMe: true,
+      if (!selfTest) {
+        unawaited(
+          _tryAutoExtractMemories(
+            sessionId: activeSession.id,
+            branchLeafId: assistantNode.id,
+            chatMessages: chatMessages,
+            userMessage: ChatMessage(
+              id: userNode.id,
+              text: userNode.text,
+              isMe: true,
+            ),
+            assistantMessage: ChatMessage(
+              id: assistantNode.id,
+              text: assistantNode.text,
+              isMe: false,
+            ),
+            characterName: character.name,
+            userName: userSetting.name,
           ),
-          assistantMessage: ChatMessage(
-            id: assistantNode.id,
-            text: assistantNode.text,
-            isMe: false,
-          ),
-          characterName: character.name,
-          userName: userSetting.name,
-        ),
-      );
+        );
+      }
 
       // 管家 AI：并行分析用户意图（如果启用）
-      if (butler != null && butler!.config.butlerAIEnabled) {
+      if (!selfTest && butler != null && butler!.config.butlerAIEnabled) {
         unawaited(_runButlerAI(input: input, userNode: userNode));
       }
 
       // 管家情绪闭环：记录情绪弧线 → 更新基线/规律 → 落库（情感基线视图数据源）
-      _recordMoodData(characterId: character.id, userText: input);
-      ButlerFlowRunner.instance.stepDone('record_mood', result: '情绪弧线已记录');
+      if (selfTest) {
+        // 自检模式：不落库（避免污染真实基线），只展示语义识别结果
+        final dims = await SemanticMoodAnalyzer.instance
+            .analyze(input, waitMs: 500);
+        String moodStr = '无显著情绪';
+        if (dims != null) {
+          final sorted = dims.entries.toList()
+            ..sort((a, b) => b.value.compareTo(a.value));
+          moodStr = sorted
+              .take(3)
+              .map((e) => '${e.key} ${e.value.round()}')
+              .join('、');
+        }
+        ButlerFlowRunner.instance.stepDone(
+          'record_mood',
+          result: '语义识别：$moodStr（自检不落库）',
+        );
+      } else {
+        _recordMoodData(characterId: character.id, userText: input);
+        ButlerFlowRunner.instance.stepDone('record_mood', result: '情绪弧线已记录');
+      }
       DebugLogger.log(
         '管家流程',
         '⑥ 男主回复完成：${segments.length} 条消息，已还原假名并存入会话',
@@ -1072,5 +1102,171 @@ class ChatService {
       default:
         return false;
     }
+  }
+}
+
+/// 一键自检：不手动聊天，直接跑管家全流程验证
+///
+/// 用法：ChatService.instance.runSelfTest()（需先 initButler）
+/// 3 条测试消息依次走完整流程（技能匹配→假面→Prompt 组装→发送(模拟)→存储→情绪识别），
+/// 每条消息的流程树会出现在日志页「流程」视图，这里汇总检查点 ✔/✖。
+class ButlerSelfTestReport {
+  final List<ButlerSelfTestItem> items;
+  final Duration elapsed;
+  final int passCount;
+
+  ButlerSelfTestReport({
+    required this.items,
+    required this.elapsed,
+  }) : passCount = items.where((i) => i.passed).length;
+
+  bool get allPassed => passCount == items.length;
+}
+
+class ButlerSelfTestItem {
+  final String message; // 测试消息原文
+  final String expected; // 预期
+  final String actual; // 实际
+  final bool passed;
+  final String? failedReason;
+
+  ButlerSelfTestItem({
+    required this.message,
+    required this.expected,
+    required this.actual,
+    required this.passed,
+    this.failedReason,
+  });
+}
+
+/// 自检入口（ChatService 扩展）
+extension ButlerSelfTest on ChatService {
+  /// 跑一遍管家全流程自检。返回汇总报告；详细过程见日志页流程树。
+  Future<ButlerSelfTestReport> runSelfTest() async {
+    final items = <ButlerSelfTestItem>[];
+    final sw = Stopwatch()..start();
+
+    // ── 准备：找第一个角色（没有就用占位角色）──
+    MaleLead? lead;
+    try {
+      final leads = await CharacterService.instance.loadAllSummaries();
+      if (leads.isNotEmpty) lead = leads.first;
+    } catch (_) {}
+    final character = ResolvedChatCharacter(
+      id: lead?.id ?? 'self_test_character',
+      name: lead?.name ?? '测试男主',
+      description: '',
+      cardJson: const {},
+    );
+
+    // ── 建独立测试会话（测完删除，不污染真实会话）──
+    ChatSession? testSession;
+    try {
+      testSession = await ChatDatabaseService.instance.createSession(
+        characterId: character.id,
+        title: '⚙ 自检会话（可删除）',
+      );
+    } catch (e) {
+      items.add(ButlerSelfTestItem(
+        message: '（环境）',
+        expected: '创建测试会话',
+        actual: '失败: $e',
+        passed: false,
+        failedReason: '无法创建测试会话，后续步骤跳过',
+      ));
+      return ButlerSelfTestReport(items: items, elapsed: sw.elapsed);
+    }
+
+    // ── 依次跑 3 条测试消息 ──
+    final testCases = [
+      (
+        text: '今天天气真好啊',
+        expect: '无技能触发，走聊天流程 + 语义情绪识别',
+        keyStep: 'skill_trigger',
+        keyResult: '无技能触发',
+      ),
+      (
+        text: '我今天心情好差，感觉好累',
+        expect: '触发【情绪状态洞察】+ 3 个工具调用',
+        keyStep: 'skill_trigger',
+        keyResult: '情绪状态洞察',
+      ),
+      (
+        text: '我妈妈说我太懒了',
+        expect: '假面层处理（有配置则替换敏感称呼）',
+        keyStep: 'mask_replace',
+        keyResult: '',
+      ),
+    ];
+
+    for (final tc in testCases) {
+      final flowBefore = ButlerFlowRunner.instance.history.length;
+      String actual = '';
+      bool passed = true;
+      String? reason;
+
+      try {
+        await sendMessage(
+          session: testSession!,
+          character: character,
+          chatMessages: const [],
+          input: tc.text,
+          selfTest: true,
+        );
+        // 从流程树读取结果（和用户看到的一致）
+        final newFlows = ButlerFlowRunner.instance.history
+            .take(ButlerFlowRunner.instance.history.length - flowBefore)
+            .toList();
+        final flow = newFlows.isNotEmpty ? newFlows.first : null;
+        if (flow == null) {
+          actual = '流程树没有新增记录';
+          passed = false;
+          reason = 'sendMessage 未产生流程记录';
+        } else {
+          final step = flow.steps
+              .where((s) => s.id == tc.keyStep)
+              .toList()
+              .firstOrNull;
+          final stepResult = step?.result ?? '';
+          if (tc.keyResult.isNotEmpty &&
+              !stepResult.contains(tc.keyResult)) {
+            passed = false;
+            reason = '步骤「${step?.name ?? tc.keyStep}」结果不符: $stepResult';
+          }
+          final toolCount = flow.toolCalls.length;
+          final moodStep = flow.steps
+              .where((s) => s.id == 'record_mood')
+              .toList()
+              .firstOrNull;
+          actual = '流程${flow.isSuccessful ? '成功' : '失败'}'
+              '（$toolCount 个工具调用）'
+              ' › ${stepResult.isNotEmpty ? stepResult : '无关键结果'}'
+              ' › ${moodStep?.result ?? ''}';
+          if (!flow.isSuccessful) {
+            passed = false;
+            reason ??= '流程未成功完成';
+          }
+        }
+      } catch (e) {
+        passed = false;
+        actual = '异常: $e';
+        reason = '发送消息抛异常';
+      }
+
+      items.add(ButlerSelfTestItem(
+        message: tc.text,
+        expected: tc.expect,
+        actual: actual,
+        passed: passed,
+        failedReason: reason,
+      ));
+    }
+
+    // ── 清理测试会话 ──
+    try {
+      await ChatDatabaseService.instance.deleteSession(testSession.id);
+    } catch (_) {}
+
+    return ButlerSelfTestReport(items: items, elapsed: sw.elapsed);
   }
 }
