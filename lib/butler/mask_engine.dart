@@ -55,7 +55,8 @@ class MaskEngine {
     'stranger': ['某人', '一个人', '那谁'],
   };
 
-  // ── 关系概述池 ──
+  // ── 关系概述池（内置兜底：身份没写描述时用）──
+  // 键：relationType（旧数据兼容）或 category（新身份）
   static const Map<String, List<String>> _relationTemplates = {
     'family_mom': [
       '一位女性长辈（关系亲密，用户感情复杂）',
@@ -67,6 +68,11 @@ class MaskEngine {
     'friend_close': ['用户的好朋友（关系很好）', '一位密友（用户可以倾诉的那种）', '用户亲近的朋友（经常联系）'],
     'work_boss': ['用户的上司（工作上有压力）', '用户的领导（用户有些怕他）', '工作上的上级（用户想讨好他）'],
     'work_colleague': ['用户的同事', '一个工作上的人', '用户的同行'],
+    // 分类级兜底
+    'family': ['一位家人（关系亲近）', '用户的家人（很熟）', '家里的长辈（常见面）'],
+    'friend': ['用户的朋友', '一个和用户很熟的人', '用户常联系的朋友'],
+    'work': ['工作相关的人', '用户工作上认识的人', '和用户有工作往来的人'],
+    'stranger': ['用户认识的人', '一个用户提到的人'],
   };
 
   final Random _random = Random();
@@ -163,7 +169,7 @@ class MaskEngine {
         code = sessionMap[entry.id]!;
       } else {
         final uniqueId = _identityCodes[entry.id] ?? '[其他]';
-        final relationSummary = _getRandomRelation(entry.relationType);
+        final relationSummary = _getRandomRelation(entry);
         code = relationSummary != null
             ? '$uniqueId（$relationSummary）'
             : uniqueId;
@@ -204,11 +210,23 @@ class MaskEngine {
     return restored;
   }
 
-  /// 获取随机关系概述
-  String? _getRandomRelation(String relationType) {
-    final templates = _relationTemplates[relationType];
-    if (templates == null || templates.isEmpty) return null;
-    return templates[_random.nextInt(templates.length)];
+  /// 获取随机关系概述：
+  /// 1. 优先：身份自己的描述池（用户写的经历/情感，随机轮换）
+  /// 2. 回退：relationType 内置模板（旧数据兼容）
+  /// 3. 再回退：分类级内置模板
+  String? _getRandomRelation(IdentityEntry entry) {
+    if (entry.descriptions.isNotEmpty) {
+      return entry.descriptions[_random.nextInt(entry.descriptions.length)];
+    }
+    final byRelation = _relationTemplates[entry.relationType];
+    if (byRelation != null && byRelation.isNotEmpty) {
+      return byRelation[_random.nextInt(byRelation.length)];
+    }
+    final byCategory = _relationTemplates[entry.category];
+    if (byCategory != null && byCategory.isNotEmpty) {
+      return byCategory[_random.nextInt(byCategory.length)];
+    }
+    return null;
   }
 
   /// 生成随机代号（给 AI 回复时用）

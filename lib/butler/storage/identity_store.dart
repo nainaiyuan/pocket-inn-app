@@ -4,6 +4,8 @@
 /// 男主 AI 只看到代号，看不到真实身份。这里存真实↔代号对应关系。
 library;
 
+import 'dart:convert';
+
 import 'package:sqflite/sqflite.dart';
 
 import 'butler_store.dart';
@@ -11,16 +13,18 @@ import 'butler_store.dart';
 /// 身份映射
 class IdentityEntry {
   final String id;
-  final String realLabel;   // 真实称呼（如 "老板"）
-  final String category;    // 分类（如 family / work / friend）
-  final String relationType; // 关系类型
-  final String importance;  // core / normal / temp
-  final String? attitude;   // 用户对该人的态度
+  final String realLabel; // 真实称呼（如 "妈妈"）
+  final String category; // 分类（family / friend / work / stranger）
+  final List<String> descriptions; // 描述池：每条 = 一段说明/经历/情感，轮换随机取
+  final String relationType; // 旧版字段（兼容历史数据，新 UI 不再使用）
+  final String importance; // core / normal / temp（内部用，UI 不再让用户选）
+  final String? attitude; // 用户对该人的态度（保留兼容）
 
   const IdentityEntry({
     required this.id,
     required this.realLabel,
     this.category = '',
+    this.descriptions = const [],
     this.relationType = '',
     this.importance = 'normal',
     this.attitude,
@@ -36,6 +40,7 @@ class IdentityEntry {
     'id': id,
     'realLabel': realLabel,
     'category': category,
+    'descriptions': _encodeDescriptions(descriptions),
     'relationType': relationType,
     'importance': importance,
     'attitude': attitude,
@@ -46,11 +51,31 @@ class IdentityEntry {
     id: json['id'] as String,
     realLabel: json['realLabel'] as String,
     category: json['category'] as String? ?? '',
+    descriptions: _decodeDescriptions(json['descriptions']),
     relationType: json['relationType'] as String? ?? '',
     importance: json['importance'] as String? ?? 'normal',
     attitude: json['attitude'] as String?,
     createdAt: DateTime.tryParse(json['createdAt'] as String? ?? ''),
   );
+
+  static String _encodeDescriptions(List<String> list) {
+    try {
+      return const JsonEncoder().convert(list);
+    } catch (_) {
+      return '[]';
+    }
+  }
+
+  static List<String> _decodeDescriptions(dynamic raw) {
+    if (raw == null || raw.toString().isEmpty) return const [];
+    try {
+      final decoded = const JsonDecoder().convert(raw.toString());
+      if (decoded is List) {
+        return decoded.whereType<String>().toList();
+      }
+    } catch (_) {}
+    return const [];
+  }
 }
 
 /// 身份映射存储
@@ -72,6 +97,7 @@ class IdentityStore extends ButlerStore {
         realLabel TEXT NOT NULL,
         category TEXT DEFAULT '',
         relationType TEXT DEFAULT '',
+        descriptions TEXT DEFAULT '[]',
         importance TEXT DEFAULT 'normal',
         attitude TEXT,
         createdAt TEXT NOT NULL
@@ -92,6 +118,18 @@ class IdentityStore extends ButlerStore {
   /// 保存身份
   Future<void> save(IdentityEntry entry) async {
     await insert(table, entry.toJson());
+  }
+
+  /// 数据库升级：旧版本没有 descriptions 列时补上
+  static Future<void> upgradeFromV4(Database db) async {
+    // 检查列是否存在（PRAGMA 不抛错，列已存在时跳过）
+    final cols = await db.rawQuery('PRAGMA table_info($table)');
+    final hasDescriptions = cols.any((c) => c['name'] == 'descriptions');
+    if (!hasDescriptions) {
+      await db.execute(
+        "ALTER TABLE $table ADD COLUMN descriptions TEXT DEFAULT '[]'",
+      );
+    }
   }
 
   /// 加载所有

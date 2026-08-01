@@ -146,9 +146,14 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
 
   void _showAddDialog() {
     final labelCtrl = TextEditingController();
-    final categoryCtrl = TextEditingController(text: 'work');
-    final relationCtrl = TextEditingController();
-    String importance = 'normal';
+    String category = 'family';
+    final descCtrls = <TextEditingController>[];
+
+    void addDescField() {
+      descCtrls.add(TextEditingController());
+    }
+
+    addDescField();
 
     showDialog(
       context: context,
@@ -166,63 +171,84 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
               color: Color(0xFF6A4A5A),
             ),
           ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: labelCtrl,
-                  decoration: _deco('真实称呼（如：老板 / 前任 / 闺蜜）'),
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  initialValue: 'work',
-                  decoration: _deco('分类'),
-                  items: const [
-                    DropdownMenuItem(value: 'family', child: Text('家人')),
-                    DropdownMenuItem(value: 'friend', child: Text('朋友')),
-                    DropdownMenuItem(value: 'work', child: Text('工作')),
-                    DropdownMenuItem(value: 'stranger', child: Text('其他')),
-                  ],
-                  onChanged: (v) => categoryCtrl.text = v ?? 'work',
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: relationCtrl,
-                  decoration: _deco('关系类型（如：work_colleague / friend_close）'),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    const Text(
-                      '重要性：',
-                      style: TextStyle(fontSize: 13, color: Color(0xFF6A4A5A)),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: labelCtrl,
+                    decoration: _deco('怎么称呼 ta？（如：妈妈 / 老板 / 前任）'),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    initialValue: category,
+                    decoration: _deco('分类（可选）'),
+                    items: const [
+                      DropdownMenuItem(value: 'family', child: Text('家人')),
+                      DropdownMenuItem(value: 'friend', child: Text('朋友')),
+                      DropdownMenuItem(value: 'work', child: Text('工作')),
+                      DropdownMenuItem(value: 'stranger', child: Text('其他')),
+                    ],
+                    onChanged: (v) =>
+                        setDialogState(() => category = v ?? 'family'),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    '给男主一些关于 ta 的描述（越多越好，每次聊天会随机轮换一条，帮助男主理解你们的关系）：',
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.5,
+                      color: const Color(0xFF6A4A5A).withValues(alpha: 0.7),
                     ),
-                    const SizedBox(width: 8),
-                    for (final imp in ['core', 'normal', 'temp'])
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: Text(
-                            imp == 'core'
-                                ? '核心'
-                                : imp == 'normal'
-                                ? '普通'
-                                : '临时',
-                            style: const TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  for (var i = 0; i < descCtrls.length; i++) ...[
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: descCtrls[i],
+                            decoration: _deco(
+                              '例：我妈妈很唠叨但特别疼我，上周又催我相亲',
+                            ),
                           ),
-                          selected: importance == imp,
-                          selectedColor: const Color(
-                            0xFFC896B4,
-                          ).withValues(alpha: 0.3),
-                          onSelected: (_) =>
-                              setDialogState(() => importance = imp),
                         ),
-                      ),
+                        if (descCtrls.length > 1)
+                          IconButton(
+                            icon: const Icon(
+                              Icons.remove_circle_outline,
+                              color: Color(0xFFE07A7A),
+                              size: 20,
+                            ),
+                            onPressed: () => setDialogState(() {
+                              descCtrls.removeAt(i);
+                            }),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
                   ],
-                ),
-              ],
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => setDialogState(addDescField),
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text(
+                        '再加一条描述',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFC896B4),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           actions: [
@@ -248,18 +274,15 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
                   ).showSnackBar(const SnackBar(content: Text('请输入真实称呼')));
                   return;
                 }
-                final category = categoryCtrl.text.trim().isEmpty
-                    ? 'work'
-                    : categoryCtrl.text.trim();
-                final relation = relationCtrl.text.trim().isEmpty
-                    ? '${category}_${DateTime.now().millisecondsSinceEpoch % 1000}'
-                    : relationCtrl.text.trim();
+                final descriptions = descCtrls
+                    .map((c) => c.text.trim())
+                    .where((s) => s.isNotEmpty)
+                    .toList();
                 final entry = IdentityEntry(
                   id: '${category}_${DateTime.now().millisecondsSinceEpoch}',
                   realLabel: label,
                   category: category,
-                  relationType: relation,
-                  importance: importance,
+                  descriptions: descriptions,
                 );
                 widget.hub.sharedMaskEngine!.registerIdentity(entry);
                 Navigator.pop(ctx);
@@ -398,12 +421,42 @@ class _IdentityCard extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   _categoryName(entry.category) +
-                      (entry.importance == 'core' ? ' · 核心' : ''),
+                      (entry.descriptions.isEmpty
+                          ? ''
+                          : ' · ${entry.descriptions.length} 条描述'),
                   style: TextStyle(
                     fontSize: 11,
                     color: const Color(0xFF5A4A52).withValues(alpha: 0.4),
                   ),
                 ),
+                if (entry.descriptions.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(
+                        0xFFC896B4,
+                      ).withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '「${entry.descriptions.first}」',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        height: 1.4,
+                        color: const Color(
+                          0xFF5A4A52,
+                        ).withValues(alpha: 0.6),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

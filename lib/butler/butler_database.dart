@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'butler_memory.dart';
+import 'storage/identity_store.dart';
 import 'storage/storage_registry.dart';
 
 /// 管家记忆数据库
@@ -30,7 +31,7 @@ class ButlerDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await _createTables(db);
         // 各 Store 的表（IF NOT EXISTS，幂等）
@@ -48,6 +49,10 @@ class ButlerDatabase {
         }
         if (oldVersion < 4) {
           await _createTriggerTable(db);
+        }
+        if (oldVersion < 5) {
+          // 假面层：身份描述池（descriptions 列）
+          await IdentityStore.upgradeFromV4(db);
         }
       },
     );
