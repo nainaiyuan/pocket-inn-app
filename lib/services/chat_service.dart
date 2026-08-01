@@ -155,13 +155,18 @@ class ChatService {
         onStreamProgress: onStreamProgress,
       );
 
-      final assistantNode = await ChatDatabaseService.instance
-          .appendAssistantMessage(
-            sessionId: activeSession.id,
-            parentMessageId: userNode.id,
-            text: completion.text,
-            thinkingChain: completion.thinkingChain,
-          );
+      // 男主连续多条：按 <split> 拆分成多条消息，链式存储（UI 显示为一组气泡）
+      final segments = splitMultiMessages(completion.text);
+      ChatNode? prevNode;
+      for (final segment in segments) {
+        prevNode = await ChatDatabaseService.instance.appendAssistantMessage(
+          sessionId: activeSession.id,
+          parentMessageId: (prevNode ?? userNode).id,
+          text: segment,
+          thinkingChain: prevNode == null ? completion.thinkingChain : null,
+        );
+      }
+      final assistantNode = prevNode!;
 
       unawaited(
         _tryAutoExtractMemories(
@@ -271,13 +276,20 @@ class ChatService {
         onStreamProgress: onStreamProgress,
       );
 
-      final assistantNode = await ChatDatabaseService.instance
-          .appendAssistantMessage(
-            sessionId: session.id,
-            parentMessageId: userMessage.id,
-            text: completion.text,
-            thinkingChain: completion.thinkingChain,
-          );
+      // 男主连续多条：按 <split> 拆分链式存储
+      final segments = splitMultiMessages(completion.text);
+      String? prevId = userMessage.id;
+      ChatNode? lastNode;
+      for (final segment in segments) {
+        lastNode = await ChatDatabaseService.instance.appendAssistantMessage(
+          sessionId: session.id,
+          parentMessageId: prevId,
+          text: segment,
+          thinkingChain: lastNode == null ? completion.thinkingChain : null,
+        );
+        prevId = lastNode.id;
+      }
+      final assistantNode = lastNode!;
 
       unawaited(
         _tryAutoExtractMemories(
@@ -407,12 +419,19 @@ class ChatService {
         onStreamProgress: onStreamProgress,
       );
 
-      await ChatDatabaseService.instance.appendAssistantMessage(
-        sessionId: session.id,
-        parentMessageId: lastMessageId,
-        text: completion.text,
-        thinkingChain: completion.thinkingChain,
-      );
+      // 男主连续多条：按 <split> 拆分链式存储
+      final segments = splitMultiMessages(completion.text);
+      String? prevId = lastMessageId;
+      ChatNode? lastNode;
+      for (final segment in segments) {
+        lastNode = await ChatDatabaseService.instance.appendAssistantMessage(
+          sessionId: session.id,
+          parentMessageId: prevId,
+          text: segment,
+          thinkingChain: lastNode == null ? completion.thinkingChain : null,
+        );
+        prevId = lastNode.id;
+      }
 
       return completion;
     } on ChatCompletionCancelledException {
@@ -751,6 +770,22 @@ class ChatService {
   String restoreButlerMask(String text, String sessionId) {
     if (butler == null || !butler!.config.maskLayerEnabled) return text;
     return butler!.processIncoming(text: text, sessionId: sessionId);
+  }
+
+  /// 男主连续多条：把回复按 <split> 拆成多条消息
+  /// - 没有 <split> → 原样单条
+  /// - 有 → 拆分、trim、过滤空段；全空时回退单条
+  static List<String> splitMultiMessages(String text) {
+    final trimmed = text.trim();
+    if (!trimmed.contains('<split>')) {
+      return [trimmed];
+    }
+    final segments = trimmed
+        .split('<split>')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    return segments.isEmpty ? [trimmed] : segments;
   }
 
   /// 管家 AI：异步分析用户意图并管理任务

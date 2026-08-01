@@ -247,6 +247,58 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  /// 查看最近一次发给男主的完整 prompt（透明化：男主"知道什么"一目了然）
+  void _showPromptDialog() {
+    final promptText = _viewModel.lastPromptText;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          '发给男主的完整内容',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF6A4A5A),
+          ),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 420,
+          child: promptText == null || promptText.isEmpty
+              ? const Center(
+                  child: Text(
+                    '还没有记录。\n先和男主聊一句，这里就能看到\n他收到的完整信息。',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.6,
+                      color: Color(0xFF8A7A80),
+                    ),
+                  ),
+                )
+              : SingleChildScrollView(
+                  child: SelectableText(
+                    promptText,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      height: 1.6,
+                      color: Color(0xFF5A4A52),
+                    ),
+                  ),
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭', style: TextStyle(color: Color(0xFF6A4A5A))),
+          ),
+        ],
+      ),
+    );
+  }
+
   // --- 标题 / 重置 ---
 
   Future<void> _renameChatTitle() async {
@@ -710,6 +762,11 @@ class _ChatPageState extends State<ChatPage> {
               ));
             },
             tooltip: '管家',
+          ),
+          IconButton(
+            icon: const Icon(Icons.article_outlined),
+            onPressed: _showPromptDialog,
+            tooltip: '查看发给男主的完整内容',
           ),
           IconButton(
             icon: const Icon(Icons.lock_outline),

@@ -89,7 +89,8 @@ class PromptAssembler {
       context: context,
     );
     return PromptAssemblyResult(
-      messages: messages,
+      // 末尾附上"可以连续发多条"的说明（告知男主 <split> 用法）
+      messages: withMultiMessageHint(messages),
       mergedText: _buildMergedText(_mergeAdjacentMessages(topLevelSegments)),
       activatedWorldBookEntries: activatedEntries,
       segments: topLevelSegments,
@@ -611,6 +612,26 @@ class PromptAssembler {
       merged.add(message);
     }
     return merged;
+  }
+
+  /// 连续消息说明（附在 system 末尾，告知男主可以一次发多条）
+  static const String multiMessageHint =
+      '像真人聊天一样，如果你一次想发多条消息，'
+      '用 <split> 分隔每条，例如：「晚安啦<split>今天早点睡」。'
+      '每条都要简短自然、口语化，不要用 <split> 以外的任何标记。';
+
+  /// 在组装结果末尾附加连续消息说明
+  static List<PromptMessage> withMultiMessageHint(
+    List<PromptMessage> messages,
+  ) {
+    return [
+      ...messages,
+      PromptMessage(
+        role: 'system',
+        content: multiMessageHint,
+        sources: const ['连续消息说明'],
+      ),
+    ];
   }
 
   static String _buildMergedText(List<PromptMessage> messages) {

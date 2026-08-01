@@ -15,6 +15,7 @@ import '../../services/chat_database_service.dart';
 import '../../services/chat_opening_message_builder.dart';
 import '../../services/chat_service.dart';
 import '../../services/chat_variable_service.dart';
+import '../../utils/debug_logger.dart';
 import '../../services/openai_compatible_api_service.dart';
 import '../../services/preset_service.dart';
 import '../../services/voice_chat_service.dart' as voice;
@@ -90,6 +91,7 @@ class ChatViewModel extends ChangeNotifier {
   String _streamingAssistantText = '';
   String _streamingThinkingChain = '';
   String _streamingImpersonationText = '';
+  String? _lastPromptText;
   bool _isDraftSession = false;
   List<String> _draftOpeningAssistantMessages = const [];
   int _draftOpeningMessageIndex = 0;
@@ -120,6 +122,8 @@ class ChatViewModel extends ChangeNotifier {
   String? get apiStatusModelId => _apiStatusModelId;
   ApiConnectionTestResult? get apiStatusResult => _apiStatusResult;
   bool get isDraftSession => _isDraftSession;
+  /// 最近一次发给男主的完整 prompt（聊天页"查看 Prompt"用）
+  String? get lastPromptText => _lastPromptText;
   List<String> get draftOpeningAssistantMessages =>
       _draftOpeningAssistantMessages;
   int get draftOpeningMessageIndex => _draftOpeningMessageIndex;
@@ -563,7 +567,7 @@ class ChatViewModel extends ChangeNotifier {
     ChatSession? persistedSession;
 
     try {
-      await getIt<ChatService>().sendMessage(
+      final result = await getIt<ChatService>().sendMessage(
         session: session,
         character: character,
         chatMessages: _messages,
@@ -596,6 +600,10 @@ class ChatViewModel extends ChangeNotifier {
               }
             : null,
       );
+
+      // 保存本次发给男主的完整 prompt（聊天页可查看）
+      _lastPromptText = result.promptAssembly.mergedText;
+      DebugLogger.log('Prompt', '本次发给男主的完整内容已保存（${_lastPromptText?.length ?? 0} 字）');
 
       // 非流式模式：没有逐字回调，回复拿到 = 已读
       if (!_useStreaming) {
