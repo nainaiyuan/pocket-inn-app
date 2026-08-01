@@ -112,12 +112,36 @@ class AiChatService {
       AIChatMessage(role: 'user', content: message),
       if (toolMessages != null) ...toolMessages,
     ];
-    final result = await manager.chat(
-      personaId,
-      messages,
-      // 工具轮不带工具定义（避免模型再次调用）；正常轮带 butlerTools
-      tools: toolRound ? null : butlerTools,
-    );
+    late final AIProviderResult result;
+    try {
+      result = await manager.chat(
+        personaId,
+        messages,
+        // 工具轮不带工具定义（避免模型再次调用）；正常轮带 butlerTools
+        tools: toolRound ? null : butlerTools,
+      );
+    } on Object catch (e) {
+      // 上下文超限 → 窗口自动校准（表值只是起点，真实 API 行为说了算）
+      final msg = e.toString();
+      final overflow = msg.contains('context length') ||
+          msg.contains('maximum context') ||
+          msg.contains('context_length') ||
+          msg.contains('too many tokens') ||
+          msg.contains('token limit') ||
+          msg.contains('超出上下文') ||
+          msg.contains('最大上下文');
+      if (overflow) {
+        try {
+          final butler = ChatService.instance.butler;
+          final used = butler?.totalPromptTokens ?? 0;
+          final calibrated = used + 2000;
+          ContextTracker.instance.setWindow(personaId, calibrated);
+          DebugLogger.log('上下文', '⚠️ 上下文超限 → 窗口校准: → $calibrated'
+              '（已用 $used + 余量2000）');
+        } catch (_) {}
+      }
+      rethrow;
+    }
     final hasToolCalls = result.toolCalls != null && result.toolCalls!.isNotEmpty;
     if (result.text.trim().isEmpty && !hasToolCalls && !toolRound) {
       // DeepSeek 偶发空回复：自动重试一次（工具轮不重试，由 chat_page 循环处理）
