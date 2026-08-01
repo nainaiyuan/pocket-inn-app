@@ -138,8 +138,14 @@ class ButlerCommandParser {
   }
 
   /// 剥离所有指令，返回显示文本（男主回复 → 用户看到的干净版本）
+  /// 支持两种形式：闭合 `#指令#` 和无闭合 `#model xxx 65536`
   String strip(String text) {
-    return text.replaceAll(RegExp(r'#([^\n#]+)#'), '').trim();
+    var out = text;
+    // 无闭合 #model（男主常漏掉结尾 #）
+    out = out.replaceAll(RegExp(r'#model\s+\S+\s+\d+', caseSensitive: false), '');
+    // 闭合指令 #…#
+    out = out.replaceAll(RegExp(r'#([^\n#]+)#'), '');
+    return out.trim();
   }
 
   String? _matchType(String name) {
