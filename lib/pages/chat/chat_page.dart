@@ -274,6 +274,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // ===== 管家管线：技能触发 → 假面替换 → 情绪记录（流程树可见）=====
       String sendText = t;
       String? skillInjection;
+      String? keywordAsk;
       try {
         final pipeline = await ChatService.instance.runButlerPipeline(
           userText: t,
@@ -282,6 +283,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         );
         sendText = pipeline.maskedText;
         skillInjection = pipeline.skillInjection;
+        keywordAsk = pipeline.keywordAsk;
       } catch (e) {
         // 管家失败不阻断聊天，只记日志
         DebugLogger.log('管家流程', '✖ 管家管线异常（不阻断聊天）: $e');
@@ -290,7 +292,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         sendText,
         personaId,
         personaName: personaName,
-        skillContext: skillInjection,
+        // 技能注入 + 温控询问指令都拼进 system（后者让男主在回复末尾附 #keywords）
+        skillContext: [
+          if (skillInjection != null) skillInjection,
+          if (keywordAsk != null) keywordAsk,
+        ].join('\n'),
+      );
+      // 剥离 #keywords（仅管家可见）→ 显示/落库用干净文本
+      final displayText = ButlerPipelineResult.extractKeywordsFromReply(
+        result.text.trim(),
       );
       // 男主回复落库 + 每 3 轮提取一次记忆（管家"记得"的数据源）
       if (_chatSessionId != null) {
@@ -298,7 +308,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           final aiNode = await ChatDatabaseService.instance.appendAssistantMessage(
             sessionId: _chatSessionId!,
             parentMessageId: _chatLeafId,
-            text: result.text.trim(),
+            text: displayText,
           );
           _chatLeafId = aiNode.id;
           _chatRound++;
@@ -311,7 +321,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       }
       _msgKey.currentState?.appendMessage(ChatMessage(
         id: '${DateTime.now().millisecondsSinceEpoch}_ai',
-        text: result.text.trim(),
+        text: displayText,
         isMe: false,
       ));
       // 男主回复完成：全部已读 + 停止输入

@@ -979,6 +979,19 @@ class ChatService {
       } catch (_) {}
       if (dimensions.isEmpty) return;
 
+      // 合并男主推测关键词（#keywords 暂存队列）→ 规律引擎据此积累
+      if (ButlerPipelineResult.pendingKeywords.isNotEmpty) {
+        for (final k in ButlerPipelineResult.pendingKeywords) {
+          if (!keywords.contains(k)) keywords.add(k);
+        }
+        DebugLogger.log(
+          '管家流程',
+          '🎯 男主推测关键词已并入弧线: '
+          '${ButlerPipelineResult.pendingKeywords.join('、')}',
+        );
+        ButlerPipelineResult.pendingKeywords.clear();
+      }
+
       final now = DateTime.now();
       final arc = EmotionArc(
         id: 'arc_${now.millisecondsSinceEpoch}',
@@ -1156,12 +1169,35 @@ class ButlerPipelineResult {
   /// 假面层替换后的文本（无替换时 = 原文）
   final String maskedText;
 
+  /// 男主推测关键词暂存队列（#keywords 解析后，下轮情绪记录时并入弧线）
+  static final List<String> pendingKeywords = [];
+
+  /// 从男主回复中解析 #keywords 并剥离（仅管家可见，不显示给用户）
+  /// 返回剥离命令后的显示文本；解析到的关键词进暂存队列
+  static String extractKeywordsFromReply(String reply) {
+    final m = RegExp(r'#keywords\s+([^\n#]+)').firstMatch(reply);
+    if (m == null) return reply;
+    final words = m
+        .group(1)!
+        .split(RegExp(r'[,，、\s]+'))
+        .where((w) => w.isNotEmpty)
+        .toList();
+    if (words.isNotEmpty) {
+      pendingKeywords.addAll(words);
+      DebugLogger.log('管家流程', '🎯 男主推测关键词: ${words.join('、')}（已暂存，下轮并入弧线）');
+    }
+    return reply.replaceRange(m.start, m.end, '').trim();
+  }
   /// 技能注入内容（塞进 AI prompt；无技能/无注入 = null）
   final String? skillInjection;
+
+  /// 温控询问指令（情绪超基线 → 让男主在回复末尾附 #keywords，仅管家可见）
+  final String? keywordAsk;
 
   const ButlerPipelineResult({
     required this.maskedText,
     this.skillInjection,
+    this.keywordAsk,
   });
 }
 
@@ -1179,8 +1215,8 @@ extension ButlerSelfTest on ChatService {
     ButlerFlowRunner.instance.startRecording(
       id: 'chat_flow',
       name: '聊天流程',
-      stepIds: const ['skill_trigger', 'mask_replace', 'record_mood'],
-      stepNames: const ['技能触发', '假面替换', '记录情绪与规律'],
+      stepIds: const ['skill_trigger', 'mask_replace', 'record_mood', 'keyword_ask'],
+      stepNames: const ['技能触发', '假面替换', '记录情绪与规律', '温控询问'],
     );
 
     var text = userText.trim();
@@ -1237,11 +1273,39 @@ extension ButlerSelfTest on ChatService {
     // 3. 情绪记录：关键词 → 弧线 → 规律 → 落库（真实收集）
     _recordMoodData(characterId: characterId, userText: userText);
     ButlerFlowRunner.instance.stepDone('record_mood', result: '情绪弧线已记录');
+
+    // 4. 温控询问：情绪超基线 → 让男主在回复末尾附 #keywords（仅管家可见）
+    //    基线空/样本少时也触发 → 一开始就快速积累关键词找规律
+    String? keywordAsk;
+    try {
+      final pe = ButlerModuleHub.instance.sharedPatternEngine;
+      if (pe != null && butler != null && butler!.config.maskLayerEnabled) {
+        final mood = KeywordMoodAnalyzer().analyze(userText);
+        final base = pe.baseline;
+        final dims = mood.dimensions;
+        final exceeds = !base.isReliable ||
+            dims.entries.any((e) =>
+                (e.value - (base.allValues[e.key] ?? 0)).abs() > 20);
+        if (exceeds && dims.isNotEmpty) {
+          final top = dims.entries
+              .reduce((a, b) => a.value >= b.value ? a : b);
+          keywordAsk =
+              '（管家观察：用户情绪「${top.key} ${top.value.round()}」超出当前基线。'
+              '请在回复末尾附一行 #keywords 关键词1,关键词2 —— 你推测导致用户'
+              '情绪变化的关键词；这一行仅管家可见，不要告诉用户）';
+          ButlerFlowRunner.instance.stepDone(
+            'keyword_ask',
+            result: '情绪超基线（${top.key}+${top.value.round()}）→ 请男主附关键词',
+          );
+        }
+      }
+    } catch (_) {}
     ButlerFlowRunner.instance.finishRecording();
 
     return ButlerPipelineResult(
       maskedText: text,
       skillInjection: skillInjection,
+      keywordAsk: keywordAsk,
     );
   }
 
