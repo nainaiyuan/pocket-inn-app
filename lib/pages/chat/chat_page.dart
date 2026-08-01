@@ -318,6 +318,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       _pendingRecall = null;
       _pendingRecallCategory = null;
       _pendingRecallLimit = null;
+      // 收集男主各轮文本（第一轮 + 工具轮）——文本与工具可共存：
+      // 模型第一轮既说话又调工具时，文本不丢，工具执行后合并显示
+      final replyTexts = <String>[];
+      if (result.text.trim().isNotEmpty) {
+        replyTexts.add(result.text.trim());
+      }
       // function calling 循环：模型请求工具 → 执行 → 回传 → 再生成（最多3轮防死循环）
       var toolLoop = 0;
       while (toolLoop < 3 &&
@@ -358,11 +364,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           toolRound: true,
           toolMessages: toolMessages,
         );
+        if (result.text.trim().isNotEmpty) {
+          replyTexts.add(result.text.trim());
+        }
       }
 
   // 剥离 #keywords（仅管家可见）→ 显示/落库用干净文本
       var displayText = ButlerPipelineResult.extractKeywordsFromReply(
-        result.text.trim(),
+        replyTexts.join('\n'),
       );
       // 指令模块：解析男主输出（#记录/#查记忆/#定时/#帮助/#model）→ 审批弹窗
       final commands =

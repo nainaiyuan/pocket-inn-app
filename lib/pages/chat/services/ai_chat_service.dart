@@ -121,9 +121,9 @@ class AiChatService {
       result = await manager.chat(
         personaId,
         messages,
-        // 工具轮不带工具定义（避免模型再次调用）；
-        // 窗口未确认轮也不带（男主专注回 #model，避免【必答】与工具冲突）
-        tools: (toolRound || needsWindow) ? null : butlerTools,
+        // 工具轮不带工具定义（避免模型再次调用）；正常轮始终带
+        // （文本与工具可共存：模型可同时说话+调工具，chat_page 分步处理）
+        tools: toolRound ? null : butlerTools,
       );
     } on Object catch (e) {
       // 上下文超限 → 窗口自动校准（表值只是起点，真实 API 行为说了算）
