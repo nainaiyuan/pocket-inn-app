@@ -334,6 +334,35 @@ class ChatMemoryService {
     await ChatDatabaseService.instance.deleteMemory(memoryId);
   }
 
+  /// 按类别/关键词检索记忆（男主 #查记忆 用）
+  /// [category] 类别名（喜好/约定/日常/事实/其他，匹配 [类别] 前缀）
+  /// [keyword] 关键词（content 包含即命中）
+  /// 返回按时间倒序的列表
+  Future<List<MemoryNode>> searchMemories(
+    String sessionId, {
+    String? category,
+    String? keyword,
+  }) async {
+    final all = await loadAllSessionMemories(sessionId);
+    final result = <MemoryNode>[];
+    for (final m in all) {
+      final content = m.content;
+      // 类别过滤：content 带 [类别] 前缀
+      if (category != null && category.isNotEmpty) {
+        final catMatch = RegExp(r'^\[(喜好|约定|日常|事实|其他)\]')
+            .firstMatch(content);
+        if (catMatch == null || catMatch.group(1) != category) continue;
+      }
+      if (keyword != null && keyword.isNotEmpty) {
+        final stripped =
+            content.replaceFirst(RegExp(r'^\[(喜好|约定|日常|事实|其他)\]'), '');
+        if (!stripped.contains(keyword)) continue;
+      }
+      result.add(m);
+    }
+    return result;
+  }
+
   Future<List<MemoryNode>> loadAllSessionMemories(String sessionId) async {
     return ChatDatabaseService.instance.loadAllSessionMemories(sessionId);
   }

@@ -295,6 +295,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         // 管家失败不阻断聊天，只记日志
         DebugLogger.log('管家流程', '✖ 管家管线异常（不阻断聊天）: $e');
       }
+      // 获准记忆注入（异步检索记忆库，按类别/条数）
+      final recallInjection = _pendingRecall != null
+          ? await _buildRecallInjectionAsync(_pendingRecall!)
+          : const <String>[];
       final result = await _aiSvc.generateReply(
         sendText,
         personaId,
@@ -304,12 +308,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           if (skillInjection != null) skillInjection,
           if (keywordAsk != null) keywordAsk,
           if (_pendingFeedback != null) _pendingFeedback!,
-          if (_pendingRecall != null) ..._buildRecallInjection(_pendingRecall!),
+          ...recallInjection,
         ].join('\n'),
       );
       // 用完即清（反馈/记忆只注入一次）
       _pendingFeedback = null;
       _pendingRecall = null;
+      _pendingRecallCategory = null;
+      _pendingRecallLimit = null;
       // 剥离 #keywords（仅管家可见）→ 显示/落库用干净文本
       var displayText = ButlerPipelineResult.extractKeywordsFromReply(
         result.text.trim(),
@@ -324,13 +330,17 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           await _approveRecord(cmd.arg);
         } else if (cmd.type == ButlerCommandParser.cmdRecall) {
           _appendToolBubble('正在查记忆：${cmd.arg.isEmpty ? '全部' : cmd.arg}…');
-          await _approveRecall(cmd.arg);
+          await _startRecallFlow(cmd.arg);
         } else {
           await _handleButlerCommand(cmd);
         }
       }
       // 剥离所有指令（#…#）→ 用户只看到男主自然的回复
       displayText = ButlerCommandParser.instance.strip(displayText);
+      // 待定查询：男主回复"看5条/全部" → 继续审批流程
+      if (_pendingQuery != null) {
+        await _resolvePendingQuery(displayText);
+      }
       // 假面层反向还原：男主回复里的代号 → 真名（"妈妈"不再显示为 [家人1]）
       try {
         final butler = ChatService.instance.butler;
@@ -745,6 +755,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 男主获准调取的记忆查询词（下轮注入检索到的记忆）
   String? _pendingRecall;
 
+  /// 获准查询的类别（null = 关键词查询）
+  String? _pendingRecallCategory;
+
+  /// 获准查看的条数上限（null = 不限，取最近6条）
+  int? _pendingRecallLimit;
+
+  /// 待定查询（命中太多 → 等男主说想看几条）
+  ({String query, String category, int total})? _pendingQuery;
+
   /// 插入管家工具气泡（🔧 正在…，男主头像下小气泡）
   /// 用 [tool] 前缀标记（freezed ChatMessage 不加字段，bubble 检测前缀渲染）
   void _appendToolBubble(String text) {
@@ -783,6 +802,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   Future<void> _approveRecord(String content) async {
     if (content.isEmpty) return;
     if (!mounted) return;
+    // 类别解析：男主带"类别：内容" → 用男主的；否则管家自动归类
+    final split = ButlerCommandParser.instance.splitCategory(content);
+    final category = split.category;
+    final body = split.content;
     final approved = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -790,7 +813,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('💌 男主想记住这个'),
         content: Text(
-          '「$content」\n\n要让他记住吗？',
+          '「$body」\n\n类别：$category\n\n要让他记住吗？',
           style: const TextStyle(fontSize: 14, height: 1.5),
         ),
         actions: [
@@ -807,27 +830,79 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       ),
     );
     if (approved == true) {
-      // 写入记忆库（用户确认的"记录"）
+      // 写入记忆库（[类别] 前缀存储，男主 #查记忆 可按类别筛）
       if (_chatSessionId != null) {
         await ChatDatabaseService.instance.insertMemoriesInTx([
           MemoryNode(
             id: 'mem_${DateTime.now().millisecondsSinceEpoch}',
             sessionId: _chatSessionId!,
             branchLeafId: _chatLeafId ?? '',
-            content: content,
+            content: '[$category] $body',
             sourceMessageIds: const [],
             createdAt: DateTime.now(),
             updatedAt: DateTime.now(),
           ),
         ]);
       }
-      DebugLogger.log('指令模块', '✅ 用户确认记录: $content');
-      _pendingFeedback = '（用户确认了你的记录请求：「$content」，已经记下了）';
-    } else {
-      DebugLogger.log('指令模块', '⛔ 用户拒绝记录: $content');
+      DebugLogger.log('指令模块', '✅ 用户确认记录: [$category] $body');
       _pendingFeedback =
-          '（用户拒绝了你的记录请求：「$content」，你可以自然地问问为什么）';
+          '（用户确认了你的记录请求：「$body」（$category），已经记下了）';
+    } else {
+      DebugLogger.log('指令模块', '⛔ 用户拒绝记录: $body');
+      _pendingFeedback =
+          '（用户拒绝了你的记录请求：「$body」，你可以自然地问问为什么）';
     }
+  }
+
+  /// 查记忆主流程：检索 → 命中数分级 → 少直接审批 / 多等男主选条数
+  Future<void> _startRecallFlow(String arg) async {
+    if (_chatSessionId == null) return;
+    try {
+      // 解析「类别：内容」/ 纯类别 / 纯关键词
+      final split = ButlerCommandParser.instance.splitCategory(arg);
+      final query = split.content.isEmpty ? split.category : arg;
+      final isCategory = ButlerCommandParser.allCategories.contains(query);
+      final memories = await ChatMemoryService.instance.searchMemories(
+        _chatSessionId!,
+        category: isCategory ? query : null,
+        keyword: isCategory ? null : query,
+      );
+      final total = memories.length;
+      if (total == 0) {
+        _appendToolBubble('没有找到相关记忆');
+        _pendingFeedback = '（没有找到关于「$query」的记忆）';
+        return;
+      }
+      if (total <= 5) {
+        // 少：直接审批
+        _pendingRecall = query;
+        _pendingRecallCategory = isCategory ? query : null;
+        await _approveRecall('$query（$total条）');
+      } else {
+        // 多：等男主说想看几条
+        _pendingQuery = (query: query, category: isCategory ? query : '', total: total);
+        _pendingFeedback =
+            '（查到了 $total 条关于「$query」的记忆。请告诉管家你想看几条，比如"看前5条"或"最近3条"；说"全部"就是都看）';
+        _appendToolBubble('查到了 $total 条，你想看几条？');
+      }
+    } catch (e) {
+      DebugLogger.log('指令模块', '✖ 查记忆失败: $e');
+      _appendToolBubble('查记忆出错了');
+    }
+  }
+
+  /// 男主回复里指定条数 → 从待定查询继续
+  Future<void> _resolvePendingQuery(String replyText) async {
+    final pq = _pendingQuery;
+    if (pq == null) return;
+    final want = ButlerCommandParser.parseWantedCount(replyText);
+    if (want == null) return; // 男主没指定，继续等
+    _pendingQuery = null;
+    final limit = want == -1 ? pq.total : (want < pq.total ? want : pq.total);
+    _pendingRecall = pq.query;
+    _pendingRecallCategory = pq.category.isEmpty ? null : pq.category;
+    _pendingRecallLimit = limit;
+    await _approveRecall('${pq.query}（${pq.total}条，${want == -1 ? '全部' : '看$limit条'}）');
   }
 
   /// 查记忆授权：男主申请调记忆 → 用户允许/拒绝 → 反馈
@@ -872,20 +947,30 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     }
   }
 
-  /// 男主获准调取记忆 → 检索相关记忆生成注入文本
-  List<String> _buildRecallInjection(String query) {
+  /// 男主获准调取记忆 → 异步检索记忆库生成注入文本（按类别/条数）
+  Future<List<String>> _buildRecallInjectionAsync(String query) async {
     try {
-      final memories = _msgKey.currentState?.messages
-              .where((m) => !m.isMe && m.text.isNotEmpty)
-              .toList() ??
-          const <ChatMessage>[];
-      final recent = memories.length > 6
-          ? memories.sublist(memories.length - 6)
-          : memories;
-      if (recent.isEmpty) return const [];
+      final sessionId = _chatSessionId;
+      if (sessionId == null) return const [];
+      final isCategory =
+          _pendingRecallCategory != null && _pendingRecallCategory!.isNotEmpty;
+      var memories = await ChatMemoryService.instance.searchMemories(
+        sessionId,
+        category: isCategory ? _pendingRecallCategory : null,
+        keyword: isCategory ? null : query,
+      );
+      if (memories.isEmpty) return const [];
+      final limit = _pendingRecallLimit ?? 6;
+      if (memories.length > limit) {
+        memories = memories.sublist(0, limit);
+      }
+      final lines = memories
+          .map((m) => m.content
+              .replaceFirst(RegExp(r'^\[(喜好|约定|日常|事实|其他)\]'), ''))
+          .toList();
       return [
-        '（用户允许你查看记忆。以下是你们最近的对话，自然接住：\n'
-        '- ${recent.map((m) => m.text).join('\n- ')}）',
+        '（用户允许你查看记忆。以下是关于「$query」的记忆，自然接住：\n'
+        '- ${lines.join('\n- ')}）',
       ];
     } catch (_) {
       return const [];
