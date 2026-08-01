@@ -241,9 +241,35 @@ class MaskEngine {
       restored = restored.replaceAll(withDesc, entry.value);
       // 再还原纯代号
       restored = restored.replaceAll(entry.key, entry.value);
+      // 兜底：AI 可能把中文代号"翻译"成英文（[family1]/family1/Family1）
+      final en = _categoryEn[entry.key.replaceAll(RegExp(r'[\[\]\d]'), '')];
+      if (en != null) {
+        final numMatch = RegExp(r'(\d+)').firstMatch(entry.key);
+        final num = numMatch?.group(1) ?? '';
+        restored = restored.replaceAll(
+          RegExp('[$en]\\s*$num|\\b$en\\s*$num\\b', caseSensitive: false),
+          entry.value,
+        );
+      }
     }
     return restored;
   }
+
+  /// 中文类别 → 英文（AI 输出代号时可能英文化，还原兜底）
+  static const Map<String, String> _categoryEn = {
+    '家人': 'family',
+    '亲属': 'relative',
+    '朋友': 'friend',
+    '闺蜜': 'bestie',
+    '损友': 'friend',
+    '同事': 'colleague',
+    '上司': 'boss',
+    '下属': 'subordinate',
+    '合作伙伴': 'partner',
+    '某人': 'someone',
+    '一个人': 'someone',
+    '那谁': 'someone',
+  };
 
   /// 挑选本次附给男主的描述：
   /// 1. 优先：用户写的描述池（随机轮换）

@@ -299,9 +299,21 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         ].join('\n'),
       );
       // 剥离 #keywords（仅管家可见）→ 显示/落库用干净文本
-      final displayText = ButlerPipelineResult.extractKeywordsFromReply(
+      var displayText = ButlerPipelineResult.extractKeywordsFromReply(
         result.text.trim(),
       );
+      // 假面层反向还原：男主回复里的代号 → 真名（"妈妈"不再显示为 [家人1]）
+      try {
+        final butler = ChatService.instance.butler;
+        if (butler != null) {
+          displayText = butler.processIncoming(
+            text: displayText,
+            sessionId: 'chat_page',
+          );
+        }
+      } catch (e) {
+        DebugLogger.log('管家流程', '✖ 代号还原失败: $e');
+      }
       // 男主回复落库 + 每 3 轮提取一次记忆（管家"记得"的数据源）
       if (_chatSessionId != null) {
         try {
