@@ -116,6 +116,47 @@ class PatternQueryTool extends ButlerTool {
   }
 }
 
+/// 🔧 记忆检索工具
+///
+/// 参数：
+///   query (String) — 查询词（用户消息；空 = 返回最近记忆）
+///   topN (int) — 返回几条（默认 3）
+///
+/// 输出：匹配的用户记忆句子（用户想让男主记住的事）
+class MemoryRecallTool extends ButlerTool {
+  @override
+  String get id => 'memory_recall';
+
+  @override
+  String get name => '记忆检索';
+
+  @override
+  String get description =>
+      '检索用户记忆（用户想让男主记住的事），支持按查询词过滤';
+
+  @override
+  Future<String> call(Map<String, dynamic> args) async {
+    final query = (args['query'] as String? ?? '').trim();
+    final topN = (args['topN'] as num?)?.toInt() ?? 3;
+
+    final all = await StorageRegistry.instance.userMemory.loadAll();
+    if (all.isEmpty) return '还没有记录任何记忆';
+
+    List<dynamic> matched = all;
+    if (query.isNotEmpty) {
+      matched = all.where((m) {
+        final hay = '${m.toSentence()} ${m.category} ${m.tags.join(' ')}';
+        // 查询词按空格拆开，任一命中即可
+        return query.split(RegExp(r'\s+')).any((q) => q.isNotEmpty && hay.contains(q));
+      }).toList();
+    }
+    if (matched.isEmpty) return '没有找到相关记忆';
+
+    final top = matched.take(topN).toList();
+    return top.map((m) => m.toSentence()).join('；');
+  }
+}
+
 /// 🔧 基线查询工具
 ///
 /// 输出：整体情绪基线 TOP3（用户长期状态）

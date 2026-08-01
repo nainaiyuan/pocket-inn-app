@@ -80,12 +80,14 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
               border: Border.all(color: const Color(0xFFE8D5DE)),
             ),
             child: const Text(
-              '不用手动聊天，直接跑 3 条测试消息验证管家全流程：\n'
+              '不用手动聊天，直接跑 5 条测试消息验证管家全流程：\n'
               '① "今天天气真好啊" → 语义情绪 + 聊天流程\n'
               '② "我今天心情好差，感觉好累" → 触发【情绪状态洞察】+ 工具调用\n'
-              '③ "我妈妈说我太懒了" → 假面层处理\n\n'
+              '③ "我妈妈说我太懒了" → 假面层处理\n'
+              '④ "你还记得我之前说过喜欢喝什么吗" → 触发【记忆检索】\n'
+              '⑤ "我发现自己一聊到工作就烦" → 触发【情绪规律查询】\n\n'
               '自检不真实调用 AI（模拟回复）、不写情绪落库、不污染真实会话。\n'
-              '详细过程：日志页 🐞 → 「流程」视图。',
+              '失败会给出"怎么办"指引；详细过程：日志页 🐞 → 「流程」视图。',
               style: TextStyle(color: Colors.black54, fontSize: 12, height: 1.6),
             ),
           ),
@@ -214,6 +216,24 @@ class _ResultCard extends StatelessWidget {
                 color: Color(0xFFD0503A),
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          if (item.guidance != null) ...[
+            const SizedBox(height: 3),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF8E1),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                '💡 怎么办: ${item.guidance}',
+                style: const TextStyle(
+                  color: Color(0xFF8D6E00),
+                  fontSize: 10,
+                  height: 1.4,
+                ),
               ),
             ),
           ],

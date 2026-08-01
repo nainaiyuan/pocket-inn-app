@@ -615,6 +615,21 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             onPickBg: _pickBgImage,
           )),
 
+        // ===== 📄 prompt 查看按钮（透明化：男主"知道什么"一目了然）=====
+        Positioned(
+          right: 38, top: MediaQuery.of(context).padding.top + 4,
+          child: GestureDetector(
+            onTap: _showPromptDialog,
+            child: Container(
+              width: 28, height: 28,
+              decoration: BoxDecoration(
+                color: Colors.black26, shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.description_outlined, size: 15, color: Colors.white70),
+            ),
+          ),
+        ),
+
         // ===== 调试日志按钮（右上角） =====
         Positioned(
           right: 4, top: MediaQuery.of(context).padding.top + 4,
@@ -635,6 +650,58 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   void _showDebugLog() {
     showDebugLogSheet(context);
+  }
+
+  /// 查看最近一次发给男主的完整 prompt（透明化：男主"知道什么"一目了然）
+  void _showPromptDialog() {
+    final promptText = _aiSvc.lastPromptText;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          '发给男主的完整内容',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF6A4A5A),
+          ),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 420,
+          child: promptText == null || promptText.isEmpty
+              ? const Center(
+                  child: Text(
+                    '还没有记录。\n先和男主聊一句，这里就能看到\n他收到的完整信息。',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.black45,
+                      fontSize: 13,
+                      height: 1.6,
+                    ),
+                  ),
+                )
+              : SingleChildScrollView(
+                  child: SelectableText(
+                    promptText,
+                    style: const TextStyle(
+                      color: Color(0xFF6A4A5A),
+                      fontSize: 12,
+                      height: 1.5,
+                    ),
+                  ),
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭', style: TextStyle(color: Color(0xFFC896B4))),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _pageWidget({

@@ -10,6 +10,9 @@ class AiChatService {
   factory AiChatService() => _instance;
   AiChatService._();
 
+  /// 最近一次组装好的完整 prompt（📄 按钮查看：男主"知道什么"一目了然）
+  String? lastPromptText;
+
   /// 真实 AI 回复。
   ///
   /// [personaId] 决定用哪个男主的 Provider 绑定与自动切换设置；
@@ -35,6 +38,9 @@ class AiChatService {
         '不要说"作为AI"之类的话，也不要提及模型或技术细节。'
         '回复要口语化、有情绪、有代入感，一般不超过 200 字。'
         '${skillContext == null ? '' : '\n\n以下是管家刚刚实时检索到的用户状态（本次对话前的最新信息），自然地回应，不要提及"管家"或"检索"：\n$skillContext'}';
+    // 透明化：保存完整 prompt 供 📄 按钮查看
+    lastPromptText = '【System】\n$systemPrompt\n\n【User】\n$message';
+    DebugLogger.log('Prompt', '本次组装完成（${lastPromptText!.length} 字，可点 📄 查看）');
     final result = await manager.chat(
       personaId,
       [

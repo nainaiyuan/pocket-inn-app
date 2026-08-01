@@ -9,7 +9,9 @@ import '../butler/memory/emotion_arc.dart';
 import '../butler/skills/butler_skill.dart';
 import '../butler/skills/butler_skill_registry.dart';
 import '../butler/skills/chat_skill.dart';
+import '../butler/skills/memory_recall_skill.dart';
 import '../butler/skills/mood_status_skill.dart';
+import '../butler/skills/pattern_query_skill.dart';
 import '../butler/tools/butler_tool_registry.dart';
 import '../butler/tools/query_tools.dart';
 import '../butler/tools/semantic_mood_tool.dart';
@@ -67,13 +69,19 @@ class ChatService {
     SemanticMoodAnalyzer.instance.warmUp();
     // 注册内置技能（幂等）
     ButlerSkillRegistry.instance
-      ..registerAll([MoodStatusSkill(), ChatSkill()]);
+      ..registerAll([
+        MoodStatusSkill(),
+        MemoryRecallSkill(),
+        PatternQuerySkill(),
+        ChatSkill(),
+      ]);
     // 注册内置工具（幂等）：管家模块 = 工具，技能通过工具干活
     ButlerToolRegistry.instance.registerAll([
       EmotionArcsQueryTool(),
       PatternQueryTool(),
       BaselineQueryTool(),
       SemanticMoodTool(),
+      MemoryRecallTool(),
     ]);
   }
 
@@ -1130,12 +1138,16 @@ class ButlerSelfTestItem {
   final bool passed;
   final String? failedReason;
 
+  /// 失败时的解决建议（自检页展示："怎么办"）
+  final String? guidance;
+
   ButlerSelfTestItem({
     required this.message,
     required this.expected,
     required this.actual,
     required this.passed,
     this.failedReason,
+    this.guidance,
   });
 }
 
@@ -1269,7 +1281,22 @@ extension ButlerSelfTest on ChatService {
       return ButlerSelfTestReport(items: items, elapsed: sw.elapsed);
     }
 
-    // ── 依次跑 3 条测试消息 ──
+    // ── 环境检查：假面层是否配置了身份词 ──
+    final identities = butler?.maskEngine.allIdentities ?? const <dynamic>[];
+    items.add(ButlerSelfTestItem(
+      message: '（环境）假面层身份词',
+      expected: '已配置 ≥1 个身份词（如"妈妈"→[家人1]）',
+      actual: identities.isEmpty
+          ? '未配置任何身份词'
+          : '已配置 ${identities.length} 个：${identities.map((e) => (e as dynamic).realLabel).take(4).join('、')}',
+      passed: identities.isNotEmpty,
+      failedReason: identities.isEmpty ? '假面层没有替换词，替换功能无法生效' : null,
+      guidance: identities.isEmpty
+          ? '打开右侧栏 → 假面层 → 添加身份词（如"妈妈""老板"），或点"让管家生成"自动生成'
+          : null,
+    ));
+
+    // ── 依次跑 5 条测试消息 ──
     final testCases = [
       (
         text: '今天天气真好啊',
@@ -1288,6 +1315,18 @@ extension ButlerSelfTest on ChatService {
         expect: '假面层处理（有配置则替换敏感称呼）',
         keyStep: 'mask_replace',
         keyResult: '',
+      ),
+      (
+        text: '你还记得我之前说过喜欢喝什么吗',
+        expect: '触发【记忆检索】+ 工具调用',
+        keyStep: 'skill_trigger',
+        keyResult: '记忆检索',
+      ),
+      (
+        text: '我发现自己一聊到工作就烦',
+        expect: '触发【情绪规律查询】+ 工具调用',
+        keyStep: 'skill_trigger',
+        keyResult: '情绪规律查询',
       ),
     ];
 
@@ -1351,6 +1390,7 @@ extension ButlerSelfTest on ChatService {
         actual: actual,
         passed: passed,
         failedReason: reason,
+        guidance: reason != null ? _guidanceFor(tc.text, reason) : null,
       ));
     }
 
@@ -1360,5 +1400,22 @@ extension ButlerSelfTest on ChatService {
     } catch (_) {}
 
     return ButlerSelfTestReport(items: items, elapsed: sw.elapsed);
+  }
+
+  /// 根据失败原因给出解决建议（测试期"有 bug 明显一点，告诉用户怎么了、怎么办"）
+  String _guidanceFor(String text, String reason) {
+    if (text.contains('心情') || text.contains('情绪')) {
+      return '检查：规律引擎是否就绪（initButler 后自动创建）。'
+          '还不行就重启 APP 再试。';
+    }
+    if (text.contains('还记得') || text.contains('记得')) {
+      return '记忆为空是正常的：先和男主聊几句让管家总结记忆，'
+          '或在「记忆管理」里手动添加一条，再来自检。';
+    }
+    if (text.contains('一聊到') || text.contains('规律')) {
+      return '规律需要积累：多聊几次相关话题（至少2次确认）后才会出现。'
+          '先用第2条用例验证情绪洞察技能是否正常。';
+    }
+    return '参考日志页 🐞 → 流程视图，看哪一步标红；把截图发给龙虾。';
   }
 }
