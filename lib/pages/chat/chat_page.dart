@@ -304,6 +304,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         sendText,
         personaId,
         personaName: personaName,
+        personaPrompt: _currentPersonaPrompt(),
         // 技能注入 + 温控询问 + 审批反馈 + 获准记忆 都拼进 system
         skillContext: [
           if (skillInjection != null) skillInjection,
@@ -353,11 +354,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           '',
           personaId,
           personaName: personaName,
+          personaPrompt: _currentPersonaPrompt(),
           toolRound: true,
           toolMessages: toolMessages,
         );
       }
-      // 剥离 #keywords（仅管家可见）→ 显示/落库用干净文本
+
+  // 剥离 #keywords（仅管家可见）→ 显示/落库用干净文本
       var displayText = ButlerPipelineResult.extractKeywordsFromReply(
         result.text.trim(),
       );
@@ -1208,5 +1211,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         child: (isCenter && panelOpen) ? IgnorePointer(child: child) : child,
       ),
     );
+  }
+  /// 当前 persona 的初始设定（用户写的人设），随每轮请求进 system
+  String _currentPersonaPrompt() {
+    try {
+      return _state.persona?.prompt ?? '';
+    } catch (_) {
+      return '';
+    }
   }
 }
