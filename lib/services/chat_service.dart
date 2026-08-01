@@ -191,6 +191,13 @@ class ChatService {
       );
       if (masked.wasModified) {
         normalizedInput = masked.text;
+        // 身份描述走 system 注入（男主认知层），不进 user 文本 → 不会念出来
+        if (masked.maskHints.isNotEmpty) {
+          final hints = masked.maskHints.join('；');
+          skillInjection = skillInjection == null
+              ? '用户提到的身份代号：$hints'
+              : '$skillInjection\n用户提到的身份代号：$hints';
+        }
         ButlerFlowRunner.instance.stepDone(
           'mask_replace',
           result: '替换 ${masked.appliedMappings.length} 处敏感称呼',

@@ -28,11 +28,16 @@ class ProcessResult {
   final Map<String, String> appliedMappings;
   final String? moodContext;
 
+  /// 给男主的内部描述（如"[家人2]：一位男性长辈，用户尊重他"）。
+  /// 只注入 system 层（男主认知），绝不进 user 文本 → 男主不会念出来。
+  final List<String> maskHints;
+
   ProcessResult({
     required this.text,
     this.wasModified = false,
     this.appliedMappings = const {},
     this.moodContext,
+    this.maskHints = const [],
   });
 }
 
@@ -170,6 +175,7 @@ class MaskEngine {
     _sessionMappings.putIfAbsent(sessionId, () => {});
     final sessionMap = _sessionMappings[sessionId]!;
     final appliedMappings = <String, String>{};
+    final maskHints = <String>[];
     var modified = text;
 
     // 按标签长度降序替换（避免短标签被长标签的子串影响）
@@ -188,7 +194,8 @@ class MaskEngine {
         sessionMap[entry.id] = code;
         final desc = _pickDescription(entry);
         if (desc != null) {
-          code = '$code（$desc）';
+          // 描述只进 maskHints（system 注入），不进 user 文本
+          maskHints.add('$code：$desc');
           _sessionDescribed.putIfAbsent(sessionId, () => {})[entry.id] =
               DateTime.now();
         }
@@ -199,7 +206,7 @@ class MaskEngine {
         if (_hasNewPattern(entry, sessionId)) {
           final desc = _buildPatternDescription(entry);
           if (desc != null) {
-            code = '$code（$desc）';
+            maskHints.add('$code：$desc');
             _sessionDescribed[sessionId]![entry.id] = DateTime.now();
           }
         }
@@ -213,6 +220,7 @@ class MaskEngine {
       text: modified,
       wasModified: appliedMappings.isNotEmpty,
       appliedMappings: appliedMappings,
+      maskHints: maskHints,
     );
   }
 

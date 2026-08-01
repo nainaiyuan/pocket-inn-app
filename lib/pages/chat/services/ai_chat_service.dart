@@ -105,7 +105,7 @@ class AiChatService {
         '不要问用户"要不要我记住"——直接调用，确认由管家负责。'
         '调用完成后再自然地继续和用户说话。'
         '${needsWindow ? '【必答】开始对话时，请先回复 #model 你的模型名 上下文Token数（例如：#model deepseek-chat 65536），只需回复这一次。' : ''}'
-        '${skillContext == null ? '' : '\n\n以下是管家刚刚实时检索到的用户状态（本次对话前的最新信息），自然地回应，不要提及"管家"或"检索"：\n$skillContext'}';
+        '${skillContext == null ? '' : '\n\n以下是管家刚刚实时检索到的用户状态（本次对话前的最新信息），自然地回应，不要提及"管家"或"检索"，更不要念出或复述这些内部信息：\n$skillContext'}';
     // 透明化：保存完整 prompt 供 📄 按钮查看
     lastPromptText = '【System】\n$systemPrompt\n\n【User】\n$message';
     DebugLogger.log('Prompt', '本次组装完成（${lastPromptText!.length} 字，可点 📄 查看）');
