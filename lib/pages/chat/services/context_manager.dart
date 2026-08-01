@@ -1,0 +1,193 @@
+import '../../../ai_provider/models.dart';
+
+/// 上下文管理器 —— DeepSeek 无后端记忆，靠它让男主"记得"聊天。
+///
+/// 分层结构（缓存友好）：
+///   messages = system(冻结人设) + 摘要区 + 当前话题原文 + 当前消息
+///
+/// - 摘要区：历史话题的男主视角要点（追加式，稳定时前缀不变 → 缓存命中）
+/// - 当前话题原文：只保留当前话题的原始对话（攒够量 → 男主总结进摘要区 → 清空）
+/// - 话题切换：本地关键词检测（免费），不立即总结，攒 2-3 个话题才批量总结
+/// - 摘要区太大 → 合并缩减（男主把旧摘要再总结成更紧凑的）
+///
+/// 纯内存实现（MVP）：APP 重启后摘要丢失，TODO 持久化到 DB。
+/// 单个话题状态（关键词 + 原文行）
+class TopicState {
+  final Set<String> keywords = {};
+  final List<String> raw = []; // '用户：…' / '男主：…'
+}
+
+class ContextManager {
+  static final ContextManager _instance = ContextManager._();
+  factory ContextManager() => _instance;
+  static ContextManager get instance => _instance;
+  ContextManager._();
+
+  /// 当前话题原文预算（字符数，中文 1 字 ≈ 1 token，保守）→ 触发总结
+  static const int topicTokenBudget = 4000;
+
+  /// 摘要区预算（字符数）→ 触发合并缩减
+  static const int summaryTokenBudget = 8000;
+
+  /// 话题切换的相似度阈值（关键词 Jaccard 低于此值视为换话题）
+  static const double topicSwitchThreshold = 0.15;
+
+  /// 当前话题至少多少条消息才允许切换（防碎片化）
+  static const int minTopicMessagesBeforeSwitch = 3;
+
+  /// personaId → 当前话题
+  final Map<String, TopicState> _topics = {};
+
+  /// personaId → 摘要列表（每条 = 一个话题的要点）
+  final Map<String, List<String>> _summaries = {};
+
+  // ---- 写入 ----
+
+  /// 记录用户消息（同时做话题切换检测）
+  void feedUserMessage(String personaId, String text) {
+    if (text.trim().isEmpty) return;
+    final t = _topics.putIfAbsent(personaId, TopicState.new);
+    final words = _extractKeywords(text);
+    if (words.isNotEmpty &&
+        t.keywords.isNotEmpty &&
+        t.raw.length >= minTopicMessagesBeforeSwitch &&
+        _jaccard(words, t.keywords) < topicSwitchThreshold) {
+      // 话题切换：旧话题原文留在 raw 里，等批量总结；开新话题
+      _topics[personaId] = TopicState()..raw.add('用户：$text');
+      _topics[personaId]!.keywords.addAll(words);
+      return;
+    }
+    t.keywords.addAll(words);
+    t.raw.add('用户：$text');
+  }
+
+  /// 记录男主回复（进当前话题原文）
+  void feedAssistantMessage(String personaId, String text) {
+    if (text.trim().isEmpty) return;
+    final t = _topics.putIfAbsent(personaId, TopicState.new);
+    t.raw.add('男主：$text');
+  }
+
+  // ---- 读取 / 组装 ----
+
+  /// 组装历史消息（摘要区 + 当前话题原文），插在 system 之后。
+  /// 当前话题原文超过预算时截断最旧部分（兜底；正常由总结触发清空）。
+  List<AIChatMessage> buildHistoryMessages(String personaId) {
+    final out = <AIChatMessage>[];
+
+    // 摘要区（一条 system 消息，前缀稳定 → 缓存命中）
+    final summaries = _summaries[personaId];
+    if (summaries != null && summaries.isNotEmpty) {
+      final sb = StringBuffer('【对话摘要（按话题）】');
+      for (final s in summaries) {
+        sb.write('\n- $s');
+      }
+      out.add(AIChatMessage(role: 'system', content: sb.toString()));
+    }
+
+    // 当前话题原文（user/assistant 交替）
+    final t = _topics[personaId];
+    if (t != null && t.raw.isNotEmpty) {
+      var total = 0;
+      // 从尾部取（保留最近），预算内
+      for (var i = t.raw.length - 1; i >= 0; i--) {
+        total += t.raw[i].length;
+        if (total > topicTokenBudget) break;
+        final line = t.raw[i];
+        out.insert(1, line.startsWith('男主：')
+            ? AIChatMessage(role: 'assistant', content: line.substring(3))
+            : AIChatMessage(role: 'user', content: line.substring(3)));
+      }
+    }
+    return out;
+  }
+
+  /// 是否需要触发男主总结（当前话题或待总结原文攒够了）
+  bool needsSummarize(String personaId) {
+    final t = _topics[personaId];
+    if (t == null) return false;
+    var total = 0;
+    for (final line in t.raw) {
+      total += line.length;
+    }
+    return total >= topicTokenBudget;
+  }
+
+  /// 取走全部待总结原文（当前话题原文），并清空。
+  /// 返回原文全文（含"用户：/男主："前缀），供总结轮使用。
+  String takePendingRaw(String personaId) {
+    final t = _topics.remove(personaId);
+    if (t == null) return '';
+    return t.raw.join('\n');
+  }
+
+  /// 追加一条摘要（男主总结输出）
+  void appendSummary(String personaId, String summary) {
+    final list = _summaries.putIfAbsent(personaId, () => []);
+    // 摘要本身可能多行 → 按行拆成多条，便于后续缩减
+    for (final line in summary.split('\n')) {
+      final l = line.trim().replaceAll(RegExp(r'^[-•*\d.、]+'), '').trim();
+      if (l.isNotEmpty) list.add(l);
+    }
+  }
+
+  /// 摘要区是否需要合并缩减
+  bool needsCompact(String personaId) {
+    final list = _summaries[personaId];
+    if (list == null || list.isEmpty) return false;
+    var total = 0;
+    for (final s in list) {
+      total += s.length;
+    }
+    return total >= summaryTokenBudget;
+  }
+
+  /// 取走摘要区全文并清空（供缩减轮使用）
+  String takeSummariesForCompact(String personaId) {
+    final list = _summaries.remove(personaId);
+    if (list == null || list.isEmpty) return '';
+    return list.map((s) => '- $s').join('\n');
+  }
+
+  /// 总结失败回滚：原文放回当前话题（下次再试）
+  void restoreRaw(String personaId, String raw) {
+    if (raw.trim().isEmpty) return;
+    final t = _topics.putIfAbsent(personaId, TopicState.new);
+    t.raw.addAll(raw.split('\n').where((l) => l.trim().isNotEmpty));
+  }
+
+  /// 缩减失败回滚：摘要区放回
+  void restoreSummaries(String personaId, String old) {
+    if (old.trim().isEmpty) return;
+    final list = _summaries.putIfAbsent(personaId, () => []);
+    for (final line in old.split('\n')) {
+      final l = line.trim().replaceAll(RegExp(r'^[-•*\d.、]+'), '').trim();
+      if (l.isNotEmpty) list.add(l);
+    }
+  }
+
+  // ---- 关键词 / 相似度（本地，免费） ----
+
+  static const _stopWords = {
+    '的', '了', '吗', '呢', '啊', '吧', '我', '你', '他', '她', '它',
+    '这', '那', '是', '在', '有', '和', '就', '都', '也', '很', '还',
+    '什么', '怎么', '今天', '昨天', '明天', '我们', '你们', '他们',
+  };
+
+  Set<String> _extractKeywords(String text) {
+    final out = <String>{};
+    final re = RegExp(r'[\u4e00-\u9fa5]{2,}|[a-zA-Z]{2,}');
+    for (final m in re.allMatches(text)) {
+      final w = m.group(0)!;
+      if (!_stopWords.contains(w)) out.add(w);
+    }
+    return out;
+  }
+
+  double _jaccard(Set<String> a, Set<String> b) {
+    if (a.isEmpty || b.isEmpty) return 0;
+    final inter = a.intersection(b).length;
+    final union = a.union(b).length;
+    return union == 0 ? 0 : inter / union;
+  }
+}

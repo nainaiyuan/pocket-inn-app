@@ -1,5 +1,7 @@
 import '../../../ai_provider/ai_provider_manager.dart';
 import '../../../ai_provider/models.dart';
+import '../../../ai_provider/price_table.dart';
+import 'context_manager.dart';
 import '../../../butler/context/context_tracker.dart';
 import '../../../services/chat_service.dart';
 import '../../../utils/debug_logger.dart';
@@ -90,6 +92,19 @@ class AiChatService {
       );
       throw const AIAllProvidersFailedException();
     }
+    // 上下文管理：非工具轮先处理"该总结了/该缩减了"（男主总结 → 摘要区）
+    if (!toolRound && personaPrompt.isNotEmpty) {
+      if (ContextManager.instance.needsCompact(personaId)) {
+        await _compactSummaries(personaId, personaName);
+      }
+      if (ContextManager.instance.needsSummarize(personaId)) {
+        await _summarize(personaId, personaName);
+      }
+    }
+    // 记录用户消息（话题检测，本地免费）
+    if (!toolRound && message.trim().isNotEmpty) {
+      ContextManager.instance.feedUserMessage(personaId, message);
+    }
     final needsWindow = !ContextTracker.instance.windowConfirmed(personaId);
     final systemPrompt = '你是「$personaName」，一个正在和用户聊天的角色。'
         '请始终以这个身份自然、温柔地回复，保持人设与说话风格，'
@@ -108,11 +123,17 @@ class AiChatService {
         '不要问用户"要不要我记住"——直接调用，确认由管家负责。'
         '调用完成后再自然地继续和用户说话。'
         '${skillContext == null ? '' : '\n\n以下是管家刚刚实时检索到的用户状态（本次对话前的最新信息），自然地回应，不要提及"管家"或"检索"，更不要念出或复述这些内部信息：\n$skillContext'}';
+    // 历史（摘要区 + 当前话题原文）——插在 system 后、当前消息前
+    final historyMsgs = ContextManager.instance.buildHistoryMessages(personaId);
     // 透明化：保存完整 prompt 供 📄 按钮查看
-    lastPromptText = '【System】\n$systemPrompt\n\n【User】\n$message';
+    final historyText = historyMsgs.isEmpty
+        ? ''
+        : '\n\n【历史】\n${historyMsgs.map((m) => '[${m.role}] ${m.content}').join('\n')}';
+    lastPromptText = '【System】\n$systemPrompt$historyText\n\n【User】\n$message';
     DebugLogger.log('Prompt', '本次组装完成（${lastPromptText!.length} 字，可点 📄 查看）');
     final messages = <AIChatMessage>[
       AIChatMessage(role: 'system', content: systemPrompt),
+      ...historyMsgs,
       AIChatMessage(role: 'user', content: message),
       if (toolMessages != null) ...toolMessages,
     ];
@@ -147,6 +168,10 @@ class AiChatService {
       }
       rethrow;
     }
+    // 男主回复进上下文（当前话题原文）
+    if (result.text.trim().isNotEmpty) {
+      ContextManager.instance.feedAssistantMessage(personaId, result.text.trim());
+    }
     final hasToolCalls = result.toolCalls != null && result.toolCalls!.isNotEmpty;
     if (result.text.trim().isEmpty && !hasToolCalls && !toolRound) {
       // DeepSeek 偶发空回复：自动重试一次（工具轮不重试，由 chat_page 循环处理）
@@ -176,6 +201,24 @@ class AiChatService {
           butler.recordTokenUsage(promptTokens, totalTokens);
           ContextTracker.instance.recordCall(personaId, promptTokens);
           DebugLogger.log('上下文', '📈 $personaName 本轮 ${promptTokens}token（累计 ${butler.totalPromptTokens}）');
+          // 缓存命中统计 + 成本（DeepSeek usage 返回 hit/miss，管家精确算账）
+          final hitTokens = (usage['prompt_cache_hit_tokens'] as num?)?.toInt() ?? 0;
+          final missTokens = (usage['prompt_cache_miss_tokens'] as num?)?.toInt() ?? 0;
+          final outTokens = (usage['completion_tokens'] as num?)?.toInt() ?? 0;
+          if (hitTokens + missTokens + outTokens > 0) {
+            final cost = PriceTable.instance.costFor(
+              providerName: result.providerName ?? '',
+              hit: hitTokens,
+              miss: missTokens,
+              output: outTokens,
+            );
+            final rate = PriceTable.instance.hitRate(hitTokens, missTokens) * 100;
+            DebugLogger.log(
+              'AI成本',
+              'hit=$hitTokens miss=$missTokens out=$outTokens '
+              '命中率=${rate.toStringAsFixed(0)}% 成本=¥${cost.toStringAsFixed(4)}',
+            );
+          }
         }
       }
     } catch (_) {}
@@ -204,6 +247,71 @@ class AiChatService {
       }
     }
     return result;
+  }
+
+  /// 男主总结轮：待总结原文 → 男主写要点 → 追加进摘要区 → 清空原文。
+  /// 触发由管家控制（原文攒够量），内容男主写（视角一致，不 OOC）。
+  Future<void> _summarize(String personaId, String personaName) async {
+    final raw = ContextManager.instance.takePendingRaw(personaId);
+    if (raw.trim().isEmpty) return;
+    DebugLogger.log('上下文管理', '✂️ 原文攒够了（${raw.length} 字），叫男主总结…');
+    final system = '你是「$personaName」。请把以下你们的聊天记录压缩成简洁要点。'
+        '要求：① 按话题分条，每条一行 ② 单条不超过 30 字 ③ 只保留重要信息'
+        '（她的喜好、习惯、约定、个人信息、你答应过的事、重要事件）'
+        '④ 不要客套话、不要长句、不要复述原话、不要评价。只输出要点列表。';
+    try {
+      final res = await AIProviderManager.instance.chat(
+        personaId,
+        [
+          AIChatMessage(role: 'system', content: system),
+          AIChatMessage(role: 'user', content: raw),
+        ],
+        tools: null,
+      );
+      final summary = res.text.trim();
+      if (summary.isNotEmpty) {
+        ContextManager.instance.appendSummary(personaId, summary);
+        DebugLogger.log('上下文管理', '✅ 男主总结完成（${summary.length} 字，摘要区已更新）');
+      } else {
+        // 总结失败：原文不能丢，重新放回（下次再试）
+        ContextManager.instance.restoreRaw(personaId, raw);
+        DebugLogger.log('上下文管理', '⚠️ 男主总结为空，原文保留待下次');
+      }
+    } on Object catch (e) {
+      ContextManager.instance.restoreRaw(personaId, raw);
+      DebugLogger.log('上下文管理', '⚠️ 男主总结失败: $e（原文保留待下次）');
+    }
+  }
+
+  /// 摘要缩减轮：摘要区太大 → 男主把旧摘要再压缩成更紧凑的 → 替换。
+  Future<void> _compactSummaries(String personaId, String personaName) async {
+    final old = ContextManager.instance.takeSummariesForCompact(personaId);
+    if (old.trim().isEmpty) return;
+    DebugLogger.log('上下文管理', '🗜️ 摘要区太大，缩减中…');
+    final system = '你是「$personaName」。以下是你们之前的对话摘要列表，'
+        '请压缩合并成更紧凑的要点：① 合并同类话题 ② 每条一行、20 字内 '
+        '③ 只保留最重要的信息 ④ 不要客套话。只输出压缩后的要点列表。';
+    try {
+      final res = await AIProviderManager.instance.chat(
+        personaId,
+        [
+          AIChatMessage(role: 'system', content: system),
+          AIChatMessage(role: 'user', content: old),
+        ],
+        tools: null,
+      );
+      final summary = res.text.trim();
+      if (summary.isNotEmpty) {
+        ContextManager.instance.appendSummary(personaId, summary);
+        DebugLogger.log('上下文管理', '✅ 摘要缩减完成（${summary.length} 字）');
+      } else {
+        ContextManager.instance.restoreSummaries(personaId, old);
+        DebugLogger.log('上下文管理', '⚠️ 摘要缩减为空，保留原摘要');
+      }
+    } on Object catch (e) {
+      ContextManager.instance.restoreSummaries(personaId, old);
+      DebugLogger.log('上下文管理', '⚠️ 摘要缩减失败: $e（保留原摘要）');
+    }
   }
 
   /// 当前生效的模型名（候选列表第一个 = 当前生效）
