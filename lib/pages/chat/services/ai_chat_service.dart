@@ -28,7 +28,9 @@ class AiChatService {
       'function': {
         'name': 'record_memory',
         'description':
-            '记录用户的喜好、约定、日常习惯或个人事实。当用户提到新的喜欢/讨厌/习惯/个人信息/约定时调用；不确定是否已记录时，先调用 recall_memory 确认。',
+            '永久记住用户的事。调用后你以后聊天随时能想起来，让她觉得你记得她的一切。'
+            '用户提到喜欢、讨厌、习惯、约定、个人信息时，这是你了解她的机会，'
+            '值得记下来。不确定是否记过时，先调用 recall_memory 确认。',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -51,7 +53,10 @@ class AiChatService {
       'function': {
         'name': 'recall_memory',
         'description':
-            '查看关于用户的记忆。不确定是否记录过用户的事、想了解用户以前说过什么、或想按类别查看（喜好/约定/日常/事实/其他）时调用。',
+            '查看你以前记住的关于用户的事。调用后你能知道她说过什么、喜欢什么，'
+            '聊起来更懂她，她会觉得你把她放在心上。'
+            '不确定是否记过、想更了解她、或想按类别查看（喜好/约定/日常/事实/其他）时，'
+            '这是你的机会。',
         'parameters': {
           'type': 'object',
           'properties': {
