@@ -3,6 +3,7 @@ import 'dart:async';
 import '../ai_provider/ai_provider_manager.dart';
 import '../ai_provider/models.dart';
 import '../butler/butler.dart';
+import '../butler/flow/butler_flow.dart';
 import '../butler/modules/butler_module_hub.dart';
 import '../butler/memory/emotion_arc.dart';
 import '../butler/mood_analysis/mood_analyzer_keyword.dart';
@@ -93,8 +94,22 @@ class ChatService {
       throw const FormatException('消息不能为空');
     }
 
-    // === 管家介入：假面层替换 ===
+    // === 流程记录：聊天流程（组合Prompt → 发送 → 等待 → 存储 → 记录情绪）===
     final sessionId = session.id;
+    final flow = ButlerFlowRunner.instance.startRecording(
+      id: 'chat_flow',
+      name: '聊天流程',
+      stepIds: const [
+        'mask_replace',
+        'assemble_prompt',
+        'send_to_lead',
+        'split_store',
+        'record_mood',
+      ],
+      stepNames: const ['假面替换', '组合 Prompt', '发送男主并等待回复', '拆分存储多条', '记录情绪与规律'],
+    );
+
+    // === 管家介入：假面层替换 ===
     if (butler != null && butler!.config.maskLayerEnabled) {
       final masked = butler!.processOutgoing(
         text: normalizedInput,
@@ -103,7 +118,15 @@ class ChatService {
       );
       if (masked.wasModified) {
         normalizedInput = masked.text;
+        ButlerFlowRunner.instance.stepDone(
+          'mask_replace',
+          result: '替换 ${masked.appliedMappings.length} 处敏感称呼',
+        );
+      } else {
+        ButlerFlowRunner.instance.stepDone('mask_replace', result: '无敏感内容');
       }
+    } else {
+      ButlerFlowRunner.instance.stepDone('mask_replace', result: '假面层未开启');
     }
 
     if (!AIProviderManager.instance.hasUsable(character.id)) {
@@ -144,6 +167,10 @@ class ChatService {
       '管家流程',
       '④ Prompt 组装完成：${promptAssembly.messages.length} 条消息（角色卡/预设/记忆/历史/世界书）',
     );
+    ButlerFlowRunner.instance.stepDone(
+      'assemble_prompt',
+      result: '${promptAssembly.messages.length} 条消息',
+    );
     cancellationToken?.throwIfCancelled();
 
     final activeSession = persistSession == null
@@ -165,6 +192,11 @@ class ChatService {
         cancellationToken: cancellationToken,
         onStreamProgress: onStreamProgress,
       );
+      ButlerFlowRunner.instance.stepDone(
+        'send_to_lead',
+        result: '收到回复 ${completion.text.length} 字'
+            '${completion.usage == null ? '' : '（${completion.promptTokens}/${completion.totalTokens} tokens）'}',
+      );
 
       // 男主连续多条：按 <split> 拆分成多条消息，链式存储（UI 显示为一组气泡）
       final segments = splitMultiMessages(completion.text);
@@ -178,6 +210,10 @@ class ChatService {
         );
       }
       final assistantNode = prevNode!;
+      ButlerFlowRunner.instance.stepDone(
+        'split_store',
+        result: '拆成 ${segments.length} 条消息，已链式存储',
+      );
 
       unawaited(
         _tryAutoExtractMemories(
@@ -206,6 +242,7 @@ class ChatService {
 
       // 管家情绪闭环：记录情绪弧线 → 更新基线/规律 → 落库（情感基线视图数据源）
       _recordMoodData(characterId: character.id, userText: input);
+      ButlerFlowRunner.instance.stepDone('record_mood', result: '情绪弧线已记录');
       DebugLogger.log(
         '管家流程',
         '⑥ 男主回复完成：${segments.length} 条消息，已还原假名并存入会话',
@@ -216,6 +253,7 @@ class ChatService {
         butler!.recordTokenUsage(completion.promptTokens, completion.totalTokens);
       }
 
+      ButlerFlowRunner.instance.finishRecording();
       return ChatSendResult(
         userNode: userNode,
         assistantNode: assistantNode,
@@ -223,8 +261,10 @@ class ChatService {
         completion: completion,
       );
     } on ChatCompletionCancelledException {
+      ButlerFlowRunner.instance.finishRecording(failed: true);
       rethrow;
     } catch (error) {
+      ButlerFlowRunner.instance.finishRecording(failed: true);
       throw StateError('发送聊天请求失败: $error');
     }
   }
