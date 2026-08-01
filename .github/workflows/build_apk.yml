@@ -67,6 +67,13 @@ jobs:
           APK="build/app/outputs/flutter-apk/app-${{ github.event.inputs.mode }}.apk"
           REPO="${{ github.repository }}"
           if gh release view latest-apk --repo "$REPO" >/dev/null 2>&1; then
+            # 清理该 release 下所有旧 APK（防止 debug/release 积累占存储）
+            gh release view latest-apk --repo "$REPO" --json assets \
+              -q '.assets[].name' | grep '\.apk$' | while read -r name; do
+              aid=$(gh release view latest-apk --repo "$REPO" --json assets \
+                -q ".assets[] | select(.name==\"$name\") | .id")
+              [ -n "$aid" ] && gh api -X DELETE "repos/$REPO/releases/assets/$aid" || true
+            done
             gh release upload latest-apk "$APK" --repo "$REPO" --clobber
           else
             gh release create latest-apk "$APK" --repo "$REPO" --title "最新 APK" --notes "手动触发编译的最新 APK"

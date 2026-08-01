@@ -1139,8 +1139,100 @@ class ButlerSelfTestItem {
   });
 }
 
+/// 轻量管家管线结果（新版聊天页用）
+class ButlerPipelineResult {
+  /// 假面层替换后的文本（无替换时 = 原文）
+  final String maskedText;
+
+  /// 技能注入内容（塞进 AI prompt；无技能/无注入 = null）
+  final String? skillInjection;
+
+  const ButlerPipelineResult({
+    required this.maskedText,
+    this.skillInjection,
+  });
+}
+
 /// 自检入口（ChatService 扩展）
 extension ButlerSelfTest on ChatService {
+  /// 轻量管家管线（新版聊天页用）：
+  /// 技能触发 → 假面替换 → 情绪记录，全程流程树可见。
+  /// 返回替换后的文本 + 技能注入；不落库聊天消息（新版聊天页不持久化会话）。
+  Future<ButlerPipelineResult> runButlerPipeline({
+    required String userText,
+    required String characterId,
+    required String characterName,
+    String? sessionId,
+  }) async {
+    ButlerFlowRunner.instance.startRecording(
+      id: 'chat_flow',
+      name: '聊天流程',
+      stepIds: const ['skill_trigger', 'mask_replace', 'record_mood'],
+      stepNames: const ['技能触发', '假面替换', '记录情绪与规律'],
+    );
+
+    var text = userText.trim();
+    String? skillInjection;
+
+    // 1. 技能触发：匹配 → 执行（内部调工具）→ 产出注入
+    try {
+      final skill = ButlerSkillRegistry.instance.match(text);
+      if (skill != null && !skill.isFallback) {
+        final result = await skill.execute(
+          ButlerSkillContext(
+            userText: text,
+            characterId: characterId,
+            characterName: characterName,
+            sessionId: sessionId ?? 'chat_page',
+          ),
+        );
+        skillInjection = result.promptInjection;
+        ButlerFlowRunner.instance.stepDone(
+          'skill_trigger',
+          result: '触发技能【${skill.name}】'
+              '${skillInjection == null ? '（无注入）' : '（已注入洞察）'}',
+        );
+      } else {
+        ButlerFlowRunner.instance.stepDone(
+          'skill_trigger',
+          result: '无技能触发，走聊天流程',
+        );
+      }
+    } catch (e) {
+      ButlerFlowRunner.instance.stepDone('skill_trigger', result: '技能触发失败: $e');
+    }
+
+    // 2. 假面层：敏感称呼替换
+    if (butler != null && butler!.config.maskLayerEnabled) {
+      final masked = butler!.processOutgoing(
+        text: text,
+        characterId: characterId,
+        sessionId: sessionId ?? 'chat_page',
+      );
+      if (masked.wasModified) {
+        text = masked.text;
+        ButlerFlowRunner.instance.stepDone(
+          'mask_replace',
+          result: '替换 ${masked.appliedMappings.length} 处敏感称呼',
+        );
+      } else {
+        ButlerFlowRunner.instance.stepDone('mask_replace', result: '无敏感内容');
+      }
+    } else {
+      ButlerFlowRunner.instance.stepDone('mask_replace', result: '假面层未开启');
+    }
+
+    // 3. 情绪记录：关键词 → 弧线 → 规律 → 落库（真实收集）
+    _recordMoodData(characterId: characterId, userText: userText);
+    ButlerFlowRunner.instance.stepDone('record_mood', result: '情绪弧线已记录');
+    ButlerFlowRunner.instance.finishRecording();
+
+    return ButlerPipelineResult(
+      maskedText: text,
+      skillInjection: skillInjection,
+    );
+  }
+
   /// 跑一遍管家全流程自检。返回汇总报告；详细过程见日志页流程树。
   Future<ButlerSelfTestReport> runSelfTest() async {
     final items = <ButlerSelfTestItem>[];

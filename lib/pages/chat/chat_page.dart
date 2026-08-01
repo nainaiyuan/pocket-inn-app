@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../ai_provider/models.dart';
 import '../../models/male_lead.dart';
 import '../../services/character_service.dart';
+import '../../services/chat_service.dart';
 import '../../services/local_storage_service.dart';
 import '../../models/chat_message.dart';
 import '../../utils/debug_logger.dart';
@@ -254,7 +255,27 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     ChatPresence.instance.markUnread(userMsgId);
     ChatPresence.instance.setTyping(true);
     try {
-      final result = await _aiSvc.generateReply(t, personaId, personaName: personaName);
+      // ===== 管家管线：技能触发 → 假面替换 → 情绪记录（流程树可见）=====
+      String sendText = t;
+      String? skillInjection;
+      try {
+        final pipeline = await ChatService.instance.runButlerPipeline(
+          userText: t,
+          characterId: personaId,
+          characterName: personaName,
+        );
+        sendText = pipeline.maskedText;
+        skillInjection = pipeline.skillInjection;
+      } catch (e) {
+        // 管家失败不阻断聊天，只记日志
+        DebugLogger.log('管家流程', '✖ 管家管线异常（不阻断聊天）: $e');
+      }
+      final result = await _aiSvc.generateReply(
+        sendText,
+        personaId,
+        personaName: personaName,
+        skillContext: skillInjection,
+      );
       _msgKey.currentState?.appendMessage(ChatMessage(
         id: '${DateTime.now().millisecondsSinceEpoch}_ai',
         text: result.text.trim(),
