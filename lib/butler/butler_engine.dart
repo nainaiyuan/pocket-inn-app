@@ -1,6 +1,7 @@
 import 'mask_engine.dart';
 import 'butler_config.dart';
 import 'ai/butler_ai_service.dart';
+import '../utils/debug_logger.dart';
 
 /// 管家调度中心
 /// 负责分发用户指令、调用各模块
@@ -167,6 +168,12 @@ class ButlerEngine {
         sessionId: sessionId,
       );
       text = maskResult.text;
+      if (text != userText) {
+        DebugLogger.log(
+          '管家流程',
+          '① 假面替换：把敏感称呼替换为代号（共 ${maskResult.appliedMappings.length} 处）',
+        );
+      }
     }
 
     // 2. 关键词替换（PRIVACY_MARK）
@@ -178,9 +185,14 @@ class ButlerEngine {
           sensitiveWords: sensitiveWords,
         );
         text = privacyResult.text;
+        DebugLogger.log(
+          '管家流程',
+          '② 隐私标记：检测到 ${sensitiveWords.length} 类敏感词，已加标记',
+        );
 
         // 3. 有替换时 → 生成心情标签助理解读
         moodContext = _maskEngine.buildMoodContextString(userText);
+        DebugLogger.log('管家流程', '③ 心情标签已生成，附给男主辅助理解');
       }
     }
 
@@ -198,10 +210,14 @@ class ButlerEngine {
   }) {
     if (!_config.maskLayerEnabled) return characterReply;
 
-    return _maskEngine.restoreSensitive(
+    final restored = _maskEngine.restoreSensitive(
       text: characterReply,
       sessionId: sessionId,
     );
+    if (restored != characterReply) {
+      DebugLogger.log('管家流程', '⑦ 假面还原：男主回复里的代号已还原为真实称呼');
+    }
+    return restored;
   }
 
   /// 简单敏感词检测（后续可扩展为AI判断）

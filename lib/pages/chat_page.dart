@@ -16,6 +16,7 @@ import '../pages/vault_page.dart';
 import '../pages/music_player_page.dart';
 import '../pages/chat/chat_view_model.dart';
 import '../pages/chat/state/chat_presence.dart';
+import '../pages/chat/widgets/debug_log_sheet.dart';
 import '../pages/chat/widgets/api_selector_sheet.dart';
 import '../pages/chat/widgets/chat_input_area.dart';
 import '../pages/chat/widgets/chat_message_list.dart';
@@ -767,6 +768,11 @@ class _ChatPageState extends State<ChatPage> {
             icon: const Icon(Icons.article_outlined),
             onPressed: _showPromptDialog,
             tooltip: '查看发给男主的完整内容',
+          ),
+          IconButton(
+            icon: const Icon(Icons.bug_report_outlined),
+            onPressed: () => showDebugLogSheet(context),
+            tooltip: '调试日志（管家每一步干了什么）',
           ),
           IconButton(
             icon: const Icon(Icons.lock_outline),

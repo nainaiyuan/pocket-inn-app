@@ -137,6 +137,10 @@ class ChatService {
         memoryContext: memoryContext,
       ),
     );
+    DebugLogger.log(
+      '管家流程',
+      '④ Prompt 组装完成：${promptAssembly.messages.length} 条消息（角色卡/预设/记忆/历史/世界书）',
+    );
     cancellationToken?.throwIfCancelled();
 
     final activeSession = persistSession == null
@@ -199,6 +203,10 @@ class ChatService {
 
       // 管家情绪闭环：记录情绪弧线 → 更新基线/规律 → 落库（情感基线视图数据源）
       _recordMoodData(characterId: character.id, userText: input);
+      DebugLogger.log(
+        '管家流程',
+        '⑥ 男主回复完成：${segments.length} 条消息，已还原假名并存入会话',
+      );
 
       // 记录 Token 用量到上下文缓存
       if (butler != null && completion.usage != null) {
