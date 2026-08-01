@@ -71,6 +71,42 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 管家工具气泡：男主头像下的小气泡（🔧 正在查记忆…），无头像、小字
+    if (message.text.startsWith('[tool]')) {
+      return Padding(
+        padding: const EdgeInsets.only(left: 60, right: 60, top: 3, bottom: 2),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: const Color(0xFFC896B4).withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('🔧',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF9A6B84))),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: Text(
+                      message.text.replaceFirst('[tool] ', '').replaceFirst('[tool]', ''),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF9A6B84),
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: EdgeInsets.only(
         left: message.isMe ? 60 : 16,

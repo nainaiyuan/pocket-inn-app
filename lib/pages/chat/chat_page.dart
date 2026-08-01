@@ -317,8 +317,17 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 指令模块：解析男主输出（#记录/#查记忆/#定时/#帮助/#model）→ 审批弹窗
       final commands =
           ButlerCommandParser.instance.parse(result.text.trim());
+      // 静默执行：男主输出指令 → 先出工具气泡（🔧 正在…）→ 审批 → 男主干完活才说话
       for (final cmd in commands) {
-        await _handleButlerCommand(cmd);
+        if (cmd.type == ButlerCommandParser.cmdRecord) {
+          _appendToolBubble('正在记录：「${cmd.arg}」，等用户确认…');
+          await _approveRecord(cmd.arg);
+        } else if (cmd.type == ButlerCommandParser.cmdRecall) {
+          _appendToolBubble('正在查记忆：${cmd.arg.isEmpty ? '全部' : cmd.arg}…');
+          await _approveRecall(cmd.arg);
+        } else {
+          await _handleButlerCommand(cmd);
+        }
       }
       // 剥离所有指令（#…#）→ 用户只看到男主自然的回复
       displayText = ButlerCommandParser.instance.strip(displayText);
@@ -334,8 +343,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       } catch (e) {
         DebugLogger.log('管家流程', '✖ 代号还原失败: $e');
       }
-      // 男主回复落库 + 每 3 轮提取一次记忆（管家"记得"的数据源）
-      if (_chatSessionId != null) {
+      // 男主回复落库（静默执行时 displayText 为空 → 只记工具气泡，不记男主空回复）
+      if (_chatSessionId != null && displayText.trim().isNotEmpty) {
         try {
           final aiNode = await ChatDatabaseService.instance.appendAssistantMessage(
             sessionId: _chatSessionId!,
@@ -343,19 +352,17 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             text: displayText,
           );
           _chatLeafId = aiNode.id;
-          _chatRound++;
-          if (_chatRound % 3 == 0) {
-            await _tryExtractMemory(personaName);
-          }
         } catch (e) {
           DebugLogger.log('管家流程', '✖ 对话落库失败（男主回复）: $e');
         }
       }
-      _msgKey.currentState?.appendMessage(ChatMessage(
-        id: '${DateTime.now().millisecondsSinceEpoch}_ai',
-        text: displayText,
-        isMe: false,
-      ));
+      if (displayText.trim().isNotEmpty) {
+        _msgKey.currentState?.appendMessage(ChatMessage(
+          id: '${DateTime.now().millisecondsSinceEpoch}_ai',
+          text: displayText,
+          isMe: false,
+        ));
+      }
       // 男主回复完成：全部已读 + 停止输入
       ChatPresence.instance.markAllRead();
       if (result.failedProviders.isNotEmpty) {
@@ -731,7 +738,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   String? _chatSessionId;
   String? _chatLeafId;
-  int _chatRound = 0;
 
   /// 待反馈给男主的审批结果（下轮注入 prompt：确认/拒绝/帮助文本）
   String? _pendingFeedback;
@@ -739,14 +745,20 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 男主获准调取的记忆查询词（下轮注入检索到的记忆）
   String? _pendingRecall;
 
+  /// 插入管家工具气泡（🔧 正在…，男主头像下小气泡）
+  /// 用 [tool] 前缀标记（freezed ChatMessage 不加字段，bubble 检测前缀渲染）
+  void _appendToolBubble(String text) {
+    _msgKey.currentState?.appendMessage(ChatMessage(
+      id: '${DateTime.now().millisecondsSinceEpoch}_tool',
+      text: '[tool] $text',
+      isMe: false,
+    ));
+  }
+
   /// 处理男主指令（#记录/#查记忆/#定时/#帮助/#model）→ 审批弹窗 → 反馈
   Future<void> _handleButlerCommand(ParsedCommand cmd) async {
     try {
       switch (cmd.type) {
-        case ButlerCommandParser.cmdRecord:
-          await _approveRecord(cmd.arg);
-        case ButlerCommandParser.cmdRecall:
-          await _approveRecall(cmd.arg);
         case ButlerCommandParser.cmdTimer:
           _pendingFeedback =
               '（用户说定时功能还在路上，先记下这个需求：${cmd.arg}）';
@@ -896,22 +908,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   /// 每 3 轮对话提取一次记忆（LLM 总结 → 用户记忆库 → 记忆检索技能可查）
-  Future<void> _tryExtractMemory(String personaName) async {
-    try {
-      final msgArea = _msgKey.currentState;
-      if (msgArea == null || msgArea.messages.length < 4) return;
-      await ChatMemoryService.instance.tryExtractAndSave(
-        sessionId: _chatSessionId!,
-        branchLeafId: _chatLeafId!,
-        messages: msgArea.messages,
-        characterName: personaName,
-        userName: '我',
-      );
-      DebugLogger.log('管家流程', '🧠 记忆提取完成（每3轮自动）');
-    } catch (e) {
-      DebugLogger.log('管家流程', '✖ 记忆提取失败: $e');
-    }
-  }
 
   /// 查看最近一次发给男主的完整 prompt（透明化：男主"知道什么"一目了然）
   void _showPromptDialog() {

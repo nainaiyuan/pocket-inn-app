@@ -74,6 +74,33 @@ class ContextTracker {
   bool windowConfirmed(String personaId) =>
       _state(personaId).windowSize > 0;
 
+  /// 内置窗口表（男主没报 #model 时的兜底；以男主自报为准）
+  static const Map<String, int> knownModels = {
+    'deepseek-chat': 65536,
+    'deepseek-reasoner': 65536,
+    'deepseek-r1': 65536,
+    'gpt-4': 8192,
+    'gpt-4o': 128000,
+    'gpt-4o-mini': 128000,
+    'glm-4': 128000,
+    'glm-4-plus': 128000,
+    'qwen-plus': 131072,
+    'qwen-max': 32768,
+    'qwen-turbo': 131072,
+  };
+
+  /// 按模型名查窗口（模糊匹配，返回 0 = 未知）
+  int windowByModelHint(String modelHint) {
+    if (modelHint.isEmpty) return 0;
+    final lower = modelHint.toLowerCase();
+    for (final entry in knownModels.entries) {
+      if (lower.contains(entry.key.toLowerCase())) {
+        return entry.value;
+      }
+    }
+    return 0;
+  }
+
   /// 记录发送了一条内容（进记得清单）
   void recordSent(
     String personaId,
@@ -82,6 +109,26 @@ class ContextTracker {
   }) {
     if (personaId.isEmpty || text.isEmpty) return;
     final s = _state(personaId);
+    // 防膨胀：遗忘条目超过 60 条 → 清掉最旧的遗忘条目（核心内容保留）
+    final forgotten = s.entries.where((e) => e.forgotten).toList();
+    if (forgotten.length > 60) {
+      forgotten.sort((a, b) => a.sentAt.compareTo(b.sentAt));
+      for (final e in forgotten.take(forgotten.length - 60)) {
+        s.entries.remove(e);
+      }
+      DebugLogger.log('上下文', '🧽 清理遗忘条目（保留最近60条遗忘记录）');
+    }
+    // 防膨胀：总条目超过 300 → 直接删最旧的遗忘条目
+    if (s.entries.length > 300) {
+      final toRemove = s.entries
+          .where((e) => e.forgotten)
+          .toList()
+        ..sort((a, b) => a.sentAt.compareTo(b.sentAt));
+      while (s.entries.length > 300 && toRemove.isNotEmpty) {
+        s.entries.remove(toRemove.removeAt(0));
+      }
+      DebugLogger.log('上下文', '🧽 条目超300，强制清理遗忘条目');
+    }
     final contentId = '${category}_${text.hashCode}';
     for (final e in s.entries) {
       if (e.contentId == contentId) {
