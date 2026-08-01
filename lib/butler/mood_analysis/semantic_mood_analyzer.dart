@@ -81,6 +81,7 @@ class SemanticMoodAnalyzer {
         [1, encoded.attentionMask.length],
       );
       final runOptions = OrtRunOptions();
+      // run 返回 List<OrtValue?>（按模型输出顺序），不是 Map
       final outputs = _session!.run(runOptions, {
         'input_ids': inputOrt,
         'attention_mask': maskOrt,
@@ -89,11 +90,16 @@ class SemanticMoodAnalyzer {
       inputOrt.release();
       maskOrt.release();
 
-      final logits = outputs['logits']?.value;
-      for (final o in outputs.values) {
-        o.release();
+      // 取第一个张量输出（logits）；不依赖输出名，找不到就回退
+      Object? logits;
+      for (final o in outputs) {
+        final v = o?.value;
+        if (v is List && logits == null) {
+          logits = v;
+        }
+        o?.release();
       }
-      if (logits == null || logits is! List || logits.isEmpty) return null;
+      if (logits == null) return null;
       final row = (logits as List).first;
       if (row is! List || row.length < 31) return null;
       final scores = <double>[
