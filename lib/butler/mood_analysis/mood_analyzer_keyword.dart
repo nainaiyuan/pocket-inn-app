@@ -34,21 +34,57 @@ class KeywordMoodAnalyzer implements IMoodAnalyzer {
     '晚安': {'放松': 60, '依恋': 40, '疲惫': 30},
   };
 
+  /// 否定模式：'不/没/别/不太/一点也不' + 情绪词（"不开心"=悲伤，不是开心！）
+  static final RegExp _negationPattern = RegExp(
+    r'(一点也不|一点都不|不太|不怎么|不|没|别)(开心|高兴|难过|伤心|好烦|烦死了|累|生气|无聊|害怕|想你|爱你)',
+  );
+
+  /// 被否定的情绪词反转映射：正性词被否定 → 负性维度
+  static const Map<String, Map<String, double>> _negationInversion = {
+    '开心': {'悲伤': 55, '烦躁': 40, '负面情绪': 50},
+    '高兴': {'悲伤': 50, '烦躁': 35, '负面情绪': 45},
+    // 负性词被否定（"不难过"）→ 中性，不反转
+  };
+
+  /// 检测文本中被否定的情绪词（如"不开心" → ['开心']）
+  static List<String> detectNegatedMoods(String text) {
+    final matches = _negationPattern.allMatches(text);
+    return matches.map((m) => m.group(2)!).toList();
+  }
+
   /// 从文本中匹配出命中的情绪关键词（触发因素提取用）
   static List<String> matchKeywords(String text) {
     final lowerText = text.toLowerCase();
-    return [
+    final negated = detectNegatedMoods(lowerText);
+    final keys = <String>[
       for (final key in _keywordToMood.keys)
-        if (lowerText.contains(key)) key,
+        if (!negated.contains(key) && lowerText.contains(key)) key,
     ];
+    // 被否定的情绪词也作为关键词展示（"不开心"），让日志/规律可见
+    for (final n in negated) {
+      keys.add('不$n');
+    }
+    return keys;
   }
 
   @override
   MoodResult analyze(String text) {
     final dimensions = <String, double>{};
     final lowerText = text.toLowerCase();
+    final negated = detectNegatedMoods(lowerText);
 
+    // 1. 否定反转：'不开心' → 悲伤/烦躁/负面情绪
+    for (final mood in negated) {
+      final inverted = _negationInversion[mood];
+      if (inverted == null) continue;
+      for (final e in inverted.entries) {
+        dimensions[e.key] = (dimensions[e.key] ?? 0) + e.value;
+      }
+    }
+
+    // 2. 正常匹配（跳过被否定的词）
     for (final entry in _keywordToMood.entries) {
+      if (negated.contains(entry.key)) continue;
       if (lowerText.contains(entry.key)) {
         for (final moodEntry in entry.value.entries) {
           dimensions[moodEntry.key] = (dimensions[moodEntry.key] ?? 0) +

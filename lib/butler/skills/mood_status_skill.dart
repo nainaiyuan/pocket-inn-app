@@ -23,7 +23,11 @@ class MoodStatusSkill extends ButlerSkill {
       '用户提到心情、情绪、心态、烦不烦时触发：调用基线/弧线/规律工具，生成洞察注入男主回复';
 
   @override
-  List<String> get triggers => ['心情', '情绪', '心态', '烦不烦', '最近怎么'];
+  List<String> get triggers => [
+    '心情', '情绪', '心态', '烦不烦', '最近怎么',
+    '不开心', '难过', '伤心', '好烦', '烦死', '烦透了',
+    '生气', '焦虑', '委屈', '沮丧', '压力大', '好累', '累死',
+  ];
 
   @override
   int get priority => 10;

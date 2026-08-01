@@ -7,6 +7,7 @@ import 'package:onnxruntime/onnxruntime.dart';
 
 import '../../utils/debug_logger.dart';
 import 'bert_tokenizer.dart';
+import 'mood_analyzer_keyword.dart';
 
 /// 语义情绪分析器 — 基于 ONNX 量化模型（liudev/roberta-multilabel-28-3-classes）
 ///
@@ -105,7 +106,22 @@ class SemanticMoodAnalyzer {
       final scores = <double>[
         for (final v in row) (v as num).toDouble(),
       ];
-      return _scoresToDimensions(scores);
+      var dims = _scoresToDimensions(scores);
+
+      // 否定修正：'不开心' 被模型误判为"开心"（BERT+int8 对否定理解弱）
+      // → 正性维度减半，负性维度抬高
+      final negated = KeywordMoodAnalyzer.detectNegatedMoods(text);
+      if (negated.isNotEmpty && dims != null) {
+        const positiveDims = {'开心', '情绪高涨', '依恋', '放松'};
+        for (final d in positiveDims) {
+          if (dims.containsKey(d)) dims[d] = dims[d]! * 0.4;
+        }
+        dims['悲伤'] = (dims['悲伤'] ?? 0) + 30;
+        dims['负面情绪'] = (dims['负面情绪'] ?? 0) + 30;
+        dims.removeWhere((_, v) => v < 5);
+        if (dims.isEmpty) dims = null;
+      }
+      return dims;
     } catch (e) {
       DebugLogger.log('管家情绪', '语义分析失败: $e');
       return null;
