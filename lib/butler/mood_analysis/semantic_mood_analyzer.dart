@@ -192,7 +192,7 @@ class SemanticMoodAnalyzer {
     'gratitude': {'依恋': 40, '开心': 40},
     'contentment': {'放松': 60, '开心': 50, '平静': 40},
     'caring': {'依恋': 60, '渴望关注': 40},
-    'approval': {'开心': 50},
+    'approval': {'开心': 30}, // 调低：int8 量化下 approval 常虚高（"我不开心"实测 0.69 噪音）
     'curiosity': {'好奇': 60},
     'realization': {'好奇': 40, '情绪高涨': 30},
     'surprise': {'情绪高涨': 50, '开心': 30},
