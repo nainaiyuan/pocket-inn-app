@@ -286,7 +286,7 @@ class AIChatMessage {
         'tool_calls': [
           for (final call in toolCalls!)
             {
-              'id': call['id'] ?? 'call_${DateTime.now().millisecondsSinceEpoch}',
+              'id': call['id'] ?? 'call_${call['name'] ?? 'fn'}',
               'type': 'function',
               'function': {
                 'name': call['name'],

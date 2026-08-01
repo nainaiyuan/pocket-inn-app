@@ -343,13 +343,18 @@ class OpenAICompatibleApiService implements IOpenAiApiService {
         final fn = raw['function'];
         if (fn is! Map) continue;
         final name = fn['name']?.toString() ?? '';
+        final id = raw['id']?.toString() ?? '';
         final argsRaw = fn['arguments']?.toString() ?? '{}';
         Map<String, dynamic> args = {};
         try {
           final decoded = jsonDecode(argsRaw);
           if (decoded is Map<String, dynamic>) args = decoded;
         } catch (_) {}
-        toolCalls.add({'name': name, 'arguments': args});
+        toolCalls.add({
+          'name': name,
+          'arguments': args,
+          if (id.isNotEmpty) 'id': id,
+        });
       }
     }
     if (text.isEmpty && toolCalls.isEmpty) {
