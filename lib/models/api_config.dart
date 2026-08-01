@@ -103,11 +103,13 @@ abstract class ResolvedApiConfig with _$ResolvedApiConfig {
   Map<String, dynamic> buildRequestBody({
     required List<Map<String, dynamic>> messages,
     Map<String, dynamic>? defaults,
+    List<Map<String, dynamic>>? tools,
   }) {
     final body = <String, dynamic>{
       if (defaults != null) ...defaults,
       'model': model,
       'messages': messages,
+      if (tools != null && tools.isNotEmpty) 'tools': tools,
     };
     body.addAll(parseCustomBody());
     return body;

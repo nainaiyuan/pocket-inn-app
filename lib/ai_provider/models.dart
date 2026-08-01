@@ -5,6 +5,8 @@
 /// 其余能力字段预留，后续加识图、语音时不需要改结构。
 library;
 
+import 'dart:convert';
+
 /// 能力标签。路由时按能力过滤：聊天请求只试带 chat 的 Provider。
 enum AICapability {
   chat,
@@ -254,14 +256,47 @@ class AIChatMessage {
     required this.role,
     required this.content,
     this.imageBase64,
+    this.toolCallId,
+    this.toolCalls,
   });
 
-  /// system / user / assistant
+  /// system / user / assistant / tool
   final String role;
+
+  /// 消息内容（tool 消息时为工具执行结果；assistant 工具轮可为空字符串）
   final String content;
   final String? imageBase64;
 
+  /// tool 消息的调用 ID（关联 assistant 的 tool_calls）
+  final String? toolCallId;
+
+  /// assistant 消息请求的工具调用（function calling）
+  final List<Map<String, dynamic>>? toolCalls;
+
   Map<String, dynamic> toApiJson() {
+    // 工具结果消息：{role: tool, tool_call_id, content}
+    if (role == 'tool' && toolCallId != null) {
+      return {'role': 'tool', 'tool_call_id': toolCallId, 'content': content};
+    }
+    // assistant 工具轮：{role: assistant, content: null, tool_calls}
+    if (toolCalls != null && toolCalls!.isNotEmpty) {
+      return {
+        'role': 'assistant',
+        'content': null,
+        'tool_calls': [
+          for (final call in toolCalls!)
+            {
+              'id': call['id'] ?? 'call_${DateTime.now().millisecondsSinceEpoch}',
+              'type': 'function',
+              'function': {
+                'name': call['name'],
+                'arguments': call['argumentsJson'] ??
+                    _encodeArguments(call['arguments']),
+              },
+            },
+        ],
+      };
+    }
     if (imageBase64 == null || imageBase64!.isEmpty) {
       return {'role': role, 'content': content};
     }
@@ -276,6 +311,16 @@ class AIChatMessage {
       ],
     };
   }
+
+  static String _encodeArguments(Object? args) {
+    if (args == null) return '{}';
+    if (args is String) return args;
+    try {
+      return jsonEncode(args);
+    } catch (_) {
+      return '{}';
+    }
+  }
 }
 
 /// 一次 AI 调用的结果。
@@ -287,6 +332,7 @@ class AIProviderResult {
     this.providerId,
     this.providerName,
     this.usage,
+    this.toolCalls,
     this.failedProviders = const [],
     this.done = false,
   });
@@ -301,6 +347,9 @@ class AIProviderResult {
 
   /// API 返回的 token 用量（非流式才有）
   final Map<String, dynamic>? usage;
+
+  /// 模型请求的工具调用（function calling）：[{name, arguments}]
+  final List<Map<String, dynamic>>? toolCalls;
 
   /// 本次调用中尝试过但失败了的 Provider 名（故障切换痕迹）
   final List<String> failedProviders;

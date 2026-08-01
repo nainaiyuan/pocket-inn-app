@@ -14,10 +14,15 @@ class ChatCompletionResult {
     required this.text,
     this.thinkingChain,
     this.usage,
+    this.toolCalls,
   });
 
   final String text;
   final String? thinkingChain;
+
+  /// 模型请求的工具调用列表（function calling）
+  /// 每项格式：{name, arguments(Map)}
+  final List<Map<String, dynamic>>? toolCalls;
 
   /// API 返回的 Token 用量
   /// 格式：{"prompt_tokens": 2450, "completion_tokens": 180, "total_tokens": 2630}
@@ -249,6 +254,7 @@ class OpenAICompatibleApiService implements IOpenAiApiService {
     ResolvedApiConfig config, {
     required List<Map<String, dynamic>> messages,
     Map<String, dynamic>? defaults,
+    List<Map<String, dynamic>>? tools,
     ChatCompletionCancelToken? cancellationToken,
   }) async {
     _validateConfig(config);
@@ -261,6 +267,7 @@ class OpenAICompatibleApiService implements IOpenAiApiService {
     final requestBody = config.buildRequestBody(
       messages: messages,
       defaults: defaults,
+      tools: tools,
     );
     final stopwatch = Stopwatch()..start();
     _HttpTextResponse response;
@@ -327,7 +334,25 @@ class OpenAICompatibleApiService implements IOpenAiApiService {
 
     final firstChoice = completionResponse.choices.first;
     final text = firstChoice.resolvedText.trim();
-    if (text.isEmpty) {
+    // 工具调用轮：文本可为空（模型只发 tool_calls）
+    final toolCalls = <Map<String, dynamic>>[];
+    final rawCalls = firstChoice.message?.toolCalls;
+    if (rawCalls != null) {
+      for (final raw in rawCalls) {
+        if (raw is! Map) continue;
+        final fn = raw['function'];
+        if (fn is! Map) continue;
+        final name = fn['name']?.toString() ?? '';
+        final argsRaw = fn['arguments']?.toString() ?? '{}';
+        Map<String, dynamic> args = {};
+        try {
+          final decoded = jsonDecode(argsRaw);
+          if (decoded is Map<String, dynamic>) args = decoded;
+        } catch (_) {}
+        toolCalls.add({'name': name, 'arguments': args});
+      }
+    }
+    if (text.isEmpty && toolCalls.isEmpty) {
       throw const FormatException('聊天接口返回了空回复');
     }
 
@@ -347,6 +372,7 @@ class OpenAICompatibleApiService implements IOpenAiApiService {
       text: text,
       thinkingChain: thinkingChain.isEmpty ? null : thinkingChain,
       usage: completionResponse.usage,
+      toolCalls: toolCalls.isEmpty ? null : toolCalls,
     );
   }
 

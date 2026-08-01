@@ -21,11 +21,60 @@ class AiChatService {
   /// [personaName] 用于组装人设提示词；
   /// [skillContext] 管家技能注入（如情绪洞察），拼入 system 让男主自然接住。
   /// 返回完整结果（含实际用的 Provider 与切换痕迹，供 UI 展示）。
+  /// 男主可调用的工具定义（function calling，OpenAI 兼容格式）
+  static const List<Map<String, dynamic>> butlerTools = [
+    {
+      'type': 'function',
+      'function': {
+        'name': 'record_memory',
+        'description':
+            '记录用户的喜好、约定、日常习惯或个人事实。当用户提到新的喜欢/讨厌/习惯/个人信息/约定时调用；不确定是否已记录时，先调用 recall_memory 确认。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'category': {
+              'type': 'string',
+              'enum': ['喜好', '约定', '日常', '事实', '其他'],
+              'description': '记忆类别',
+            },
+            'content': {
+              'type': 'string',
+              'description': '要记录的内容，如：她喜欢猫',
+            },
+          },
+          'required': ['category', 'content'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'recall_memory',
+        'description':
+            '查看关于用户的记忆。不确定是否记录过用户的事、想了解用户以前说过什么、或想按类别查看（喜好/约定/日常/事实/其他）时调用。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'query': {'type': 'string', 'description': '关键词，如：猫、喜欢'},
+            'category': {
+              'type': 'string',
+              'enum': ['喜好', '约定', '日常', '事实', '其他'],
+              'description': '可选：按类别过滤',
+            },
+          },
+          'required': ['query'],
+        },
+      },
+    },
+  ];
+
   Future<AIProviderResult> generateReply(
     String message,
     String personaId, {
     String personaName = '角色',
     String? skillContext,
+    bool toolRound = false,
+    List<AIChatMessage>? toolMessages,
   }) async {
     final manager = AIProviderManager.instance;
     if (!manager.hasUsable(personaId)) {
@@ -55,12 +104,16 @@ class AiChatService {
     // 透明化：保存完整 prompt 供 📄 按钮查看
     lastPromptText = '【System】\n$systemPrompt\n\n【User】\n$message';
     DebugLogger.log('Prompt', '本次组装完成（${lastPromptText!.length} 字，可点 📄 查看）');
+    final messages = <AIChatMessage>[
+      AIChatMessage(role: 'system', content: systemPrompt),
+      AIChatMessage(role: 'user', content: message),
+      if (toolMessages != null) ...toolMessages,
+    ];
     final result = await manager.chat(
       personaId,
-      [
-        AIChatMessage(role: 'system', content: systemPrompt),
-        AIChatMessage(role: 'user', content: message),
-      ],
+      messages,
+      // 工具轮不带工具定义（避免模型再次调用）；正常轮带 butlerTools
+      tools: toolRound ? null : butlerTools,
     );
     if (result.text.trim().isEmpty) {
       throw const FormatException('AI 返回了空回复');

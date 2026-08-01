@@ -299,7 +299,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       final recallInjection = _pendingRecall != null
           ? await _buildRecallInjectionAsync(_pendingRecall!)
           : const <String>[];
-      final result = await _aiSvc.generateReply(
+      // 工具调用轮（function calling）：模型请求工具 → 执行（弹窗审批）→ 回传 → 再生成
+      var result = await _aiSvc.generateReply(
         sendText,
         personaId,
         personaName: personaName,
@@ -316,6 +317,46 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       _pendingRecall = null;
       _pendingRecallCategory = null;
       _pendingRecallLimit = null;
+      // function calling 循环：模型请求工具 → 执行 → 回传 → 再生成（最多3轮防死循环）
+      var toolLoop = 0;
+      while (toolLoop < 3 &&
+          result.toolCalls != null &&
+          result.toolCalls!.isNotEmpty) {
+        toolLoop++;
+        final toolMessages = <AIChatMessage>[
+          AIChatMessage(role: 'assistant', content: '', toolCalls: result.toolCalls),
+        ];
+        for (final call in result.toolCalls!) {
+          final name = call['name']?.toString() ?? '';
+          final args = (call['arguments'] as Map<String, dynamic>?) ?? {};
+          String toolResult;
+          if (name == 'record_memory') {
+            final content = args['content']?.toString() ?? '';
+            final category = args['category']?.toString() ?? '';
+            _appendToolBubble('正在记录：「$content」（$category）…');
+            toolResult = await _executeRecordTool(category, content);
+          } else if (name == 'recall_memory') {
+            final query = args['query']?.toString() ?? '';
+            final category = args['category']?.toString() ?? '';
+            _appendToolBubble('正在查记忆：$query…');
+            toolResult = await _executeRecallTool(query, category);
+          } else {
+            toolResult = '未知工具：$name';
+          }
+          toolMessages.add(AIChatMessage(
+            role: 'tool',
+            content: toolResult,
+            toolCallId: 'call_${toolLoop}_$name',
+          ));
+        }
+        result = await _aiSvc.generateReply(
+          '',
+          personaId,
+          personaName: personaName,
+          toolRound: true,
+          toolMessages: toolMessages,
+        );
+      }
       // 剥离 #keywords（仅管家可见）→ 显示/落库用干净文本
       var displayText = ButlerPipelineResult.extractKeywordsFromReply(
         result.text.trim(),
@@ -944,6 +985,109 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           ? '（用户暂时不想让你看记忆，别追问）'
           : '（用户拒绝了查「$query」记忆的请求，别追问）';
       DebugLogger.log('指令模块', '⛔ 用户拒绝查记忆: $query');
+    }
+  }
+
+  /// 工具执行：record_memory（弹窗确认 → 写记忆 → 返回结果给模型）
+  Future<String> _executeRecordTool(String category, String content) async {
+    if (content.isEmpty) return '内容为空，无法记录';
+    if (!mounted) return '用户不在，记录未确认';
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('💌 男主想记住这个'),
+        content: Text(
+          '「$content」\n\n类别：${category.isEmpty ? '其他' : category}\n\n要让他记住吗？',
+          style: const TextStyle(fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('不记', style: TextStyle(color: Color(0xFF8A7A80))),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('让他记住'),
+          ),
+        ],
+      ),
+    );
+    if (approved == true) {
+      if (_chatSessionId != null) {
+        await ChatDatabaseService.instance.insertMemoriesInTx([
+          MemoryNode(
+            id: 'mem_${DateTime.now().millisecondsSinceEpoch}',
+            sessionId: _chatSessionId!,
+            branchLeafId: _chatLeafId ?? '',
+            content: '[${category.isEmpty ? '其他' : category}] $content',
+            sourceMessageIds: const [],
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+          ),
+        ]);
+      }
+      DebugLogger.log('指令模块', '✅ 工具记录确认: [$category] $content');
+      return '已记录：[$category] $content';
+    }
+    DebugLogger.log('指令模块', '⛔ 工具记录被拒: $content');
+    return '用户拒绝了记录：「$content」。如果想知道原因，可以自然地问她。';
+  }
+
+  /// 工具执行：recall_memory（检索 → 弹窗授权 → 返回记忆给模型）
+  Future<String> _executeRecallTool(String query, String category) async {
+    try {
+      final sessionId = _chatSessionId;
+      if (sessionId == null) return '暂无记忆可查';
+      final isCategory = category.isNotEmpty &&
+          ButlerCommandParser.allCategories.contains(category);
+      final memories = await ChatMemoryService.instance.searchMemories(
+        sessionId,
+        category: isCategory ? category : null,
+        keyword: isCategory ? null : (query.isEmpty ? category : query),
+      );
+      if (memories.isEmpty) {
+        return '没有找到关于「${query.isEmpty ? category : query}」的记忆';
+      }
+      if (!mounted) return '用户不在，查询未授权';
+      final approved = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFFFDF7F9),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('🔍 男主想翻你的记忆'),
+          content: Text(
+            '查到了 ${memories.length} 条关于「${query.isEmpty ? category : query}」的记忆，'
+            '允许他看吗？（最多显示 5 条）',
+            style: const TextStyle(fontSize: 14, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('不允许', style: TextStyle(color: Color(0xFF8A7A80))),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('允许'),
+            ),
+          ],
+        ),
+      );
+      if (approved != true) {
+        return '用户拒绝了查看记忆的请求，不要追问';
+      }
+      final lines = memories
+          .take(5)
+          .map((m) => m.content
+              .replaceFirst(RegExp(r'^\[(喜好|约定|日常|事实|其他)\]'), ''))
+          .toList();
+      return '查到的记忆：\n- ${lines.join('\n- ')}';
+    } catch (e) {
+      DebugLogger.log('指令模块', '✖ 工具查记忆失败: $e');
+      return '查记忆出错了';
     }
   }
 

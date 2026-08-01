@@ -415,6 +415,7 @@ class AIProviderManager {
     String? personaId,
     List<AIChatMessage> messages, {
     Map<String, dynamic>? defaults,
+    List<Map<String, dynamic>>? tools,
     ChatCompletionCancelToken? cancellationToken,
   }) async {
     try {
@@ -428,12 +429,14 @@ class AIProviderManager {
             _resolve(config),
             messages: [for (final message in messages) message.toApiJson()],
             defaults: defaults,
+            tools: tools,
             cancellationToken: cancellationToken,
           );
           return AIProviderResult(
             text: apiResult.text,
             thinking: apiResult.thinkingChain ?? '',
             usage: apiResult.usage,
+            toolCalls: apiResult.toolCalls,
           );
         },
       );

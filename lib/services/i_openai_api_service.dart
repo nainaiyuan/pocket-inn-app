@@ -12,6 +12,7 @@ abstract class IOpenAiApiService {
     ResolvedApiConfig config, {
     required List<Map<String, dynamic>> messages,
     Map<String, dynamic>? defaults,
+    List<Map<String, dynamic>>? tools,
     ChatCompletionCancelToken? cancellationToken,
   });
 
