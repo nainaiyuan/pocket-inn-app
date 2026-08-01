@@ -17,6 +17,9 @@ class AiChatService {
   /// 最近一次组装好的完整 prompt（📄 按钮查看：男主"知道什么"一目了然）
   String? lastPromptText;
 
+  /// 已做过上下文恢复的 persona（防重复恢复）
+  final Set<String> _contextRestored = {};
+
   /// 真实 AI 回复。
   ///
   /// [personaId] 决定用哪个男主的 Provider 绑定与自动切换设置；
@@ -83,6 +86,7 @@ class AiChatService {
     String? skillContext,
     bool toolRound = false,
     List<AIChatMessage>? toolMessages,
+    String? sessionId,
   }) async {
     final manager = AIProviderManager.instance;
     if (!manager.hasUsable(personaId)) {
@@ -104,6 +108,11 @@ class AiChatService {
     // 记录用户消息（话题检测，本地免费）
     if (!toolRound && message.trim().isNotEmpty) {
       ContextManager.instance.feedUserMessage(personaId, message);
+    }
+    // 首次请求：从 DB 恢复摘要 + 重建当前话题原文（重启不丢记忆）
+    if (!_contextRestored.contains(personaId)) {
+      _contextRestored.add(personaId);
+      await ContextManager.instance.restore(personaId, sessionId);
     }
     final needsWindow = !ContextTracker.instance.windowConfirmed(personaId);
     final systemPrompt = '你是「$personaName」，一个正在和用户聊天的角色。'
@@ -270,7 +279,7 @@ class AiChatService {
       );
       final summary = res.text.trim();
       if (summary.isNotEmpty) {
-        ContextManager.instance.appendSummary(personaId, summary);
+        await ContextManager.instance.appendSummary(personaId, summary);
         DebugLogger.log('上下文管理', '✅ 男主总结完成（${summary.length} 字，摘要区已更新）');
       } else {
         // 总结失败：原文不能丢，重新放回（下次再试）
@@ -285,7 +294,7 @@ class AiChatService {
 
   /// 摘要缩减轮：摘要区太大 → 男主把旧摘要再压缩成更紧凑的 → 替换。
   Future<void> _compactSummaries(String personaId, String personaName) async {
-    final old = ContextManager.instance.takeSummariesForCompact(personaId);
+    final old = await ContextManager.instance.takeSummariesForCompact(personaId);
     if (old.trim().isEmpty) return;
     DebugLogger.log('上下文管理', '🗜️ 摘要区太大，缩减中…');
     final system = '你是「$personaName」。以下是你们之前的对话摘要列表，'
@@ -302,14 +311,14 @@ class AiChatService {
       );
       final summary = res.text.trim();
       if (summary.isNotEmpty) {
-        ContextManager.instance.appendSummary(personaId, summary);
+        await ContextManager.instance.appendSummary(personaId, summary);
         DebugLogger.log('上下文管理', '✅ 摘要缩减完成（${summary.length} 字）');
       } else {
-        ContextManager.instance.restoreSummaries(personaId, old);
+        await ContextManager.instance.restoreSummaries(personaId, old);
         DebugLogger.log('上下文管理', '⚠️ 摘要缩减为空，保留原摘要');
       }
     } on Object catch (e) {
-      ContextManager.instance.restoreSummaries(personaId, old);
+      await ContextManager.instance.restoreSummaries(personaId, old);
       DebugLogger.log('上下文管理', '⚠️ 摘要缩减失败: $e（保留原摘要）');
     }
   }

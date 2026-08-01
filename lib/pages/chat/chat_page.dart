@@ -305,6 +305,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         personaId,
         personaName: personaName,
         personaPrompt: _currentPersonaPrompt(),
+        sessionId: _chatSessionId,
         // 技能注入 + 温控询问 + 审批反馈 + 获准记忆 都拼进 system
         skillContext: [
           if (skillInjection != null) skillInjection,
@@ -363,6 +364,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           personaPrompt: _currentPersonaPrompt(),
           toolRound: true,
           toolMessages: toolMessages,
+          sessionId: _chatSessionId,
         );
         if (result.text.trim().isNotEmpty) {
           replyTexts.add(result.text.trim());

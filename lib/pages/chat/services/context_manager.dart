@@ -1,4 +1,7 @@
 import '../../../ai_provider/models.dart';
+import '../../../models/chat_session.dart';
+import '../../../services/chat_database_service.dart';
+import '../../../utils/debug_logger.dart';
 
 /// 上下文管理器 —— DeepSeek 无后端记忆，靠它让男主"记得"聊天。
 ///
@@ -10,7 +13,8 @@ import '../../../ai_provider/models.dart';
 /// - 话题切换：本地关键词检测（免费），不立即总结，攒 2-3 个话题才批量总结
 /// - 摘要区太大 → 合并缩减（男主把旧摘要再总结成更紧凑的）
 ///
-/// 纯内存实现（MVP）：APP 重启后摘要丢失，TODO 持久化到 DB。
+/// 摘要持久化到 DB（context_summaries 表）：重启后 restore() 恢复摘要 +
+/// 从聊天记录重建最近原文（当前话题）。
 /// 单个话题状态（关键词 + 原文行）
 class TopicState {
   final Set<String> keywords = {};
@@ -121,13 +125,41 @@ class ContextManager {
     return t.raw.join('\n');
   }
 
-  /// 追加一条摘要（男主总结输出）
-  void appendSummary(String personaId, String summary) {
+  /// 重启后恢复：摘要从 DB 读 + 从聊天记录重建最近原文（当前话题）。
+  /// [sessionId] 为当前聊天会话；null 时只恢复摘要。
+  Future<void> restore(String personaId, String? sessionId) async {
+    try {
+      final saved = await ChatDatabaseService.instance.loadSummaries(personaId);
+      if (saved.isNotEmpty) {
+        _summaries[personaId] = saved;
+        DebugLogger.log('上下文管理', '♻️ 恢复摘要 ${saved.length} 条（persona $personaId）');
+      }
+      if (sessionId != null) {
+        final lines = await ChatDatabaseService.instance
+            .loadRecentChatLines(sessionId, maxChars: topicTokenBudget);
+        if (lines.isNotEmpty) {
+          final t = _topics.putIfAbsent(personaId, TopicState.new);
+          for (final (role, text) in lines) {
+            t.raw.add(role == ChatNodeRole.assistant.value ? '男主：$text' : '用户：$text');
+          }
+          DebugLogger.log('上下文管理', '♻️ 重建当前话题原文 ${lines.length} 条');
+        }
+      }
+    } on Object catch (e) {
+      DebugLogger.log('上下文管理', '⚠️ 上下文恢复失败: $e');
+    }
+  }
+
+  /// 追加一条摘要（男主总结输出）——同步持久化到 DB
+  Future<void> appendSummary(String personaId, String summary) async {
     final list = _summaries.putIfAbsent(personaId, () => []);
     // 摘要本身可能多行 → 按行拆成多条，便于后续缩减
     for (final line in summary.split('\n')) {
       final l = line.trim().replaceAll(RegExp(r'^[-•*\d.、]+'), '').trim();
-      if (l.isNotEmpty) list.add(l);
+      if (l.isNotEmpty) {
+        list.add(l);
+        await ChatDatabaseService.instance.saveSummary(personaId, l);
+      }
     }
   }
 
@@ -142,10 +174,11 @@ class ContextManager {
     return total >= summaryTokenBudget;
   }
 
-  /// 取走摘要区全文并清空（供缩减轮使用）
-  String takeSummariesForCompact(String personaId) {
+  /// 取走摘要区全文并清空（供缩减轮使用）——同步清 DB
+  Future<String> takeSummariesForCompact(String personaId) async {
     final list = _summaries.remove(personaId);
     if (list == null || list.isEmpty) return '';
+    await ChatDatabaseService.instance.clearSummaries(personaId);
     return list.map((s) => '- $s').join('\n');
   }
 
@@ -156,13 +189,16 @@ class ContextManager {
     t.raw.addAll(raw.split('\n').where((l) => l.trim().isNotEmpty));
   }
 
-  /// 缩减失败回滚：摘要区放回
-  void restoreSummaries(String personaId, String old) {
+  /// 缩减失败回滚：摘要区放回——同步写 DB
+  Future<void> restoreSummaries(String personaId, String old) async {
     if (old.trim().isEmpty) return;
     final list = _summaries.putIfAbsent(personaId, () => []);
     for (final line in old.split('\n')) {
       final l = line.trim().replaceAll(RegExp(r'^[-•*\d.、]+'), '').trim();
-      if (l.isNotEmpty) list.add(l);
+      if (l.isNotEmpty) {
+        list.add(l);
+        await ChatDatabaseService.instance.saveSummary(personaId, l);
+      }
     }
   }
 

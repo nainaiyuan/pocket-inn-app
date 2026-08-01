@@ -17,7 +17,7 @@ class ChatDatabaseService {
   static final ChatDatabaseService instance = ChatDatabaseService._();
   final ValueNotifier<int> changeNotifier = ValueNotifier<int>(0);
 
-  static const int _dbVersion = 3;
+  static const int _dbVersion = 4;
   static const String _dbName = 'pocket_inn_chat.db';
 
   Database? _database;
@@ -129,11 +129,82 @@ class ChatDatabaseService {
       // v2: 引入 chat_memories 表与索引
       await _createMemoriesSchema(db);
     }
+    if (oldVersion < 4 && newVersion >= 4) {
+      // v4: 对话摘要持久化
+      await _createSummariesSchema(db);
+    }
     // v3: 仅调整 _dbVersion 占位，无 schema 变更。
     // 若未来需要在 v3 引入列/索引，请在此处添加 oldVersion < 3 分支。
   }
 
+  /// v4: 对话摘要持久化（上下文管理——男主滚动摘要，重启不丢）
+  Future<void> _createSummariesSchema(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS context_summaries (
+        persona_id TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_context_summaries_persona '
+      'ON context_summaries(persona_id, created_at)',
+    );
+  }
+
+  /// 读某 persona 的全部摘要（按时间）
+  Future<List<String>> loadSummaries(String personaId) async {
+    final rows = await _db.query(
+      'context_summaries',
+      where: 'persona_id = ?',
+      whereArgs: [personaId],
+      orderBy: 'created_at ASC',
+    );
+    return rows.map((r) => (r['summary'] as String?) ?? '').where((s) => s.isNotEmpty).toList();
+  }
+
+  /// 追加一条摘要
+  Future<void> saveSummary(String personaId, String summary) async {
+    if (summary.trim().isEmpty) return;
+    await _db.insert('context_summaries', {
+      'persona_id': personaId,
+      'summary': summary.trim(),
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  /// 清空某 persona 的摘要（缩减替换时）
+  Future<void> clearSummaries(String personaId) async {
+    await _db.delete('context_summaries', where: 'persona_id = ?', whereArgs: [personaId]);
+  }
+
+  /// 读会话最近对话行（供重启后重建"当前话题原文"）
+  /// 返回 (role, text)，从旧到新；[maxChars] 限制总量（从最新往回取）。
+  Future<List<(String, String)>> loadRecentChatLines(
+    String sessionId, {
+    int maxChars = 2000,
+  }) async {
+    final rows = await _db.query(
+      'chat_messages',
+      columns: ['role', 'text'],
+      where: 'session_id = ? AND role IN (?, ?)',
+      whereArgs: [sessionId, ChatNodeRole.user.value, ChatNodeRole.assistant.value],
+      orderBy: 'created_at DESC',
+    );
+    final out = <(String, String)>[];
+    var total = 0;
+    for (final r in rows) {
+      final text = (r['text'] as String?)?.trim() ?? '';
+      if (text.isEmpty) continue;
+      total += text.length;
+      if (total > maxChars) break;
+      out.add(((r['role'] as String?) ?? 'user', text));
+    }
+    return out.reversed.toList();
+  }
+
   Future<void> _createSchema(Database db) async {
+    await _createSummariesSchema(db);
     await db.execute('''
       CREATE TABLE chat_sessions (
         id TEXT PRIMARY KEY,
