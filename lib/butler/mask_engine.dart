@@ -114,8 +114,10 @@ class MaskEngine {
   final Map<String, String> _identityCodes = {};
 
   // ── 代号池（随机分配，按男主不同） ──
+  // 用户 8-03 00:07：亲属类别就"亲属＋A/B/C"，轮完了 AA/AB 开始轮，
+  // 一直轮，单次随机抽一个代号 → family 固定 label"亲属"，后缀自动轮换
   static const Map<String, List<String>> _codePools = {
-    'family': ['家人', '亲属', '家人'],
+    'family': ['亲属'],
     'friend': ['朋友', '闺蜜', '损友'],
     'work': ['同事', '上司', '下属', '合作伙伴'],
     'stranger': ['某人', '一个人', '那谁'],
@@ -149,16 +151,20 @@ class MaskEngine {
   /// 会话级代号分配：从该类别的代号池里挑一个本会话未使用的代号。
   /// 每次新会话（sessionId 变化）重新轮换 → 男主无法积累"代号=谁"的绑定；
   /// 同一会话内保持一致 → 不影响对话连贯。
+  /// 用户 8-03 00:07：单次随机抽一个代号（label 固定，后缀随机起点，
+  /// 但同会话内不重复 → 已用的跳过，A/B/C 轮完自然到 AA/AB，一直轮）
   String _pickSessionCode(IdentityEntry entry, Map<String, String> sessionMap) {
     final used = sessionMap.values.toSet();
     final pool = _codePools[entry.category] ?? const ['某人'];
     final label = pool[_random.nextInt(pool.length)];
-    var idx = 0;
-    while (true) {
+    // 随机起点（0~51 即 A~AZ），碰撞则顺延找未用的 → 每次会话代号都不同
+    var idx = _random.nextInt(52);
+    for (var attempt = 0; attempt < 200; attempt++) {
       final code = '[$label${_codeSuffix(idx)}]';
       if (!used.contains(code)) return code;
-      idx++;
+      idx = (idx + 1) % 200;
     }
+    return '[$label${_codeSuffix(idx)}]';
   }
 
   // ── 持久化存储（可空 = 纯内存）──

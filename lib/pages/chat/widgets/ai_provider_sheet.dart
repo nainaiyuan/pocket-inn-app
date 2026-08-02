@@ -409,13 +409,15 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
               runSpacing: 2,
               children: [
                 FilledButton.tonalIcon(
-                  onPressed: () async {
-                    // 先关 sheet，等关闭动画完成再 push 配置页
-                    // （避免 pop 后立刻用同一 context push 导致 Navigator 状态异常）
-                    Navigator.of(context).pop();
-                    await Future<void>.delayed(const Duration(milliseconds: 250));
-                    if (!context.mounted) return;
-                    Navigator.of(context).push(
+                  onPressed: () {
+                    // ⚠️ 不能在 pop 后 await 再检查 context.mounted：
+                    // sheet 关闭后 context 已销毁 → mounted=false → 不 push，
+                    // 表现为"点了没反应"（用户 8-03 00:07 报）。
+                    // 正确做法：pop 前先捕获 navigator，pop 后直接用捕获的
+                    // navigator push（同一个根 Navigator，顺序安全）。
+                    final navigator = Navigator.of(context);
+                    navigator.pop();
+                    navigator.push(
                       MaterialPageRoute(builder: (_) => const AiConfigPage()),
                     );
                   },

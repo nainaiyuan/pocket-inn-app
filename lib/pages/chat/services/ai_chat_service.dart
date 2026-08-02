@@ -274,9 +274,12 @@ class AiChatService {
         ? <AIChatMessage>[]
         : ContextManager.instance.buildHistoryMessages(personaId);
     // 透明化：保存完整 prompt 供 📄 按钮查看
+    // 用户 8-03 00:07：标签不该叫"历史"，是"上下文参考"——
+    // 本次对话实时记录（用户+男主交替），不是档案历史
     final historyText = historyMsgs.isEmpty
         ? ''
-        : '\n\n【历史】\n${historyMsgs.map((m) => '[${m.role}] ${m.content}').join('\n')}';
+        : '\n\n【上下文参考】（本次对话实时记录，含你（男主）自己的回答）\n'
+              '${historyMsgs.map((m) => '[${m.role}] ${m.content}').join('\n')}';
     lastPromptText = '【System】\n$systemPrompt$historyText\n\n【User】\n$message';
     DebugLogger.log('Prompt', '本次组装完成（${lastPromptText!.length} 字，可点 📄 查看）');
     final messages = <AIChatMessage>[

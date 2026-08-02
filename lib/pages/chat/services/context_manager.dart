@@ -126,9 +126,14 @@ class ContextManager {
         t.keywords.isNotEmpty &&
         t.raw.length >= minTopicMessagesBeforeSwitch &&
         _jaccard(words, t.keywords) < topicSwitchThreshold) {
-      // 话题切换：旧话题原文留在 raw 里，等批量总结；开新话题
-      _topics[personaId] = TopicState()..raw.add('用户：$text');
-      _topics[personaId]!.keywords.addAll(words);
+      // 话题切换：⚠️ 不能丢旧话题原文（里面是男主回答+用户消息，
+      // 丢了历史就"完全没带上男主的回答"——用户 8-03 00:07 报）。
+      // 旧话题原文并入新话题的 raw（保留男主回答），只重置关键词。
+      final oldRaw = t.raw;
+      final fresh = TopicState()..raw.addAll(oldRaw);
+      fresh.raw.add('用户：$text');
+      fresh.keywords.addAll(words);
+      _topics[personaId] = fresh;
       return;
     }
     t.keywords.addAll(words);
