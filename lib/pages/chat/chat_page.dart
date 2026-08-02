@@ -356,6 +356,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             toolCalls: intent,
             usage: result.usage,
             providerName: result.providerName,
+            reasoningContent: result.reasoningContent,
           );
         }
       }
@@ -373,7 +374,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         toolExecuted = true;
         DebugLogger.log('AI路由', '🔧 第 $toolLoop 轮：男主请求 ${result.toolCalls!.length} 个工具');
         final toolMessages = <AIChatMessage>[
-          AIChatMessage(role: 'assistant', content: '', toolCalls: result.toolCalls),
+          AIChatMessage(
+            role: 'assistant',
+            content: '',
+            toolCalls: result.toolCalls,
+            // 8-03 06:29：DeepSeek 思考模式必须原样回传 reasoning_content，
+            // 否则 HTTP 400（"reasoning_content must be passed back"）
+            reasoningContent: result.reasoningContent,
+          ),
         ];
         var loopExceeded = false;
         for (final call in result.toolCalls!) {
@@ -383,7 +391,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           DebugLogger.log('AI路由', '🔧 工具 $name 参数：${args.isEmpty ? '（空）' : args}');
           if (name == 'record_memory') {
             final content = args['content']?.toString() ?? '';
-            final category = args['category']?.toString() ?? '';
+            var category = args['category']?.toString() ?? '';
+            // 8-03 06:29：男主不知道类别规范，常写"其他" → 管家兜底：
+            // 空类别，或"其他"但内容明显可归类（喜欢/约定/日常/事实）→ 自动纠正
+            if (category.isEmpty || category == ButlerCommandParser.catOther) {
+              final auto = ButlerCommandParser.autoCategory(content);
+              if (auto != ButlerCommandParser.catOther || category.isEmpty) {
+                category = auto;
+              }
+            }
             _appendToolBubble('正在记录：「$content」（$category）…');
             toolResult = await _executeRecordTool(category, content);
           } else if (name == 'recall_memory') {

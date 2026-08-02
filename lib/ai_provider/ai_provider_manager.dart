@@ -471,6 +471,7 @@ class AIProviderManager {
           return AIProviderResult(
             text: finalText,
             thinking: apiResult.thinkingChain ?? '',
+            reasoningContent: apiResult.thinkingChain,
             usage: apiResult.usage,
             toolCalls: finalToolCalls,
           );

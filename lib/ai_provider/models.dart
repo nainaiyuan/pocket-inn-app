@@ -293,6 +293,7 @@ class AIChatMessage {
     this.imageBase64,
     this.toolCallId,
     this.toolCalls,
+    this.reasoningContent,
   });
 
   /// system / user / assistant / tool
@@ -308,16 +309,24 @@ class AIChatMessage {
   /// assistant 消息请求的工具调用（function calling）
   final List<Map<String, dynamic>>? toolCalls;
 
+  /// DeepSeek 思考模式：assistant 消息的 reasoning_content
+  /// （8-03 06:29：工具轮回传必须原样带回，否则 HTTP 400
+  ///  "The 'reasoning_content' in the thinking mode must be passed back"）
+  final String? reasoningContent;
+
   Map<String, dynamic> toApiJson() {
     // 工具结果消息：{role: tool, tool_call_id, content}
     if (role == 'tool' && toolCallId != null) {
       return {'role': 'tool', 'tool_call_id': toolCallId, 'content': content};
     }
-    // assistant 工具轮：{role: assistant, content: null, tool_calls}
+    // assistant 工具轮：{role: assistant, content: null, tool_calls,
+    //                    reasoning_content（思考模式必须回传）}
     if (toolCalls != null && toolCalls!.isNotEmpty) {
       return {
         'role': 'assistant',
         'content': null,
+        if (reasoningContent != null && reasoningContent!.isNotEmpty)
+          'reasoning_content': reasoningContent,
         'tool_calls': [
           for (final call in toolCalls!)
             {
@@ -364,6 +373,7 @@ class AIProviderResult {
   const AIProviderResult({
     this.text = '',
     this.thinking = '',
+    this.reasoningContent,
     this.providerId,
     this.providerName,
     this.usage,
@@ -376,6 +386,10 @@ class AIProviderResult {
 
   /// 思考链（reasoning）。流式时是增量，非流式是完整内容。
   final String thinking;
+
+  /// DeepSeek 思考模式的 reasoning_content 原文
+  /// （8-03 06:29：工具轮回传时原样带回，否则 HTTP 400）
+  final String? reasoningContent;
 
   final String? providerId;
   final String? providerName;
@@ -394,6 +408,7 @@ class AIProviderResult {
   AIProviderResult copyWith({
     String? text,
     String? thinking,
+    String? reasoningContent,
     String? providerId,
     String? providerName,
     Map<String, dynamic>? usage,
@@ -403,6 +418,7 @@ class AIProviderResult {
     return AIProviderResult(
       text: text ?? this.text,
       thinking: thinking ?? this.thinking,
+      reasoningContent: reasoningContent ?? this.reasoningContent,
       providerId: providerId ?? this.providerId,
       providerName: providerName ?? this.providerName,
       usage: usage ?? this.usage,
