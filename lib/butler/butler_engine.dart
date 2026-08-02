@@ -1,5 +1,6 @@
 import 'mask_engine.dart';
-import 'risk_filter_wordlist.dart' show RiskWord, riskWordlist, privacyMark;
+import 'risk_filter_wordlist.dart' show RiskWord, privacyMark;
+import 'risk_word_store.dart' show RiskWordStore;
 import 'butler_config.dart';
 import 'ai/butler_ai_service.dart';
 import '../utils/debug_logger.dart';
@@ -152,11 +153,13 @@ class ButlerEngine {
   }
 
   /// 处理用户发往男主的消息（假面层介入）
-  ProcessResult processOutgoingMessage({
+  Future<ProcessResult> processOutgoingMessage({
     required String userText,
     required String characterId,
     required String sessionId,
-  }) {
+  }) async {
+    // 确保敏感词表已加载（用户配置；首次启动写入默认表）
+    await RiskWordStore.instance.loadWords();
     // 管家规则校验
     var text = userText;
     String? moodContext;
@@ -190,6 +193,16 @@ class ButlerEngine {
           '管家流程',
           '② 隐私标记：检测到 ${sensitiveWords.length} 类敏感词，已加标记'
           '（${sensitiveWords.map((w) => w.word).join('/')}）',
+        );
+
+        // 记录冷却时间（持续时间维度：N 分钟内不重复挖空同一词）
+        for (final w in sensitiveWords) {
+          _riskCooldowns[w.word] = DateTime.now();
+        }
+        DebugLogger.log(
+          '管家流程',
+          '已记录冷却：${sensitiveWords.map((w) => w.word).join('/')} '
+          '（${sensitiveWords.map((w) => '${w.coolDownMinutes}分钟').join('/')}）',
         );
 
         // 3. 有替换时 → 生成心情标签助理解读
@@ -233,16 +246,33 @@ class ButlerEngine {
     return restored;
   }
 
-  /// 风险词检测（分级 + 搭配 + 浓度判定——敏感词不一定是敏感词）
+  /// 风险词检测（用户词表 + 白名单 + 冷却 + 分级搭配）
   ///
-  /// 判定规则：
-  /// - hard 词（动作类）单独命中 → 触发
-  /// - soft 词（身体部位/日常常见词）单独命中 → 不触发（避免误伤"嘴唇干/腰疼/进来"）
-  /// - soft 词与 hard 词同现，或 soft 命中 ≥2 → 触发（浓度达标）
+  /// 判定规则（"不是所有时候都是敏感的"）：
+  /// 1. 词表 = 用户配置（默认预置：爸爸/妈妈等测试词 + 动作/身体词）
+  /// 2. 白名单覆盖：命中词在例外词组内（亲爱的/进口…）→ 不触发
+  /// 3. 冷却：该词触发后 coolDownMinutes 分钟内不重复挖空（持续时间维度）
+  /// 4. 分级：hard 单独触发；soft 需搭配 hard 或 soft 命中 ≥2
   List<RiskWord> _detectSensitiveWords(String text) {
+    final words = RiskWordStore.instance.cachedWords;
+    final exceptions = RiskWordStore.instance.cachedExceptions;
+    final now = DateTime.now();
     final hits = <RiskWord>[];
-    for (final w in riskWordlist) {
-      if (text.contains(w.word)) hits.add(w);
+    for (final w in words) {
+      if (!text.contains(w.word)) continue;
+      // 白名单覆盖 → 该词在此场景不敏感
+      if (exceptions.any(
+        (e) => text.contains(e) && e.contains(w.word),
+      )) {
+        continue;
+      }
+      // 冷却期 → 不重复触发
+      final last = _riskCooldowns[w.word];
+      if (last != null &&
+          now.difference(last).inMinutes < w.coolDownMinutes) {
+        continue;
+      }
+      hits.add(w);
     }
     if (hits.isEmpty) return hits;
 
@@ -255,6 +285,9 @@ class ButlerEngine {
 
   /// 检测降温话题
   /// 这些话题不触发 PRIVACY_MARK，但触发"需要降温"提示
+  /// 敏感词冷却记录：词 → 上次触发时间（持续时间维度）
+  final Map<String, DateTime> _riskCooldowns = {};
+
   bool _hasCoolDownTopics(String text) {
     const coolDownTopics = [
       '几点了', '多久', '频率', '时间',

@@ -335,7 +335,8 @@ class MaskEngine {
 
     final others =
         p.keywords.where((k) => k != entry.realLabel).toList();
-    final tail = others.isEmpty ? '' : '（和${others.join('、')}有关）';
+    // 关键词直接给男主（管家记录的就是关键词——男主知道和什么有关）
+    final tail = others.isEmpty ? '' : '（提到${others.join('、')}时）';
     return '最近聊到这位${_categoryLabel(entry.category)}时，你的情绪${parts.join('，')}$tail';
   }
 

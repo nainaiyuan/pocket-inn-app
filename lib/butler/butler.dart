@@ -54,11 +54,11 @@ class Butler {
   }
 
   /// 处理发给男主的消息（经过假面层）
-  ProcessResult processOutgoing({
+  Future<ProcessResult> processOutgoing({
     required String text,
     required String characterId,
     required String sessionId,
-  }) {
+  }) async {
     return butlerEngine.processOutgoingMessage(
       userText: text,
       characterId: characterId,

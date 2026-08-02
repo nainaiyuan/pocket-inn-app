@@ -184,7 +184,7 @@ class ChatService {
 
     // === 管家介入：假面层替换 ===
     if (butler != null && butler!.config.maskLayerEnabled) {
-      final masked = butler!.processOutgoing(
+      final masked = await butler!.processOutgoing(
         text: normalizedInput,
         characterId: character.id,
         sessionId: sessionId,
@@ -1259,7 +1259,7 @@ extension ButlerSelfTest on ChatService {
 
     // 2. 假面层：敏感称呼替换
     if (butler != null && butler!.config.maskLayerEnabled) {
-      final masked = butler!.processOutgoing(
+      final masked = await butler!.processOutgoing(
         text: text,
         characterId: characterId,
         sessionId: sessionId ?? 'chat_page',

@@ -9,7 +9,8 @@ library;
 
 import '../butler_config.dart';
 import '../mask_engine.dart';
-import '../risk_filter_wordlist.dart' show RiskWord, riskWordlist, privacyMark;
+import '../risk_filter_wordlist.dart' show RiskWord, privacyMark;
+import '../risk_word_store.dart' show RiskWordStore;
 import '../modules/butler_module.dart';
 
 /// 假面层模块
@@ -90,11 +91,17 @@ class MaskModule extends ButlerModule {
     return ButlerModuleResult(text: restored);
   }
 
-  /// 风险词检测（与 ButlerEngine 保持一致：分级 + 搭配 + 浓度判定）
+  /// 风险词检测（与 ButlerEngine 保持一致：用户词表 + 白名单 + 冷却 + 分级）
   List<RiskWord> _detectSensitiveWords(String text) {
+    final words = RiskWordStore.instance.cachedWords;
+    final exceptions = RiskWordStore.instance.cachedExceptions;
     final hits = <RiskWord>[];
-    for (final w in riskWordlist) {
-      if (text.contains(w.word)) hits.add(w);
+    for (final w in words) {
+      if (!text.contains(w.word)) continue;
+      if (exceptions.any((e) => text.contains(e) && e.contains(w.word))) {
+        continue;
+      }
+      hits.add(w);
     }
     if (hits.isEmpty) return hits;
     final hardCount = hits.where((h) => h.isHard).length;
