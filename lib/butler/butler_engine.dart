@@ -305,16 +305,6 @@ class ButlerEngine {
     }
     if (hits.isEmpty) return hits;
 
-    // 求知意图 → 不屏蔽（用户在了解这个词/让男主解释，直接放行）
-    // 例："接吻是什么感觉？" → 男主可以解释；"我想和你接吻" → 挖空
-    if (_isCuriosityIntent(text)) {
-      DebugLogger.log(
-        '管家流程',
-        '求知意图：${hits.map((w) => w.word).join('/')} 命中但用户在了解，不屏蔽',
-      );
-      return [];
-    }
-
     // 强度判定（用户 16:23）：
     // - A词+B词（≥2 命中）更敏感 → 强度 ≥1 就挖空
     // - 单词（hard）没那么敏感 → 需强度 ≥2 才挖空
@@ -351,6 +341,18 @@ class ButlerEngine {
           now.difference(last).inMinutes < w.coolDownMinutes;
     });
     if (anyRecent) score += 1;
+
+    // 求知意图 → 也要过强度关（用户 16:32："做爱是什么感觉？"不能放行）
+    // 求知 + 强度 < 2（soft 词、低浓度）→ 放行，男主可以解释
+    // 求知 + 强度 ≥2（hard 词、高浓度）→ 不豁免，照常挖空
+    if (_isCuriosityIntent(text) && score < 2) {
+      DebugLogger.log(
+        '管家流程',
+        '求知意图：${hits.map((w) => w.word).join('/')} 命中且强度 ${score} < 2，'
+        '放行让男主解释',
+      );
+      return [];
+    }
 
     final hardCount = hits.where((h) => h.isHard).length;
     if (hits.length >= 2) {
