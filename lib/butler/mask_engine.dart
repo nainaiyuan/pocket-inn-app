@@ -112,26 +112,6 @@ class MaskEngine {
     'stranger': ['某人', '一个人', '那谁'],
   };
 
-  // ── 关系概述池（内置兜底：身份没写描述时用）──
-  // 键：relationType（旧数据兼容）或 category（新身份）
-  static const Map<String, List<String>> _relationTemplates = {
-    'family_mom': [
-      '一位女性长辈（关系亲密，用户感情复杂）',
-      '家里的长辈（很亲近，用户有些烦她）',
-      '长辈（用户又爱又烦的一位女性长辈）',
-      '用户的女性长辈（关系紧密，常有互动）',
-    ],
-    'family_dad': ['一位男性长辈（关系亲近，用户尊重他）', '家里的长辈（严肃但关心用户）', '男性长辈（用户和他话不多但感情深）'],
-    'friend_close': ['用户的好朋友（关系很好）', '一位密友（用户可以倾诉的那种）', '用户亲近的朋友（经常联系）'],
-    'work_boss': ['用户的上司（工作上有压力）', '用户的领导（用户有些怕他）', '工作上的上级（用户想讨好他）'],
-    'work_colleague': ['用户的同事', '一个工作上的人', '用户的同行'],
-    // 分类级兜底
-    'family': ['一位家人（关系亲近）', '用户的家人（很熟）', '家里的长辈（常见面）'],
-    'friend': ['用户的朋友', '一个和用户很熟的人', '用户常联系的朋友'],
-    'work': ['工作相关的人', '用户工作上认识的人', '和用户有工作往来的人'],
-    'stranger': ['用户认识的人', '一个用户提到的人'],
-  };
-
   final Random _random = Random();
 
   // ── 持久化存储（可空 = 纯内存）──
@@ -235,35 +215,23 @@ class MaskEngine {
         // 首次：分配纯代号（描述不固化进映射，避免"每次描述都一样"）
         code = _identityCodes[entry.id] ?? '[其他]';
         sessionMap[entry.id] = code;
-        // 描述 + 情绪规律都附上（男主既知道 ta 是谁，也知道你对 ta 的平均情绪）
-        final desc = _pickDescription(entry);
+        // 只附中性情绪规律（不含真实称呼）——男主不需要知道代号对应谁，
+        // 代号就是普通内容；首次也不附身份描述（用户 18:09：带身份描述=泄露）
         final patternDesc = _buildPatternDescription(entry);
-        final parts = [
-          if (desc != null) desc,
-          if (patternDesc != null) patternDesc,
-        ];
-        if (parts.isNotEmpty) {
-          // 描述只进 maskHints（system 注入），不进 user 文本
-          maskHints.add('$code：${parts.join('；')}');
+        if (patternDesc != null) {
+          maskHints.add('$code：$patternDesc');
           _sessionDescribed.putIfAbsent(sessionId, () => {})[entry.id] =
               DateTime.now();
         }
       } else {
         code = sessionMap[entry.id]!;
         // 已有映射 → 默认不再附描述
-        // 开关"每次都附上"（DeepSeek 无后台记忆）→ 每轮都附情绪参考
+        // 开关"每次都附上"（DeepSeek 无后台记忆）→ 每轮都附情绪规律参考
+        // （只附中性情绪规律，不附身份描述——男主不需要知道代号对应谁）
         // 或该身份出现了新确认的规律（情绪变了）→ 附规律描述
         final patternDesc = _buildPatternDescription(entry);
-        final desc = _pickDescription(entry);
-        if (hintsEveryTurn) {
-          // 每次都带：身份描述（男主知道代号指谁，被要求念时能念出）+ 情绪规律
-          final parts = [
-            if (desc != null) desc,
-            if (patternDesc != null) patternDesc,
-          ];
-          if (parts.isNotEmpty) {
-            maskHints.add('$code：${parts.join('；')}');
-          }
+        if (hintsEveryTurn && patternDesc != null) {
+          maskHints.add('$code：$patternDesc');
         } else if (_hasNewPattern(entry, sessionId)) {
           if (patternDesc != null) {
             maskHints.add('$code：$patternDesc');
@@ -338,28 +306,6 @@ class MaskEngine {
     '一个人': 'someone',
     '那谁': 'someone',
   };
-
-  /// 挑选本次附给男主的描述：
-  /// 1. 优先：用户写的描述池（随机轮换）
-  /// 2. 其次：规律联动描述（管家发现的情绪规律，动态生成）
-  /// 3. 回退：relationType 内置模板（旧数据兼容）
-  /// 4. 再回退：分类级内置模板
-  String? _pickDescription(IdentityEntry entry) {
-    if (entry.descriptions.isNotEmpty) {
-      return entry.descriptions[_random.nextInt(entry.descriptions.length)];
-    }
-    final patternDesc = _buildPatternDescription(entry);
-    if (patternDesc != null) return patternDesc;
-    final byRelation = _relationTemplates[entry.relationType];
-    if (byRelation != null && byRelation.isNotEmpty) {
-      return byRelation[_random.nextInt(byRelation.length)];
-    }
-    final byCategory = _relationTemplates[entry.category];
-    if (byCategory != null && byCategory.isNotEmpty) {
-      return byCategory[_random.nextInt(byCategory.length)];
-    }
-    return null;
-  }
 
   /// 规律联动描述：从规律引擎找该身份相关的已确认规律，
   /// 生成中性描述（不提具体称呼，只说情绪关联），如：

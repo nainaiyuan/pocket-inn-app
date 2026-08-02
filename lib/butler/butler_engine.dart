@@ -166,7 +166,7 @@ class ButlerEngine {
     String? moodContext;
 
     // 1. 假面层替换（统一替换，不因"跟我念"等指令放行——用户 17:57：
-    //    不能一个一个词放行，改由 system 提示让男主念出代号对应的真实称呼）
+    //    不能一个一个词放行。男主把代号当普通内容，念代号 → 还原层还原成真实称呼）
     if (_config.maskLayerEnabled) {
       final maskResult = _maskEngine.replaceSensitive(
         text: text,
