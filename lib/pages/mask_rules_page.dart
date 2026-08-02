@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../ai_provider/ai_provider_manager.dart';
 import '../ai_provider/models.dart';
+import '../butler/mask_engine.dart' show MaskEngine;
 import '../butler/modules/butler_module_hub.dart';
 import '../butler/storage/identity_store.dart';
 
@@ -31,6 +32,7 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
   void initState() {
     super.initState();
     _loadCustomCategories();
+    MaskEngine.loadHintsEveryTurn();
   }
 
   Future<void> _loadCustomCategories() async {
@@ -119,6 +121,41 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
       ),
       body: Column(
         children: [
+          // 每次都附上情绪参考开关（DeepSeek 无后台记忆 → 每次带，命中缓存）
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+            child: Card(
+              color: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(
+                  color: const Color(0xFF6A4A5A).withValues(alpha: 0.08),
+                ),
+              ),
+              child: SwitchListTile(
+                value: MaskEngine.hintsEveryTurn,
+                activeTrackColor: const Color(0xFFC896B4),
+                title: const Text(
+                  '每次都附上情绪参考',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF6A4A5A),
+                  ),
+                ),
+                subtitle: const Text(
+                  'DeepSeek 没有后台记忆，每轮都带上规律参考（同样内容命中缓存更省钱）；'
+                  '有后台记忆的模型可关掉，只带一次',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF6A4A5A)),
+                ),
+                onChanged: (v) async {
+                  await MaskEngine.setHintsEveryTurn(v);
+                  if (mounted) setState(() {});
+                },
+              ),
+            ),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),

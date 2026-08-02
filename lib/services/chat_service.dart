@@ -194,9 +194,12 @@ class ChatService {
         // 身份描述走 system 注入（男主认知层），不进 user 文本 → 不会念出来
         if (masked.maskHints.isNotEmpty) {
           final hints = masked.maskHints.join('；');
+          // 告诉男主：以下是参考信息（情绪规律/身份描述），理解即可，不必在回复中提及
+          final ref = '以下是关于用户身边人和情绪规律的参考信息，仅帮助你理解，'
+              '不必在回复中提及：$hints';
           skillInjection = skillInjection == null
-              ? '用户提到的身份代号：$hints'
-              : '$skillInjection\n用户提到的身份代号：$hints';
+              ? '用户提到的身份代号：$ref'
+              : '$skillInjection\n用户提到的身份代号：$ref';
         }
         ButlerFlowRunner.instance.stepDone(
           'mask_replace',

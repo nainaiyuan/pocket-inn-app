@@ -79,6 +79,7 @@ class _ComboStats {
     shiftJoy: shiftJoy,
     shiftAttachment: shiftAttachment,
     source: source,
+    lastBaseline: hits.isEmpty ? const {} : hits.last.baseline,
   );
 
   /// 组合的唯一key（排序后用逗号连接）
@@ -285,6 +286,9 @@ class PatternStats {
   final double shiftAttachment;
   final String source;
 
+  /// 最近一次命中时的情绪基线快照（曾经值参照）
+  final Map<String, double> lastBaseline;
+
   PatternStats({
     required this.comboKey,
     required this.keywords,
@@ -297,6 +301,7 @@ class PatternStats {
     required this.shiftJoy,
     required this.shiftAttachment,
     this.source = 'auto',
+    this.lastBaseline = const {},
   });
 }
 

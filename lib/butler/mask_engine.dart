@@ -18,6 +18,8 @@
 
 import 'dart:math';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'mood_analysis/mood_analyzer_keyword.dart' show KeywordMoodAnalyzer;
 import 'risk_filter_wordlist.dart' show RiskWord, privacyMark;
 import 'storage/identity_store.dart' show IdentityEntry, IdentityStore;
@@ -45,6 +47,21 @@ class ProcessResult {
 
 /// 假面层引擎
 class MaskEngine {
+  /// 每次对话都附上情绪参考（DeepSeek 无后台记忆 → 每次带，命中缓存）
+  /// 开关在假面层页 UI；有后台记忆的模型可关掉（只带一次）
+  static bool hintsEveryTurn = true;
+
+  static Future<void> loadHintsEveryTurn() async {
+    final prefs = await SharedPreferences.getInstance();
+    hintsEveryTurn = prefs.getBool('mask_hints_every_turn') ?? true;
+  }
+
+  static Future<void> setHintsEveryTurn(bool value) async {
+    hintsEveryTurn = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('mask_hints_every_turn', value);
+  }
+
   // ── 身份注册表 ──
   final Map<String, IdentityEntry> _identities = {};
 
@@ -174,6 +191,8 @@ class MaskEngine {
     required String characterId,
     required String sessionId,
   }) {
+    // 记录当前文本情绪（规律"现在"值参照）
+    _latestMood = KeywordMoodAnalyzer().analyze(text).dimensions;
     _sessionMappings.putIfAbsent(sessionId, () => {});
     final sessionMap = _sessionMappings[sessionId]!;
     final appliedMappings = <String, String>{};
@@ -209,12 +228,15 @@ class MaskEngine {
         }
       } else {
         code = sessionMap[entry.id]!;
-        // 已有映射 → 说一次机制：默认不再附描述
-        // 例外：该身份出现了新确认的规律（情绪变了）→ 附规律描述
-        if (_hasNewPattern(entry, sessionId)) {
-          final desc = _buildPatternDescription(entry);
-          if (desc != null) {
-            maskHints.add('$code：$desc');
+        // 已有映射 → 默认不再附描述
+        // 开关"每次都附上"（DeepSeek 无后台记忆）→ 每轮都附情绪参考
+        // 或该身份出现了新确认的规律（情绪变了）→ 附规律描述
+        final patternDesc = _buildPatternDescription(entry);
+        if (hintsEveryTurn && patternDesc != null) {
+          maskHints.add('$code：$patternDesc');
+        } else if (_hasNewPattern(entry, sessionId)) {
+          if (patternDesc != null) {
+            maskHints.add('$code：$patternDesc');
             _sessionDescribed[sessionId]![entry.id] = DateTime.now();
           }
         }
@@ -322,26 +344,51 @@ class MaskEngine {
     matches.sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
     final p = matches.first;
 
-    final parts = <String>[];
-    void add(double v, String label) {
-      if (v.abs() >= 5) parts.add('${v > 0 ? '上升' : '下降'}${v.abs().round()}%的$label');
+    // 曾经 vs 现在 对比格式（用户 16:13）：
+    // 曾经（小猫+狗狗+…）：依恋 12%
+    // 现在：依恋 20%
+    final combo = p.keywords.join('+');
+    final lastHit = p;
+
+    String? dimValue(String label, double shift, List<String> keys) {
+      if (shift.abs() < 5) return null;
+      // 曾经 = 最近命中时的基线快照 + 偏移（无快照 → 偏移直接当曾经值）
+      double? past;
+      if (lastHit != null && lastHit.lastBaseline.isNotEmpty) {
+        for (final k in keys) {
+          if (lastHit.lastBaseline.containsKey(k)) {
+            past = (lastHit.lastBaseline[k] ?? 0) + shift;
+            break;
+          }
+        }
+      }
+      past ??= shift;
+      // 现在 = 当前情绪（最近一次分析值，无则省略"现在"）
+      final now = _latestMood[keys.firstWhere(
+        (k) => _latestMood.containsKey(k),
+        orElse: () => keys.first,
+      )];
+      if (now == null) return '$label ${past.round()}%';
+      return '$label ${past.round()}% → 现在 ${now.round()}%';
     }
 
-    add(p.shiftJoy, '开心');
-    add(p.shiftSad, '悲伤');
-    add(p.shiftAnger, '生气');
-    add(p.shiftAttachment, '依恋');
+    final parts = <String>[
+      if (dimValue('依恋', p.shiftAttachment, const ['依恋', '渴望', '思念', '爱意']) != null)
+        dimValue('依恋', p.shiftAttachment, const ['依恋', '渴望', '思念', '爱意'])!,
+      if (dimValue('开心', p.shiftJoy, const ['喜悦', '幸福', '满足', '安心', '开心']) != null)
+        dimValue('开心', p.shiftJoy, const ['喜悦', '幸福', '满足', '安心', '开心'])!,
+      if (dimValue('烦躁', p.shiftAnger, const ['愤怒', '烦躁', '厌烦', '生气']) != null)
+        dimValue('烦躁', p.shiftAnger, const ['愤怒', '烦躁', '厌烦', '生气'])!,
+      if (dimValue('悲伤', p.shiftSad, const ['悲伤', '脆弱', '失望', '委屈', '难过']) != null)
+        dimValue('悲伤', p.shiftSad, const ['悲伤', '脆弱', '失望', '委屈', '难过'])!,
+    ];
     if (parts.isEmpty) return null;
 
-    final others =
-        p.keywords.where((k) => k != entry.realLabel).toList();
-    // 规律描述格式：A+B = 情感（关键词直接给男主，男主知道和什么有关）
-    // 例："提到唠叨、相亲时 → 你的情绪上升12%的烦躁"
-    if (others.isNotEmpty) {
-      return '提到${others.join('、')}时 → 你的情绪${parts.join('，')}';
-    }
-    return '最近聊到这位${_categoryLabel(entry.category)}时，你的情绪${parts.join('，')}';
+    return '曾经（$combo）：${parts.join('；')}';
   }
+
+  /// 最近一次情绪分析值（规律"现在"参照；无则空）
+  Map<String, double> _latestMood = {};
 
   /// 该身份是否有"新确认的规律"（在本次会话首次描述之后出现的）
   bool _hasNewPattern(IdentityEntry entry, String sessionId) {
