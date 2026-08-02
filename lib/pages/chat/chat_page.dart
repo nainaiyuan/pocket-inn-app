@@ -336,15 +336,17 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       }
       // function calling 循环：模型请求工具 → 执行 → 回传 → 再生成（最多3轮防死循环）
       // 用户 8-03 00:55：日志里看不见工具调用 → 每个工具调用都记日志
+      // 用户 8-03 01:57：工具轮不限定轮数（原来最多 3 轮，复杂任务可能不够）；
+      // 但防死循环：同一工具连续调用 ≥3 次 → 强制停止
       var toolLoop = 0;
-      while (toolLoop < 3 &&
-          result.toolCalls != null &&
-          result.toolCalls!.isNotEmpty) {
+      final consecutiveToolCounts = <String, int>{};
+      while (result.toolCalls != null && result.toolCalls!.isNotEmpty) {
         toolLoop++;
         DebugLogger.log('AI路由', '🔧 第 $toolLoop 轮：男主请求 ${result.toolCalls!.length} 个工具');
         final toolMessages = <AIChatMessage>[
           AIChatMessage(role: 'assistant', content: '', toolCalls: result.toolCalls),
         ];
+        var loopExceeded = false;
         for (final call in result.toolCalls!) {
           final name = call['name']?.toString() ?? '';
           final args = (call['arguments'] as Map<String, dynamic>?) ?? {};
@@ -379,13 +381,23 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           } else {
             toolResult = '未知工具：$name';
           }
+          // 完成/失败气泡（用户 8-03 01:57）：执行完必须给用户明确反馈
+          _appendToolResultBubble(name, toolResult);
           DebugLogger.log('AI路由', '🔧 工具 $name 结果：${toolResult.length > 80 ? toolResult.substring(0, 80) + '…' : toolResult}');
           toolMessages.add(AIChatMessage(
             role: 'tool',
             content: toolResult,
             toolCallId: 'call_${toolLoop}_$name',
           ));
+          // 防死循环：同一工具连续调用 ≥3 次 → 停止本轮
+          final n = (consecutiveToolCounts[name] ?? 0) + 1;
+          consecutiveToolCounts[name] = n;
+          if (n >= 3) {
+            loopExceeded = true;
+            DebugLogger.log('AI路由', '⚠️ 工具 $name 连续调用 $n 次，强制停止（防死循环）');
+          }
         }
+        if (loopExceeded) break;
         result = await _aiSvc.generateReply(
           '',
           personaId,
@@ -931,6 +943,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       text: '[tool] $text',
       isMe: false,
     ));
+  }
+
+  /// 工具执行完成/失败气泡（用户 8-03 01:57）：执行完必须给用户明确反馈。
+  /// 结果文本含"拒绝/没有找到/为空/失败/无法/暂无/不在/未知" → ❌，否则 ✅
+  void _appendToolResultBubble(String toolName, String resultText) {
+    const failMarkers = ['拒绝', '没有找到', '为空', '失败', '无法', '暂无', '不在', '未知'];
+    final failed = failMarkers.any(resultText.contains);
+    final icon = failed ? '❌' : '✅';
+    _appendToolBubble('$icon $toolName ${failed ? '失败' : '完成'}：$resultText');
   }
 
   /// 处理男主指令（#记录/#查记忆/#定时/#帮助/#model）→ 审批弹窗 → 反馈
