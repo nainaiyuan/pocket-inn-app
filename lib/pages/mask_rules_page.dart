@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../ai_provider/ai_provider_manager.dart';
 import '../ai_provider/models.dart';
@@ -21,6 +24,76 @@ class MaskRulesPage extends StatefulWidget {
 }
 
 class _MaskRulesPageState extends State<MaskRulesPage> {
+  /// 用户自定义分类（微信分组式：自己填，下次还能选）
+  List<String> _customCategories = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCustomCategories();
+  }
+
+  Future<void> _loadCustomCategories() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList('mask_custom_categories') ?? [];
+    if (mounted) setState(() => _customCategories = list);
+  }
+
+  /// 添加自定义分类（保存后下次可复用）
+  Future<void> _addCustomCategory(String name) async {
+    final n = name.trim();
+    if (n.isEmpty || _customCategories.contains(n)) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      'mask_custom_categories',
+      [..._customCategories, n],
+    );
+    if (mounted) setState(() => _customCategories = [..._customCategories, n]);
+  }
+
+  /// 新建分类弹窗
+  Future<String?> _promptNewCategory(BuildContext ctx) {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: ctx,
+      builder: (dctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        title: const Text(
+          '新建分类',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF6A4A5A),
+          ),
+        ),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: _deco('分类名（如：亲戚 / 同学 / 前任）'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dctx),
+            child: const Text(
+              '取消',
+              style: TextStyle(color: Color(0xFF6A4A5A)),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFC896B4),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onPressed: () => Navigator.pop(dctx, ctrl.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final engine = widget.hub.sharedMaskEngine!;
@@ -148,6 +221,7 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
 
   void _showAddDialog() {
     final labelCtrl = TextEditingController();
+    final describeCtrl = TextEditingController();
     String category = 'family';
     final descCtrls = <TextEditingController>[];
     var generating = false;
@@ -179,6 +253,77 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
             }
             setDialogState(() => generating = true);
             try {
+              // 口语描述 → 管家整理成整套身份（称呼+分类+描述）
+              final describeText = describeCtrl.text.trim();
+              if (describeText.isNotEmpty) {
+                final idResult = await AIProviderManager.instance.chat(
+                  null,
+                  [
+                    AIChatMessage(
+                      role: 'system',
+                      content:
+                          '你是关系整理助手。用户会用口语描述一个人（家人/朋友/同事/前任等）。'
+                          '请整理成 JSON，格式：'
+                          '{"label":"怎么称呼ta（如 妈妈/老板/闺蜜）","category":"family或friend或work或stranger或简短中文分类",'
+                          '"descriptions":["5条中性第三人称描述，每条不超过30字，不出现真实称呼，'
+                          '覆盖关系、性格、相处方式、对用户情绪的影响"]}'
+                          '只输出 JSON，不要多余文字。',
+                    ),
+                    AIChatMessage(role: 'user', content: '口语描述：$describeText'),
+                  ],
+                );
+                final jsonStr = idResult.text
+                    .replaceAll(RegExp(r'^```json\s*|\s*```$'), '')
+                    .trim();
+                final start = jsonStr.indexOf('{');
+                final end = jsonStr.lastIndexOf('}');
+                if (start >= 0 && end > start) {
+                  final decoded =
+                      jsonDecode(jsonStr.substring(start, end + 1));
+                  final genLabel = (decoded['label'] as String?)?.trim() ?? '';
+                  final genCategory =
+                      (decoded['category'] as String?)?.trim() ?? '';
+                  final genDescs = ((decoded['descriptions'] as List?) ?? [])
+                      .map((d) => d.toString().trim())
+                      .where((d) => d.isNotEmpty && d.length > 3)
+                      .toList();
+                  if (genLabel.isNotEmpty) {
+                    setDialogState(() {
+                      labelCtrl.text = genLabel;
+                      // 分类：预设或自定义（自定义自动加入列表）
+                      const presets = ['family', 'friend', 'work', 'stranger'];
+                      if (presets.contains(genCategory)) {
+                        category = genCategory;
+                      } else if (genCategory.isNotEmpty) {
+                        category = genCategory;
+                        if (!_customCategories.contains(genCategory)) {
+                          _customCategories = [..._customCategories, genCategory];
+                          SharedPreferences.getInstance().then((prefs) => prefs
+                              .setStringList(
+                                  'mask_custom_categories', _customCategories));
+                        }
+                      }
+                      descCtrls
+                        ..clear()
+                        ..addAll(
+                          genDescs.map(
+                            (d) => TextEditingController(text: d),
+                          ),
+                        );
+                      if (genDescs.isEmpty) descCtrls.add(TextEditingController());
+                      generating = false;
+                    });
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(content: Text('✨ 管家已整理好，确认后可添加')),
+                      );
+                    }
+                    return; // 已回填，不再走下面的描述生成
+                  }
+                }
+                throw Exception('管家返回内容无法解析');
+              }
+              // 没有口语描述 → 原有逻辑：称呼 → 生成 5 条描述
               final result = await AIProviderManager.instance.chat(
                 null,
                 [
@@ -252,21 +397,72 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   TextField(
+                    controller: describeCtrl,
+                    decoration: _deco(
+                      '口语描述 ta（管家自动整理成身份，如：我妈管我管得严，老催我相亲）',
+                    ),
+                    maxLines: 2,
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: generating ? null : generateDescriptions,
+                      icon: generating
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color(0xFFC896B4),
+                              ),
+                            )
+                          : const Icon(Icons.auto_fix_high, size: 16),
+                      label: Text(
+                        generating ? '整理中…' : '✨ 管家整理成身份',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFC896B4),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  TextField(
                     controller: labelCtrl,
                     decoration: _deco('怎么称呼 ta？（如：妈妈 / 老板 / 前任）'),
                   ),
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
                     initialValue: category,
-                    decoration: _deco('分类（可选）'),
-                    items: const [
-                      DropdownMenuItem(value: 'family', child: Text('家人')),
-                      DropdownMenuItem(value: 'friend', child: Text('朋友')),
-                      DropdownMenuItem(value: 'work', child: Text('工作')),
-                      DropdownMenuItem(value: 'stranger', child: Text('其他')),
+                    decoration: _deco('分类（可选，可自定义）'),
+                    items: [
+                      const DropdownMenuItem(value: 'family', child: Text('家人')),
+                      const DropdownMenuItem(value: 'friend', child: Text('朋友')),
+                      const DropdownMenuItem(value: 'work', child: Text('工作')),
+                      const DropdownMenuItem(value: 'stranger', child: Text('其他')),
+                      ..._customCategories.map(
+                        (c) => DropdownMenuItem(value: c, child: Text(c)),
+                      ),
+                      const DropdownMenuItem(
+                        value: '__new__',
+                        child: Text('＋ 新建分类…'),
+                      ),
                     ],
-                    onChanged: (v) =>
-                        setDialogState(() => category = v ?? 'family'),
+                    onChanged: (v) async {
+                      if (v == '__new__') {
+                        final name = await _promptNewCategory(ctx);
+                        if (name != null && name.isNotEmpty) {
+                          await _addCustomCategory(name);
+                          if (ctx.mounted) {
+                            setDialogState(() => category = name);
+                          }
+                        }
+                      } else {
+                        setDialogState(() => category = v ?? 'family');
+                      }
+                    },
                   ),
                   const SizedBox(height: 14),
                   Text(

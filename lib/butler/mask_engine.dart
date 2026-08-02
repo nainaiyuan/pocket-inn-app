@@ -18,6 +18,7 @@
 
 import 'dart:math';
 
+import 'mood_analysis/mood_analyzer_keyword.dart' show KeywordMoodAnalyzer;
 import 'risk_filter_wordlist.dart' show RiskWord, privacyMark;
 import 'storage/identity_store.dart' show IdentityEntry, IdentityStore;
 import 'patterns/pattern_engine.dart' show PatternEngine;
@@ -193,10 +194,16 @@ class MaskEngine {
         // 首次：分配纯代号（描述不固化进映射，避免"每次描述都一样"）
         code = _identityCodes[entry.id] ?? '[其他]';
         sessionMap[entry.id] = code;
+        // 描述 + 情绪规律都附上（男主既知道 ta 是谁，也知道你对 ta 的平均情绪）
         final desc = _pickDescription(entry);
-        if (desc != null) {
+        final patternDesc = _buildPatternDescription(entry);
+        final parts = [
+          if (desc != null) desc,
+          if (patternDesc != null) patternDesc,
+        ];
+        if (parts.isNotEmpty) {
           // 描述只进 maskHints（system 注入），不进 user 文本
-          maskHints.add('$code：$desc');
+          maskHints.add('$code：${parts.join('；')}');
           _sessionDescribed.putIfAbsent(sessionId, () => {})[entry.id] =
               DateTime.now();
         }
@@ -389,25 +396,17 @@ class MaskEngine {
 
   /// 构建心情标签上下文字符串
   /// 根据用户原文生成助理解读标签
+  /// 情绪标签上下文（敏感词触发时给男主）
+  /// 输出情绪标签 + 建议（如"她现在的情绪：依恋 65、渴望关注 30。用户今天很黏人…"）
+  /// 不输出活动词（男主不知道具体活动，只需要知道当前情绪）
   String buildMoodContextString(String originalText) {
-    final lower = originalText.toLowerCase();
-    final tags = <String>[];
-
-    if (lower.contains('亲') || lower.contains('吻') || lower.contains('抱')) {
-      tags.add('亲密互动');
-    }
-    if (lower.contains('想你') || lower.contains('爱你') || lower.contains('依恋')) {
-      tags.add('依恋表达');
-    }
-    if (lower.contains('摸') || lower.contains('抚') || lower.contains('触')) {
-      tags.add('肢体接触');
-    }
-    if (lower.contains('别走') || lower.contains('陪') || lower.contains('留下')) {
-      tags.add('陪伴需求');
-    }
-
-    if (tags.isEmpty) return '';
-    return '\n（标签：${tags.join(' / ')}）';
+    final result = KeywordMoodAnalyzer().analyze(originalText);
+    if (result.dimensions.isEmpty) return '';
+    final top = result.dimensions.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final tagParts = top.take(3).map((e) => '${e.key} ${e.value.round()}').join('、');
+    final hint = result.anomalyDescription ?? '按这个情绪自然回应';
+    return '\n（她现在的情绪：$tagParts。$hint）';
   }
 
   // ── 会话管理 ──
