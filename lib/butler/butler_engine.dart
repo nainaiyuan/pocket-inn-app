@@ -217,6 +217,19 @@ class ButlerEngine {
           DebugLogger.log('管家流程', '④ 全挖空 → 用情绪标签生成 fallback 文本');
         }
       }
+
+      // 5. 固定格式敏感信息屏蔽（身份证/手机号/银行卡/邮箱…）
+      //    只要匹配格式就挖空，每次都执行（不走冷却）
+      final (fmtText, fmtMatched) = _maskEngine.applyFormatMask(text);
+      if (fmtMatched.isNotEmpty) {
+        text = fmtText;
+        DebugLogger.log(
+          '管家流程',
+          '⑤ 固定格式屏蔽：${fmtMatched.join('/')} → [PRIVACY_MARK]',
+        );
+        // 敏感词没触发时也附情绪标签（男主理解意图）
+        moodContext ??= _maskEngine.buildMoodContextString(userText);
+      }
     }
 
     return ProcessResult(

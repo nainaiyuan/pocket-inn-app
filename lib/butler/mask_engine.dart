@@ -335,9 +335,12 @@ class MaskEngine {
 
     final others =
         p.keywords.where((k) => k != entry.realLabel).toList();
-    // 关键词直接给男主（管家记录的就是关键词——男主知道和什么有关）
-    final tail = others.isEmpty ? '' : '（提到${others.join('、')}时）';
-    return '最近聊到这位${_categoryLabel(entry.category)}时，你的情绪${parts.join('，')}$tail';
+    // 规律描述格式：A+B = 情感（关键词直接给男主，男主知道和什么有关）
+    // 例："提到唠叨、相亲时 → 你的情绪上升12%的烦躁"
+    if (others.isNotEmpty) {
+      return '提到${others.join('、')}时 → 你的情绪${parts.join('，')}';
+    }
+    return '最近聊到这位${_categoryLabel(entry.category)}时，你的情绪${parts.join('，')}';
   }
 
   /// 该身份是否有"新确认的规律"（在本次会话首次描述之后出现的）
@@ -422,6 +425,30 @@ class MaskEngine {
       Map.from(_sessionMappings[sessionId] ?? {});
 
   // ── 禁区检测 ──
+
+  /// 固定格式敏感信息屏蔽（身份证/手机号/银行卡/邮箱…）
+  ///
+  /// 只要匹配固定格式 → 挖空为 [PRIVACY_MARK]（每次都执行，不走冷却）
+  /// 顺序：身份证 → 手机号 → 邮箱 → 银行卡（兜底 16-19 位纯数字）
+  /// 返回 (处理后的文本, 命中的格式标签列表)
+  (String, List<String>) applyFormatMask(String text) {
+    var result = text;
+    final matched = <String>{};
+    const rules = <String, String>{
+      '身份证号': r'\b\d{17}[\dXx]\b',
+      '手机号': r'\b1[3-9]\d{9}\b',
+      '邮箱': r'\b[\w.+-]+@[\w-]+\.[\w.-]+\b',
+      '银行卡号': r'\b\d{16,19}\b',
+    };
+    for (final e in rules.entries) {
+      final re = RegExp(e.value);
+      if (re.hasMatch(result)) {
+        matched.add(e.key);
+        result = result.replaceAllMapped(re, (_) => privacyMark);
+      }
+    }
+    return (result, matched.toList());
+  }
 
   /// 检测文本是否包含隐私禁区（身份证、银行卡、手机号等）
   /// 这些不应该发送给任何第三方
