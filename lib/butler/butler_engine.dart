@@ -165,6 +165,27 @@ class ButlerEngine {
     var text = userText;
     String? moodContext;
 
+    // 2'. 敏感词检测【在原文上先做】（用户 8-03 00:55：设了敏感词日志里没检测出来）
+    //    根因：假面层先替换"爸爸"→[亲属A]，敏感词检测在替换后文本上做 → 永远检测不到。
+    //    改：先在原文 userText 上检测，命中结果保留；挖空仍在假面层替换后执行
+    //    （避免挖空内容里带真实称呼，也保证 [PRIVACY_MARK] 出现在最终文本里）。
+    var askWords = <String>[];
+    var blockedWords = <String>[];
+    String? maskLayerText; // 敏感词挖空前（假面层已替换）——用户选"不屏蔽"时用
+    final riskEnabled = RiskWordStore.instance.cachedEnabled &&
+        !RiskWordStore.instance.isCharacterDisabled(characterId);
+    var detectedSensitiveWords = <RiskWord>[];
+    if (_config.keywordReplaceEnabled && riskEnabled) {
+      final verdict = _detectSensitiveWords(userText);
+      detectedSensitiveWords = [...verdict.block, ...verdict.ask];
+      if (verdict.block.isNotEmpty) {
+        blockedWords = verdict.block.map((w) => w.word).toList();
+      }
+      if (verdict.ask.isNotEmpty) {
+        askWords = verdict.ask.map((w) => w.word).toList();
+      }
+    }
+
     // 1. 假面层替换（统一替换，不因"跟我念"等指令放行——用户 17:57：
     //    不能一个一个词放行。男主把代号当普通内容，念代号 → 还原层还原成真实称呼）
     //    37批：代号会话级轮换（每次新对话重新分配），男主无法把代号绑定到具体人
@@ -185,43 +206,30 @@ class ButlerEngine {
 
     // 2. 关键词替换（PRIVACY_MARK）——三档：直接屏蔽 / 提醒（弹窗问用户）/ 放行
     //    每男主开关：本地 AI 男主可关闭（固定格式检测不受影响）
-    var askWords = <String>[];
-    var blockedWords = <String>[];
-    String? maskLayerText; // 敏感词挖空前（假面层已替换）——用户选"不屏蔽"时用
-    final riskEnabled = RiskWordStore.instance.cachedEnabled &&
-        !RiskWordStore.instance.isCharacterDisabled(characterId);
+    //    检测已在原文上完成（见 2'）；这里用检测结果做挖空
     if (_config.keywordReplaceEnabled && riskEnabled) {
-      final verdict = _detectSensitiveWords(text);
-      // 提醒档：先挖空，用户选"不屏蔽"时用 maskLayerText 恢复
-      final sensitiveWords = [...verdict.block, ...verdict.ask];
-      if (verdict.block.isNotEmpty) {
-        blockedWords = verdict.block.map((w) => w.word).toList();
-      }
-      if (verdict.ask.isNotEmpty) {
-        askWords = verdict.ask.map((w) => w.word).toList();
-      }
-      if (sensitiveWords.isNotEmpty) {
+      if (detectedSensitiveWords.isNotEmpty) {
         maskLayerText = text; // 挖空前存档（假面层已替换）
         final privacyResult = _maskEngine.applyPrivacyMark(
           text: text,
-          sensitiveWords: sensitiveWords,
+          sensitiveWords: detectedSensitiveWords,
         );
         text = privacyResult.text;
         DebugLogger.log(
           '管家流程',
-          '② 隐私标记：检测到 ${sensitiveWords.length} 类敏感词，已加标记'
-          '（${sensitiveWords.map((w) => w.word).join('/')}）'
-          '${verdict.ask.isNotEmpty ? '（其中 ${verdict.ask.map((w) => w.word).join('/')} 为提醒档，待用户确认）' : ''}',
+          '② 隐私标记：检测到 ${detectedSensitiveWords.length} 类敏感词，已加标记'
+          '（${detectedSensitiveWords.map((w) => w.word).join('/')}）'
+          '${askWords.isNotEmpty ? '（其中 ${askWords.join('/')} 为提醒档，待用户确认）' : ''}',
         );
 
         // 记录触发时间（持续时间因子：持续聊同一话题 → 强度 +1）
-        for (final w in sensitiveWords) {
+        for (final w in detectedSensitiveWords) {
           _lastTriggerTime[w.word] = DateTime.now();
         }
         DebugLogger.log(
           '管家流程',
-          '已记录触发时间：${sensitiveWords.map((w) => w.word).join('/')} '
-          '（持续窗口 ${sensitiveWords.map((w) => '${w.coolDownMinutes}分钟').join('/')}）',
+          '已记录触发时间：${detectedSensitiveWords.map((w) => w.word).join('/')} '
+          '（持续窗口 ${detectedSensitiveWords.map((w) => '${w.coolDownMinutes}分钟').join('/')}）',
         );
 
         // 3. 有替换时 → 生成心情标签助理解读

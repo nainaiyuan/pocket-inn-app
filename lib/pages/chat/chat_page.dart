@@ -331,11 +331,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         replyTexts.add(result.text.trim());
       }
       // function calling 循环：模型请求工具 → 执行 → 回传 → 再生成（最多3轮防死循环）
+      // 用户 8-03 00:55：日志里看不见工具调用 → 每个工具调用都记日志
       var toolLoop = 0;
       while (toolLoop < 3 &&
           result.toolCalls != null &&
           result.toolCalls!.isNotEmpty) {
         toolLoop++;
+        DebugLogger.log('AI路由', '🔧 第 $toolLoop 轮：男主请求 ${result.toolCalls!.length} 个工具');
         final toolMessages = <AIChatMessage>[
           AIChatMessage(role: 'assistant', content: '', toolCalls: result.toolCalls),
         ];
@@ -343,6 +345,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           final name = call['name']?.toString() ?? '';
           final args = (call['arguments'] as Map<String, dynamic>?) ?? {};
           String toolResult;
+          DebugLogger.log('AI路由', '🔧 工具 $name 参数：${args.isEmpty ? '（空）' : args}');
           if (name == 'record_memory') {
             final content = args['content']?.toString() ?? '';
             final category = args['category']?.toString() ?? '';
@@ -372,6 +375,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           } else {
             toolResult = '未知工具：$name';
           }
+          DebugLogger.log('AI路由', '🔧 工具 $name 结果：${toolResult.length > 80 ? toolResult.substring(0, 80) + '…' : toolResult}');
           toolMessages.add(AIChatMessage(
             role: 'tool',
             content: toolResult,

@@ -270,7 +270,11 @@ class AiChatService {
     // stateful：AI 自己记得 → 不重复带历史（避免浪费 + 服务端已有）；
     // 但空闲超时后 AI 已不记得（服务器释放了缓存）→ 本次带摘要区恢复
     // （用户 21:47：空闲 N 小时没聊天 → 服务器省空间释放上下文缓存）
-    final historyMsgs = (stateful && !statefulRecover)
+    //
+    // 用户 8-03 00:55：男主分不清上下文和当前用户的话，以为上下文也要回复。
+    // 修复：上下文参考打包成【一条】system 消息（不混进 user/assistant 对话流），
+    // 明确"无需回复，只回复最新一条用户消息"→ 男主不会逐条回历史。
+    final historyMsgs = (stateful && !statefulRecover) || toolRound
         ? <AIChatMessage>[]
         : ContextManager.instance.buildHistoryMessages(personaId);
     // 透明化：保存完整 prompt 供 📄 按钮查看
@@ -278,14 +282,25 @@ class AiChatService {
     // 本次对话实时记录（用户+男主交替），不是档案历史
     final historyText = historyMsgs.isEmpty
         ? ''
-        : '\n\n【上下文参考】（本次对话实时记录，含你（男主）自己的回答）\n'
+        : '\n\n【上下文参考】（本次对话实时记录，含你（男主）自己的回答。'
+              '这些是已经聊过的内容，你只需要参考它们保持人设和记忆连贯，'
+              '【不要回复】它们——你只需要回复最后一条【用户】消息）\n'
               '${historyMsgs.map((m) => '[${m.role}] ${m.content}').join('\n')}';
     lastPromptText = '【System】\n$systemPrompt$historyText\n\n【User】\n$message';
     DebugLogger.log('Prompt', '本次组装完成（${lastPromptText!.length} 字，可点 📄 查看）');
+    // 上下文参考作为一条 system 消息（role: system 明确是"参考"不是"待回复"），
+    // 与当前 user 消息彻底分开 → 男主不会把历史当待回复内容
     final messages = <AIChatMessage>[
       AIChatMessage(role: 'system', content: systemPrompt),
-      ...historyMsgs,
-      AIChatMessage(role: 'user', content: message),
+      if (historyMsgs.isNotEmpty)
+        AIChatMessage(
+          role: 'system',
+          content: '【上下文参考】（已聊过的内容，无需回复，仅作参考保持连贯）\n'
+              '${historyMsgs.map((m) => '[${m.role}] ${m.content}').join('\n')}',
+        ),
+      // 工具轮不拼空 user 消息（toolMessages 已含 assistant(tool_calls)+tool 结果，
+      // 空 user 消息会让 DeepSeek 困惑甚至空回复——用户 8-03 00:55 报频繁空回复）
+      if (!toolRound) AIChatMessage(role: 'user', content: message),
       if (toolMessages != null) ...toolMessages,
     ];
     late final AIProviderResult result;

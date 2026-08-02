@@ -318,8 +318,9 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
                 }
                 final repl = replCtrl.text.trim();
                 Navigator.pop(ctx);
+                // 用户 8-03 00:55：新加的敏感词排最前面（原来 append 到最后，
+                // 列表长时看不见，以为没加成功）
                 _save([
-                  ..._words,
                   RiskWord(
                     word,
                     kind: kind,
@@ -327,6 +328,7 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
                     replacement: repl.isEmpty ? null : repl,
                     coolDownMinutes: coolDown,
                   ),
+                  ..._words,
                 ]);
               },
               child: const Text('添加'),
