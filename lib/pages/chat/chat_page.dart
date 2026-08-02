@@ -350,7 +350,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         for (final call in result.toolCalls!) {
           final name = call['name']?.toString() ?? '';
           final args = (call['arguments'] as Map<String, dynamic>?) ?? {};
-          String toolResult;
+          _ToolResult toolResult;
           DebugLogger.log('AI路由', '🔧 工具 $name 参数：${args.isEmpty ? '（空）' : args}');
           if (name == 'record_memory') {
             final content = args['content']?.toString() ?? '';
@@ -379,14 +379,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             _appendToolBubble('男主在翻日记：$keyword…');
             toolResult = await _executeQueryDiaryTool(keyword);
           } else {
-            toolResult = '未知工具：$name';
+            toolResult = _ToolResult(false, '未知工具：$name');
           }
           // 完成/失败气泡（用户 8-03 01:57）：执行完必须给用户明确反馈
           _appendToolResultBubble(name, toolResult);
-          DebugLogger.log('AI路由', '🔧 工具 $name 结果：${toolResult.length > 80 ? toolResult.substring(0, 80) + '…' : toolResult}');
+          DebugLogger.log('AI路由', '🔧 工具 $name 结果：${toolResult.text.length > 80 ? toolResult.text.substring(0, 80) + '…' : toolResult.text}');
           toolMessages.add(AIChatMessage(
             role: 'tool',
-            content: toolResult,
+            content: toolResult.text,
             toolCallId: 'call_${toolLoop}_$name',
           ));
           // 防死循环：同一工具连续调用 ≥3 次 → 停止本轮
@@ -946,12 +946,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   /// 工具执行完成/失败气泡（用户 8-03 01:57）：执行完必须给用户明确反馈。
-  /// 结果文本含"拒绝/没有找到/为空/失败/无法/暂无/不在/未知" → ❌，否则 ✅
-  void _appendToolResultBubble(String toolName, String resultText) {
-    const failMarkers = ['拒绝', '没有找到', '为空', '失败', '无法', '暂无', '不在', '未知'];
-    final failed = failMarkers.any(resultText.contains);
-    final icon = failed ? '❌' : '✅';
-    _appendToolBubble('$icon $toolName ${failed ? '失败' : '完成'}：$resultText');
+  void _appendToolResultBubble(String toolName, _ToolResult r) {
+    _appendToolBubble('${r.ok ? '✅' : '❌'} $toolName ${r.ok ? '完成' : '失败'}：${r.text}');
   }
 
   /// 处理男主指令（#记录/#查记忆/#定时/#帮助/#model）→ 审批弹窗 → 反馈
@@ -1128,9 +1124,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   /// 工具执行：record_memory（弹窗确认 → 写记忆 → 返回结果给模型）
-  Future<String> _executeRecordTool(String category, String content) async {
-    if (content.isEmpty) return '内容为空，无法记录';
-    if (!mounted) return '用户不在，记录未确认';
+  Future<_ToolResult> _executeRecordTool(String category, String content) async {
+    if (content.isEmpty) return const _ToolResult(false, '内容为空，无法记录');
+    if (!mounted) return const _ToolResult(false, '用户不在，记录未确认');
     final approved = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1169,17 +1165,17 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         ]);
       }
       DebugLogger.log('指令模块', '✅ 工具记录确认: [$category] $content');
-      return '已记录：[$category] $content';
+      return _ToolResult(true, '已记录：[$category] $content');
     }
     DebugLogger.log('指令模块', '⛔ 工具记录被拒: $content');
-    return '用户拒绝了记录：「$content」。如果想知道原因，可以自然地问她。';
+    return _ToolResult(false, '用户拒绝了记录：「$content」。如果想知道原因，可以自然地问她。');
   }
 
   /// 工具执行：recall_memory（检索 → 弹窗授权 → 返回记忆给模型）
-  Future<String> _executeRecallTool(String query, String category) async {
+  Future<_ToolResult> _executeRecallTool(String query, String category) async {
     try {
       final sessionId = _chatSessionId;
-      if (sessionId == null) return '暂无记忆可查';
+      if (sessionId == null) return const _ToolResult(false, '暂无记忆可查');
       final isCategory = category.isNotEmpty &&
           ButlerCommandParser.allCategories.contains(category);
       final memories = await ChatMemoryService.instance.searchMemories(
@@ -1188,9 +1184,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         keyword: isCategory ? null : (query.isEmpty ? category : query),
       );
       if (memories.isEmpty) {
-        return '没有找到关于「${query.isEmpty ? category : query}」的记忆';
+        return _ToolResult(false, '没有找到关于「${query.isEmpty ? category : query}」的记忆');
       }
-      if (!mounted) return '用户不在，查询未授权';
+      if (!mounted) return const _ToolResult(false, '用户不在，查询未授权');
       final approved = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -1216,7 +1212,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         ),
       );
       if (approved != true) {
-        return '用户拒绝了查看记忆的请求，不要追问';
+        return const _ToolResult(false, '用户拒绝了查看记忆的请求，不要追问');
       }
       // 21:02：记忆库存的是用户原文（可能含真实称呼）→ 返回给模型前替换成代号
       final butler = ChatService.instance.butler;
@@ -1229,22 +1225,22 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               ? butler.maskEngine.maskRealNames(c, sessionId)
               : c)
           .toList();
-      return '查到的记忆：\n- ${lines.join('\n- ')}';
+      return _ToolResult(true, '查到的记忆：\n- ${lines.join('\n- ')}');
     } catch (e) {
       DebugLogger.log('指令模块', '✖ 工具查记忆失败: $e');
-      return '查记忆出错了';
+      return _ToolResult(false, '查记忆出错了');
     }
   }
 
   /// 工具执行：save_identity_memory（男主写代号人物记忆 → 待确认区，用户确认才生效）
   /// 37批：原生 function calling 替代 #A# 文本协议（DeepSeek 对文本协议不可靠）
-  Future<String> _executeSaveIdentityMemoryTool(String code, String content) async {
+  Future<_ToolResult> _executeSaveIdentityMemoryTool(String code, String content) async {
     if (code.trim().isEmpty || content.trim().isEmpty) {
-      return '参数不完整：需要代号（code）和内容（content）';
+      return const _ToolResult(false, '参数不完整：需要代号（code）和内容（content）');
     }
     final butler = ChatService.instance.butler;
     if (butler == null || !butler.config.maskLayerEnabled) {
-      return '假面层未开启，无法保存代号记忆';
+      return const _ToolResult(false, '假面层未开启，无法保存代号记忆');
     }
     final sessionId = _chatSessionId ?? 'chat_page';
     // 会话映射：代号 → 身份 id
@@ -1263,8 +1259,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       }
     }
     if (identityId == null) {
-      return '无法识别代号「$code」——它不是当前对话里的代号。'
-          '不要追问它代表谁，当作没记住继续聊天即可。';
+      return _ToolResult(false, '无法识别代号「$code」——它不是当前对话里的代号。'
+          '不要追问它代表谁，当作没记住继续聊天即可。');
     }
     final String targetId = identityId!;
     await butler.maskEngine.identityStore?.addIdentityMemory(
@@ -1272,41 +1268,41 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       content: content.trim(),
     );
     DebugLogger.log('假面层', '✅ 工具保存代号记忆: $code → $content');
-    return '已把「$code」的事记下，等用户确认后生效。'
-        '确认前不要当作已记住的信息使用。';
+    return _ToolResult(true, '已把「$code」的事记下，等用户确认后生效。'
+        '确认前不要当作已记住的信息使用。');
   }
 
   /// 工具执行：list_tools（男主查询自己有哪些工具可用）
-  String _executeListToolsTool() {
-    return '你现在可以使用的工具：\n'
+  _ToolResult _executeListToolsTool() {
+    return const _ToolResult(true, '你现在可以使用的工具：\n'
         '- record_memory：记录用户的事（类别：喜好/约定/日常/事实/其他）\n'
         '- recall_memory：查看以前记住的关于用户的事\n'
         '- save_identity_memory：保存关于某位代号人物（如 家人A）的事\n'
         '- write_diary：写日记（把值得记住的细节存档）\n'
         '- query_diary：查日记（按关键词回忆以前的细节）\n'
         '- list_tools：查看工具清单（就是现在这个）\n'
-        '调用完成后自然地继续和用户说话。';
+        '调用完成后自然地继续和用户说话。');
   }
 
   /// 工具执行：write_diary（男主写日记 → 存档，无需用户审批）
-  Future<String> _executeWriteDiaryTool(String content) async {
-    if (content.trim().isEmpty) return '内容为空，无法写日记';
+  Future<_ToolResult> _executeWriteDiaryTool(String content) async {
+    if (content.trim().isEmpty) return const _ToolResult(false, '内容为空，无法写日记');
     final personaId = _state.personaId ?? '';
-    if (personaId.isEmpty) return '日记保存失败（缺少角色）';
+    if (personaId.isEmpty) return const _ToolResult(false, '日记保存失败（缺少角色）');
     try {
       await ChatDatabaseService.instance.saveDiaryEntry(personaId, content.trim());
       DebugLogger.log('指令模块', '✅ 男主写日记（${content.length} 字）');
-      return '已写进日记。以后想回忆这段，可以查日记。';
+      return const _ToolResult(true, '已写进日记。以后想回忆这段，可以查日记。');
     } catch (e) {
       DebugLogger.log('指令模块', '✖ 写日记失败: $e');
-      return '日记保存失败，稍后再试';
+      return const _ToolResult(false, '日记保存失败，稍后再试');
     }
   }
 
   /// 工具执行：query_diary（男主查日记 → 按关键词返回最近条目）
-  Future<String> _executeQueryDiaryTool(String keyword) async {
+  Future<_ToolResult> _executeQueryDiaryTool(String keyword) async {
     final personaId = _state.personaId ?? '';
-    if (personaId.isEmpty) return '查日记失败（缺少角色）';
+    if (personaId.isEmpty) return const _ToolResult(false, '查日记失败（缺少角色）');
     try {
       final entries = await ChatDatabaseService.instance.searchDiary(
         personaId,
@@ -1314,13 +1310,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         limit: 8,
       );
       if (entries.isEmpty) {
-        return '日记里没有找到关于「${keyword.isEmpty ? '最近' : keyword}」的记录。'
-            '不用勉强，自然继续聊天。';
+        return _ToolResult(false, '日记里没有找到关于「${keyword.isEmpty ? '最近' : keyword}」的记录。'
+            '不用勉强，自然继续聊天。');
       }
-      return '日记里找到 ${entries.length} 条相关记录：\n- ${entries.join('\n- ')}';
+      return _ToolResult(true, '日记里找到 ${entries.length} 条相关记录：\n- ${entries.join('\n- ')}');
     } catch (e) {
       DebugLogger.log('指令模块', '✖ 查日记失败: $e');
-      return '查日记出错了';
+      return const _ToolResult(false, '查日记出错了');
     }
   }
 
@@ -1476,4 +1472,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       return '';
     }
   }
+}
+
+/// 工具执行结果（用户 8-03 01:58）：结构化状态，不靠语义猜。
+/// ok=true 成功 / ok=false 失败；text 是回传给男主（AI）的文本。
+class _ToolResult {
+  final bool ok;
+  final String text;
+  const _ToolResult(this.ok, this.text);
 }
