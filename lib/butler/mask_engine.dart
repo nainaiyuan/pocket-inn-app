@@ -259,16 +259,20 @@ class MaskEngine {
   /// 该身份已确认的 #代号# 记忆描述（用户 18:58：男主写 #A# 记忆 → 用户确认 →
   /// 下次轮换后以新代号注入，记忆跟随身份不跟随代号）
   /// 如："[家人C]：这位家人的喜好：喜欢小猫；讨厌下雨"
+  /// 21:02：记忆内容可能含真实称呼 → 用 maskRealNames 替换成代号再注入
   Future<String?> _buildIdentityMemoriesDescription(
     IdentityEntry entry,
     String code,
+    String sessionId,
   ) async {
     final store = _store;
     if (store == null) return null;
     try {
       final memories = await store.confirmedMemories(entry.id);
       if (memories.isEmpty) return null;
-      final contents = memories.map((m) => m.content).toList();
+      final contents = memories
+          .map((m) => maskRealNames(m.content, sessionId))
+          .toList();
       return '$code：${entry.pronoun}相关的事：${contents.join('；')}';
     } catch (e) {
       print('[MaskEngine] 加载身份记忆失败: $e');
@@ -358,6 +362,27 @@ class MaskEngine {
   List<String> getAllLabels() =>
       _identities.values.map((e) => e.realLabel).toList();
 
+  /// 管家生成文本的代号替换（用户 21:02：记忆注入/规律描述等也要替换）
+  ///
+  /// 记忆库里存的是用户原文（可能含真实称呼"妈妈"），管家把记忆/描述
+  /// 注入给男主前必须替换成当前会话代号。无会话映射（该身份本会话没
+  /// 出现过）→ 不替换（男主本来就不该知道有这个身份，跳过最安全）。
+  String maskRealNames(String text, String sessionId) {
+    if (text.isEmpty) return text;
+    final sessionMap = _sessionMappings[sessionId];
+    if (sessionMap == null || sessionMap.isEmpty) return text;
+    var masked = text;
+    // 按标签长度降序替换（避免短标签被长标签的子串影响）
+    final entries = _identities.entries.toList()
+      ..sort((a, b) => b.value.realLabel.length.compareTo(a.value.realLabel.length));
+    for (final e in entries) {
+      final code = sessionMap[e.key];
+      if (code == null || code.isEmpty) continue;
+      masked = masked.replaceAll(e.value.realLabel, code);
+    }
+    return masked;
+  }
+
   // ── 核心替换逻辑 ──
 
   /// 替换敏感信息（用户消息 → 发给男主的版本）
@@ -404,7 +429,7 @@ class MaskEngine {
         final moodBase = _buildAverageMoodDescription(entry, code);
         final patternDesc = _buildPatternDescription(entry, code);
         final identityMemories =
-            await _buildIdentityMemoriesDescription(entry, code);
+            await _buildIdentityMemoriesDescription(entry, code, sessionId);
         final parts = [
           if (moodBase != null) moodBase,
           if (patternDesc != null) patternDesc,

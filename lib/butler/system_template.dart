@@ -13,12 +13,29 @@ class SystemTemplate {
   static String? lastBuilt;
 
   /// 构建完整 system prompt
+  ///
+  /// [light]（用户 21:19：stateful 后台有记忆 AI 用）：
+  /// 只带人设 + 当前技能注入，不带固定模板（铁律/隐私标记/代号/工具清单…
+  /// 那些是 stateless 靠前缀稳定命中缓存才每次带的；stateful 的 AI 服务端
+  /// 已记住这些，重复带反而浪费 token）。
   static String build({
     required String personaName,
     required String personaPrompt,
     required bool needsWindow,
     String? skillContext,
+    bool light = false,
   }) {
+    if (light) {
+      final result = '你是「$personaName」，一个正在和用户聊天的角色。'
+          '请始终以这个身份自然、温柔地回复，保持人设与说话风格，'
+          '不要说"作为AI"之类的话，也不要提及模型或技术细节。'
+          '回复要口语化、有情绪、有代入感，一般不超过 200 字。'
+          '${personaPrompt.trim().isEmpty ? '' : '\n\n【你的初始设定】（这是用户为你写的人设，永远记住，任何时候都不要违背）：\n${personaPrompt.trim()}'}'
+          '${needsWindow ? '【必答】开始对话时，请先回复 #model 你的模型名 上下文Token数（例如：#model deepseek-chat 65536），只需回复这一次，之后正常聊天即可。' : ''}'
+          '${skillContext != null && skillContext.trim().isNotEmpty ? '\n\n$skillContext' : ''}';
+      lastBuilt = result;
+      return result;
+    }
     final result = '你是「$personaName」，一个正在和用户聊天的角色。'
         '请始终以这个身份自然、温柔地回复，保持人设与说话风格，'
         '不要说"作为AI"之类的话，也不要提及模型或技术细节。'
@@ -41,7 +58,13 @@ class SystemTemplate {
         '确认后下次提到时会想起来。不要在回复文本里写 #代号# 之类的格式。'
         '【工具清单】你可以调用工具：record_memory（记用户的事）、'
         'recall_memory（查看记忆）、save_identity_memory（记代号人物的事）、'
+        'write_diary（写日记存档细节）、query_diary（查日记回忆细节）、'
         'list_tools（查看工具清单）。不确定时先调用 list_tools 看看。'
+        '【日记】每天结束时（她说要睡了/晚安后）你会写一篇当天日记存档，'
+        '回顾今天发生的事。想回忆以前的细节时用 query_diary 查（和摘要对应着看）；'
+        '觉得值得留档的事也可以随时用 write_diary 写。'
+        '【摘要】你的长期摘要只留"提醒"——每天要记得的事、影响后续对话的约定。'
+        '细节不用写进摘要，需要时用工具现查。'
         '【记忆总结】总结或记录用户的事时，不要写代号本身（不要写 A、B、C），'
         '只写"家人、朋友、同事"这类属性词，例如写"一位家人"而不是代号。'
         // 能力引导（男主可见，管家执行；function calling 为主路径）

@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import '../../../ai_provider/ai_provider_manager.dart';
 import '../../../ai_provider/models.dart';
 import '../../../ai_provider/price_table.dart';
 import 'context_manager.dart';
 import '../../../butler/context/context_tracker.dart';
 import '../../../butler/system_template.dart' show SystemTemplate;
+import '../../../services/chat_database_service.dart';
 import '../../../services/chat_service.dart';
 import '../../../utils/debug_logger.dart';
 
@@ -116,7 +119,78 @@ class AiChatService {
         },
       },
     },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'write_diary',
+        'description':
+            '写日记。把你们聊过的值得记住的细节（她的经历、说过的话、'
+            '你们之间发生的事）按时间整理存档。上下文被精简后，'
+            '日记是你回忆细节的地方——写完摘要后想接上，就靠它。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'content': {
+              'type': 'string',
+              'description': '日记内容，一段完整的记录',
+            },
+          },
+          'required': ['content'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'query_diary',
+        'description':
+            '查日记。按关键词翻看以前的对话细节存档。'
+            '当你感觉上下文被精简过、想回忆某段具体对话/某件事的细节时，'
+            '这是你的机会——查完就能接上。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'keyword': {
+              'type': 'string',
+              'description': '关键词，如：小猫、生日、约定',
+            },
+          },
+          'required': ['keyword'],
+        },
+      },
+    },
   ];
+
+  /// 生成当天日记（男主视角的一天总结，不存库，纯生成）。
+  /// 用户 02:08/21:13：日记 = 男主自己拼（男主视角整理，不是管家总结），
+  /// 双重作用：情感日记本 + 上下文压缩存档（原文要没了时把细节留下）。
+  /// 返回空字符串 = 生成失败。
+  Future<String> generateDailyDiary(
+    String personaId,
+    String personaName,
+    String raw,
+  ) async {
+    if (raw.trim().isEmpty) return '';
+    final system = '你是「$personaName」。下面是你们今天的聊天记录。'
+        '请以你的口吻写一篇今天的日记：'
+        '① 回顾今天聊了什么、她今天的状态/心情、你答应过的事、'
+        '让你在意的小细节 ② 像真正的日记，有你的语气和感受，'
+        '不要列清单 ③ 300 字以内 ④ 只输出日记正文。';
+    try {
+      final res = await AIProviderManager.instance.chat(
+        personaId,
+        [
+          AIChatMessage(role: 'system', content: system),
+          AIChatMessage(role: 'user', content: raw),
+        ],
+        tools: null,
+      );
+      return res.text.trim();
+    } on Object catch (e) {
+      DebugLogger.log('指令模块', '⚠️ 生成日记失败: $e');
+      return '';
+    }
+  }
 
   Future<AIProviderResult> generateReply(
     String message,
@@ -137,32 +211,68 @@ class AiChatService {
       throw const AIAllProvidersFailedException();
     }
     // 上下文管理：非工具轮先处理"该总结了/该缩减了"（男主总结 → 摘要区）
+    // 用户 21:19：两种 AI 分开——
+    //   stateless（后台无记忆，DeepSeek 等）：缓存友好 + 攒够摘要提炼（现有逻辑）
+    //   stateful（后台有记忆）：AI 服务端记得，prompt 轻量；
+    //     空闲超时一半时管家主动找男主写三类存档（日记/摘要/恢复包）
+    // 用户 21:36：stateful 但没确定空闲超时 → 先按 stateless 用（每次全量带）
+    // 用户 21:47：空闲超时 = 用户和 AI 多久没聊天 → 服务器释放上下文缓存
+    // 用户 21:52：要在记忆消失之前（超时一半）写，等超时到了 AI 全忘了
+    var statefulRecover = false;
     if (!toolRound && personaPrompt.isNotEmpty) {
-      if (ContextManager.instance.needsCompact(personaId)) {
-        await _compactSummaries(personaId, personaName);
-      }
-      if (ContextManager.instance.needsSummarize(personaId)) {
-        await _summarize(personaId, personaName);
+      if (_statefulInfoFor(personaId).$1) {
+        // 用户发消息 → 重置定时沉淀（新一轮空闲期）
+        scheduleStatefulSettle(personaId, personaName);
+        // 空闲超时已过 → AI 已不记得 → 本次带恢复包+摘要接上
+        final since = ContextManager.instance.hoursSinceLastChat(personaId);
+        final idle = _statefulInfoFor(personaId).$2;
+        statefulRecover = since != null && idle != null && since >= idle;
+        if (statefulRecover) {
+          DebugLogger.log(
+            '上下文管理',
+            '🧩 空闲超时已过（${since.toStringAsFixed(1)}h ≥ $idle h）→ '
+            '本次带恢复包+摘要接上（AI 已不记得）',
+          );
+        }
+        // 防 APP 被杀/定时器丢：下次聊天时若已过半且没沉淀过 → 补沉淀
+        await _maybeSettleStateful(personaId, personaName);
+      } else {
+        if (ContextManager.instance.needsCompact(personaId)) {
+          await _compactSummaries(personaId, personaName);
+        }
+        if (ContextManager.instance.needsSummarize(personaId)) {
+          await _summarize(personaId, personaName);
+        }
       }
     }
     // 记录用户消息（话题检测，本地免费）
     if (!toolRound && message.trim().isNotEmpty) {
       ContextManager.instance.feedUserMessage(personaId, message);
     }
-    // 首次请求：从 DB 恢复摘要 + 重建当前话题原文（重启不丢记忆）
+    // 首次请求：恢复摘要区（不重建历史原文——历史=本次对话实时记录，
+    // DB 里是原始/还原后文本，硬拉会泄露真实称呼，用户 20:08 指示）
     if (!_contextRestored.contains(personaId)) {
       _contextRestored.add(personaId);
       await ContextManager.instance.restore(personaId, sessionId);
     }
     final needsWindow = !ContextTracker.instance.windowConfirmed(personaId);
+    final stateful = _statefulInfoFor(personaId).$1;
     final systemPrompt = SystemTemplate.build(
       personaName: personaName,
       personaPrompt: personaPrompt,
       needsWindow: needsWindow,
       skillContext: skillContext,
+      // stateful：AI 服务端记得对话 → 不重复带固定模板（只带人设+当前技能注入）
+      // stateless：前缀稳定 → 缓存命中 → 每次带全量反而便宜
+      light: stateful && !statefulRecover,
     );
-    // 历史（摘要区 + 当前话题原文）——插在 system 后、当前消息前
-    final historyMsgs = ContextManager.instance.buildHistoryMessages(personaId);
+    // 历史（摘要区 + 当前话题原文）——插在 system 后、当前消息前。
+    // stateful：AI 自己记得 → 不重复带历史（避免浪费 + 服务端已有）；
+    // 但空闲超时后 AI 已不记得（服务器释放了缓存）→ 本次带摘要区恢复
+    // （用户 21:47：空闲 N 小时没聊天 → 服务器省空间释放上下文缓存）
+    final historyMsgs = (stateful && !statefulRecover)
+        ? <AIChatMessage>[]
+        : ContextManager.instance.buildHistoryMessages(personaId);
     // 透明化：保存完整 prompt 供 📄 按钮查看
     final historyText = historyMsgs.isEmpty
         ? ''
@@ -287,16 +397,245 @@ class AiChatService {
     return result;
   }
 
-  /// 男主总结轮：待总结原文 → 男主写要点 → 追加进摘要区 → 清空原文。
+  /// 当前 persona 用的 Provider 是否"真正按 stateful 走"。
+  /// 用户 21:36：stateful 但没确定刷新周期（refreshHours=null）→
+  /// 不确定就先按 stateless（每次全量带），提醒用户之后修改。
+  /// 用户 21:47：refreshHours 语义 = 空闲超时（多久没聊天服务器释放
+  /// 上下文缓存），不是"每 N 小时强制写"。
+  /// 返回 (是否 stateful, 空闲超时小时, 配置对象)。
+  (bool, int?, AIProviderConfig?) _statefulInfoFor(String personaId) {
+    try {
+      final manager = AIProviderManager.instance;
+      final pid = manager.lastProviderFor(personaId);
+      if (pid == null) return (false, null, null);
+      for (final p in manager.providers) {
+        if (p.id == pid) {
+          // stateful 且空闲超时已确定 → 真正 stateful
+          if (p.isStateful && p.refreshHours != null && p.refreshHours! > 0) {
+            return (true, p.refreshHours, p);
+          }
+          // stateful 但周期没定 → 降级 stateless（用户 21:36 指示）
+          if (p.isStateful) {
+            DebugLogger.log(
+              'AI路由',
+              '⚠️ ${p.name} 选了"有后台记忆"但没填空闲超时 → '
+              '先按"每次全量带"用；查到服务器释放时间后去 AI 配置里改（用户 21:36）',
+            );
+          }
+          return (false, null, p);
+        }
+      }
+    } catch (_) {}
+    return (false, null, null);
+  }
+
+  /// stateful 模式：上下文管理 = 空闲超时前沉淀三类内容（日记/摘要/恢复包）。
+  /// 用户 21:52 澄清：不能等超时到了才写（那时 AI 全忘了，写不出来）——
+  /// 要在记忆消失之前，也就是"用户最后一次对话 + 空闲超时的一半"时，
+  /// 管家主动去找男主写（AI 还记得，写得出来）；分类存好，管家好管理。
+  /// 触发：① 定时器（见 [scheduleStatefulSettle]）② 下次聊天时检测
+  /// 距上次聊天已过超时一半且没沉淀过 → 补沉淀（防 APP 被杀/定时器丢）。
+  /// 沉淀成功后返回 true。
+  Future<bool> _maybeSettleStateful(String personaId, String personaName) async {
+    try {
+      final info = _statefulInfoFor(personaId);
+      if (!info.$1) return false;
+      final idleHours = info.$2!;
+      final since = ContextManager.instance.hoursSinceLastChat(personaId);
+      if (since == null) return false;
+      // 用户 21:52：在空闲超时的一半（2小时 → 1小时时）写——
+      // 太早没内容可写（刚聊完），太晚 AI 忘了（写不出来）
+      final settleAt = idleHours / 2;
+      // 距上次聊天 ≥ 一半 → 该写了；但也要防重复（写过后本次跳过）
+      if (since < settleAt) return false;
+      if (_settledAtHalf[personaId] == true) return false;
+      DebugLogger.log(
+        '上下文管理',
+        '📝 空闲超时 $idleHours h，距上次聊天 ${since.toStringAsFixed(1)}h ≥ '
+        '一半 $settleAt h → 趁 AI 还记得，让男主写三类存档…',
+      );
+      final raw = ContextManager.instance.peekRaw(personaId);
+      if (raw.trim().isEmpty) return false;
+      // 男主一次写三类：日记 / 摘要 / 恢复包（下次要带的上下文）
+      final written = await _generateAndStoreThree(
+        personaId, personaName, raw);
+      if (written) {
+        _settledAtHalf[personaId] = true;
+        DebugLogger.log('上下文管理', '✅ 三类存档完成（日记/摘要/恢复包），管家已分类存好');
+      }
+      return written;
+    } on Object catch (e) {
+      DebugLogger.log('上下文管理', '⚠️ stateful 沉淀失败（静默）: $e');
+      return false;
+    }
+  }
+
+  /// personaId → 是否已在本轮空闲期写过"三类存档"（防重复写）
+  final Map<String, bool> _settledAtHalf = {};
+
+  /// 安排定时沉淀：用户最后聊天 + 空闲超时一半后触发。
+  /// 用户 21:52：管家主动去找男主（不能等用户下次来才发现忘了）。
+  /// 每次用户发消息时调用（重置定时器）；到点且期间没再聊 → 写三类存档。
+  void scheduleStatefulSettle(String personaId, String personaName) {
+    try {
+      final info = _statefulInfoFor(personaId);
+      if (!info.$1) return;
+      final idleHours = info.$2!;
+      _settledAtHalf[personaId] = false; // 新一轮空闲期，重新允许写
+      _settleTimers[personaId]?.cancel();
+      final timer = Timer(Duration(minutes: (idleHours * 30).round()), () {
+        _settleTimers.remove(personaId);
+        // 到点时若还在聊（刚有消息）→ 跳过（下次发消息会重置定时器）
+        final since = ContextManager.instance.hoursSinceLastChat(personaId);
+        if (since != null && since >= idleHours / 2) {
+          DebugLogger.log(
+            '上下文管理',
+            '⏰ 定时到点（空闲 ${idleHours / 2} h），管家主动找男主写三类存档…',
+          );
+          unawaited(_maybeSettleStateful(personaId, personaName));
+        }
+      });
+      _settleTimers[personaId] = timer;
+      DebugLogger.log(
+        '上下文管理',
+        '⏱️ 已安排定时沉淀：${(idleHours / 2).toStringAsFixed(1)} 小时后（空闲超时 $idleHours h 的一半）',
+      );
+    } catch (_) {}
+  }
+
+  final Map<String, Timer> _settleTimers = {};
+
+  /// 男主一次写三类（一次 AI 调用，分类输出）：
+  /// - 日记：**男主调用 write_diary 工具写入**（用户 21:56：日记要让男主
+  ///   调用工具写进去；同一天拼接进同一天，不新增多条）
+  /// - 摘要：提醒索引 → context_summaries
+  /// - 恢复包：下次要带的上下文 → context_recovery
+  /// 返回是否成功。
+  Future<bool> _generateAndStoreThree(
+    String personaId,
+    String personaName,
+    String raw,
+  ) async {
+    final system = '你是「$personaName」。下面是你们最近的聊天记录。'
+        '趁你还记得（之后上下文会被清空），把三样东西分类整理好：'
+        '① 日记：把今天聊的、她的状态心情、你答应过的事、在意的小细节，'
+        '整理成一段日记（像真正的日记有你的语气，300 字内），'
+        '**用 write_diary 工具写进去**。'
+        '② 摘要：影响后续对话的提醒（约定/承诺/正在做的事/她希望你记住的），'
+        '每条一行 20 字内，细节不写——能查的用工具现查。'
+        '③ 恢复包：下次继续对话时你需要知道的最关键上下文：'
+        '你们进行到哪了、关系状态、当前话题、她最近的状态'
+        '（100 字内，像失忆前留给自己看的纸条）。'
+        '摘要和恢复包直接写在回复里：'
+        '【摘要】\n…\n【恢复包】\n…\n'
+        '不要客套话不要解释。';
+    try {
+      final res = await AIProviderManager.instance.chat(
+        personaId,
+        [
+          AIChatMessage(role: 'system', content: system),
+          AIChatMessage(role: 'user', content: raw),
+        ],
+        // 只带 write_diary：日记必须走工具写入（用户 21:56）
+        tools: [
+          {
+            'type': 'function',
+            'function': {
+              'name': 'write_diary',
+              'description': '写日记。把值得记住的细节按时间整理存档。',
+              'parameters': {
+                'type': 'object',
+                'properties': {
+                  'content': {
+                    'type': 'string',
+                    'description': '日记内容，一段完整的记录',
+                  },
+                },
+                'required': ['content'],
+              },
+            },
+          },
+        ],
+      );
+      var diarySaved = false;
+      // ① 工具调用：write_diary（男主调用工具写日记 → 同天拼接落库）
+      final calls = res.toolCalls ?? const [];
+      for (final tc in calls) {
+        final name = tc['name'] as String? ?? '';
+        final args = tc['arguments'];
+        if (name == 'write_diary' && args is Map) {
+          final content = (args['content'] as String?)?.trim() ?? '';
+          if (content.isNotEmpty) {
+            await ChatDatabaseService.instance.saveDiaryEntry(personaId, content);
+            diarySaved = true;
+            DebugLogger.log('上下文管理', '📔 男主调用 write_diary 写日记（${content.length} 字，同天拼接）');
+          }
+        }
+      }
+      // ② 文本里解析 摘要/恢复包（+ 兜底：AI 没调工具但写了【日记】段）
+      final text = res.text.trim();
+      final summary = _extractSection(text, '【摘要】');
+      final recovery = _extractSection(text, '【恢复包】');
+      if (!diarySaved) {
+        final diaryText = _extractSection(text, '【日记】');
+        if (diaryText.isNotEmpty) {
+          await ChatDatabaseService.instance.saveDiaryEntry(personaId, diaryText);
+          diarySaved = true;
+          DebugLogger.log('上下文管理', '📔 兜底：日记文本直接落库（同天拼接）');
+        }
+      }
+      if (summary.isNotEmpty) {
+        await ContextManager.instance.appendSummary(personaId, summary);
+      }
+      if (recovery.isNotEmpty) {
+        await ContextManager.instance.saveRecovery(personaId, recovery);
+      }
+      return diarySaved || summary.isNotEmpty || recovery.isNotEmpty;
+    } on Object catch (e) {
+      DebugLogger.log('指令模块', '⚠️ 三类存档生成失败: $e');
+      return false;
+    }
+  }
+
+  /// 从男主输出里截取某段（按标记切，取标记后到下个标记前）。
+  String _extractSection(String text, String marker) {
+    final idx = text.indexOf(marker);
+    if (idx < 0) return '';
+    var start = idx + marker.length;
+    // 找下一个标记
+    var end = text.length;
+    for (final next in ['【日记】', '【摘要】', '【恢复包】']) {
+      if (next == marker) continue;
+      final n = text.indexOf(next, start);
+      if (n >= 0 && n < end) end = n;
+    }
+    return text.substring(start, end).trim();
+  }
+
+  /// 男主总结轮：待总结原文 → 男主写提醒要点 → 追加进摘要区 → 清空原文。
   /// 触发由管家控制（原文攒够量），内容男主写（视角一致，不 OOC）。
+  /// 用户 21:10：摘要=提醒索引，不是细节仓库——能查的当场查（工具），
+  /// 每天要查的/影响连续性的才写进摘要；不重要的遗忘，需要时现查。
+  /// 用户 21:13：上下文要没了（token 快满）→ 先写日记存档（细节不丢），
+  /// 再提炼摘要提醒（日记=细节存档，摘要=提醒，各司其职）。
   Future<void> _summarize(String personaId, String personaName) async {
     final raw = ContextManager.instance.takePendingRaw(personaId);
     if (raw.trim().isEmpty) return;
-    DebugLogger.log('上下文管理', '✂️ 原文攒够了（${raw.length} 字），叫男主总结…');
-    final system = '你是「$personaName」。请把以下你们的聊天记录压缩成简洁要点。'
-        '要求：① 按话题分条，每条一行 ② 单条不超过 30 字 ③ 只保留重要信息'
-        '（她的喜好、习惯、约定、个人信息、你答应过的事、重要事件）'
-        '④ 不要客套话、不要长句、不要复述原话、不要评价。只输出要点列表。';
+    DebugLogger.log('上下文管理', '✂️ 原文攒够了（${raw.length} 字，上下文要没了）…');
+    // ① 先写日记存档（原文要没了，细节进日记，男主可查）
+    final diary = await generateDailyDiary(personaId, personaName, raw);
+    if (diary.isNotEmpty) {
+      await ChatDatabaseService.instance.saveDiaryEntry(personaId, diary);
+      DebugLogger.log('上下文管理', '📔 日记已存档（${diary.length} 字），细节没丢');
+    }
+    // ② 再提炼摘要提醒（能查的现查，只留影响连续性的提醒）
+    final system = '你是「$personaName」。下面是你们最近的聊天记录。'
+        '请从中提炼"你需要记住的提醒"，写进你的长期摘要。要求：'
+        '① 只写影响后续对话的：她的约定/承诺/正在做的事/你答应过的事/'
+        '她明确希望你记住的、每天都要记得的事'
+        '② 细节不用写——能当场查的（记忆、日记）不写，需要时你用工具查'
+        '③ 不重要的直接遗忘，不要写'
+        '④ 每条一行，20 字内，只输出提醒列表，不要客套话不要评价。';
     try {
       final res = await AIProviderManager.instance.chat(
         personaId,
@@ -309,15 +648,14 @@ class AiChatService {
       final summary = res.text.trim();
       if (summary.isNotEmpty) {
         await ContextManager.instance.appendSummary(personaId, summary);
-        DebugLogger.log('上下文管理', '✅ 男主总结完成（${summary.length} 字，摘要区已更新）');
+        DebugLogger.log('上下文管理', '✅ 摘要提醒已更新（${summary.length} 字），原文已遗忘');
       } else {
-        // 总结失败：原文不能丢，重新放回（下次再试）
-        ContextManager.instance.restoreRaw(personaId, raw);
-        DebugLogger.log('上下文管理', '⚠️ 男主总结为空，原文保留待下次');
+        // 总结为空：没有值得长期记的 → 原文直接遗忘（能查的靠工具现查）
+        DebugLogger.log('上下文管理', 'ℹ️ 男主没提炼出提醒，原文已遗忘（细节在日记）');
       }
     } on Object catch (e) {
-      ContextManager.instance.restoreRaw(personaId, raw);
       DebugLogger.log('上下文管理', '⚠️ 男主总结失败: $e（原文保留待下次）');
+      ContextManager.instance.restoreRaw(personaId, raw);
     }
   }
 

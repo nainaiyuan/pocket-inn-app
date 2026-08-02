@@ -17,7 +17,7 @@ class ChatDatabaseService {
   static final ChatDatabaseService instance = ChatDatabaseService._();
   final ValueNotifier<int> changeNotifier = ValueNotifier<int>(0);
 
-  static const int _dbVersion = 4;
+  static const int _dbVersion = 6;
   static const String _dbName = 'pocket_inn_chat.db';
 
   Database? _database;
@@ -133,8 +133,155 @@ class ChatDatabaseService {
       // v4: 对话摘要持久化
       await _createSummariesSchema(db);
     }
+    if (oldVersion < 5 && newVersion >= 5) {
+      // v5: 男主日记（原文归档，总结后不丢细节）
+      await _createDiarySchema(db);
+    }
+    if (oldVersion < 6 && newVersion >= 6) {
+      // v6: 恢复包（stateful 空闲超时前男主写的"下次要带的上下文"）
+      await _createRecoverySchema(db);
+    }
     // v3: 仅调整 _dbVersion 占位，无 schema 变更。
     // 若未来需要在 v3 引入列/索引，请在此处添加 oldVersion < 3 分支。
+  }
+
+  /// v5: 男主日记 —— 总结轮原文归档（用户 20:53：上下文太多变精简摘要，
+  /// 具体细节存到"其他地方"，男主可查可写，写完摘要后能接上）
+  Future<void> _createDiarySchema(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS butler_diary (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        persona_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_butler_diary_persona '
+      'ON butler_diary(persona_id, created_at)',
+    );
+  }
+
+  /// 写一条日记（男主调用 write_diary 工具 / 沉淀轮写入）。
+  /// 用户 21:56：同一天就拼接进同一天的（不新增多条，避免越搞越大）；
+  /// 跨天才新开一条。
+  Future<void> saveDiaryEntry(String personaId, String content) async {
+    if (content.trim().isEmpty) return;
+    final now = DateTime.now();
+    final dayStart = DateTime(now.year, now.month, now.day)
+        .millisecondsSinceEpoch;
+    final dayEnd = dayStart + Duration(days: 1).inMilliseconds;
+    // 查当天已有日记（最新在前）
+    final rows = await _db.query(
+      'butler_diary',
+      where: 'persona_id = ? AND created_at >= ? AND created_at < ?',
+      whereArgs: [personaId, dayStart, dayEnd],
+      orderBy: 'created_at DESC',
+      limit: 1,
+    );
+    if (rows.isNotEmpty) {
+      // 同一天 → 拼接（旧内容 + 新内容，中间空行分隔）
+      final old = (rows.first['content'] as String?)?.trim() ?? '';
+      final id = rows.first['id'] as int?;
+      if (id != null) {
+        final merged = old.isEmpty
+            ? content.trim()
+            : '$old\n\n${content.trim()}';
+        await _db.update(
+          'butler_diary',
+          {'content': merged},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        return;
+      }
+    }
+    // 新的一天 → 新建
+    await _db.insert('butler_diary', {
+      'persona_id': personaId,
+      'content': content.trim(),
+      'created_at': now.millisecondsSinceEpoch,
+    });
+  }
+
+  /// 查日记（按关键词，最新在前，最多 [limit] 条）
+  Future<List<String>> searchDiary(
+    String personaId, {
+    String? keyword,
+    int limit = 8,
+  }) async {
+    final rows = await _db.query(
+      'butler_diary',
+      where: 'persona_id = ?',
+      whereArgs: [personaId],
+      orderBy: 'created_at DESC',
+      limit: limit,
+    );
+    final kw = keyword?.trim() ?? '';
+    final out = <String>[];
+    for (final r in rows) {
+      final c = (r['content'] as String?)?.trim() ?? '';
+      if (c.isEmpty) continue;
+      if (kw.isNotEmpty && !c.contains(kw)) continue;
+      out.add(c);
+    }
+    return out;
+  }
+
+  /// 最近一次日记时间（stateful 刷新周期判断用）。
+  /// 没有日记返回 null。
+  Future<DateTime?> latestDiaryTime(String personaId) async {
+    final rows = await _db.query(
+      'butler_diary',
+      columns: ['created_at'],
+      where: 'persona_id = ?',
+      whereArgs: [personaId],
+      orderBy: 'created_at DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final ts = rows.first['created_at'] as int?;
+    if (ts == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(ts);
+  }
+
+  /// v6: 恢复包 —— stateful 空闲超时前，男主写的"下次要带的上下文"。
+  /// 用户 21:52：要在记忆消失之前（空闲超时的一半）让男主写日记+摘要+
+  /// 下次要带的上下文，分类存好，管家好管理；等超时到了 AI 全忘了就晚了。
+  Future<void> _createRecoverySchema(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS context_recovery (
+        persona_id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  /// 保存恢复包（每人一条，覆盖式更新）
+  Future<void> saveRecovery(String personaId, String content) async {
+    if (content.trim().isEmpty) return;
+    await _db.insert(
+      'context_recovery',
+      {
+        'persona_id': personaId,
+        'content': content.trim(),
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// 读恢复包；没有返回 null。
+  Future<String?> loadRecovery(String personaId) async {
+    final rows = await _db.query(
+      'context_recovery',
+      where: 'persona_id = ?',
+      whereArgs: [personaId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return (rows.first['content'] as String?)?.trim();
   }
 
   /// v4: 对话摘要持久化（上下文管理——男主滚动摘要，重启不丢）
@@ -205,6 +352,7 @@ class ChatDatabaseService {
 
   Future<void> _createSchema(Database db) async {
     await _createSummariesSchema(db);
+    await _createDiarySchema(db);
     await db.execute('''
       CREATE TABLE chat_sessions (
         id TEXT PRIMARY KEY,

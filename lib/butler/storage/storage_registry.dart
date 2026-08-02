@@ -16,6 +16,7 @@ import 'identity_store.dart';
 import 'interaction_store.dart';
 import 'memory_store.dart';
 import 'pattern_store.dart';
+import 'schedule_store.dart';
 import 'trigger_store.dart';
 import 'user_memory_store.dart';
 import 'vault_store.dart';
@@ -35,6 +36,7 @@ class StorageRegistry {
       PatternStore(),
       UserMemoryStore(),
       EmotionArcStore(),
+      ScheduleStore(),
     ];
   }
 
@@ -68,6 +70,9 @@ class StorageRegistry {
 
   EmotionArcStore get emotionArcs =>
       _store<EmotionArcStore>('emotion_arcs');
+
+  ScheduleStore get schedule =>
+      _store<ScheduleStore>('schedule');
 
   // ========== 通用 ==========
 

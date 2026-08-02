@@ -434,6 +434,8 @@ class _AiConfigPageState extends State<AiConfigPage> {
     final baseUrl = result['baseUrl'] ?? '';
     final apiKey = result['apiKey'] ?? '';
     final model = result['model'] ?? '';
+    final memoryMode = result['memoryMode'] ?? 'stateless';
+    final refreshHours = result['refreshHours'] as int?;
 
     if (existing != null) {
       // 编辑：整体保存
@@ -443,9 +445,12 @@ class _AiConfigPageState extends State<AiConfigPage> {
           baseUrl: baseUrl,
           apiKey: apiKey,
           model: model,
+          memoryMode: memoryMode,
+          refreshHours: refreshHours,
         ),
       );
-      DebugLogger.log('AI管理', '编辑 AI: $name');
+      DebugLogger.log(
+          'AI管理', '编辑 AI: $name（memoryMode=$memoryMode, refreshHours=$refreshHours）');
     } else if (preset != null) {
       await manager.addProviderFromPreset(preset, name: name, apiKey: apiKey);
     } else {
@@ -461,6 +466,8 @@ class _AiConfigPageState extends State<AiConfigPage> {
           isCustom: true,
           enabled: true,
           priority: 500,
+          memoryMode: memoryMode,
+          refreshHours: refreshHours,
         ),
       );
     }
@@ -621,6 +628,14 @@ class _ProviderFormState extends State<_ProviderForm> {
 
   bool _customModel = false;
 
+  /// 后台记忆模式（stateless/stateful，默认 stateless）
+  String _memoryMode = 'stateless';
+
+  /// stateful 模式的刷新周期（小时），null = 还没确定
+  int? _refreshHours;
+
+  final TextEditingController _refreshHoursCtrl = TextEditingController();
+
   bool get _isLocal =>
       widget.preset?.type == ProviderType.local ||
       widget.existing?.type == ProviderType.local;
@@ -658,6 +673,11 @@ class _ProviderFormState extends State<_ProviderForm> {
     // 当前模型在预置列表里 → 下拉选中；否则 → 自定义输入
     _customModel = !_modelOptions.contains(currentModel);
     _model = TextEditingController(text: currentModel);
+    _memoryMode = existing?.memoryMode ?? 'stateless';
+    _refreshHours = existing?.refreshHours;
+    if (_refreshHours != null) {
+      _refreshHoursCtrl.text = '$_refreshHours';
+    }
   }
 
   @override
@@ -666,6 +686,7 @@ class _ProviderFormState extends State<_ProviderForm> {
     _baseUrl.dispose();
     _apiKey.dispose();
     _model.dispose();
+    _refreshHoursCtrl.dispose();
     super.dispose();
   }
 
@@ -783,6 +804,50 @@ class _ProviderFormState extends State<_ProviderForm> {
               ),
               const SizedBox(height: 8),
             ],
+            // ---- 后台记忆模式（用户 21:19：两种 AI 分开）----
+            DropdownButtonFormField<String>(
+              value: _memoryMode,
+              decoration: const InputDecoration(
+                labelText: '后台记忆模式',
+                helperText:
+                    '无记忆：每次全量带上下文（前缀稳定→缓存命中省钱），如 DeepSeek；'
+                    '有记忆：AI 服务端自己记得，prompt 轻量；空闲超时后服务器释放缓存，自动沉淀日记恢复',
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: 'stateless',
+                  child: Text('无后台记忆（默认，DeepSeek/GLM/通义等）'),
+                ),
+                DropdownMenuItem(
+                  value: 'stateful',
+                  child: Text('有后台记忆（服务器缓存/记忆会释放的 AI）'),
+                ),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() => _memoryMode = value);
+                }
+              },
+            ),
+            if (_memoryMode == 'stateful') ...[
+              const SizedBox(height: 8),
+              // 用户 21:47：刷新周期 = "用户和 AI 多久没聊天 → 服务器省空间
+              // 释放上下文缓存"（空闲超时），不是固定定时。不填 = 还没确定，
+              // 保存时提醒"先按每次全量带用，查到后回来改"
+              TextField(
+                controller: _refreshHoursCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: '空闲超时（小时）',
+                  hintText: '不填 = 还没确定（先按"每次全量带"用，查到后回来改）',
+                  helperText:
+                      '用户和 AI 多久没聊天，服务器就释放上下文缓存（去厂商文档查）。'
+                      '超过后下次聊天会自动沉淀日记并带摘要恢复',
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+            ],
+            const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
               child: FilledButton(
@@ -814,11 +879,40 @@ class _ProviderFormState extends State<_ProviderForm> {
                     );
                     return;
                   }
+                  // 用户 21:36/21:47：stateful 必须确定空闲超时才算数；
+                  // 不填 = 还没确定 → 保存成 stateless（每次全量带），
+                  // 并提醒用户之后去 AI 配置里改成 stateful+空闲超时
+                  var memoryMode = _memoryMode;
+                  int? refreshHours;
+                  final hoursText = _refreshHoursCtrl.text.trim();
+                  if (hoursText.isNotEmpty) {
+                    refreshHours = int.tryParse(hoursText);
+                    if (refreshHours == null || refreshHours <= 0) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('空闲超时要填正整数小时')),
+                      );
+                      return;
+                    }
+                  }
+                  if (memoryMode == 'stateful' && refreshHours == null) {
+                    memoryMode = 'stateless';
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          '有后台记忆但没填空闲超时 → 先按"每次全量带"用；'
+                          '查到服务器释放时间后记得回来改成有记忆+空闲超时',
+                        ),
+                        duration: Duration(seconds: 6),
+                      ),
+                    );
+                  }
                   Navigator.of(context).pop({
                     'name': _name.text,
                     'baseUrl': _baseUrl.text,
                     'apiKey': _apiKey.text,
                     'model': _model.text,
+                    'memoryMode': memoryMode,
+                    'refreshHours': refreshHours,
                   });
                 },
                 child: const Text('保存'),

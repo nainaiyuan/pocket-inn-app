@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
@@ -12,11 +13,13 @@ import '../../models/chat_memory.dart';
 import '../../services/chat_service.dart';
 import '../../services/butler_command.dart';
 import '../../butler/context/context_tracker.dart';
+import '../../butler/storage/storage_registry.dart';
 import '../../services/local_storage_service.dart';
 import '../../models/chat_message.dart';
 import '../../utils/debug_logger.dart';
 import '../ai_config_page.dart';
 import 'services/ai_chat_service.dart';
+import 'services/context_manager.dart';
 import 'state/chat_presence.dart';
 import 'state/current_character_state.dart';
 import 'widgets/ai_provider_sheet.dart';
@@ -358,6 +361,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             toolResult = await _executeSaveIdentityMemoryTool(code, content);
           } else if (name == 'list_tools') {
             toolResult = _executeListToolsTool();
+          } else if (name == 'write_diary') {
+            final content = args['content']?.toString() ?? '';
+            _appendToolBubble('男主在写日记…');
+            toolResult = await _executeWriteDiaryTool(content);
+          } else if (name == 'query_diary') {
+            final keyword = args['keyword']?.toString() ?? '';
+            _appendToolBubble('男主在翻日记：$keyword…');
+            toolResult = await _executeQueryDiaryTool(keyword);
           } else {
             toolResult = '未知工具：$name';
           }
@@ -466,6 +477,77 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     } finally {
       // 无论如何：停止"正在输入"（失败则保持未读，男主没读到）
       ChatPresence.instance.setTyping(false);
+      // 作息规律：当天首次聊天 → 记开始时间（用户一般几点来找男主）
+      if (personaId.isNotEmpty) {
+        unawaited(_recordChatStart());
+      }
+      // 用户 21:10：日记 = 男主每天结束（用户睡觉后）写的当天总结。
+      // 用户消息含结束信号（睡了/晚安/睡觉/拜拜…）→ 男主写完回复后，
+      // 管家把当天对话原文交给男主写当天日记（异步，不打断用户）。
+      // 21:13：同时记录"平均结束聊时间"（用户一般聊到几点睡）。
+      if (personaId.isNotEmpty && _isEndOfDaySignal(t)) {
+        unawaited(_recordChatEnd());
+        unawaited(_writeDailyDiary(personaId, personaName));
+      }
+    }
+  }
+
+  /// 记录当天首次聊天时间（作息规律：平均开始聊）
+  Future<void> _recordChatStart() async {
+    try {
+      final store = StorageRegistry.instance.schedule;
+      final now = DateTime.now();
+      final minute = now.hour * 60 + now.minute;
+      await store.recordStart(minute);
+    } catch (e) {
+      DebugLogger.log('指令模块', '⚠️ 记录开始聊失败（静默）: $e');
+    }
+  }
+
+  /// 记录当天结束聊时间（作息规律：平均结束聊）
+  Future<void> _recordChatEnd() async {
+    try {
+      final store = StorageRegistry.instance.schedule;
+      final now = DateTime.now();
+      final minute = now.hour * 60 + now.minute;
+      await store.recordEnd(minute);
+    } catch (e) {
+      DebugLogger.log('指令模块', '⚠️ 记录结束聊失败（静默）: $e');
+    }
+  }
+
+  /// 结束信号检测：用户说"睡了/晚安/睡觉/拜拜/下线…" → 该写当天日记了
+  bool _isEndOfDaySignal(String text) {
+    return RegExp(
+      r'睡了|晚安|睡觉|拜拜|下线|去睡|要睡了|碎觉|不聊了|先这样',
+    ).hasMatch(text);
+  }
+
+  /// 写当天日记（男主视角的一天总结）：
+  /// - 同一天只写一次（防重复触发）
+  /// - 取当前上下文原文（peek，不清空——用户可能还在聊）
+  /// - 男主把当天发生的事总结成日记 → 存 butler_diary
+  /// - 失败静默（不打扰用户）
+  Future<void> _writeDailyDiary(String personaId, String personaName) async {
+    final today = DateTime.now();
+    final dateKey =
+        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    if (_dailyDiaryWrittenDate == dateKey) return;
+    try {
+      final raw = ContextManager.instance.peekRaw(personaId);
+      if (raw.trim().isEmpty) {
+        DebugLogger.log('指令模块', '📔 当天没有对话原文，跳过写日记');
+        return;
+      }
+      _dailyDiaryWrittenDate = dateKey;
+      DebugLogger.log('指令模块', '📔 检测到结束信号，男主写当天日记…');
+      final diary = await _aiSvc.generateDailyDiary(personaId, personaName, raw);
+      if (diary.isNotEmpty) {
+        await ChatDatabaseService.instance.saveDiaryEntry(personaId, diary);
+        DebugLogger.log('指令模块', '✅ 当天日记已写（${diary.length} 字）');
+      }
+    } on Object catch (e) {
+      DebugLogger.log('指令模块', '⚠️ 写日记失败（静默）: $e');
     }
   }
 
@@ -827,6 +909,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 获准查看的条数上限（null = 不限，取最近6条）
   int? _pendingRecallLimit;
 
+  /// 当天日记已写日期（yyyy-MM-dd，同一天只写一次）
+  String? _dailyDiaryWrittenDate;
+
   /// 待定查询（命中太多 → 等男主说想看几条）
   ({String query, String category, int total})? _pendingQuery;
 
@@ -1104,10 +1189,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       if (approved != true) {
         return '用户拒绝了查看记忆的请求，不要追问';
       }
+      // 21:02：记忆库存的是用户原文（可能含真实称呼）→ 返回给模型前替换成代号
+      final butler = ChatService.instance.butler;
+      final maskEnabled = butler != null && butler.config.maskLayerEnabled;
       final lines = memories
           .take(5)
           .map((m) => m.content
               .replaceFirst(RegExp(r'^\[(喜好|约定|日常|事实|其他)\]'), ''))
+          .map((c) => maskEnabled
+              ? butler.maskEngine.maskRealNames(c, sessionId)
+              : c)
           .toList();
       return '查到的记忆：\n- ${lines.join('\n- ')}';
     } catch (e) {
@@ -1162,11 +1253,50 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         '- record_memory：记录用户的事（类别：喜好/约定/日常/事实/其他）\n'
         '- recall_memory：查看以前记住的关于用户的事\n'
         '- save_identity_memory：保存关于某位代号人物（如 家人A）的事\n'
+        '- write_diary：写日记（把值得记住的细节存档）\n'
+        '- query_diary：查日记（按关键词回忆以前的细节）\n'
         '- list_tools：查看工具清单（就是现在这个）\n'
         '调用完成后自然地继续和用户说话。';
   }
 
+  /// 工具执行：write_diary（男主写日记 → 存档，无需用户审批）
+  Future<String> _executeWriteDiaryTool(String content) async {
+    if (content.trim().isEmpty) return '内容为空，无法写日记';
+    final personaId = _state.personaId ?? '';
+    if (personaId.isEmpty) return '日记保存失败（缺少角色）';
+    try {
+      await ChatDatabaseService.instance.saveDiaryEntry(personaId, content.trim());
+      DebugLogger.log('指令模块', '✅ 男主写日记（${content.length} 字）');
+      return '已写进日记。以后想回忆这段，可以查日记。';
+    } catch (e) {
+      DebugLogger.log('指令模块', '✖ 写日记失败: $e');
+      return '日记保存失败，稍后再试';
+    }
+  }
+
+  /// 工具执行：query_diary（男主查日记 → 按关键词返回最近条目）
+  Future<String> _executeQueryDiaryTool(String keyword) async {
+    final personaId = _state.personaId ?? '';
+    if (personaId.isEmpty) return '查日记失败（缺少角色）';
+    try {
+      final entries = await ChatDatabaseService.instance.searchDiary(
+        personaId,
+        keyword: keyword.trim().isEmpty ? null : keyword.trim(),
+        limit: 8,
+      );
+      if (entries.isEmpty) {
+        return '日记里没有找到关于「${keyword.isEmpty ? '最近' : keyword}」的记录。'
+            '不用勉强，自然继续聊天。';
+      }
+      return '日记里找到 ${entries.length} 条相关记录：\n- ${entries.join('\n- ')}';
+    } catch (e) {
+      DebugLogger.log('指令模块', '✖ 查日记失败: $e');
+      return '查日记出错了';
+    }
+  }
+
   /// 男主获准调取记忆 → 异步检索记忆库生成注入文本（按类别/条数）
+  /// 21:02：记忆库存的是用户原文（可能含真实称呼）→ 注入前过假面层替换成代号
   Future<List<String>> _buildRecallInjectionAsync(String query) async {
     try {
       final sessionId = _chatSessionId;
@@ -1183,9 +1313,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       if (memories.length > limit) {
         memories = memories.sublist(0, limit);
       }
+      final butler = ChatService.instance.butler;
+      final maskEnabled = butler != null && butler.config.maskLayerEnabled;
       final lines = memories
           .map((m) => m.content
               .replaceFirst(RegExp(r'^\[(喜好|约定|日常|事实|其他)\]'), ''))
+          .map((c) => maskEnabled
+              ? butler.maskEngine.maskRealNames(c, sessionId)
+              : c)
           .toList();
       return [
         '（用户允许你查看记忆。以下是关于「$query」的记忆，自然接住：\n'

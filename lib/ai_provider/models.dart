@@ -51,6 +51,8 @@ class AIProviderConfig {
     this.priority = 100,
     this.note = '',
     this.toolFormat = 'openai',
+    this.memoryMode = 'stateless',
+    this.refreshHours,
   });
 
   /// 稳定唯一 id，如 'preset-deepseek' / 'custom'
@@ -89,6 +91,22 @@ class AIProviderConfig {
   /// （工具格式翻译层，见 tool_format_adapter.dart；默认 openai 兼容直通）
   final String toolFormat;
 
+  /// 后台记忆模式（用户 21:19：两种 AI 要分开，不能混成一套）：
+  /// - 'stateless'：后台无记忆（DeepSeek/GLM/通义…）——每次 prompt 全量带，
+  ///   靠"前缀稳定→缓存命中"省钱；上下文管理=缓存友好 + 攒够摘要提炼
+  /// - 'stateful'：后台有记忆（token 快满/有刷新时间）——AI 服务端自己记得，
+  ///   不重复带已记忆内容；窗口满/刷新前把关键内容沉淀（日记/记忆）
+  final String memoryMode;
+
+  /// stateful 模式：空闲超时（小时）——用户和 AI 多久没聊天，服务器
+  /// 省空间释放上下文缓存（用户 21:47 澄清，不是"每N小时强制写"）。
+  /// null = 用户还没确定（→ 先按 stateless 用，提醒用户之后修改）。
+  /// 用户 21:36：周期是几小时/几分钟/几天不确定 → 让用户自己查自己选；
+  /// 确定"每次都要带"就不用 N 小时；不确定就先每次带，提醒之后改。
+  final int? refreshHours;
+
+  bool get isStateful => memoryMode == 'stateful';
+
   bool get supportsChat => capabilities.contains(AICapability.chat);
   bool get supportsVision => capabilities.contains(AICapability.vision);
 
@@ -109,6 +127,8 @@ class AIProviderConfig {
     int? priority,
     String? note,
     String? toolFormat,
+    String? memoryMode,
+    int? refreshHours,
   }) {
     return AIProviderConfig(
       id: id ?? this.id,
@@ -123,6 +143,8 @@ class AIProviderConfig {
       priority: priority ?? this.priority,
       note: note ?? this.note,
       toolFormat: toolFormat ?? this.toolFormat,
+      memoryMode: memoryMode ?? this.memoryMode,
+      refreshHours: refreshHours ?? this.refreshHours,
     );
   }
 
@@ -139,6 +161,8 @@ class AIProviderConfig {
         'priority': priority,
         'note': note,
         'toolFormat': toolFormat,
+        'memoryMode': memoryMode,
+        'refreshHours': refreshHours,
       };
 
   factory AIProviderConfig.fromJson(Map<String, dynamic> json) {
@@ -160,6 +184,8 @@ class AIProviderConfig {
       priority: json['priority'] as int? ?? 100,
       note: json['note'] as String? ?? '',
       toolFormat: json['toolFormat'] as String? ?? 'openai',
+      memoryMode: json['memoryMode'] as String? ?? 'stateless',
+      refreshHours: json['refreshHours'] as int?,
     );
   }
 }
