@@ -1216,6 +1216,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       ),
     );
     if (approved == true) {
+      // 用户 8-03 05:53：会话未创建时静默跳过 = 假成功（用户以为记住了实际没写库）
+      // → 先补建会话再插入；补建失败明确报错，绝不假成功
+      if (_chatSessionId == null) {
+        await _ensureChatSession(_state.personaId ?? '', '');
+      }
       if (_chatSessionId != null) {
         await ChatDatabaseService.instance.insertMemoriesInTx([
           MemoryNode(
@@ -1228,9 +1233,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             updatedAt: DateTime.now(),
           ),
         ]);
+        DebugLogger.log('指令模块', '✅ 工具记录确认: [$category] $content');
+        return _ToolResult(true, '已记录：[$category] $content');
       }
-      DebugLogger.log('指令模块', '✅ 工具记录确认: [$category] $content');
-      return _ToolResult(true, '已记录：[$category] $content');
+      DebugLogger.log('指令模块', '⛔ 工具记录失败: 会话未创建');
+      return const _ToolResult(false, '记忆库不可用（会话未创建），请稍后再试');
     }
     DebugLogger.log('指令模块', '⛔ 工具记录被拒: $content');
     return _ToolResult(false, '用户拒绝了记录：「$content」。如果想知道原因，可以自然地问她。');
@@ -1239,6 +1246,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 工具执行：recall_memory（检索 → 弹窗授权 → 返回记忆给模型）
   Future<_ToolResult> _executeRecallTool(String query, String category) async {
     try {
+      // 用户 8-03 05:53：会话未建时直接说"暂无记忆"容易误判 → 先补建会话再查
+      if (_chatSessionId == null) {
+        await _ensureChatSession(_state.personaId ?? '', '');
+      }
       final sessionId = _chatSessionId;
       if (sessionId == null) return const _ToolResult(false, '暂无记忆可查');
       final isCategory = category.isNotEmpty &&

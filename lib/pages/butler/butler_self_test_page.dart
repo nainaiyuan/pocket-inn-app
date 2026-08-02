@@ -71,15 +71,20 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
     }
 
     // ── 第 2 层：记忆库读写（绕过弹窗直接测数据库）──
-    const testSession = '__tool_selftest__';
+    // 8-03 05:53：chat_memories.session_id 有外键 → 必须先用真实会话，
+    // 否则 FOREIGN KEY constraint failed（自测第一次就是这么挂的）
+    final testSession = await ChatDatabaseService.instance.createSession(
+      characterId: '__tool_selftest__',
+      title: '工具自测（可删）',
+    );
     try {
       final node = await ChatMemoryService.instance.addMemory(
-        sessionId: testSession,
+        sessionId: testSession.id,
         branchLeafId: '__tool_selftest__',
         content: '[日常] 工具链路自测标记',
       );
       final found = await ChatMemoryService.instance
-          .searchMemories(testSession, keyword: '工具链路自测标记');
+          .searchMemories(testSession.id, keyword: '工具链路自测标记');
       if (node.id.isNotEmpty && found.isNotEmpty) {
         await ChatMemoryService.instance.deleteMemory(node.id);
         items.add(ButlerSelfTestItem(
@@ -105,8 +110,10 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
         actual: '异常: $e',
         passed: false,
         failedReason: '记忆库抛异常',
-        guidance: '看日志页具体报错；检查数据库是否可写',
+        guidance: '看日志页具体报错；检查 chat_memories 外键（session 需先存在于 chat_sessions）',
       ));
+    } finally {
+      await ChatDatabaseService.instance.deleteSession(testSession.id);
     }
 
     // ── 第 3 层：日记库读写 ──
