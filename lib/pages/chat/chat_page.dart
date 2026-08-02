@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../ai_provider/models.dart';
+import '../../butler/tools/tool_intent_parser.dart';
 import '../../models/male_lead.dart';
 import '../../services/character_service.dart';
 import '../../services/chat_database_service.dart';
@@ -308,25 +309,36 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 用户 8-03 01:52：用户指名道姓让男主调用某工具（如"调用recall_memory"）
       // 但 DeepSeek 可能不响应 → 检测到工具名时注入强制提示，确保男主真的调用
       final toolHint = _buildExplicitToolHint(t);
+      // 用户 8-03 05:31：用户直接发 JSON 工具指令（兼容不同 AI 的指令格式）→
+      // 不走男主主调用（男主收到 JSON 会空回复），直接进工具轮执行，
+      // 工具结果回传男主后再由男主说话
+      final userJsonCalls = ToolIntentParser.extractJsonToolCalls(t);
       // 工具调用轮（function calling）：模型请求工具 → 执行（弹窗审批）→ 回传 → 再生成
-      var result = await _aiSvc.generateReply(
-        sendText,
-        personaId,
-        personaName: personaName,
-        personaPrompt: _currentPersonaPrompt(),
-        sessionId: _chatSessionId,
-        // 用户 8-03 02:41 模块化重构：技能注入 + 温控询问 + 获准记忆 → USER_PROFILE
-        //（用户状态）；审批反馈 + 工具强制提示 → TASK_STATE（任务状态）
-        userProfile: [
-          if (skillInjection != null) skillInjection,
-          if (keywordAsk != null) keywordAsk,
-          ...recallInjection,
-        ].join('\n'),
-        taskState: [
-          if (_pendingFeedback != null) _pendingFeedback!,
-          if (toolHint != null) toolHint,
-        ].join('\n'),
-      );
+      var result;
+      if (userJsonCalls != null && userJsonCalls.isNotEmpty) {
+        result = AIProviderResult(text: '', toolCalls: userJsonCalls);
+        DebugLogger.log('AI路由',
+            '🔧 用户消息含 JSON 工具指令: ${userJsonCalls.map((c) => c['name']).join('、')}');
+      } else {
+        result = await _aiSvc.generateReply(
+          sendText,
+          personaId,
+          personaName: personaName,
+          personaPrompt: _currentPersonaPrompt(),
+          sessionId: _chatSessionId,
+          // 用户 8-03 02:41 模块化重构：技能注入 + 温控询问 + 获准记忆 → USER_PROFILE
+          //（用户状态）；审批反馈 + 工具强制提示 → TASK_STATE（任务状态）
+          userProfile: [
+            if (skillInjection != null) skillInjection,
+            if (keywordAsk != null) keywordAsk,
+            ...recallInjection,
+          ].join('\n'),
+          taskState: [
+            if (_pendingFeedback != null) _pendingFeedback!,
+            if (toolHint != null) toolHint,
+          ].join('\n'),
+        );
+      }
       // 用完即清（反馈/记忆只注入一次）
       _pendingFeedback = null;
       _pendingRecall = null;
@@ -337,6 +349,23 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       final replyTexts = <String>[];
       if (result.text.trim().isNotEmpty) {
         replyTexts.add(result.text.trim());
+      }
+      // 用户 8-03 05:31：男主回复文本里含工具指令（JSON / 中文文本，
+      // 兼容不同 AI 的输出格式）→ 管家解析识别 → 转 toolCalls 走工具轮。
+      // 纯聊天文本（无指令）→ 返回 null → 零副作用照常显示
+      if ((result.toolCalls == null || result.toolCalls!.isEmpty) &&
+          result.text.trim().isNotEmpty) {
+        final intent = ToolIntentParser.extract(result.text);
+        if (intent != null && intent.isNotEmpty) {
+          DebugLogger.log('AI路由',
+              '🔧 管家解析到男主工具指令: ${intent.map((c) => c['name']).join('、')}');
+          result = AIProviderResult(
+            text: result.text,
+            toolCalls: intent,
+            usage: result.usage,
+            providerName: result.providerName,
+          );
+        }
       }
       // function calling 循环：模型请求工具 → 执行 → 回传 → 再生成（最多3轮防死循环）
       // 用户 8-03 00:55：日志里看不见工具调用 → 每个工具调用都记日志
