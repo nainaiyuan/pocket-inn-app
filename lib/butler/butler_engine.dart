@@ -305,7 +305,26 @@ class ButlerEngine {
     }
     if (hits.isEmpty) return hits;
 
-    // 强度判定（用户 16:23）：
+    // 最高敏词（severe，如"做爱"）：任何场景直接屏蔽，求知也不豁免
+    // 用户 16:32："做爱是什么感觉？"必须屏蔽，不能让男主展开解释
+    final severes = hits.where((h) => h.isSevere).toList();
+    if (severes.isNotEmpty) {
+      DebugLogger.log(
+        '管家流程',
+        '最高敏词 ${severes.map((w) => w.word).join('/')} 命中 → 直接屏蔽（求知不豁免）',
+      );
+      return hits;
+    }
+
+    // 综合公式判定（用户 16:37：各种信号一起辅助，不是一触发就没了）：
+    // score = Σ词基础分（hard +2 / soft +1）
+    //       + 情感浓度分（真实 high +2 / medium +1；无情绪信号 +1）
+    //       + 基线偏离分（当前 vs 基线差 ≥20 → +1）
+    //       + 持续时间分（距上次触发 < 持续窗口 → +1）
+    //       + 话题浓度分（命中 ≥2 词 +1；≥3 词 +2）
+    //       - 求知减分（求知意图 → -1）
+    // score ≥ 3 → 屏蔽
+    // 求知只是减分因子，不是一票放行；hard 单词 + 求知 → 2 分不屏蔽（可解释）
     // - A词+B词（≥2 命中）更敏感 → 强度 ≥1 就挖空
     // - 单词（hard）没那么敏感 → 需强度 ≥2 才挖空
     // - soft 单词 → 不挖空
@@ -313,59 +332,84 @@ class ButlerEngine {
     final analyzer = KeywordMoodAnalyzer();
     final mood = analyzer.analyze(text);
     var score = 0;
+    final parts = <String>[];
 
-    // ① 情感浓度：high ≥60 → +2；medium ≥30 → +1
+    // ① 词基础分：hard +2 / soft +1（每个命中词累加）
+    final wordScore = hits.fold<int>(
+      0,
+      (a, w) => a + (w.isHard ? 2 : 1),
+    );
+    score += wordScore;
+    parts.add('词${hits.map((w) => '${w.word}${w.isHard ? "(硬)" : "(软)"}').join('/')}+$wordScore');
+
+    // ② 情感浓度分：真实情绪 high +2 / medium +1；无情绪信号（平静兜底）+1
     final cv = mood.concentrationValue;
-    if (cv >= 60) {
-      score += 2;
+    final isPureFallback = mood.dimensions.length <= 2 &&
+        mood.dimensions.containsKey('平静');
+    int concScore;
+    if (isPureFallback) {
+      concScore = 1; // 无情绪信号 → 中性分（敏感词命中本身说明话题浓度）
+    } else if (cv >= 60) {
+      concScore = 2;
     } else if (cv >= 30) {
-      score += 1;
+      concScore = 1;
+    } else {
+      concScore = 0;
     }
+    score += concScore;
+    parts.add('浓度${isPureFallback ? "平静兜底" : cv.round()}+$concScore');
 
-    // ② 情感基线偏离：当前情绪 vs 基线差 ≥20 → +1
+    // ③ 情感基线偏离：当前情绪 vs 基线差 ≥20 → +1
     final baseline = analyzer.getBaseline();
+    var baseScore = 0;
     if (baseline.isNotEmpty) {
       for (final e in mood.dimensions.entries) {
         final b = baseline[e.key];
         if (b != null && (e.value - b).abs() >= 20) {
-          score += 1;
+          baseScore = 1;
           break;
         }
       }
     }
+    score += baseScore;
+    parts.add('基线$baseScore');
 
-    // ③ 持续时间：距上次触发 < 持续窗口（coolDownMinutes）→ 持续中 +1
+    // ④ 持续时间：距上次触发 < 持续窗口 → 持续中 +1
     final anyRecent = hits.any((w) {
       final last = _lastTriggerTime[w.word];
       return last != null &&
           now.difference(last).inMinutes < w.coolDownMinutes;
     });
-    if (anyRecent) score += 1;
+    final durScore = anyRecent ? 1 : 0;
+    score += durScore;
+    parts.add('持续$durScore');
 
-    // 求知意图 → 也要过强度关（用户 16:32："做爱是什么感觉？"不能放行）
-    // 求知 + 强度 < 2（soft 词、低浓度）→ 放行，男主可以解释
-    // 求知 + 强度 ≥2（hard 词、高浓度）→ 不豁免，照常挖空
-    if (_isCuriosityIntent(text) && score < 2) {
+    // ⑤ 话题浓度：命中 ≥2 词 +1；≥3 词 +2（A+B 搭配更敏感）
+    final topicScore = hits.length >= 3 ? 2 : (hits.length >= 2 ? 1 : 0);
+    score += topicScore;
+    parts.add('话题${hits.length}词+$topicScore');
+
+    // ⑥ 求知减分：用户在了解 → -1（只是减分，不是一票放行）
+    final curiosity = _isCuriosityIntent(text);
+    if (curiosity) {
+      score -= 1;
+      parts.add('求知-1');
+    }
+
+    if (score >= 3) {
       DebugLogger.log(
         '管家流程',
-        '求知意图：${hits.map((w) => w.word).join('/')} 命中且强度 ${score} < 2，'
-        '放行让男主解释',
+        '屏蔽判定：${hits.map((w) => w.word).join('/')} '
+        '（${parts.join('，')} = $score ≥ 3）→ 挖空',
       );
-      return [];
+      return hits;
     }
-
-    final hardCount = hits.where((h) => h.isHard).length;
-    if (hits.length >= 2) {
-      // A+B 搭配 → 强度 ≥1 触发
-      if (score < 1) return [];
-    } else if (hardCount == 1) {
-      // 单词 hard → 强度 ≥2 触发（"单词还没那么敏感"）
-      if (score < 2) return [];
-    } else {
-      // soft 单词 → 不触发（该词在此场景不是敏感词）
-      return [];
-    }
-    return hits;
+    DebugLogger.log(
+      '管家流程',
+      '屏蔽判定：${hits.map((w) => w.word).join('/')} '
+      '（${parts.join('，')} = $score < 3）→ 放行',
+    );
+    return [];
   }
 
   /// 检测降温话题

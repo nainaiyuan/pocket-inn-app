@@ -19,7 +19,7 @@
 
 class RiskWord {
   final String word;
-  final String kind; // 'hard' | 'soft'
+  final String kind; // 'severe' | 'hard' | 'soft'
   final String category; // 分类（亲密/身体/家人/其他…）——辅助判定与组织
   final String? replacement; // 有替换词直接替换；null = 挖空 [PRIVACY_MARK]
   final int coolDownMinutes; // 触发后冷却分钟（持续时间维度，防反复打码）
@@ -33,6 +33,9 @@ class RiskWord {
   });
 
   bool get isHard => kind == 'hard';
+
+  /// 最高敏：任何场景直接屏蔽（求知也不豁免）——性行为等
+  bool get isSevere => kind == 'severe';
 
   Map<String, dynamic> toJson() => {
         'word': word,

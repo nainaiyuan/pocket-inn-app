@@ -137,7 +137,14 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
                     initialValue: kind,
                     decoration: _deco('强度'),
                     items: const [
-                      DropdownMenuItem(value: 'hard', child: Text('强（单独出现就挖空）')),
+                      DropdownMenuItem(
+                        value: 'severe',
+                        child: Text('最高敏（任何场景都挖，求知也不放）'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'hard',
+                        child: Text('强（需公式强度达标，求知可放）'),
+                      ),
                       DropdownMenuItem(value: 'soft', child: Text('弱（需搭配或浓度达标）')),
                     ],
                     onChanged: (v) => setDialogState(() => kind = v ?? 'hard'),
@@ -343,7 +350,8 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
                       Expanded(
                         child: Text(
                           '聊到敏感词时挖空成 [PRIVACY_MARK]，男主理解情绪、不脑补内容。'
-                          '强度判定：A+B搭配更敏感、单词需情感浓度/基线/持续时间达标才挖。',
+                          '综合公式判定：词强度+情感浓度+基线偏离+持续时间+话题浓度-求知，'
+                          '总分≥3才挖空；最高敏词任何场景都挖。',
                           style: TextStyle(
                             fontSize: 12,
                             height: 1.5,
@@ -432,6 +440,7 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
                                       ? '替换：${w.replacement}'
                                       : '挖空',
                                 ),
+                                if (w.isSevere) _tag('最高敏'),
                                 _tag('持续 ${w.coolDownMinutes}分'),
                               ],
                             ),
