@@ -27,6 +27,7 @@ import 'widgets/chat_sidebar_left.dart';
 import 'widgets/chat_sidebar_right.dart';
 import 'widgets/chat_top_bar.dart';
 import 'widgets/chat_message_area.dart';
+import 'services/chat_storage_service.dart';
 import 'widgets/character_world_page.dart';
 import 'widgets/chat_input_bar.dart';
 import 'widgets/debug_log_sheet.dart';
@@ -969,13 +970,32 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   /// 插入管家工具气泡（🔧 正在…，男主头像下小气泡）
   /// 用 [tool] 前缀标记（freezed ChatMessage 不加字段，bubble 检测前缀渲染）
+  /// 用户 8-03 03:09：男主只要做了什么，气泡就必须有——不管用户看不看。
+  /// 所以气泡先落库（ChatStorageService，不依赖聊天页挂载），
+  /// 聊天页挂载时再实时插入 UI；没挂载时用户回来从 DB 加载也能看到。
+  /// 注意：ChatMessageAreaState.appendMessage 内部自己会落库，
+  /// 所以挂载时直接调它（避免双写）；没挂载时才手动落库。
   void _appendToolBubble(String text) {
-    _msgKey.currentState?.appendMessage(ChatMessage(
-      id: '${DateTime.now().millisecondsSinceEpoch}_tool',
+    final personaId = _state.personaId;
+    if (personaId == null) return;
+    final msg = ChatMessage(
+      // 微秒时间戳 + 自增序号：同一毫秒多个气泡也不撞 id（撞了落库会丢）
+      id: '${DateTime.now().microsecondsSinceEpoch}_tool${_toolBubbleSeq++}',
       text: '[tool] $text',
       isMe: false,
-    ));
+    );
+    final area = _msgKey.currentState;
+    if (area != null) {
+      // 聊天页挂载 → 实时插入 UI（内部会落库 + 滚到底部）
+      area.appendMessage(msg);
+    } else {
+      // 聊天页没挂载（切走/后台）→ 只落库，回来从 DB 加载能看到
+      ChatStorageService().appendMessage(personaId, msg);
+    }
   }
+
+  /// 工具气泡自增序号（防同一微秒撞 id）
+  int _toolBubbleSeq = 0;
 
   /// 工具执行完成/失败气泡（用户 8-03 01:57）：执行完必须给用户明确反馈。
   void _appendToolResultBubble(String toolName, _ToolResult r) {

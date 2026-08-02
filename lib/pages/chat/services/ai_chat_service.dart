@@ -4,6 +4,8 @@ import '../../../ai_provider/ai_provider_manager.dart';
 import '../../../ai_provider/models.dart';
 import '../../../ai_provider/price_table.dart';
 import 'context_manager.dart';
+import 'chat_storage_service.dart';
+import '../../../models/chat_message.dart';
 import '../../../butler/context/context_tracker.dart';
 import '../../../butler/system_template.dart' show SystemTemplate;
 import '../../../services/chat_database_service.dart';
@@ -171,7 +173,7 @@ class AiChatService {
     String raw,
   ) async {
     if (raw.trim().isEmpty) return '';
-    final system = '你是「$personaName」。下面是你们今天的聊天记录。'
+    final system = '【管家指令】你是「$personaName」。下面是你们今天的聊天记录。'
         '请以你的口吻写一篇今天的日记：'
         '① 回顾今天聊了什么、她今天的状态/心情、你答应过的事、'
         '让你在意的小细节 ② 像真正的日记，有你的语气和感受，'
@@ -224,7 +226,7 @@ class AiChatService {
     if (!toolRound && personaPrompt.isNotEmpty) {
       if (_statefulInfoFor(personaId).$1) {
         // 用户发消息 → 重置定时沉淀（新一轮空闲期）
-        scheduleStatefulSettle(personaId, personaName);
+        scheduleStatefulSettle(personaId, personaName, personaPrompt);
         // 空闲超时已过 → AI 已不记得 → 本次带恢复包+摘要接上
         final since = ContextManager.instance.hoursSinceLastChat(personaId);
         final idle = _statefulInfoFor(personaId).$2;
@@ -470,6 +472,98 @@ class AiChatService {
   /// 用户 21:52 澄清：不能等超时到了才写（那时 AI 全忘了，写不出来）——
   /// 要在记忆消失之前，也就是"用户最后一次对话 + 空闲超时的一半"时，
   /// 管家主动去找男主写（AI 还记得，写得出来）；分类存好，管家好管理。
+  /// 用户 8-03 03:09：男主做了什么必须有气泡记录（不管用户看不看）。
+  /// 后台沉淀/定时场景聊天页可能没挂载 → 直接落库（ChatStorageService），
+  /// 用户下次进聊天页从 DB 加载就能看到（[tool] 前缀渲染成管家气泡）。
+  Future<void> _logToolBubble(String personaId, String text) async {
+    try {
+      await ChatStorageService().appendMessage(
+        personaId,
+        ChatMessage(
+          id: '${DateTime.now().microsecondsSinceEpoch}_tool',
+          text: '[tool] $text',
+          isMe: false,
+        ),
+      );
+    } catch (_) {}
+  }
+
+  /// 管家唤醒男主主动发消息（用户 8-03 03:13：大半夜我不在，男主给我发消息——
+  /// 和工具调用一样要落库记录，用户回来能看到）。
+  ///
+  /// [instruction]：管家给男主的指令（如"现在是凌晨3点，用户睡了，你可以
+  /// 主动给她留一句话"）。注意：这不是用户说的 → 不 feedUserMessage，
+  /// 不污染用户消息历史；男主回复 → feedAssistantMessage（男主说过的话）
+  /// + 落库（ChatStorageService，isMe: false，用户回来从 DB 加载看到）。
+  ///
+  /// 返回男主主动消息文本；空 = 没说出来（不落库）。
+  Future<String> butlerWakeUp(
+    String personaId,
+    String personaName,
+    String personaPrompt,
+    String instruction, {
+    String? sessionId,
+  }) async {
+    try {
+      final manager = AIProviderManager.instance;
+      if (!manager.hasUsable(personaId)) return '';
+      // 男主被唤醒时也要恢复摘要区（否则重启后男主失忆）
+      if (!_contextRestored.contains(personaId)) {
+        _contextRestored.add(personaId);
+        await ContextManager.instance.restore(personaId, sessionId);
+      }
+      final needsWindow = !ContextTracker.instance.windowConfirmed(personaId);
+      final systemPrompt = SystemTemplate.build(
+        personaName: personaName,
+        personaPrompt: personaPrompt,
+        needsWindow: needsWindow,
+        // 用户 8-03 03:20：男主已知管家=系统本身（SYSTEM_CORE 已说明），
+        // 指令统一带【管家指令】标记即可，不用再解释"这是管家唤醒"
+        userProfile: null,
+        taskState: '【管家指令】用户当前不在场。你主动说一句话或做一件事，'
+            '像平时一样自然、简短（30 字以内），参考你的设定；'
+            '不需要等她回复，说完就好。',
+        light: _statefulInfoFor(personaId).$1,
+      );
+      final historyMsgs = ContextManager.instance.buildHistoryMessages(personaId);
+      final res = await manager.chat(
+        personaId,
+        [
+          AIChatMessage(role: 'system', content: systemPrompt),
+          if (historyMsgs.isNotEmpty)
+            AIChatMessage(
+              role: 'system',
+              content: '【上下文参考】（已聊过的内容，无需回复，仅作参考保持连贯）\n'
+                  '${historyMsgs.map((m) => '[${m.role}] ${m.content}').join('\n')}',
+            ),
+          AIChatMessage(role: 'user', content: '【管家指令】$instruction'),
+        ],
+        tools: butlerTools,
+      );
+      final text = res.text.trim();
+      if (text.isEmpty) {
+        DebugLogger.log('AI路由', '🔔 管家唤醒：男主没说话（空回复，不落库）');
+        return '';
+      }
+      // 男主主动消息进上下文（男主说过的话，下次聊天记得）
+      ContextManager.instance.feedAssistantMessage(personaId, text);
+      // 落库为男主消息（用户回来从 DB 加载看到，和工具气泡一样持久）
+      await ChatStorageService().appendMessage(
+        personaId,
+        ChatMessage(
+          id: '${DateTime.now().microsecondsSinceEpoch}_wake',
+          text: text,
+          isMe: false,
+        ),
+      );
+      DebugLogger.log('AI路由', '🔔 管家唤醒：男主主动发消息（${text.length} 字，已落库）');
+      return text;
+    } on Object catch (e) {
+      DebugLogger.log('AI路由', '⚠️ 管家唤醒男主失败（静默）: $e');
+      return '';
+    }
+  }
+
   /// 触发：① 定时器（见 [scheduleStatefulSettle]）② 下次聊天时检测
   /// 距上次聊天已过超时一半且没沉淀过 → 补沉淀（防 APP 被杀/定时器丢）。
   /// 沉淀成功后返回 true。
@@ -499,6 +593,17 @@ class AiChatService {
       if (written) {
         _settledAtHalf[personaId] = true;
         DebugLogger.log('上下文管理', '✅ 三类存档完成（日记/摘要/恢复包），管家已分类存好');
+        // 用户 8-03 03:13：大半夜我不在，男主给我发消息——和工具气泡一样
+        // 落库记录，用户回来能看到。沉淀完顺带给用户留一句话（不打扰，
+        // 只落库；男主想说话就说，不想说就静默）
+        await butlerWakeUp(
+          personaId,
+          personaName,
+          _settlePersonaPrompts[personaId] ?? '',
+          '现在是深夜/你不在的时候，管家代你转达：男主可以主动给她留一句话，'
+          '像平时一样自然、简短（30字内），比如想她、今天的心情、明天想一起做什么。'
+          '不需要等她回复，说完就好。',
+        );
       }
       return written;
     } on Object catch (e) {
@@ -513,13 +618,20 @@ class AiChatService {
   /// 安排定时沉淀：用户最后聊天 + 空闲超时一半后触发。
   /// 用户 21:52：管家主动去找男主（不能等用户下次来才发现忘了）。
   /// 每次用户发消息时调用（重置定时器）；到点且期间没再聊 → 写三类存档。
-  void scheduleStatefulSettle(String personaId, String personaName) {
+  /// [personaPrompt]：男主专属人设（主动发消息时要像男主本人）。
+  void scheduleStatefulSettle(
+    String personaId,
+    String personaName,
+    String personaPrompt,
+  ) {
     try {
       final info = _statefulInfoFor(personaId);
       if (!info.$1) return;
       final idleHours = info.$2!;
       _settledAtHalf[personaId] = false; // 新一轮空闲期，重新允许写
       _settleTimers[personaId]?.cancel();
+      // 记住人设（定时到点时用——男主主动发消息要像男主）
+      _settlePersonaPrompts[personaId] = personaPrompt;
       final timer = Timer(Duration(minutes: (idleHours * 30).round()), () {
         _settleTimers.remove(personaId);
         // 到点时若还在聊（刚有消息）→ 跳过（下次发消息会重置定时器）
@@ -542,6 +654,9 @@ class AiChatService {
 
   final Map<String, Timer> _settleTimers = {};
 
+  /// personaId → 男主专属人设（定时到点时主动发消息要用）
+  final Map<String, String> _settlePersonaPrompts = {};
+
   /// 男主一次写三类（一次 AI 调用，分类输出）：
   /// - 日记：**男主调用 write_diary 工具写入**（用户 21:56：日记要让男主
   ///   调用工具写进去；同一天拼接进同一天，不新增多条）
@@ -553,7 +668,7 @@ class AiChatService {
     String personaName,
     String raw,
   ) async {
-    final system = '你是「$personaName」。下面是你们最近的聊天记录。'
+    final system = '【管家指令】你是「$personaName」。下面是你们最近的聊天记录。'
         '趁你还记得（之后上下文会被清空），把三样东西分类整理好：'
         '① 日记：把今天聊的、她的状态心情、你答应过的事、在意的小细节，'
         '整理成一段日记（像真正的日记有你的语气，300 字内），'
@@ -606,6 +721,9 @@ class AiChatService {
             await ChatDatabaseService.instance.saveDiaryEntry(personaId, content);
             diarySaved = true;
             DebugLogger.log('上下文管理', '📔 男主调用 write_diary 写日记（${content.length} 字，同天拼接）');
+            // 用户 8-03 03:09：男主做了什么必须有气泡记录（不管用户看不看）。
+            // 后台沉淀时聊天页可能没挂载 → 直接落库，用户回来从 DB 加载能看到
+            await _logToolBubble(personaId, '✅ write_diary 完成：日记已存档（${content.length} 字）');
           }
         }
       }
@@ -666,7 +784,7 @@ class AiChatService {
       DebugLogger.log('上下文管理', '📔 日记已存档（${diary.length} 字），细节没丢');
     }
     // ② 再提炼摘要提醒（能查的现查，只留影响连续性的提醒）
-    final system = '你是「$personaName」。下面是你们最近的聊天记录。'
+    final system = '【管家指令】你是「$personaName」。下面是你们最近的聊天记录。'
         '请从中提炼"你需要记住的提醒"，写进你的长期摘要。要求：'
         '① 只写影响后续对话的：她的约定/承诺/正在做的事/你答应过的事/'
         '她明确希望你记住的、每天都要记得的事'
@@ -701,7 +819,7 @@ class AiChatService {
     final old = await ContextManager.instance.takeSummariesForCompact(personaId);
     if (old.trim().isEmpty) return;
     DebugLogger.log('上下文管理', '🗜️ 摘要区太大，缩减中…');
-    final system = '你是「$personaName」。以下是你们之前的对话摘要列表，'
+    final system = '【管家指令】你是「$personaName」。以下是你们之前的对话摘要列表，'
         '请压缩合并成更紧凑的要点：① 合并同类话题 ② 每条一行、20 字内 '
         '③ 只保留最重要的信息 ④ 不要客套话。只输出压缩后的要点列表。';
     try {
