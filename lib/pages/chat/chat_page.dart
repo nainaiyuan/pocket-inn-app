@@ -1402,13 +1402,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     if (text.isEmpty) return null;
     final calls = <Map<String, dynamic>>[];
     // 工具名 → 中文意图词（避免"上次用过"这类提及被误抓）
+    // 用户 8-03 03:56：男主回复"回忆…"但词表只有"查记忆"→ 抓不到 → 没气泡。
+    // 扩充常见说法：回忆/回想/查一下/看看记忆/记得吗/查查 等
     const toolIntents = <String, List<String>>{
-      'record_memory': ['调用record_memory', '使用record_memory', '用一下record_memory', '记住', '记一下', '记下来'],
-      'recall_memory': ['调用recall_memory', '使用recall_memory', '用一下recall_memory', '查记忆', '查一下记忆', '查看记忆', '查关于'],
+      'record_memory': ['调用record_memory', '使用record_memory', '用一下record_memory', '记住', '记一下', '记下来', '记着', '别忘了', '你要记住'],
+      'recall_memory': ['调用recall_memory', '使用recall_memory', '用一下recall_memory', '查记忆', '查一下记忆', '查看记忆', '查关于', '回忆', '回想', '查一下', '查查', '看看记忆', '记得吗', '想起来'],
       'save_identity_memory': ['调用save_identity_memory', '使用save_identity_memory', '记住代号', '保存代号'],
       'list_tools': ['调用list_tools', '使用list_tools', '有什么工具', '能做什么', '工具清单'],
       'write_diary': ['调用write_diary', '使用write_diary', '写日记', '写一下日记', '记日记'],
-      'query_diary': ['调用query_diary', '使用query_diary', '查日记', '查一下日记', '翻日记'],
+      'query_diary': ['调用query_diary', '使用query_diary', '查日记', '查一下日记', '翻日记', '看看日记', '之前聊过什么', '我说过什么'],
     };
     toolIntents.forEach((name, intents) {
       final hit = intents.any(text.contains);
