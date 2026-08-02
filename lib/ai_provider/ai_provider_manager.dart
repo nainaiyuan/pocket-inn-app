@@ -437,15 +437,19 @@ class AIProviderManager {
             toolFormatOverride: config.toolFormat,
           );
           final translatedTools = adapter.translateTools(tools ?? const []);
-          // 文本协议：把工具说明拼进 system（不传原生 tools）
+          // 文本协议：工具轮翻译（不发原生 tool_calls，DeepSeek 思考模式
+          // 回传 reasoning_content 拿不到就 400，8-03 06:54）+ 工具说明拼进 system
           var effectiveMessages = messages;
-          if (adapter.formatId == 'text' && (tools?.isNotEmpty ?? false)) {
-            final hint = adapter.buildToolHint(tools!);
-            if (hint.isNotEmpty) {
-              effectiveMessages = [
-                AIChatMessage(role: 'system', content: hint),
-                ...messages,
-              ];
+          if (adapter.formatId == 'text') {
+            effectiveMessages = adapter.translateToolRound(messages);
+            if (tools?.isNotEmpty ?? false) {
+              final hint = adapter.buildToolHint(tools!);
+              if (hint.isNotEmpty) {
+                effectiveMessages = [
+                  AIChatMessage(role: 'system', content: hint),
+                  ...effectiveMessages,
+                ];
+              }
             }
           }
           final apiResult = await _api.createChatCompletion(

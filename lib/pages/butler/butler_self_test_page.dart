@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../ai_provider/models.dart';
+import '../../ai_provider/tool_format_adapter.dart';
 import '../../butler/tools/tool_intent_parser.dart';
 import '../../services/butler_command.dart';
 import '../../services/chat_database_service.dart';
@@ -144,6 +145,45 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
       passed: r6kw is List && r6kw.length == 2,
       failedReason: r6kw == null ? '解析器丢了 keywords 参数' : null,
       guidance: '检查 extractToolBlocks 参数解析',
+    ));
+
+    // ── R8（8-03 06:54）：文本协议工具轮回传不 400 ──
+    // DeepSeek 思考模式：assistant(tool_calls) 必须带 reasoning_content，
+    // 拿不到就 400 → 文本协议直接翻译：丢弃原生 tool_calls，
+    // 工具结果注入 user 消息（男主看到结果继续说话）
+    final r8Translated = const TextProtocolAdapter().translateToolRound([
+      const AIChatMessage(role: 'system', content: '系统提示'),
+      const AIChatMessage(
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          {'name': 'record_memory', 'arguments': <String, dynamic>{}},
+        ],
+      ),
+      const AIChatMessage(
+        role: 'tool',
+        content: '已记录：[喜好] 妈妈喜欢猫',
+        toolCallId: 'call_1',
+      ),
+    ]);
+    final r8HasToolCall = r8Translated
+        .any((m) => m.toolCalls != null && m.toolCalls!.isNotEmpty);
+    final r8Injected = r8Translated
+        .where((m) => m.role == 'user' && m.content.contains('工具执行结果'))
+        .toList();
+    items.add(ButlerSelfTestItem(
+      message: 'R8 文本协议工具轮回传',
+      expected: '无原生 tool_calls，结果注入 user 消息',
+      actual: r8HasToolCall
+          ? '❌ 仍发原生 tool_calls（会 400）'
+          : (r8Injected.length == 1 && r8Injected.first.content.contains('妈妈喜欢猫')
+              ? '✅ 已翻译（结果注入，无 tool_calls）'
+              : '❌ 翻译结果异常'),
+      passed: !r8HasToolCall &&
+          r8Injected.length == 1 &&
+          r8Injected.first.content.contains('妈妈喜欢猫'),
+      failedReason: r8HasToolCall ? 'translateToolRound 没丢弃 tool_calls' : null,
+      guidance: '检查 TextProtocolAdapter.translateToolRound',
     ));
 
     // ── R7（8-03 06:41）：男主写的完整句 + 关键词都要保存 ──
@@ -587,7 +627,8 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
               'R1 记忆库外键 · R2 record_memory 假成功\n'
               'R3a 代码块JSON · R3b 残缺JSON容错\n'
               'R4 reasoning_content 回传（DeepSeek 400）\n'
-              'R5 类别兜底 · R6 关键词并入规律引擎 · R7 完整句+关键词保存',
+              'R5 类别兜底 · R6 关键词并入规律引擎 · R7 完整句+关键词保存\n'
+              'R8 文本协议工具轮回传（DeepSeek 400 根治）',
               style: TextStyle(color: Colors.black54, fontSize: 12, height: 1.6),
             ),
           ),
@@ -608,7 +649,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
                     ),
                   )
                 : const Icon(Icons.bug_report),
-            label: Text(_regRunning ? '回归测试中…' : '开始 Bug 回归测试 × 8'),
+            label: Text(_regRunning ? '回归测试中…' : '开始 Bug 回归测试 × 9'),
           ),
           if (_regReport != null) ...[
             const SizedBox(height: 16),

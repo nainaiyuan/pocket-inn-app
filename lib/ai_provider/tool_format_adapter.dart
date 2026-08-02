@@ -2,6 +2,8 @@ library;
 
 import 'dart:convert';
 
+import 'models.dart';
+
 /// 工具格式翻译层（用户 19:29/19:34 设计）
 ///
 /// 核心思想：底层调用、参数、执行逻辑**不变**，只有"工具声明/返回格式"
@@ -47,6 +49,11 @@ abstract class ToolFormatAdapter {
 
   /// 文本协议：从回复文本剥掉工具块（默认原样返回）
   String stripToolBlocks(String text) => text;
+
+  /// 工具轮消息翻译（默认原样返回；文本协议覆盖为丢弃原生
+  /// tool_calls + 工具结果注入 user 消息，8-03 06:54）
+  List<AIChatMessage> translateToolRound(List<AIChatMessage> messages) =>
+      messages;
 }
 
 /// OpenAI 兼容格式：内部格式即原生格式，直通
@@ -258,6 +265,36 @@ class TextProtocolAdapter extends ToolFormatAdapter {
   @override
   String stripToolBlocks(String text) =>
       text.replaceAll(_toolBlock, '').trim();
+
+  /// 8-03 06:54：文本协议下工具轮回传翻译。
+  ///
+  /// DeepSeek 思考模式要求「带 tool_calls 的 assistant 消息」必须原样
+  /// 回传 reasoning_content，响应里拿不到（或解析不出）就 HTTP 400：
+  /// "The 'reasoning_content' in the thinking mode must be passed back"。
+  /// 文本协议干脆不发原生 tool_calls：丢弃 assistant(tool_calls) 与
+  /// tool 消息，把工具结果合并成一条 user 消息注入，男主看到结果继续说话。
+  /// 非工具轮消息（无 tool/assistant(tool_calls)）原样返回，零副作用。
+  List<AIChatMessage> translateToolRound(List<AIChatMessage> messages) {
+    final toolResults = <String>[];
+    final filtered = <AIChatMessage>[];
+    for (final m in messages) {
+      if (m.role == 'tool') {
+        if (m.content.trim().isNotEmpty) toolResults.add(m.content.trim());
+      } else if (m.toolCalls != null && m.toolCalls!.isNotEmpty) {
+        // 丢弃 assistant(tool_calls)——思考模式回传要求太高，文本协议不需要
+      } else {
+        filtered.add(m);
+      }
+    }
+    if (toolResults.isNotEmpty) {
+      filtered.add(AIChatMessage(
+        role: 'user',
+        content: '【工具执行结果】\n${toolResults.join('\n')}\n\n'
+            '基于结果自然地回复用户，不要再调用工具。',
+      ));
+    }
+    return filtered;
+  }
 }
 
 /// 完全不用工具的模型：不声明工具、不解析调用（纯聊天，不假装有工具）
