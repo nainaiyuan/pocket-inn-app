@@ -304,6 +304,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       final recallInjection = _pendingRecall != null
           ? await _buildRecallInjectionAsync(_pendingRecall!)
           : const <String>[];
+      // 用户 8-03 01:52：用户指名道姓让男主调用某工具（如"调用recall_memory"）
+      // 但 DeepSeek 可能不响应 → 检测到工具名时注入强制提示，确保男主真的调用
+      final toolHint = _buildExplicitToolHint(t);
       // 工具调用轮（function calling）：模型请求工具 → 执行（弹窗审批）→ 回传 → 再生成
       var result = await _aiSvc.generateReply(
         sendText,
@@ -317,6 +320,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           if (keywordAsk != null) keywordAsk,
           if (_pendingFeedback != null) _pendingFeedback!,
           ...recallInjection,
+          if (toolHint != null) toolHint,
         ].join('\n'),
       );
       // 用完即清（反馈/记忆只注入一次）
@@ -1301,6 +1305,26 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   /// 男主获准调取记忆 → 异步检索记忆库生成注入文本（按类别/条数）
   /// 21:02：记忆库存的是用户原文（可能含真实称呼）→ 注入前过假面层替换成代号
+  /// 用户 8-03 01:52：用户指名道姓让男主调用工具（"调用recall_memory"等），
+  /// 但模型可能忽略 → 检测工具名并注入强制提示，确保男主真的调用。
+  /// 返回 null = 用户没提工具名，不注入。
+  String? _buildExplicitToolHint(String userText) {
+    const known = <String, String>{
+      'record_memory': '记住',
+      'recall_memory': '查看记忆',
+      'save_identity_memory': '保存身份记忆',
+      'list_tools': '查看工具',
+      'write_diary': '写日记',
+      'query_diary': '查日记',
+    };
+    final matched = known.keys.where(userText.contains).toList();
+    if (matched.isEmpty) return null;
+    final names = matched.join('、');
+    return '【用户指令】用户明确要求你调用工具 $names。'
+        '请立即调用该工具（function calling），不要只说不做。'
+        '调用完成后用自然的话告诉用户结果。';
+  }
+
   Future<List<String>> _buildRecallInjectionAsync(String query) async {
     try {
       final sessionId = _chatSessionId;
