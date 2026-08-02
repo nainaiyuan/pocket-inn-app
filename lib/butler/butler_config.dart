@@ -24,7 +24,9 @@ class ButlerConfig {
   String butlerAIModel;         // 管家用的模型名
 
   ButlerConfig({
-    this.keywordReplaceEnabled = false,
+    // 用户 8-03 01:26：敏感词检测从没有 UI 开关、默认关 → 用户设词永不生效。
+    // 默认改开（risk_words_page 的"全局启用"开关 cachedEnabled 可总关）
+    this.keywordReplaceEnabled = true,
     this.safeTranslateEnabled = false,
     this.maskLayerEnabled = true,
     this.defaultMaskLevel = 'core',
@@ -54,7 +56,7 @@ class ButlerConfig {
   };
 
   factory ButlerConfig.fromJson(Map<String, dynamic> json) => ButlerConfig(
-    keywordReplaceEnabled: json['keywordReplaceEnabled'] ?? false,
+    keywordReplaceEnabled: json['keywordReplaceEnabled'] ?? true,
     safeTranslateEnabled: json['safeTranslateEnabled'] ?? false,
     maskLayerEnabled: json['maskLayerEnabled'] ?? true,
     defaultMaskLevel: json['defaultMaskLevel'] ?? 'core',

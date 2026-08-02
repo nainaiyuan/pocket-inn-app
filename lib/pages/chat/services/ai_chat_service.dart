@@ -342,10 +342,12 @@ class AiChatService {
     if (result.text.trim().isEmpty && !hasToolCalls && !toolRound) {
       // DeepSeek 偶发空回复：自动重试一次（工具轮不重试，由 chat_page 循环处理）
       DebugLogger.log('AI路由', '⚠️ 空回复，自动重试一次');
-      // 重试不带 tools：若 tools 导致模型空回复，去掉后至少能正常聊天
+      // 重试保持带 tools（用户 8-03 01:26：男主说调用了工具但日志没体现——
+      // 重试不带 tools → 男主想调工具也调不了。保持与主调用一致的调用能力）
       final retry = await manager.chat(
         personaId,
         messages,
+        tools: toolRound ? null : butlerTools,
       );
       if (retry.text.trim().isEmpty &&
           (retry.toolCalls == null || retry.toolCalls!.isEmpty)) {
