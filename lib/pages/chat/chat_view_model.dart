@@ -541,7 +541,8 @@ class ChatViewModel extends ChangeNotifier {
   /// 发送一条用户消息。[rawText] 为未经变量替换的原始输入。
   Future<void> sendMessage(
     String rawText, {
-    Future<bool?> Function(List<String> askWords)? onAskBlock,
+    Future<String?> Function(List<String> askWords)? onAskBlock,
+    Future<bool?> Function(List<String> formatMatched)? onAskFormat,
     void Function(List<String> blocked, List<String> allowed)? onMaskResult,
   }) async {
     final session = _activeSession;
@@ -597,6 +598,7 @@ class ChatViewModel extends ChangeNotifier {
           notifyListeners();
         },
         onAskBlock: onAskBlock,
+        onAskFormat: onAskFormat,
         persistSession: _isDraftSession
             ? () async {
                 final createdSession = await _persistDraftSession();

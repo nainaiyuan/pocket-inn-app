@@ -20,6 +20,8 @@ class RiskWordStore {
   static const _exceptionsKey = 'risk_exceptions_v2';
   static const _userPrefsKey = 'risk_user_prefs';
   static const _tempAllowsKey = 'risk_temp_allows';
+  static const _enabledKey = 'risk_enabled';
+  static const _disabledCharsKey = 'risk_disabled_characters';
 
   /// 用户偏好：词 → 'block'（用户明确说过要屏蔽 → 以后直接屏蔽不再问）
   static const String prefBlock = 'block';
@@ -31,6 +33,8 @@ class RiskWordStore {
   List<String>? _exceptions;
   Map<String, String>? _userPrefs;
   Map<String, DateTime>? _tempAllows;
+  bool? _enabled;
+  Set<String>? _disabledCharacters;
   bool _loaded = false;
 
   /// 加载词表（首次写入默认表；之后返回用户配置）
@@ -82,6 +86,32 @@ class RiskWordStore {
         _tempAllows![e.substring(0, i)] = until;
       }
     }
+    _enabled = prefs.getBool(_enabledKey) ?? true;
+    _disabledCharacters = (prefs.getStringList(_disabledCharsKey) ?? []).toSet();
+  }
+
+  /// 敏感词屏蔽总开关（固定格式检测不受影响）
+  bool get cachedEnabled => _enabled ?? true;
+
+  Future<void> setEnabled(bool value) async {
+    _enabled = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_enabledKey, value);
+  }
+
+  /// 某男主是否关闭了敏感词屏蔽（本地 AI 男主不需要屏蔽词）
+  bool isCharacterDisabled(String characterId) =>
+      _disabledCharacters?.contains(characterId) ?? false;
+
+  Future<void> setCharacterDisabled(String characterId, bool disabled) async {
+    _disabledCharacters ??= {};
+    if (disabled) {
+      _disabledCharacters!.add(characterId);
+    } else {
+      _disabledCharacters!.remove(characterId);
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_disabledCharsKey, _disabledCharacters!.toList());
   }
 
   /// 加载白名单（默认 + 用户追加）

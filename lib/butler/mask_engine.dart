@@ -45,6 +45,12 @@ class ProcessResult {
   /// 敏感词挖空前的文本（假面层已替换）——用户选"不屏蔽"时用这个
   final String? maskLayerText;
 
+  /// 命中的固定格式（身份证/手机号/银行卡/邮箱）——弹窗问用户是否发送
+  final List<String> formatMatched;
+
+  /// 固定格式挖空前的文本（敏感词已处理）——用户选"发送"时用这个
+  final String? formatLayerText;
+
   ProcessResult({
     required this.text,
     this.wasModified = false,
@@ -54,6 +60,8 @@ class ProcessResult {
     this.askWords = const [],
     this.blockedWords = const [],
     this.maskLayerText,
+    this.formatMatched = const [],
+    this.formatLayerText,
   });
 }
 

@@ -454,6 +454,7 @@ class _ChatPageState extends State<ChatPage> {
       await _viewModel.sendMessage(
         text,
         onAskBlock: _askBlockDialog,
+        onAskFormat: _askFormatDialog,
         onMaskResult: _showMaskResult,
       );
     } catch (error) {
@@ -466,10 +467,11 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  /// 提醒档敏感词弹窗：返回 true=屏蔽并记住，false=这次不屏蔽（临时豁免），null=关闭
-  Future<bool?> _askBlockDialog(List<String> words) async {
+  /// 提醒档敏感词弹窗（三选项）：
+  /// 'allow'=这次不屏蔽（30分钟豁免）｜'once'=仅本次屏蔽｜'remember'=屏蔽并记住｜null=关闭
+  Future<String?> _askBlockDialog(List<String> words) async {
     if (!mounted) return null;
-    return showDialog<bool>(
+    return showDialog<String>(
       context: context,
       builder: (dctx) => AlertDialog(
         backgroundColor: const Color(0xFFFDF7F9),
@@ -483,23 +485,71 @@ class _ChatPageState extends State<ChatPage> {
         ),
         content: Text(
           '这条消息里有敏感词「${words.join('、')}」。\n\n'
-          '屏蔽：男主看不到具体内容，只回应情绪（下次同类不再问）。\n'
+          '屏蔽：男主看不到具体内容，只回应情绪。\n'
           '不屏蔽：原文发给男主，30 分钟内不再屏蔽这个词。',
           style: const TextStyle(fontSize: 13, height: 1.6, color: Color(0xFF6A4A5A)),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(dctx).pop(false),
+            onPressed: () => Navigator.of(dctx).pop('allow'),
             child: const Text(
               '这次不屏蔽',
               style: TextStyle(color: Color(0xFFC896B4)),
             ),
           ),
           TextButton(
-            onPressed: () => Navigator.of(dctx).pop(true),
+            onPressed: () => Navigator.of(dctx).pop('once'),
+            child: const Text(
+              '仅本次屏蔽',
+              style: TextStyle(color: Color(0xFFC896B4)),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop('remember'),
             child: const Text(
               '屏蔽并记住',
               style: TextStyle(color: Color(0xFF6A4A5A)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 固定格式弹窗：检测到身份证/手机号/银行卡/邮箱 → 问是否发送给 AI
+  /// true=发送，false=不发（本地不记录原文，返回挖空）
+  Future<bool?> _askFormatDialog(List<String> matched) async {
+    if (!mounted) return null;
+    return showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        title: const Text(
+          '检测到敏感信息',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF6A4A5A),
+          ),
+        ),
+        content: Text(
+          '这条消息包含${matched.join('、')}，要发给 AI 吗？\n\n'
+          '不发（推荐）：内容直接删掉，不发送也不记录，男主只会收到占位标记。',
+          style: const TextStyle(fontSize: 13, height: 1.6, color: Color(0xFF6A4A5A)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(false),
+            child: const Text(
+              '不发（推荐）',
+              style: TextStyle(color: Color(0xFF6A4A5A)),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(true),
+            child: const Text(
+              '发送',
+              style: TextStyle(color: Color(0xFFC896B4)),
             ),
           ),
         ],
@@ -528,6 +578,16 @@ class _ChatPageState extends State<ChatPage> {
         ),
       );
     }
+  }
+
+  /// 固定格式不发送后的提示
+  void _showFormatBlocked(List<String> matched) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${matched.join('、')}未发送，本地也未记录'),
+      ),
+    );
   }
 
   void _onStopGeneratingPressed() {

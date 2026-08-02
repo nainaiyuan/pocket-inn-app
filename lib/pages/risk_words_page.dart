@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../butler/risk_filter_wordlist.dart';
 import '../butler/risk_word_store.dart';
+import '../services/chat_character_resolver.dart' show ChatCharacterResolver;
 
 /// 敏感词管理页 — 用户可配置的敏感词表
 ///
@@ -20,6 +21,8 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
   List<RiskWord> _words = [];
   List<String> _exceptions = [];
   bool _loading = true;
+  bool _enabled = true;
+  List<_CharToggle> _characters = [];
 
   @override
   void initState() {
@@ -30,13 +33,116 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
   Future<void> _load() async {
     final words = await RiskWordStore.instance.loadWords();
     final exceptions = await RiskWordStore.instance.loadExceptions();
+    final enabled = RiskWordStore.instance.cachedEnabled;
+    // 加载所有男主（每男主一个开关：本地 AI 男主可关闭屏蔽）
+    final chars = <_CharToggle>[];
+    try {
+      for (final c in await ChatCharacterResolver.instance.loadAllOptions()) {
+        chars.add(
+          _CharToggle(
+            id: c.id,
+            name: c.name,
+            disabled: RiskWordStore.instance.isCharacterDisabled(c.id),
+          ),
+        );
+      }
+    } catch (_) {}
     if (mounted) {
       setState(() {
         _words = words;
         _exceptions = exceptions;
+        _enabled = enabled;
+        _characters = chars;
         _loading = false;
       });
     }
+  }
+
+  /// 开关区：全局启用 + 每男主开关 + 固定格式说明
+  Widget _buildToggleSection() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFF6A4A5A).withValues(alpha: 0.08),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SwitchListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            value: _enabled,
+            activeTrackColor: const Color(0xFFC896B4),
+            title: const Text(
+              '启用敏感词屏蔽',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF6A4A5A),
+              ),
+            ),
+            subtitle: const Text(
+              '关闭后所有男主都不做敏感词判定（固定格式仍检测）',
+              style: TextStyle(fontSize: 11, color: Color(0xFF6A4A5A)),
+            ),
+            onChanged: (v) async {
+              await RiskWordStore.instance.setEnabled(v);
+              if (mounted) setState(() => _enabled = v);
+            },
+          ),
+          const Divider(height: 12, color: Color(0xFFF0E4EA)),
+          if (_characters.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                '还没有男主，聊天后这里会出现每个男主的开关',
+                style: TextStyle(fontSize: 11, color: Color(0xFF6A4A5A)),
+              ),
+            )
+          else
+            ..._characters.map(
+              (c) => SwitchListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                value: !c.disabled,
+                activeTrackColor: const Color(0xFFC896B4),
+                title: Text(
+                  c.name,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF6A4A5A),
+                  ),
+                ),
+                subtitle: const Text(
+                  '本地 AI 男主可关掉（不需要屏蔽词）',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF6A4A5A)),
+                ),
+                onChanged: (v) async {
+                  await RiskWordStore.instance
+                      .setCharacterDisabled(c.id, !v);
+                  if (mounted) {
+                    setState(() {
+                      c.disabled = !v;
+                    });
+                  }
+                },
+              ),
+            ),
+          const SizedBox(height: 4),
+          const Text(
+            '身份证/手机号/银行卡/邮箱：不受以上开关影响，任何男主每次检测到都会弹窗'
+            '确认，默认不发送（本地不记录原文）',
+            style: TextStyle(fontSize: 11, height: 1.5, color: Color(0xFF6A4A5A)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _save(List<RiskWord> words) async {
@@ -351,7 +457,7 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
                         child: Text(
                           '聊到敏感词时挖空成 [PRIVACY_MARK]，男主理解情绪、不脑补内容。'
                           '综合公式判定：词强度+情感浓度+基线偏离+持续时间+话题浓度-求知，'
-                          '总分≥3才挖空；最高敏词任何场景都挖。',
+                          '≥5 直接屏蔽、3-4 弹窗问你、<3 放行；最高敏词任何场景都挖。',
                           style: TextStyle(
                             fontSize: 12,
                             height: 1.5,
@@ -373,6 +479,8 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
                     ],
                   ),
                 ),
+                // ---- 开关：全局 + 按男主 ----
+                _buildToggleSection(),
                 Expanded(
                   child: ListView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
@@ -492,4 +600,13 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
       ),
     );
   }
+}
+
+/// 男主开关项（每男主：是否关闭敏感词屏蔽）
+class _CharToggle {
+  final String id;
+  final String name;
+  bool disabled;
+
+  _CharToggle({required this.id, required this.name, required this.disabled});
 }

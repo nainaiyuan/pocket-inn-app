@@ -3,6 +3,7 @@ import 'dart:async';
 import '../ai_provider/ai_provider_manager.dart';
 import '../ai_provider/models.dart';
 import '../butler/butler.dart';
+import '../butler/mask_engine.dart' show MaskEngine;
 import '../butler/risk_word_store.dart' show RiskWordStore;
 import '../butler/flow/butler_flow.dart';
 import '../butler/modules/butler_module_hub.dart';
@@ -122,8 +123,12 @@ class ChatService {
     ChatCompletionCancelToken? cancellationToken,
     void Function(ChatCompletionProgress progress)? onStreamProgress,
     Future<ChatSession> Function()? persistSession,
-    /// 提醒档敏感词确认回调（由 UI 层弹窗）：返回 true=屏蔽，false=不屏蔽，null=用户关闭
-    Future<bool?> Function(List<String> askWords)? onAskBlock,
+    /// 提醒档敏感词确认回调（由 UI 层弹窗）：
+    /// 返回 'remember'=屏蔽并记住，'once'=仅本次屏蔽，'allow'=这次不屏蔽，null=关闭（保守挖空）
+    Future<String?> Function(List<String> askWords)? onAskBlock,
+    /// 固定格式确认回调：检测到身份证/手机号等 → 弹窗问是否发送给 AI
+    /// 返回 true=发送，false/null=不发（本地不记录原文，删掉，返回挖空）
+    Future<bool?> Function(List<String> formatMatched)? onAskFormat,
     /// 自检模式：不真实调用 AI（模拟回复），不写情绪落库，其余流程全跑。
     /// 用于"一键自检"——不手动聊天也能验证技能/工具/Prompt 组装等管家流程。
     bool selfTest = false,
@@ -194,12 +199,57 @@ class ChatService {
     }
 
     // === 管家介入：假面层替换 ===
+    var blockedWords = <String>[];
+    var allowedWords = <String>[];
+    var sensitiveAllowed = false; // 用户是否选了"这次不屏蔽"（影响固定格式恢复）
     if (butler != null && butler!.config.maskLayerEnabled) {
       final masked = await butler!.processOutgoing(
         text: normalizedInput,
         characterId: character.id,
         sessionId: sessionId,
       );
+      // 提醒档敏感词：弹窗问用户（三选项）
+      if (masked.askWords.isNotEmpty && onAskBlock != null) {
+        final choice = await onAskBlock(masked.askWords);
+        if (choice == 'remember') {
+          // 屏蔽并记住 → 保持挖空 + 记偏好（以后直接屏蔽不再问）
+          blockedWords = List.of(masked.askWords);
+          for (final w in masked.askWords) {
+            await RiskWordStore.instance.setUserPref(w, RiskWordStore.prefBlock);
+          }
+        } else if (choice == 'once') {
+          // 仅本次屏蔽 → 保持挖空，不记偏好（下次再问）
+          blockedWords = List.of(masked.askWords);
+        } else if (choice == 'allow') {
+          // 这次不屏蔽 → 恢复敏感词（保留假面层替换）+ 临时豁免
+          sensitiveAllowed = true;
+          allowedWords = List.of(masked.askWords);
+          normalizedInput = masked.maskLayerText ?? normalizedInput;
+          for (final w in masked.askWords) {
+            await RiskWordStore.instance.tempAllow(w);
+          }
+        }
+        // null（用户关闭弹窗）→ 保持已挖空状态（保守）
+      }
+      // 固定格式：每次命中都弹窗问是否发送（本地 AI 男主也一样）
+      if (masked.formatMatched.isNotEmpty && onAskFormat != null) {
+        final send = await onAskFormat(masked.formatMatched);
+        if (send == true) {
+          // 发送：用固定格式未挖版
+          if (!sensitiveAllowed) {
+            normalizedInput = masked.formatLayerText ?? normalizedInput;
+          }
+          // 敏感词已恢复时 maskLayerText 里格式未挖 → 保持现状
+        } else {
+          // 不发：本地不记录原文 → 确保文本是挖空版
+          if (sensitiveAllowed) {
+            // 敏感词恢复了但格式要挖 → 在恢复后的文本上挖格式
+            final fmt = MaskEngine().applyFormatMask(normalizedInput);
+            normalizedInput = fmt.$1;
+          }
+          // 否则 normalizedInput 已是全挖版（masked.text），保持
+        }
+      }
       if (masked.wasModified) {
         normalizedInput = masked.text;
         // 身份描述走 system 注入（男主认知层），不进 user 文本 → 不会念出来
@@ -507,6 +557,9 @@ class ChatService {
         assistantNode: assistantNode,
         promptAssembly: promptAssembly,
         completion: completion,
+        // 重新生成路径：无敏感词确认流程
+        blockedWords: const [],
+        allowedWords: const [],
       );
     } on ChatCompletionCancelledException {
       rethrow;

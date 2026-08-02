@@ -2,6 +2,8 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
+import '../../../utils/sensitive_input_formatter.dart';
+
 import '../../../data/app_settings.dart';
 import '../../../data/mock_user_settings.dart';
 import '../../../models/world_book.dart';
@@ -73,6 +75,8 @@ class ChatInputArea extends StatelessWidget {
             minLines: 1,
             keyboardType: TextInputType.multiline,
             textInputAction: TextInputAction.newline,
+            // 敏感信息（身份证/手机号/银行卡/邮箱）直接不让输入
+            inputFormatters: [SensitiveInfoFormatter()],
             decoration: InputDecoration(
               hintText: '输入消息',
               hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),

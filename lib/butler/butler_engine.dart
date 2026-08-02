@@ -182,10 +182,13 @@ class ButlerEngine {
     }
 
     // 2. 关键词替换（PRIVACY_MARK）——三档：直接屏蔽 / 提醒（弹窗问用户）/ 放行
+    //    每男主开关：本地 AI 男主可关闭（固定格式检测不受影响）
     var askWords = <String>[];
     var blockedWords = <String>[];
     String? maskLayerText; // 敏感词挖空前（假面层已替换）——用户选"不屏蔽"时用
-    if (_config.keywordReplaceEnabled) {
+    final riskEnabled = RiskWordStore.instance.cachedEnabled &&
+        !RiskWordStore.instance.isCharacterDisabled(characterId);
+    if (_config.keywordReplaceEnabled && riskEnabled) {
       final verdict = _detectSensitiveWords(text);
       // 提醒档：先挖空，用户选"不屏蔽"时用 maskLayerText 恢复
       final sensitiveWords = [...verdict.block, ...verdict.ask];
@@ -232,18 +235,23 @@ class ButlerEngine {
         }
       }
 
-      // 5. 固定格式敏感信息屏蔽（身份证/手机号/银行卡/邮箱…）
-      //    只要匹配格式就挖空，每次都执行（不走冷却）
-      final (fmtText, fmtMatched) = _maskEngine.applyFormatMask(text);
-      if (fmtMatched.isNotEmpty) {
-        text = fmtText;
-        DebugLogger.log(
-          '管家流程',
-          '⑤ 固定格式屏蔽：${fmtMatched.join('/')} → [PRIVACY_MARK]',
-        );
-        // 敏感词没触发时也附情绪标签（男主理解意图）
-        moodContext ??= _maskEngine.buildMoodContextString(userText);
-      }
+    }
+
+    // 5. 固定格式敏感信息屏蔽（身份证/手机号/银行卡/邮箱…）
+    //    独立于敏感词开关：任何男主都检测（本地 AI 也要），每次命中都弹窗确认
+    var formatMatched = <String>[];
+    String? formatLayerText;
+    final (fmtText, fmtMatchedList) = _maskEngine.applyFormatMask(text);
+    if (fmtMatchedList.isNotEmpty) {
+      formatMatched = fmtMatchedList;
+      formatLayerText = text; // 挖空前存档（敏感词已处理）
+      text = fmtText;
+      DebugLogger.log(
+        '管家流程',
+        '⑤ 固定格式检测：${fmtMatchedList.join('/')} → 已标记，待用户确认是否发送',
+      );
+      // 敏感词没触发时也附情绪标签（男主理解意图）
+      moodContext ??= _maskEngine.buildMoodContextString(userText);
     }
 
     return ProcessResult(
@@ -256,6 +264,8 @@ class ButlerEngine {
       askWords: askWords,
       blockedWords: blockedWords,
       maskLayerText: maskLayerText,
+      formatMatched: formatMatched,
+      formatLayerText: formatLayerText,
     );
   }
 

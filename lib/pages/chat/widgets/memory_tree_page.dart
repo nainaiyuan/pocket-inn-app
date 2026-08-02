@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../utils/sensitive_input_formatter.dart';
+
 import '../../../models/chat_memory.dart';
 import '../../../models/chat_session.dart';
 import '../../../services/chat_database_service.dart';
@@ -566,6 +568,7 @@ class _MemoryTreePageState extends State<MemoryTreePage> {
           autofocus: true,
           maxLines: 6,
           minLines: 3,
+          inputFormatters: [SensitiveInfoFormatter()],
           decoration: const InputDecoration(
             hintText: '输入要记忆的内容（可多行，每行一条）',
             border: OutlineInputBorder(),
@@ -615,6 +618,7 @@ class _MemoryTreePageState extends State<MemoryTreePage> {
             autofocus: true,
             maxLines: 12,
             minLines: 4,
+            inputFormatters: [SensitiveInfoFormatter()],
             decoration: const InputDecoration(
               hintText: '每行一条记忆，留空将清除该节点的所有记忆',
               border: OutlineInputBorder(),
