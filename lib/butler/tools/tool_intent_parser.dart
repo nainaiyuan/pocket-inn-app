@@ -23,8 +23,15 @@ class ToolIntentParser {
   };
 
   /// ⟨工具:name⟩{json}⟨/工具⟩ 文本协议块（37批 TextProtocolAdapter 同款格式）
+  /// 8-03 06:12：再加宽松变体 —— [工具:name] / 【工具:name】 / 工具:name（无括号）
   static final RegExp _toolBlock =
       RegExp(r'⟨工具:([a-zA-Z_]+)⟩(.*?)⟨/工具⟩', dotAll: true);
+  static final RegExp _toolBlockLoose = RegExp(
+      r'[⟨\[【]?\s*工具\s*[:：]\s*([a-zA-Z_]+)\s*[⟩\]】]?',
+      dotAll: true);
+
+  /// 已知工具名集合（宽松格式/JSON容错只认这些，防误抓）
+  static final Set<String> _knownToolNames = chineseIntents.keys.toSet();
 
   /// 统一入口：⟨工具:⟩块 → JSON → 中文，都识别不到返回 null
   /// （用户 8-03 05:42：不默认 AI 走哪个通道，管家认所有格式，
@@ -38,9 +45,10 @@ class ToolIntentParser {
     return extractChineseToolIntents(text);
   }
 
-  /// 解析 ⟨工具:name⟩{json}⟨/工具⟩ 文本协议块
+  /// 解析 ⟨工具:name⟩{json}⟨/工具⟩ 文本协议块（含宽松变体）
   static List<Map<String, dynamic>>? extractToolBlocks(String text) {
     final results = <Map<String, dynamic>>[];
+    // 严格块：⟨工具:name⟩…⟨/工具⟩（name 任意，参数 JSON 解析失败给空）
     for (final m in _toolBlock.allMatches(text)) {
       final name = m.group(1) ?? '';
       final jsonStr = m.group(2) ?? '';
@@ -53,6 +61,14 @@ class ToolIntentParser {
         results.add({'name': name, 'arguments': args});
       }
     }
+    // 宽松块：[工具:name] / 【工具:name】 / 工具:name（无括号）
+    // 只认已知工具名；跳过已被严格块覆盖的位置（用 lastIndex 简单去重）
+    for (final m in _toolBlockLoose.allMatches(text)) {
+      final name = m.group(1) ?? '';
+      if (name.isEmpty || !_knownToolNames.contains(name)) continue;
+      if (results.any((r) => r['name'] == name)) continue;
+      results.add({'name': name, 'arguments': <String, dynamic>{}});
+    }
     return results.isEmpty ? null : results;
   }
 
@@ -62,16 +78,16 @@ class ToolIntentParser {
 
   /// 从文本里提取 JSON 工具调用指令
   /// 兼容：完整 tool_calls 数组 / 单对象 / function 包裹 / 混在自然语言里 /
-  /// markdown 代码块包裹 / arguments 嵌套花括号
-  /// 用户 8-03 05:59：原 blockRegex `\{[^{}]*\}` 不支持嵌套 → 
-  /// `{"name":"list_tools","arguments":{}}` 抓不住 → 改栈扫描找平衡块
+  /// markdown 代码块包裹 / arguments 嵌套花括号 / 参数残缺（如 arguments: !）
+  /// 用户 8-03 05:59：原 blockRegex `\{[^{}]*\}` 不支持嵌套 → 改栈扫描找平衡块
+  /// 用户 8-03 06:12：JSON 残缺（name 在、arguments 非法）→ 降级空参数执行，
+  /// 不再整条丢弃（男主写 {"name":"list_tools","arguments":!} 也要能抓）
   static List<Map<String, dynamic>>? extractJsonToolCalls(String text) {
     final results = <Map<String, dynamic>>[];
     // 先试整体解析（文本本身就是完整 JSON）
     _tryDecode(text, results);
     if (results.isNotEmpty) return results;
     // 栈扫描：找所有平衡的 {…} 块（支持嵌套花括号）
-    // 只在最外层闭合时尝试解析，避免内层空对象 {} 被误当工具指令
     final stack = <int>[];
     for (var i = 0; i < text.length; i++) {
       final ch = text[i];
@@ -85,6 +101,16 @@ class ToolIntentParser {
           }
         }
       }
+    }
+    if (results.isNotEmpty) return results;
+    // 容错兜底：JSON 解析失败但能提取到已知工具名 → 降级空参数
+    // （覆盖 {"name":"list_tools","arguments":!} 这类残缺 JSON）
+    final nameRegex = RegExp(r'"name"\s*:\s*"([a-zA-Z_]+)"');
+    for (final m in nameRegex.allMatches(text)) {
+      final name = m.group(1) ?? '';
+      if (name.isEmpty || !_knownToolNames.contains(name)) continue;
+      if (results.any((r) => r['name'] == name)) continue;
+      results.add({'name': name, 'arguments': <String, dynamic>{}});
     }
     return results.isEmpty ? null : results;
   }

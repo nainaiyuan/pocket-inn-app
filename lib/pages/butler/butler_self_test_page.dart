@@ -28,13 +28,19 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
   String _simStripped = '';
   List<ButlerSelfTestItem> _simResults = [];
 
-  /// 内置男主回复样本（用户 8-03 06:01：男主会怎么说 → 一键全测）
+  /// 内置男主回复样本（用户 8-03 06:12：模拟男主给管家看，找管家抓不住的）
   static const List<(String, String)> _butlerSamples = [
     ('中文格式', '好的，记住啦。记住我喜欢喝美式咖啡'),
-    ('⟨工具:⟩块', '我记住啦。\n⟨工具:record_memory⟩{"content":"喜欢美式","category":"喜好"}⟨/工具⟩'),
+    ('⟨工具:⟩块带参数', '我记住啦。\n⟨工具:record_memory⟩{"content":"喜欢美式","category":"喜好"}⟨/工具⟩'),
+    ('⟨工具:⟩块空参数', '好的，我看看有哪些。\n⟨工具:list_tools⟩⟨/工具⟩'),
     ('代码块JSON', '```json\n{"name": "list_tools", "arguments": {}}\n```'),
     ('混在话里JSON', '我帮你查一下。{"name": "recall_memory", "arguments": {"query": "咖啡"}} 查到这些'),
     ('完整tool_calls', '{"id":"call_1","type":"function","function":{"name":"write_diary","arguments":"{\\"content\\":\\"今天散步了\\"}"}}'),
+    ('残缺JSON(用户原话)', '{"name": "list_tools", "arguments": !}'),
+    ('无arguments', '{"name": "list_tools"}'),
+    ('字符串参数', '{"name": "query_diary", "arguments": "{\\"keyword\\":\\"咖啡\\"}"}'),
+    ('无尖括号', '工具:list_tools'),
+    ('方括号', '[工具:list_tools]'),
     ('纯聊天(应无工具)', '今天天气真好，我们去散步吧'),
   ];
 
@@ -430,7 +436,8 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
             ),
             child: const Text(
               '🗣 模拟男主回复（用户 8-03 06:01：一键测试男主那边是不是出问题了）\n'
-              '内置男主可能说的 6 种话，一键跑完，管家抓不抓得住一目了然。\n'
+              '内置男主可能说的 12 种话（含残缺 JSON、无尖括号等怪格式），\n'
+              '一键跑完，管家抓不抓得住一目了然。\n'
               '全过 → 管家识别层没问题，问题在男主（AI）实际回复格式\n'
               '（去日志页「AI路由」看男主回复原文，粘到下面输入框再测一次）。\n\n'
               '点「一键测试」或把男主回复原文粘进输入框：',
@@ -445,7 +452,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
             icon: const Icon(Icons.playlist_play),
-            label: const Text('一键测试：内置男主回复 × 6'),
+            label: const Text('一键测试：内置男主回复 × 12'),
           ),
           if (_simResults.isNotEmpty) ...[
             const SizedBox(height: 12),
