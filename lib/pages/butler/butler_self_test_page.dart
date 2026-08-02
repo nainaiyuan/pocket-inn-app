@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../butler/tools/tool_intent_parser.dart';
+import '../../services/chat_database_service.dart';
+import '../../services/chat_memory_service.dart';
 import '../../services/chat_service.dart';
 import '../../utils/debug_logger.dart';
 
@@ -18,6 +21,129 @@ class ButlerSelfTestPage extends StatefulWidget {
 class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
   bool _running = false;
   ButlerSelfTestReport? _report;
+  bool _toolRunning = false;
+  ButlerSelfTestReport? _toolReport;
+
+  /// 工具链路自测（用户 8-03 05:44：管家对调用工具没反应，要能定位卡点）
+  /// 逐层测：解析器识别 → 记忆库读写 → 日记库读写，哪层挂了一目了然。
+  Future<void> _runToolTest() async {
+    if (_toolRunning) return;
+    setState(() {
+      _toolRunning = true;
+      _toolReport = null;
+    });
+    DebugLogger.log('工具自测', '▶ 工具链路自测开始…');
+    final items = <ButlerSelfTestItem>[];
+    final stopwatch = Stopwatch()..start();
+
+    // ── 第 1 层：解析器识别（纯函数，男主写什么格式都能认）──
+    void addParserCase(String label, String input, String expectName) {
+      final calls = ToolIntentParser.extract(input);
+      final actualNames =
+          calls?.map((c) => c['name']).join('、') ?? '（没识别到）';
+      final hit = calls?.any((c) => c['name'] == expectName) ?? false;
+      items.add(ButlerSelfTestItem(
+        message: '解析器：$label',
+        expected: '识别出 $expectName',
+        actual: actualNames,
+        passed: hit,
+        failedReason: hit ? null : '输入: $input',
+        guidance: '检查 SYSTEM_CORE【工具】段是否引导男主写 ⟨工具:…⟩ 块；'
+            '或检查男主实际回复格式（日志页看 AI路由）',
+      ));
+    }
+
+    addParserCase('⟨工具:⟩块', '⟨工具:record_memory⟩{"content":"自测"}⟨/工具⟩', 'record_memory');
+    addParserCase('JSON指令', '{"name":"recall_memory","arguments":{"query":"自测"}}', 'recall_memory');
+    addParserCase('中文词', '记住我喜欢喝美式咖啡', 'record_memory');
+    // 纯聊天必须零副作用
+    {
+      const input = '今天天气真好';
+      final calls = ToolIntentParser.extract(input);
+      items.add(ButlerSelfTestItem(
+        message: '解析器：纯聊天零副作用',
+        expected: '不识别任何工具',
+        actual: calls == null ? '（无工具，正常）' : '误识别: ${calls.map((c) => c['name']).join('、')}',
+        passed: calls == null,
+        failedReason: calls == null ? null : '纯聊天被误判成工具调用',
+        guidance: '中文词表太宽泛？检查 tool_intent_parser.dart 的 chineseIntents',
+      ));
+    }
+
+    // ── 第 2 层：记忆库读写（绕过弹窗直接测数据库）──
+    const testSession = '__tool_selftest__';
+    try {
+      final node = await ChatMemoryService.instance.addMemory(
+        sessionId: testSession,
+        branchLeafId: '__tool_selftest__',
+        content: '[日常] 工具链路自测标记',
+      );
+      final found = await ChatMemoryService.instance
+          .searchMemories(testSession, keyword: '工具链路自测标记');
+      if (node.id.isNotEmpty && found.isNotEmpty) {
+        await ChatMemoryService.instance.deleteMemory(node.id);
+        items.add(ButlerSelfTestItem(
+          message: '记忆库读写',
+          expected: '写入→查到→删除 全通',
+          actual: '写入 ${node.id.substring(0, 8)}… → 查到 ${found.length} 条 → 已删除',
+          passed: true,
+        ));
+      } else {
+        items.add(ButlerSelfTestItem(
+          message: '记忆库读写',
+          expected: '写入→查到 全通',
+          actual: found.isEmpty ? '写入了但查不到' : '写入失败',
+          passed: false,
+          failedReason: 'addMemory 或 searchMemories 异常',
+          guidance: '检查 chat_memory_service.dart / chat_database_service.dart 记忆表',
+        ));
+      }
+    } catch (e) {
+      items.add(ButlerSelfTestItem(
+        message: '记忆库读写',
+        expected: '写入→查到→删除 全通',
+        actual: '异常: $e',
+        passed: false,
+        failedReason: '记忆库抛异常',
+        guidance: '看日志页具体报错；检查数据库是否可写',
+      ));
+    }
+
+    // ── 第 3 层：日记库读写 ──
+    try {
+      await ChatDatabaseService.instance
+          .saveDiaryEntry('__tool_selftest__', '[自测] 工具链路测试');
+      final found = await ChatDatabaseService.instance
+          .searchDiary('__tool_selftest__', keyword: '[自测]');
+      items.add(ButlerSelfTestItem(
+        message: '日记库读写',
+        expected: '写入→查到 全通',
+        actual: found.isNotEmpty ? '写入 → 查到 ${found.length} 条' : '写入了但查不到',
+        passed: found.isNotEmpty,
+        failedReason: found.isEmpty ? 'saveDiaryEntry 或 searchDiary 异常' : null,
+        guidance: '检查 chat_database_service.dart butler_diary 表',
+      ));
+    } catch (e) {
+      items.add(ButlerSelfTestItem(
+        message: '日记库读写',
+        expected: '写入→查到 全通',
+        actual: '异常: $e',
+        passed: false,
+        failedReason: '日记库抛异常',
+        guidance: '看日志页具体报错；检查 butler_diary 表',
+      ));
+    }
+
+    stopwatch.stop();
+    if (!mounted) return;
+    setState(() {
+      _toolReport =
+          ButlerSelfTestReport(items: items, elapsed: stopwatch.elapsed);
+      _toolRunning = false;
+    });
+    DebugLogger.log('工具自测',
+        '■ 工具自测完成：${items.where((i) => i.passed).length}/${items.length} 通过');
+  }
 
   Future<void> _run() async {
     if (_running) return;
@@ -144,6 +270,81 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
             ),
             const SizedBox(height: 12),
             for (final item in report.items) _ResultCard(item: item),
+          ],
+          const SizedBox(height: 24),
+          const Divider(color: Color(0xFFE8D5DE)),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE8D5DE)),
+            ),
+            child: const Text(
+              '🔧 工具链路自测（用户 8-03 05:44：管家对调用工具没反应时用）\n'
+              '逐层验证，卡在哪一层一目了然：\n'
+              '① 解析器识别：⟨工具:⟩块 / JSON指令 / 中文词 / 纯聊天零副作用\n'
+              '② 记忆库读写：写入 → 查到 → 删除\n'
+              '③ 日记库读写：写入 → 查到\n\n'
+              '如果①②③全过 → 问题在男主没写工具指令（看日志 AI路由）\n'
+              '如果②③挂 → 数据库问题；①挂 → 解析器问题。',
+              style: TextStyle(color: Colors.black54, fontSize: 12, height: 1.6),
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _toolRunning ? null : _runToolTest,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF8FA8C8),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            icon: _toolRunning
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.build),
+            label: Text(_toolRunning ? '自测中…' : '开始工具链路自测'),
+          ),
+          if (_toolReport != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _toolReport!.allPassed
+                    ? const Color(0xFFEAF7EE)
+                    : const Color(0xFFFFF3F0),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _toolReport!.allPassed ? Icons.check_circle : Icons.error,
+                    color: _toolReport!.allPassed
+                        ? const Color(0xFF4CAF50)
+                        : const Color(0xFFFF8A8A),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${_toolReport!.passCount}/${_toolReport!.items.length} 项通过'
+                      '（耗时 ${_toolReport!.elapsed.inSeconds}s）',
+                      style: const TextStyle(
+                        color: Color(0xFF6A4A5A),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            for (final item in _toolReport!.items) _ResultCard(item: item),
           ],
         ],
       ),
