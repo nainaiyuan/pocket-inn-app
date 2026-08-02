@@ -267,6 +267,27 @@ class ButlerEngine {
   /// 2. 白名单覆盖：命中词在例外词组内（亲爱的/进口…）→ 不触发
   /// 3. 冷却：该词触发后 coolDownMinutes 分钟内不重复挖空（持续时间维度）
   /// 4. 分级：hard 单独触发；soft 需搭配 hard 或 soft 命中 ≥2
+  /// 求知意图：用户在了解敏感词（问意思/感觉/解释）→ 不屏蔽，让男主解释
+  static const List<String> _curiosityWords = [
+    '什么是', '是什么', '啥是', '啥叫', '解释', '讲讲', '说说',
+    '介绍一下', '介绍下', '什么感觉', '什么体验', '科普', '含义',
+    '告诉我', '知道吗', '了解吗', '怎么写', '怎么读',
+  ];
+
+  bool _isCuriosityIntent(String text) {
+    // 常见求知句式直接命中（无问号也算）
+    if (text.contains('是什么意思') || text.contains('啥意思')) return true;
+    if (!_curiosityWords.any(text.contains)) return false;
+    // 有问号，或疑问语气词（吗/么/呀/啊/呢）
+    return text.contains('？') ||
+        text.contains('?') ||
+        text.contains('吗') ||
+        text.contains('么') ||
+        text.contains('呀') ||
+        text.contains('啊') ||
+        text.contains('呢');
+  }
+
   List<RiskWord> _detectSensitiveWords(String text) {
     final words = RiskWordStore.instance.cachedWords;
     final exceptions = RiskWordStore.instance.cachedExceptions;
@@ -283,6 +304,16 @@ class ButlerEngine {
       hits.add(w);
     }
     if (hits.isEmpty) return hits;
+
+    // 求知意图 → 不屏蔽（用户在了解这个词/让男主解释，直接放行）
+    // 例："接吻是什么感觉？" → 男主可以解释；"我想和你接吻" → 挖空
+    if (_isCuriosityIntent(text)) {
+      DebugLogger.log(
+        '管家流程',
+        '求知意图：${hits.map((w) => w.word).join('/')} 命中但用户在了解，不屏蔽',
+      );
+      return [];
+    }
 
     // 强度判定（用户 16:23）：
     // - A词+B词（≥2 命中）更敏感 → 强度 ≥1 就挖空
