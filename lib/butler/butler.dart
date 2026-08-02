@@ -4,7 +4,6 @@ import 'butler_engine.dart';
 import 'butler_config.dart';
 import 'butler_database.dart';
 import 'insight/insight_engine.dart';
-import 'ai/butler_ai_service.dart';
 import '../utils/debug_logger.dart' show DebugLogger;
 
 /// 管家总入口
@@ -86,16 +85,6 @@ class Butler {
     );
   }
 
-  /// 处理管家命令
-  ButlerCommandResult processCommand(String text) {
-    final intent = analyzeIntent(text);
-    if (intent.target == 'butler') {
-      return butlerEngine.processCommand(intent.content);
-    }
-    // 用户没有叫管家，但管家也可以尝试理解
-    return butlerEngine.processCommand(text);
-  }
-
   /// 获取配置
   ButlerConfig getConfig() => config;
 
@@ -103,21 +92,6 @@ class Butler {
   /// 只检测敏感词触发了才返回，没有触发返回空字符串
   String getMoodContext(String text) {
     return butlerEngine.buildMoodContext(text);
-  }
-
-  /// 调用管家 AI 分析用户意图
-  /// 用户的文本先经过假面层脱敏，再发给管家专用 AI
-  Future<ButlerAIResult> analyzeWithAI(String userText, {bool maskBeforeSend = true}) async {
-    final maskedText = maskBeforeSend
-        ? _applyMaskLayer(userText)
-        : userText;
-    return butlerEngine.analyzeWithAI(userText, maskedText);
-  }
-
-  /// 对文本应用假面层替换（不修改原始文本，只生成脱敏版本）
-  String _applyMaskLayer(String text) {
-    // 这个方法被废弃，改用 replaceSensitive
-    return text;
   }
 
   /// 更新配置

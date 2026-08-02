@@ -175,15 +175,22 @@ class _ButlerTaskPageState extends State<ButlerTaskPage> {
   }
 
   IconData _taskTypeIcon(type) {
-    if (type is String) {
+    if (type is TaskType) {
       switch (type) {
-        case 'save_note': return Icons.note_add;
-        case 'set_config': return Icons.settings;
-        case 'lock_vault': return Icons.lock;
-        case 'call_character': return Icons.chat;
-        case 'query_memory': return Icons.search;
-        case 'set_trigger': return Icons.notifications_active;
-        case 'analyze_image': return Icons.image;
+        case TaskType.cleanupCheck: return Icons.cleaning_services;
+        case TaskType.cleanupExecute: return Icons.cleaning_services;
+        case TaskType.processMessage: return Icons.chat;
+        case TaskType.syncData: return Icons.sync;
+        case TaskType.deviceControl: return Icons.devices;
+        case TaskType.characterCreate: return Icons.person_add;
+        case TaskType.characterDelete: return Icons.person_remove;
+        case TaskType.exportData: return Icons.upload;
+        case TaskType.importData: return Icons.download;
+        case TaskType.keywordCollect: return Icons.tag;
+        case TaskType.arcConfirm: return Icons.show_chart;
+        case TaskType.patternMerge: return Icons.merge;
+        case TaskType.conversationSummary: return Icons.summarize;
+        case TaskType.other: return Icons.task;
       }
     }
     return Icons.task;
@@ -206,17 +213,6 @@ class _ButlerTaskPageState extends State<ButlerTaskPage> {
         case TaskType.patternMerge: return '规律合并';
         case TaskType.conversationSummary: return '对话总结';
         case TaskType.other: return '其他';
-      }
-    }
-    if (type is String) {
-      switch (type) {
-        case 'save_note': return '记笔记';
-        case 'set_config': return '修改设置';
-        case 'lock_vault': return '锁定保险箱';
-        case 'call_character': return '联系角色';
-        case 'query_memory': return '查询记忆';
-        case 'set_trigger': return '设置触发器';
-        case 'analyze_image': return '分析图片';
       }
     }
     return '任务';

@@ -3,7 +3,6 @@ import 'mood_analysis/mood_analyzer_keyword.dart' show KeywordMoodAnalyzer;
 import 'risk_filter_wordlist.dart' show RiskWord, privacyMark;
 import 'risk_word_store.dart' show RiskWordStore;
 import 'butler_config.dart';
-import 'ai/butler_ai_service.dart';
 import '../utils/debug_logger.dart';
 
 /// 管家调度中心
@@ -18,105 +17,7 @@ class ButlerEngine {
   }) : _maskEngine = maskEngine,
        _config = config ?? ButlerConfig();
 
-  /// 处理用户对管家的命令（"记一下xxx"、"改一下xxx"）
-  ButlerCommandResult processCommand(String userInput) {
-    final lowerInput = userInput.trim().toLowerCase();
-
-    // 关键词匹配
-    if (lowerInput.startsWith('记一下') || lowerInput.startsWith('记住')) {
-      final content = userInput.trim().substring(lowerInput.startsWith('记一下') ? 3 : 2).trim();
-      return ButlerCommandResult(
-        type: 'save_memory',
-        content: content,
-        reply: '好的，我记住了：$content',
-      );
-    }
-
-    if (lowerInput.startsWith('改一下') || lowerInput.startsWith('修改')) {
-      return ButlerCommandResult(
-        type: 'modify',
-        content: userInput,
-        reply: '你想改什么？告诉我就行。',
-      );
-    }
-
-    if (lowerInput.startsWith('查一下') || lowerInput.startsWith('搜索') || lowerInput.startsWith('找一下')) {
-      return ButlerCommandResult(
-        type: 'search',
-        content: userInput,
-        reply: '我帮你查一下……',
-      );
-    }
-
-    if (lowerInput.startsWith('忘了') || lowerInput.startsWith('删除')) {
-      return ButlerCommandResult(
-        type: 'delete',
-        content: userInput,
-        reply: '好的，你确定要删除吗？',
-      );
-    }
-
-    if (lowerInput.contains('开关') || lowerInput.contains('设置')) {
-      return ButlerCommandResult(
-        type: 'settings',
-        content: userInput,
-        reply: '你想调整什么设置？',
-      );
-    }
-
-    if (lowerInput.contains('提醒') || lowerInput.contains('触发')) {
-      return ButlerCommandResult(
-        type: 'set_trigger',
-        content: userInput,
-        reply: '好的，你希望什么情况下触发？',
-      );
-    }
-
-    // 默认：无法识别，需要求助外部AI
-    return ButlerCommandResult(
-      type: 'unknown',
-      content: userInput,
-      reply: null, // 需要外部AI帮忙判断
-      needsHelp: true,
-    );
-  }
-
-  /// 获取管家能做的事（给 AI 看的能力表）
-  /// 脱敏版本，不暴露内部实现细节
-  String getAbilityList() {
-    return '''
-管家能力清单（仅限以下，用户问不会的就说不会）:
-
-1. save_note — 记笔记
-   需要信息：笔记内容、分类（纪念日/喜好/感受/随便记）
-   示例："记住他喜欢喝美式" → 分类"喜好"，内容"喜欢喝美式"
-
-2. set_config — 修改管家设置
-   需要信息：设置名、新值
-   示例："打开假面层" → key="maskLayerEnabled", value=true
-
-3. lock_vault — 锁定保险箱
-   不需要额外信息，直接触发全量加密打包
-
-4. call_character — 叫男主出来聊天
-   需要信息：男主名字
-   示例："叫沈星回来"
-
-5. query_memory — 查询历史记录
-   需要信息：查询话题
-   示例："查一下我说过他喜欢什么"
-
-6. set_trigger — 设触发条件
-   需要信息：触发条件、触发后的动作、附加内容
-   示例："下次聊到工作提醒我要说放假" → trigger="topic:工作", action="remind_user", content="记得聊放假"
-
-7. analyze_image — 分析图片内容
-   需要信息：图片的文字描述（AI 自己看）
-   注意：不保存图片，只看内容
-''';
-  }
-
-  /// 构建给男主的上下文（假面版）
+  /// 处理用户发往男主的消息（假面层介入）
   Map<String, dynamic> buildCharacterContext({
     required String characterId,
     required String sessionId,
@@ -131,26 +32,6 @@ class ButlerEngine {
       'activeContext': [],   // 等待从记忆库中提取
       'activeMentions': [],  // 等待从映射表中提取
     };
-  }
-
-  /// 调用管家 AI 分析用户意图
-  /// [userText] 用户的原始文本（未脱敏）
-  /// [maskedText] 脱敏后的文本（发给 AI 的版本）
-  /// 返回分析结果，包括指令、情绪、是否需要回复
-  Future<ButlerAIResult> analyzeWithAI(String userText, String maskedText) async {
-    if (!_config.butlerAIEnabled) {
-      return ButlerAIResult(
-        reply: '',
-        intents: [],
-        mood: '平静',
-        needsComfort: false,
-      );
-    }
-
-    // 实际调用走 AIProviderManager（personaId = 'butler'），
-    // 旧配置里的 endpoint/key/model 字段已不再使用。
-    final aiService = ButlerAIService();
-    return aiService.analyze(maskedText);
   }
 
   /// 处理用户发往男主的消息（假面层介入）
@@ -606,21 +487,6 @@ class ButlerEngine {
       'moodAfter': moodAfter?['score'] ?? 0,
     };
   }
-}
-
-/// 管家命令处理结果
-class ButlerCommandResult {
-  final String type;           // 'save_memory' | 'search' | 'delete' | 'settings' | 'unknown'
-  final String content;        // 原始内容
-  final String? reply;         // 管家的回复（null表示需要帮助）
-  final bool needsHelp;        // 是否需要求助外部AI
-
-  ButlerCommandResult({
-    required this.type,
-    required this.content,
-    this.reply,
-    this.needsHelp = false,
-  });
 }
 
 /// 敏感词判定结果：直接屏蔽档 + 提醒档（放行=两者都空）

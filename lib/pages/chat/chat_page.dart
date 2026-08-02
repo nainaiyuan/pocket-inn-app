@@ -338,23 +338,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       if (result.text.trim().isNotEmpty) {
         replyTexts.add(result.text.trim());
       }
-      // 用户 8-03 02:33：男主想输出指令，管家要抓取——
-      // AI 第一轮可能只说话不真正发 tool_calls（"我用 recall_memory 查一下"），
-      // 管家从男主回复文本抓取工具调用意图 → 强制构造 toolCalls 走工具轮。
-      // 纯聊天文本（无意图词）→ 返回 null → 零副作用照常显示
-      if ((result.toolCalls == null || result.toolCalls!.isEmpty) &&
-          result.text.trim().isNotEmpty) {
-        final intent = _extractToolIntentFromText(result.text);
-        if (intent != null && intent.isNotEmpty) {
-          DebugLogger.log('AI路由', '🔧 管家抓取到男主工具意图: ${intent.map((c) => c['name']).join('、')}');
-          result = AIProviderResult(
-            text: result.text,
-            toolCalls: intent,
-            usage: result.usage,
-            providerName: result.providerName,
-          );
-        }
-      }
       // function calling 循环：模型请求工具 → 执行 → 回传 → 再生成（最多3轮防死循环）
       // 用户 8-03 00:55：日志里看不见工具调用 → 每个工具调用都记日志
       // 用户 8-03 01:57：工具轮不限定轮数（原来最多 3 轮，复杂任务可能不够）；
@@ -1392,53 +1375,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     return '【用户指令】用户明确要求你调用工具 $names。'
         '请立即调用该工具（function calling），不要只说不做。'
         '调用完成后用自然的话告诉用户结果。';
-  }
-
-  /// 用户 8-03 02:33：男主想输出指令，管家要抓取——
-  /// AI 可能只说话不真正发 tool_calls（"我用 recall_memory 查一下"），
-  /// 管家从男主回复文本里抓取工具调用意图 → 强制构造 toolCalls 走工具轮。
-  /// 返回 null = 没检测到工具调用意图（纯聊天，零副作用）。
-  List<Map<String, dynamic>>? _extractToolIntentFromText(String text) {
-    if (text.isEmpty) return null;
-    final calls = <Map<String, dynamic>>[];
-    // 工具名 → 中文意图词（避免"上次用过"这类提及被误抓）
-    // 用户 8-03 03:56：男主回复"回忆…"但词表只有"查记忆"→ 抓不到 → 没气泡。
-    // 扩充常见说法：回忆/回想/查一下/看看记忆/记得吗/查查 等
-    const toolIntents = <String, List<String>>{
-      'record_memory': ['调用record_memory', '使用record_memory', '用一下record_memory', '记住', '记一下', '记下来', '记着', '别忘了', '你要记住'],
-      'recall_memory': ['调用recall_memory', '使用recall_memory', '用一下recall_memory', '查记忆', '查一下记忆', '查看记忆', '查关于', '回忆', '回想', '查一下', '查查', '看看记忆', '记得吗', '想起来'],
-      'save_identity_memory': ['调用save_identity_memory', '使用save_identity_memory', '记住代号', '保存代号'],
-      'list_tools': ['调用list_tools', '使用list_tools', '有什么工具', '能做什么', '工具清单'],
-      'write_diary': ['调用write_diary', '使用write_diary', '写日记', '写一下日记', '记日记'],
-      'query_diary': ['调用query_diary', '使用query_diary', '查日记', '查一下日记', '翻日记', '看看日记', '之前聊过什么', '我说过什么'],
-    };
-    toolIntents.forEach((name, intents) {
-      final hit = intents.any(text.contains);
-      if (!hit) return;
-      final args = <String, dynamic>{};
-      // 粗提取参数：意图词后的内容（截到标点/换行，最长 30 字）
-      final m = RegExp('(?:${intents.join('|')})[：:，,\\s]*(.+?)[。！？!?\\n]')
-          .firstMatch(text);
-      final argText = (m?.group(1) ?? '').trim();
-      final arg = argText.length > 30 ? argText.substring(0, 30) : argText;
-      switch (name) {
-        case 'record_memory':
-          args['content'] = arg;
-          args['category'] = '';
-        case 'recall_memory':
-          args['query'] = arg;
-          args['category'] = '';
-        case 'save_identity_memory':
-          args['code'] = arg;
-          args['content'] = '';
-        case 'write_diary':
-          args['content'] = arg;
-        case 'query_diary':
-          args['keyword'] = arg;
-      }
-      calls.add({'name': name, 'arguments': args});
-    });
-    return calls.isEmpty ? null : calls;
   }
 
   Future<List<String>> _buildRecallInjectionAsync(String query) async {

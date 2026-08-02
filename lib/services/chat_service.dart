@@ -22,7 +22,7 @@ import '../butler/tools/semantic_mood_tool.dart';
 import '../butler/mood_analysis/mood_analyzer_keyword.dart';
 import '../butler/mood_analysis/semantic_mood_analyzer.dart';
 import '../butler/storage/storage_registry.dart';
-import '../butler/task/task_manager.dart';
+import '../butler/butler_config.dart';
 import '../data/mock_user_settings.dart';
 import '../models/chat_message.dart';
 import '../models/chat_session.dart';
@@ -426,11 +426,6 @@ class ChatService {
             userName: userSetting.name,
           ),
         );
-      }
-
-      // 管家 AI：并行分析用户意图（如果启用）
-      if (!selfTest && butler != null && butler!.config.butlerAIEnabled) {
-        unawaited(_runButlerAI(input: input, userNode: userNode));
       }
 
       // 管家情绪闭环：记录情绪弧线 → 更新基线/规律 → 落库（情感基线视图数据源）
@@ -1182,67 +1177,6 @@ class ChatService {
       DebugLogger.log('管家情绪', '[语义模型]弧线已记录 → $moodStr');
     } catch (e) {
       DebugLogger.log('管家情绪', '语义补录失败: $e');
-    }
-  }
-
-  /// 管家 AI：异步分析用户意图并管理任务
-  Future<void> _runButlerAI({
-    required String input,
-    required dynamic userNode,
-  }) async {
-    try {
-      final result = await butler!.analyzeWithAI(input);
-      if (result.hasIntents) {
-        // 创建任务
-        final tasks = TaskManager.instance.createTasks(result.intents);
-
-        // 自动执行（只自动执行简单任务，复杂任务等用户确认）
-        for (final task in tasks) {
-          if (_canAutoExecute(task.type)) {
-            final taskResult = await TaskManager.instance.execute(task.id);
-            if (taskResult.success) {
-              // 执行成功，通知用户
-              DebugLogger.log('管家', '任务 #${task.id} 已完成: ${task.description}');
-            } else {
-              // 执行失败，记录错误
-              DebugLogger.log('管家', '任务 #${task.id} 失败: ${taskResult.error}');
-            }
-          } else {
-            // 需要用户确认的任务
-            DebugLogger.log('管家', '新任务 #${task.id}: ${task.description}');
-          }
-        }
-      } else if (result.shouldReply) {
-        // 纯安慰/回复，显示在聊天界面
-        DebugLogger.log('管家', '回复: ${result.reply}');
-      }
-    } catch (e) {
-      // 管家 AI 失败不影响主流程
-      DebugLogger.log('管家', 'AI 分析失败: $e');
-    }
-  }
-
-  /// 判断任务类型是否可以自动执行
-  /// 自动执行：不需要用户额外确认的简单任务
-  /// 需确认：可能影响用户数据的操作
-  bool _canAutoExecute(String taskType) {
-    switch (taskType) {
-      case 'save_note':
-        return true;
-      case 'set_config':
-        return true;
-      case 'lock_vault':
-        return false; // 需要用户确认
-      case 'call_character':
-        return true;
-      case 'query_memory':
-        return true;
-      case 'set_trigger':
-        return true;
-      case 'analyze_image':
-        return true;
-      default:
-        return false;
     }
   }
 }

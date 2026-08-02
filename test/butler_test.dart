@@ -86,20 +86,8 @@ void main() async {
   print('AI 回复：$aiReply');
   print('还原后：$restored');
 
-  // 6. 测试管家命令
-  print('\n--- 测试 4：管家命令 ---');
-  final cmd1 = butler.processCommand('记一下我今天心情不好');
-  print('命令"记一下" → 类型=${cmd1.type}, 回复=${cmd1.reply}');
-
-  final cmd2 = butler.processCommand('查一下妈妈的事情');
-  print('命令"查一下" → 类型=${cmd2.type}, 回复=${cmd2.reply}');
-
-  final cmd3 = butler.processCommand('管家，记住我明天要早起');
-  print('命令"管家，记住..." → 类型=${cmd3.type}, 回复=${cmd3.reply}');
-
-  final cmd4 = butler.processCommand('你今天过得怎么样');
-  print('普通对话"你今天过得怎么样" → 类型=${cmd4.type}');
-  assert(cmd4.type == 'unknown', '非管家命令应该返回 unknown');
+  // 6. 管家命令（8-03 已砍：管家不做意图分析/不对话，processCommand 已删除）
+  //    记笔记/定时/查记忆 = 男主 #指令# 工具，管家只执行男主指令
 
   // 7. 测试多次会话的不同映射
   print('\n--- 测试 5：跨会话隔离 ---');
