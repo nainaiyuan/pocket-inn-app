@@ -312,7 +312,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 用户 8-03 05:31：用户直接发 JSON 工具指令（兼容不同 AI 的指令格式）→
       // 不走男主主调用（男主收到 JSON 会空回复），直接进工具轮执行，
       // 工具结果回传男主后再由男主说话
-      final userJsonCalls = ToolIntentParser.extractJsonToolCalls(t);
+      // 用户 8-03 05:59：改认全部格式（⟨工具:⟩块/JSON/中文），与男主回复解析一致
+      final userJsonCalls = ToolIntentParser.extract(t);
       // 工具调用轮（function calling）：模型请求工具 → 执行（弹窗审批）→ 回传 → 再生成
       var result;
       if (userJsonCalls != null && userJsonCalls.isNotEmpty) {

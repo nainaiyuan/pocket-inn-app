@@ -61,15 +61,30 @@ class ToolIntentParser {
       text.replaceAll(_toolBlock, '').trim();
 
   /// 从文本里提取 JSON 工具调用指令
-  /// 兼容：完整 tool_calls 数组 / 单对象 / function 包裹 / 混在自然语言里
+  /// 兼容：完整 tool_calls 数组 / 单对象 / function 包裹 / 混在自然语言里 /
+  /// markdown 代码块包裹 / arguments 嵌套花括号
+  /// 用户 8-03 05:59：原 blockRegex `\{[^{}]*\}` 不支持嵌套 → 
+  /// `{"name":"list_tools","arguments":{}}` 抓不住 → 改栈扫描找平衡块
   static List<Map<String, dynamic>>? extractJsonToolCalls(String text) {
     final results = <Map<String, dynamic>>[];
     // 先试整体解析（文本本身就是完整 JSON）
     _tryDecode(text, results);
-    // 再逐个找 JSON 对象块（可能混在自然语言里）
-    final blockRegex = RegExp(r'\{[^{}]*\}');
-    for (final m in blockRegex.allMatches(text)) {
-      _tryDecode(m.group(0)!, results);
+    if (results.isNotEmpty) return results;
+    // 栈扫描：找所有平衡的 {…} 块（支持嵌套花括号）
+    // 只在最外层闭合时尝试解析，避免内层空对象 {} 被误当工具指令
+    final stack = <int>[];
+    for (var i = 0; i < text.length; i++) {
+      final ch = text[i];
+      if (ch == '{') {
+        stack.add(i);
+      } else if (ch == '}') {
+        if (stack.isNotEmpty) {
+          final start = stack.removeLast();
+          if (stack.isEmpty) {
+            _tryDecode(text.substring(start, i + 1), results);
+          }
+        }
+      }
     }
     return results.isEmpty ? null : results;
   }
