@@ -146,19 +146,21 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
       guidance: '检查 extractToolBlocks 参数解析',
     ));
 
-    // ── R7（8-03 06:37）：原文 + 关键词都要保存 ──
-    // original 参数原样保留（recall 时当参考）
+    // ── R7（8-03 06:41）：男主写的完整句 + 关键词都要保存 ──
+    // content 是完整句子，keywords 含全部关键名词动词，两者原样保留
     final r7Calls = ToolIntentParser.extract(
-        '⟨工具:record_memory⟩{"content":"妈妈喜欢猫","category":"喜好","keywords":["妈妈","喜欢"],"original":"我妈特别喜欢猫"}⟨/工具⟩');
-    final r7Args =
-        (r7Calls?.first['arguments'] as Map<String, dynamic>?);
-    final r7Original = r7Args?['original']?.toString() ?? '';
+        '⟨工具:record_memory⟩{"content":"妈妈喜欢猫","category":"喜好","keywords":["妈妈","喜欢","猫"]}⟨/工具⟩');
+    final r7Args = (r7Calls?.first['arguments'] as Map<String, dynamic>?);
+    final r7Content = r7Args?['content']?.toString() ?? '';
+    final r7Kw = r7Args?['keywords'];
     items.add(ButlerSelfTestItem(
-      message: 'R7 原文+关键词都保存',
-      expected: 'original 原样保留',
-      actual: r7Original.isEmpty ? '❌ original 丢失' : '✅ 原文=$r7Original',
-      passed: r7Original == '我妈特别喜欢猫',
-      failedReason: r7Original.isEmpty ? '解析器丢了 original 参数' : null,
+      message: 'R7 完整句+关键词都保存',
+      expected: 'content=妈妈喜欢猫，keywords=3个',
+      actual: r7Content.isEmpty
+          ? '❌ content 丢失'
+          : '✅ content=$r7Content，keywords=$r7Kw',
+      passed: r7Content == '妈妈喜欢猫' && r7Kw is List && r7Kw.length == 3,
+      failedReason: r7Content.isEmpty ? '解析器丢了 content 参数' : null,
       guidance: '检查 extractToolBlocks 参数解析',
     ));
 
@@ -585,7 +587,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
               'R1 记忆库外键 · R2 record_memory 假成功\n'
               'R3a 代码块JSON · R3b 残缺JSON容错\n'
               'R4 reasoning_content 回传（DeepSeek 400）\n'
-              'R5 类别兜底 · R6 关键词并入规律引擎 · R7 原文保存',
+              'R5 类别兜底 · R6 关键词并入规律引擎 · R7 完整句+关键词保存',
               style: TextStyle(color: Colors.black54, fontSize: 12, height: 1.6),
             ),
           ),

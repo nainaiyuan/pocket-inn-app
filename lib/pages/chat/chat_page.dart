@@ -421,13 +421,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                     '🎯 record_memory 关键词并入规律引擎: ${words.join('、')}');
               }
             }
-            // 8-03 06:37：原文（男主看到的原话）也保存，recall 时当参考
-            final original = args['original']?.toString() ?? '';
+            // 8-03 06:37：男主写的完整句（content）原样保存 + 关键词落库
             _appendToolBubble('正在记录：「$content」（$category）…');
             toolResult = await _executeRecordTool(
               category,
               content,
-              original: original,
               keywords: words,
             );
           } else if (name == 'recall_memory') {
@@ -1227,7 +1225,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   Future<_ToolResult> _executeRecordTool(
     String category,
     String content, {
-    String original = '',
     List<String> keywords = const [],
   }) async {
     if (content.isEmpty) return const _ToolResult(false, '内容为空，无法记录');
@@ -1242,7 +1239,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           [
             '「$content」',
             '类别：${category.isEmpty ? '其他' : category}',
-            if (original.isNotEmpty) '原文：$original',
             if (keywords.isNotEmpty) '关键词：${keywords.join('、')}',
             '',
             '要让他记住吗？',
@@ -1269,9 +1265,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         await _ensureChatSession(_state.personaId ?? '', '');
       }
       if (_chatSessionId != null) {
-        // 8-03 06:37：原文+关键词也落库（recall 时当参考）
+        // 8-03 06:41：男主写的完整句 + 关键词都落库
         final parts = <String>['[${category.isEmpty ? '其他' : category}] $content'];
-        if (original.isNotEmpty) parts.add('原文：$original');
         if (keywords.isNotEmpty) parts.add('关键词：${keywords.join('、')}');
         await ChatDatabaseService.instance.insertMemoriesInTx([
           MemoryNode(
