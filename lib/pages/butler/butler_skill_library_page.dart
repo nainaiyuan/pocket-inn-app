@@ -77,10 +77,55 @@ class ButlerSkillLibraryPage extends StatelessWidget {
             )
           else
             for (final tool in tools) _ToolCard(tool: tool),
+          const SizedBox(height: 24),
+          const Text(
+            '🤖 AI 工具（男主聊天时可用）',
+            style: TextStyle(
+              color: Color(0xFF6A4A5A),
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '这些是发给 AI 的 function calling 工具，男主在聊天中自主决定是否调用。'
+            '技能库里看不到它们 ≠ 男主不能用。',
+            style: TextStyle(color: Colors.black38, fontSize: 10),
+          ),
+          const SizedBox(height: 8),
+          for (final t in _aiTools) _AiToolCard(tool: t),
         ],
       ),
     );
   }
+
+  /// AI function calling 工具（与 butlerTools 保持一致）
+  static const List<Map<String, String>> _aiTools = [
+    {
+      'name': 'record_memory',
+      'desc': '永久记住用户的事（喜好/约定/日常/事实/其他）',
+    },
+    {
+      'name': 'recall_memory',
+      'desc': '查看以前记住的关于用户的事，按关键词或类别查',
+    },
+    {
+      'name': 'save_identity_memory',
+      'desc': '记住关于某位身边人（代号）的事',
+    },
+    {
+      'name': 'list_tools',
+      'desc': '查看自己当前能用哪些工具',
+    },
+    {
+      'name': 'write_diary',
+      'desc': '写当天日记（用户说"睡了/晚安"等结束信号后）',
+    },
+    {
+      'name': 'query_diary',
+      'desc': '翻自己以前写的日记',
+    },
+  ];
 }
 
 class _SkillCard extends StatelessWidget {
@@ -228,7 +273,6 @@ class _ToolCard extends StatelessWidget {
   final ButlerTool tool;
 
   const _ToolCard({required this.tool});
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -258,6 +302,51 @@ class _ToolCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   tool.description,
+                  style: const TextStyle(color: Colors.black45, fontSize: 10),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AiToolCard extends StatelessWidget {
+  final Map<String, String> tool;
+
+  const _AiToolCard({required this.tool});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE8D5DE)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('🤖 ', style: TextStyle(fontSize: 13)),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  tool['name'] ?? '',
+                  style: const TextStyle(
+                    color: Color(0xFF6A4A5A),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  tool['desc'] ?? '',
                   style: const TextStyle(color: Colors.black45, fontSize: 10),
                 ),
               ],
