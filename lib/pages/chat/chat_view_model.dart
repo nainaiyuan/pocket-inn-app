@@ -542,7 +542,7 @@ class ChatViewModel extends ChangeNotifier {
   Future<void> sendMessage(
     String rawText, {
     Future<String?> Function(List<String> askWords)? onAskBlock,
-    Future<bool?> Function(List<String> formatMatched)? onAskFormat,
+    Future<String?> Function(List<String> formatMatched)? onAskFormat,
     void Function(List<String> blocked, List<String> allowed)? onMaskResult,
   }) async {
     final session = _activeSession;

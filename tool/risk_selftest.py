@@ -108,19 +108,23 @@ def _is_curiosity(text):
             return True
     return False
 
-# ── 固定格式正则（对照 mask_engine.applyFormatMask）──
-FORMAT_RULES = {
-    '身份证号': re.compile(r'\b\d{17}[\dXx]\b', re.ASCII),
-    '手机号': re.compile(r'\b1[3-9]\d{9}\b', re.ASCII),
-    '邮箱': re.compile(r'\b[\w.+-]+@[\w-]+\.[\w.-]+\b', re.ASCII),
-    '银行卡号': re.compile(r'\b\d{16,19}\b', re.ASCII),
-}
+# ── 敏感信息模块规则（对照 sensitive_info_detector.dart）──
+# 高优先级（手机号/身份证/邮箱）先检测并挖掉 → 低优先级"疑似长数字"不重复命中
+FORMAT_RULES = [
+    ('手机号', re.compile(r'\b1[3-9]\d{9}\b', re.ASCII), True),
+    ('身份证号', re.compile(r'\b\d{17}[\dXx]\b', re.ASCII), True),
+    ('邮箱', re.compile(r'\b[\w.+-]+@[\w-]+\.[\w.-]+\b', re.ASCII), True),
+    ('疑似长数字', re.compile(r'\b\d{11,19}\b', re.ASCII), False),
+]
 
 def format_mask(text):
     matched = []
-    for name, re_ in FORMAT_RULES.items():
-        if re_.search(text):
+    work = text
+    for name, re_, hp in FORMAT_RULES:
+        if re_.search(work):
             matched.append(name)
+            if hp:
+                work = re_.sub(' ', work)
     return matched
 
 # ── 运行 ──
@@ -171,15 +175,15 @@ for t, expect in repeat_cases:
 print()
 print('═══ 固定格式正则验证（对照 mask_engine.applyFormatMask）═══')
 fmt_cases = [
-    ('我的身份证是110101199003071234，收一下', ['身份证号', '银行卡号']),  # 18位数字同时命中银行卡规则（真实行为，都挖空）
+    ('我的身份证是110101199003071234，收一下', ['身份证号']),  # 18位数字 → 精确身份证（不重复标疑似）
     ('电话 13812345678 联系我', ['手机号']),
     ('邮箱 test@example.com 发我', ['邮箱']),
-    ('卡号 6222020200112233445 转账', ['银行卡号']),
+    ('卡号 6222020200112233445 转账', ['疑似长数字']),
     ('我想亲你', []),
     ('普通聊天没有敏感信息', []),
-    ('17位数字12345678901234567', ['银行卡号']),  # 17位数字 → 银行卡（非身份证）
-    ('18位纯数字123456789012345678', ['身份证号', '银行卡号']),  # 两规则都命中（都挖空，弹窗会列两个）
-    ('11位手机号 12345678901', []),  # 非1[3-9]开头 → 不匹配
+    ('17位数字12345678901234567', ['疑似长数字']),  # 17位非身份证格式 → 疑似
+    ('18位纯数字123456789012345678', ['身份证号']),  # 高优先级身份证先命中
+    ('订单号12345678901', ['疑似长数字']),  # 11位数字 → 疑似（用户 17:57 要求）
 ]
 for text, expect in fmt_cases:
     got = format_mask(text)
@@ -194,10 +198,11 @@ fmt2_cases = [
     ('110101199003071234', True), ('13812345678', True),
     ('test@example.com', True), ('6222020200112233445', True),
     ('我想亲你', False), ('你好呀', False), ('12345', False),
-    ('12345678901234567', True),  # 17位数字 → 银行卡命中 → 输不进去
+    ('12345678901234567', True),  # 17位数字 → 疑似长数字 → 输不进去
+    ('12345678901', True),  # 11位数字 → 疑似 → 输不进去（用户 17:57 要求）
 ]
 for text, expect in fmt2_cases:
-    hit = any(r.search(text) for r in FORMAT_RULES.values())
+    hit = any(re_.search(text) for _, re_, _ in FORMAT_RULES)
     mark = '✅' if hit == expect else '❌'
     if mark == '❌':
         ok = False

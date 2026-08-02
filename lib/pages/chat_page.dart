@@ -516,43 +516,69 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  /// 固定格式弹窗：检测到身份证/手机号/银行卡/邮箱 → 问是否发送给 AI
-  /// true=发送，false=不发（本地不记录原文，返回挖空）
-  Future<bool?> _askFormatDialog(List<String> matched) async {
+  /// 疑似敏感信息弹窗：问"发不发、记不记"
+  /// 'send'=发送 / 'block'=不发 / 'send_remember'=发送并记住 /
+  /// 'block_remember'=不发并记住 / null=关闭（保守不发）
+  Future<String?> _askFormatDialog(List<String> matched) async {
     if (!mounted) return null;
-    return showDialog<bool>(
+    var remember = false;
+    return showDialog<String>(
       context: context,
-      builder: (dctx) => AlertDialog(
-        backgroundColor: const Color(0xFFFDF7F9),
-        title: const Text(
-          '检测到敏感信息',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: Color(0xFF6A4A5A),
-          ),
-        ),
-        content: Text(
-          '这条消息包含${matched.join('、')}，要发给 AI 吗？\n\n'
-          '不发（推荐）：内容直接删掉，不发送也不记录，男主只会收到占位标记。',
-          style: const TextStyle(fontSize: 13, height: 1.6, color: Color(0xFF6A4A5A)),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dctx).pop(false),
-            child: const Text(
-              '不发（推荐）',
-              style: TextStyle(color: Color(0xFF6A4A5A)),
+      builder: (dctx) => StatefulBuilder(
+        builder: (dctx, setState) => AlertDialog(
+          backgroundColor: const Color(0xFFFDF7F9),
+          title: const Text(
+            '疑似敏感信息',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF6A4A5A),
             ),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(dctx).pop(true),
-            child: const Text(
-              '发送',
-              style: TextStyle(color: Color(0xFFC896B4)),
-            ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '这条消息包含：${matched.join('、')}。要发给 AI 吗？\n\n'
+                '不发：内容删掉，不发送也不记录，男主收到占位标记。',
+                style: const TextStyle(
+                    fontSize: 13, height: 1.6, color: Color(0xFF6A4A5A)),
+              ),
+              const SizedBox(height: 8),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                activeColor: const Color(0xFFC896B4),
+                value: remember,
+                title: const Text(
+                  '记住我的选择，以后同类不再问',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF6A4A5A)),
+                ),
+                onChanged: (v) => setState(() => remember = v ?? false),
+              ),
+            ],
           ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () =>
+                  Navigator.of(dctx).pop(remember ? 'block_remember' : 'block'),
+              child: const Text(
+                '不发（推荐）',
+                style: TextStyle(color: Color(0xFF6A4A5A)),
+              ),
+            ),
+            TextButton(
+              onPressed: () =>
+                  Navigator.of(dctx).pop(remember ? 'send_remember' : 'send'),
+              child: const Text(
+                '发送',
+                style: TextStyle(color: Color(0xFFC896B4)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

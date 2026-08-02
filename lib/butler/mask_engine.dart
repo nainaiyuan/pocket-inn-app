@@ -21,7 +21,9 @@ import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'mood_analysis/mood_analyzer_keyword.dart' show KeywordMoodAnalyzer;
-import 'risk_filter_wordlist.dart' show RiskWord, privacyMark;
+import 'risk_filter_wordlist.dart' show RiskWord;
+import 'sensitive_info/sensitive_info_detector.dart'
+    show SensitiveInfoDetector, privacyMark;
 import 'storage/identity_store.dart' show IdentityEntry, IdentityStore;
 import 'patterns/pattern_engine.dart' show PatternEngine;
 
@@ -252,8 +254,16 @@ class MaskEngine {
         // 开关"每次都附上"（DeepSeek 无后台记忆）→ 每轮都附情绪参考
         // 或该身份出现了新确认的规律（情绪变了）→ 附规律描述
         final patternDesc = _buildPatternDescription(entry);
-        if (hintsEveryTurn && patternDesc != null) {
-          maskHints.add('$code：$patternDesc');
+        final desc = _pickDescription(entry);
+        if (hintsEveryTurn) {
+          // 每次都带：身份描述（男主知道代号指谁，被要求念时能念出）+ 情绪规律
+          final parts = [
+            if (desc != null) desc,
+            if (patternDesc != null) patternDesc,
+          ];
+          if (parts.isNotEmpty) {
+            maskHints.add('$code：${parts.join('；')}');
+          }
         } else if (_hasNewPattern(entry, sessionId)) {
           if (patternDesc != null) {
             maskHints.add('$code：$patternDesc');
@@ -499,22 +509,8 @@ class MaskEngine {
   /// 顺序：身份证 → 手机号 → 邮箱 → 银行卡（兜底 16-19 位纯数字）
   /// 返回 (处理后的文本, 命中的格式标签列表)
   (String, List<String>) applyFormatMask(String text) {
-    var result = text;
-    final matched = <String>{};
-    const rules = <String, String>{
-      '身份证号': r'\b\d{17}[\dXx]\b',
-      '手机号': r'\b1[3-9]\d{9}\b',
-      '邮箱': r'\b[\w.+-]+@[\w-]+\.[\w.-]+\b',
-      '银行卡号': r'\b\d{16,19}\b',
-    };
-    for (final e in rules.entries) {
-      final re = RegExp(e.value);
-      if (re.hasMatch(result)) {
-        matched.add(e.key);
-        result = result.replaceAllMapped(re, (_) => privacyMark);
-      }
-    }
-    return (result, matched.toList());
+    // 统一走敏感信息模块（规则见 sensitive_info_detector.dart）
+    return SensitiveInfoDetector.mask(text);
   }
 
   /// 检测文本是否包含隐私禁区（身份证、银行卡、手机号等）

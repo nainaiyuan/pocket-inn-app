@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../../utils/sensitive_input_formatter.dart';
+import '../../../butler/sensitive_info/sensitive_info_formatter.dart';
 
 import '../../../models/chat_memory.dart';
 import '../../../models/chat_session.dart';

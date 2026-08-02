@@ -5,6 +5,8 @@ import '../ai_provider/models.dart';
 import '../butler/butler.dart';
 import '../butler/mask_engine.dart' show MaskEngine;
 import '../butler/risk_word_store.dart' show RiskWordStore;
+import '../butler/sensitive_info/sensitive_info_store.dart'
+    show SensitiveInfoStore;
 import '../butler/flow/butler_flow.dart';
 import '../butler/modules/butler_module_hub.dart';
 import '../butler/memory/emotion_arc.dart';
@@ -126,9 +128,10 @@ class ChatService {
     /// 提醒档敏感词确认回调（由 UI 层弹窗）：
     /// 返回 'remember'=屏蔽并记住，'once'=仅本次屏蔽，'allow'=这次不屏蔽，null=关闭（保守挖空）
     Future<String?> Function(List<String> askWords)? onAskBlock,
-    /// 固定格式确认回调：检测到身份证/手机号等 → 弹窗问是否发送给 AI
-    /// 返回 true=发送，false/null=不发（本地不记录原文，删掉，返回挖空）
-    Future<bool?> Function(List<String> formatMatched)? onAskFormat,
+    /// 固定格式确认回调：检测到疑似敏感格式 → 弹窗问"发不发、记不记"
+    /// 返回 'send'=发送 / 'block'=不发 / 'send_remember'=发送并记住 /
+    ///       'block_remember'=不发并记住 / null=关闭（保守不发）
+    Future<String?> Function(List<String> formatMatched)? onAskFormat,
     /// 自检模式：不真实调用 AI（模拟回复），不写情绪落库，其余流程全跑。
     /// 用于"一键自检"——不手动聊天也能验证技能/工具/Prompt 组装等管家流程。
     bool selfTest = false,
@@ -231,10 +234,49 @@ class ChatService {
         }
         // null（用户关闭弹窗）→ 保持已挖空状态（保守）
       }
-      // 固定格式：每次命中都弹窗问是否发送（本地 AI 男主也一样）
-      if (masked.formatMatched.isNotEmpty && onAskFormat != null) {
-        final send = await onAskFormat(masked.formatMatched);
-        if (send == true) {
+      // 固定格式：疑似敏感格式 → 查偏好（记住过的直接按偏好）→ 未记住的弹窗问
+      // 任何男主（含本地 AI）都执行
+      if (masked.formatMatched.isNotEmpty) {
+        // 已记住的格式按偏好处理，未记住的收集起来弹窗
+        final prefs = <String, String>{};
+        for (final name in masked.formatMatched) {
+          final p = await SensitiveInfoStore.instance.getPref(name);
+          if (p != null) prefs[name] = p;
+        }
+        final unhandled = masked.formatMatched
+            .where((name) => !prefs.containsKey(name))
+            .toList();
+        var sendAll =
+            prefs.values.every((v) => v == SensitiveInfoStore.prefSend) &&
+                prefs.isNotEmpty;
+        var blockAll =
+            prefs.values.every((v) => v == SensitiveInfoStore.prefBlock) &&
+                prefs.isNotEmpty;
+        if (unhandled.isNotEmpty && onAskFormat != null) {
+          final choice = await onAskFormat(unhandled);
+          if (choice == 'send' || choice == 'send_remember') {
+            sendAll = true;
+            if (choice == 'send_remember') {
+              for (final name in unhandled) {
+                await SensitiveInfoStore.instance
+                    .setPref(name, SensitiveInfoStore.prefSend);
+              }
+            }
+          } else if (choice == 'block_remember') {
+            blockAll = true;
+            for (final name in unhandled) {
+              await SensitiveInfoStore.instance
+                  .setPref(name, SensitiveInfoStore.prefBlock);
+            }
+          } else {
+            // 'block' 或 null（关闭弹窗）→ 不发
+            blockAll = true;
+          }
+        } else if (unhandled.isNotEmpty) {
+          // 无回调（UI 未接入）→ 默认不发
+          blockAll = true;
+        }
+        if (sendAll && !blockAll) {
           // 发送：用固定格式未挖版
           if (!sensitiveAllowed) {
             normalizedInput = masked.formatLayerText ?? normalizedInput;
