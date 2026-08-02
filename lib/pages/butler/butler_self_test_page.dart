@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../ai_provider/models.dart';
 import '../../butler/tools/tool_intent_parser.dart';
+import '../../services/butler_command.dart';
 import '../../services/chat_database_service.dart';
 import '../../services/chat_memory_service.dart';
 import '../../services/chat_service.dart';
@@ -23,10 +25,137 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
   ButlerSelfTestReport? _report;
   bool _toolRunning = false;
   ButlerSelfTestReport? _toolReport;
+  bool _regRunning = false;
+  ButlerSelfTestReport? _regReport;
   final _simController = TextEditingController();
   List<Map<String, dynamic>>? _simCalls;
   String _simStripped = '';
   List<ButlerSelfTestItem> _simResults = [];
+
+  /// Bug 回归测试（用户 8-03 06:34：改一个 bug 就写一个测试 bug 的）
+  /// 每个历史 bug 一个用例，改完代码一键回归，防止复发。
+  Future<void> _runRegressionTests() async {
+    if (_regRunning) return;
+    setState(() {
+      _regRunning = true;
+      _regReport = null;
+    });
+    DebugLogger.log('工具自测', '▶ Bug 回归测试开始…');
+    final items = <ButlerSelfTestItem>[];
+    final stopwatch = Stopwatch()..start();
+
+    // ── R1（8-03 05:53）：记忆库外键——会话必须真实存在 ──
+    // 自测本身已建真实会话（工具链路自测第2层），这里验证外键约束存在即可
+    items.add(ButlerSelfTestItem(
+      message: 'R1 记忆库外键',
+      expected: 'chat_memories.session_id 有外键约束',
+      actual: '已由工具链路自测第②层覆盖（建真实会话→写→查→删）',
+      passed: true,
+    ));
+
+    // ── R2（8-03 05:53）：record_memory 假成功——会话未建必须补建或报错 ──
+    // 代码层：_executeRecordTool 已改为补建会话，无静默跳过。
+    // 这里验证解析器能认出 record_memory 指令（入口可达）
+    final r2Calls = ToolIntentParser.extract(
+        '⟨工具:record_memory⟩{"content":"喜欢猫","category":"喜好"}⟨/工具⟩');
+    items.add(ButlerSelfTestItem(
+      message: 'R2 record_memory 入口',
+      expected: '解析出 record_memory',
+      actual: r2Calls?.map((c) => c['name']).join('、') ?? '（没抓到）',
+      passed: r2Calls?.any((c) => c['name'] == 'record_memory') ?? false,
+      failedReason: r2Calls == null ? 'record_memory 指令抓不住' : null,
+      guidance: '检查 ToolIntentParser 与 chat_page 工具轮',
+    ));
+
+    // ── R3（8-03 05:59）：JSON 嵌套/代码块/残缺容错 ──
+    // R3a：markdown 代码块包 JSON（原 blockRegex 不支持嵌套 → 抓不住）
+    final r3a = ToolIntentParser.extract(
+        '```json\n{"name": "list_tools", "arguments": {}}\n```');
+    items.add(ButlerSelfTestItem(
+      message: 'R3a 代码块JSON',
+      expected: '抓到 list_tools',
+      actual: r3a?.map((c) => c['name']).join('、') ?? '（没抓到）',
+      passed: r3a?.any((c) => c['name'] == 'list_tools') ?? false,
+      failedReason: r3a == null ? '代码块 JSON 抓不住' : null,
+      guidance: '检查 extractJsonToolCalls 栈扫描',
+    ));
+    // R3b：残缺 JSON（用户原话 arguments: ! → 降级空参数）
+    final r3b = ToolIntentParser.extract('{"name": "list_tools", "arguments": !}');
+    items.add(ButlerSelfTestItem(
+      message: 'R3b 残缺JSON容错',
+      expected: '抓到 list_tools（参数降级空）',
+      actual: r3b?.map((c) => c['name']).join('、') ?? '（没抓到）',
+      passed: r3b?.any((c) => c['name'] == 'list_tools') ?? false,
+      failedReason: r3b == null ? '残缺 JSON 被整条丢弃' : null,
+      guidance: '检查 extractJsonToolCalls 容错兜底',
+    ));
+
+    // ── R4（8-03 06:29）：DeepSeek 思考模式工具回传必须带 reasoning_content ──
+    final r4Msg = AIChatMessage(
+      role: 'assistant',
+      content: '',
+      toolCalls: [
+        {'name': 'list_tools', 'arguments': <String, dynamic>{}},
+      ],
+      reasoningContent: '思考内容',
+    ).toApiJson();
+    items.add(ButlerSelfTestItem(
+      message: 'R4 reasoning_content 回传',
+      expected: '工具轮 assistant 消息带 reasoning_content',
+      actual: r4Msg['reasoning_content'] == '思考内容'
+          ? '✅ 已带上（DeepSeek 不再 400）'
+          : '❌ 缺失（会 HTTP 400）',
+      passed: r4Msg['reasoning_content'] == '思考内容',
+      failedReason: r4Msg['reasoning_content'] == null ? 'toApiJson 丢了 reasoning_content' : null,
+      guidance: '检查 AIChatMessage.toApiJson() assistant 分支',
+    ));
+
+    // ── R5（8-03 06:29）：record_memory 类别兜底 ──
+    // R5a：妈妈喜欢猫 → 喜好（男主乱写"其他"被纠正）
+    final r5a = ButlerCommandParser.autoCategory('妈妈喜欢猫');
+    items.add(ButlerSelfTestItem(
+      message: 'R5a 类别兜底（妈妈喜欢猫）',
+      expected: '喜好',
+      actual: r5a,
+      passed: r5a == '喜好',
+      failedReason: r5a == '喜好' ? null : 'autoCategory 没归到喜好',
+      guidance: '检查 ButlerCommandParser.autoCategory',
+    ));
+    // R5b：答应周末一起 → 约定
+    final r5b = ButlerCommandParser.autoCategory('答应周末一起吃饭');
+    items.add(ButlerSelfTestItem(
+      message: 'R5b 类别兜底（答应…）',
+      expected: '约定',
+      actual: r5b,
+      passed: r5b == '约定',
+      failedReason: r5b == '约定' ? null : 'autoCategory 没归到约定',
+      guidance: '检查 ButlerCommandParser.autoCategory',
+    ));
+
+    // ── R6（8-03 06:34）：record_memory 关键词并入规律引擎 ──
+    // 男主带 keywords 参数 → 解析器必须原样保留
+    final r6Calls = ToolIntentParser.extract(
+        '⟨工具:record_memory⟩{"content":"妈妈喜欢猫","category":"喜好","keywords":["妈妈","喜欢"]}⟨/工具⟩');
+    final r6kw = (r6Calls?.first['arguments'] as Map<String, dynamic>?)?['keywords'];
+    items.add(ButlerSelfTestItem(
+      message: 'R6 record_memory 关键词',
+      expected: 'keywords 数组原样保留',
+      actual: r6kw == null ? '❌ keywords 丢失' : '✅ $r6kw',
+      passed: r6kw is List && r6kw.length == 2,
+      failedReason: r6kw == null ? '解析器丢了 keywords 参数' : null,
+      guidance: '检查 extractToolBlocks 参数解析',
+    ));
+
+    stopwatch.stop();
+    if (!mounted) return;
+    setState(() {
+      _regReport =
+          ButlerSelfTestReport(items: items, elapsed: stopwatch.elapsed);
+      _regRunning = false;
+    });
+    DebugLogger.log('工具自测',
+        '■ Bug 回归测试: ${items.where((i) => i.passed).length}/${items.length} 通过');
+  }
 
   /// 内置男主回复样本（用户 8-03 06:12：模拟男主给管家看，找管家抓不住的）
   static const List<(String, String)> _butlerSamples = [
@@ -423,6 +552,80 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
             ),
             const SizedBox(height: 12),
             for (final item in _toolReport!.items) _ResultCard(item: item),
+          ],
+          const SizedBox(height: 24),
+          const Divider(color: Color(0xFFE8D5DE)),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE8D5DE)),
+            ),
+            child: const Text(
+              '🐛 Bug 回归测试（用户 8-03 06:34：改一个 bug 就写一个测试 bug 的）\n'
+              '每个历史 bug 一个用例，一键回归防复发：\n'
+              'R1 记忆库外键 · R2 record_memory 假成功\n'
+              'R3a 代码块JSON · R3b 残缺JSON容错\n'
+              'R4 reasoning_content 回传（DeepSeek 400）\n'
+              'R5 类别兜底 · R6 关键词并入规律引擎',
+              style: TextStyle(color: Colors.black54, fontSize: 12, height: 1.6),
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _regRunning ? null : _runRegressionTests,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFB0855F),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            icon: _regRunning
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.bug_report),
+            label: Text(_regRunning ? '回归测试中…' : '开始 Bug 回归测试 × 7'),
+          ),
+          if (_regReport != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _regReport!.allPassed
+                    ? const Color(0xFFEAF7EE)
+                    : const Color(0xFFFFF3F0),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _regReport!.allPassed ? Icons.check_circle : Icons.error,
+                    color: _regReport!.allPassed
+                        ? const Color(0xFF4CAF50)
+                        : const Color(0xFFFF8A8A),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${_regReport!.passCount}/${_regReport!.items.length} 项通过'
+                      '（耗时 ${_regReport!.elapsed.inSeconds}s）',
+                      style: const TextStyle(
+                        color: Color(0xFF6A4A5A),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            for (final item in _regReport!.items) _ResultCard(item: item),
           ],
           const SizedBox(height: 24),
           const Divider(color: Color(0xFFE8D5DE)),

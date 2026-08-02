@@ -400,6 +400,27 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                 category = auto;
               }
             }
+            // 8-03 06:34：男主提取的关键词（妈妈→亲戚、喜欢→喜好）→
+            // 并入规律引擎关键词池，找规律时总能找到
+            final kw = args['keywords'];
+            if (kw != null) {
+              final words = <String>[];
+              if (kw is List) {
+                for (final w in kw) {
+                  final s = w.toString().trim();
+                  if (s.isNotEmpty) words.add(s);
+                }
+              } else if (kw is String) {
+                words.addAll(kw
+                    .split(RegExp(r'[,，、\s]+'))
+                    .where((w) => w.isNotEmpty));
+              }
+              if (words.isNotEmpty) {
+                ButlerPipelineResult.pendingKeywords.addAll(words);
+                DebugLogger.log('管家流程',
+                    '🎯 record_memory 关键词并入规律引擎: ${words.join('、')}');
+              }
+            }
             _appendToolBubble('正在记录：「$content」（$category）…');
             toolResult = await _executeRecordTool(category, content);
           } else if (name == 'recall_memory') {
