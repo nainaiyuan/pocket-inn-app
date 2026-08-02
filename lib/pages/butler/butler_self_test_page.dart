@@ -146,6 +146,22 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
       guidance: '检查 extractToolBlocks 参数解析',
     ));
 
+    // ── R7（8-03 06:37）：原文 + 关键词都要保存 ──
+    // original 参数原样保留（recall 时当参考）
+    final r7Calls = ToolIntentParser.extract(
+        '⟨工具:record_memory⟩{"content":"妈妈喜欢猫","category":"喜好","keywords":["妈妈","喜欢"],"original":"我妈特别喜欢猫"}⟨/工具⟩');
+    final r7Args =
+        (r7Calls?.first['arguments'] as Map<String, dynamic>?);
+    final r7Original = r7Args?['original']?.toString() ?? '';
+    items.add(ButlerSelfTestItem(
+      message: 'R7 原文+关键词都保存',
+      expected: 'original 原样保留',
+      actual: r7Original.isEmpty ? '❌ original 丢失' : '✅ 原文=$r7Original',
+      passed: r7Original == '我妈特别喜欢猫',
+      failedReason: r7Original.isEmpty ? '解析器丢了 original 参数' : null,
+      guidance: '检查 extractToolBlocks 参数解析',
+    ));
+
     stopwatch.stop();
     if (!mounted) return;
     setState(() {
@@ -569,7 +585,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
               'R1 记忆库外键 · R2 record_memory 假成功\n'
               'R3a 代码块JSON · R3b 残缺JSON容错\n'
               'R4 reasoning_content 回传（DeepSeek 400）\n'
-              'R5 类别兜底 · R6 关键词并入规律引擎',
+              'R5 类别兜底 · R6 关键词并入规律引擎 · R7 原文保存',
               style: TextStyle(color: Colors.black54, fontSize: 12, height: 1.6),
             ),
           ),
@@ -590,7 +606,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
                     ),
                   )
                 : const Icon(Icons.bug_report),
-            label: Text(_regRunning ? '回归测试中…' : '开始 Bug 回归测试 × 7'),
+            label: Text(_regRunning ? '回归测试中…' : '开始 Bug 回归测试 × 8'),
           ),
           if (_regReport != null) ...[
             const SizedBox(height: 16),

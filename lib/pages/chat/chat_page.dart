@@ -403,8 +403,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             // 8-03 06:34：男主提取的关键词（妈妈→亲戚、喜欢→喜好）→
             // 并入规律引擎关键词池，找规律时总能找到
             final kw = args['keywords'];
+            final words = <String>[];
             if (kw != null) {
-              final words = <String>[];
               if (kw is List) {
                 for (final w in kw) {
                   final s = w.toString().trim();
@@ -421,8 +421,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                     '🎯 record_memory 关键词并入规律引擎: ${words.join('、')}');
               }
             }
+            // 8-03 06:37：原文（男主看到的原话）也保存，recall 时当参考
+            final original = args['original']?.toString() ?? '';
             _appendToolBubble('正在记录：「$content」（$category）…');
-            toolResult = await _executeRecordTool(category, content);
+            toolResult = await _executeRecordTool(
+              category,
+              content,
+              original: original,
+              keywords: words,
+            );
           } else if (name == 'recall_memory') {
             final query = args['query']?.toString() ?? '';
             final category = args['category']?.toString() ?? '';
@@ -1217,7 +1224,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   /// 工具执行：record_memory（弹窗确认 → 写记忆 → 返回结果给模型）
-  Future<_ToolResult> _executeRecordTool(String category, String content) async {
+  Future<_ToolResult> _executeRecordTool(
+    String category,
+    String content, {
+    String original = '',
+    List<String> keywords = const [],
+  }) async {
     if (content.isEmpty) return const _ToolResult(false, '内容为空，无法记录');
     if (!mounted) return const _ToolResult(false, '用户不在，记录未确认');
     final approved = await showDialog<bool>(
@@ -1227,7 +1239,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('💌 男主想记住这个'),
         content: Text(
-          '「$content」\n\n类别：${category.isEmpty ? '其他' : category}\n\n要让他记住吗？',
+          [
+            '「$content」',
+            '类别：${category.isEmpty ? '其他' : category}',
+            if (original.isNotEmpty) '原文：$original',
+            if (keywords.isNotEmpty) '关键词：${keywords.join('、')}',
+            '',
+            '要让他记住吗？',
+          ].join('\n'),
           style: const TextStyle(fontSize: 14, height: 1.5),
         ),
         actions: [
@@ -1250,18 +1269,22 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         await _ensureChatSession(_state.personaId ?? '', '');
       }
       if (_chatSessionId != null) {
+        // 8-03 06:37：原文+关键词也落库（recall 时当参考）
+        final parts = <String>['[${category.isEmpty ? '其他' : category}] $content'];
+        if (original.isNotEmpty) parts.add('原文：$original');
+        if (keywords.isNotEmpty) parts.add('关键词：${keywords.join('、')}');
         await ChatDatabaseService.instance.insertMemoriesInTx([
           MemoryNode(
             id: 'mem_${DateTime.now().millisecondsSinceEpoch}',
             sessionId: _chatSessionId!,
             branchLeafId: _chatLeafId ?? '',
-            content: '[${category.isEmpty ? '其他' : category}] $content',
+            content: parts.join('\n'),
             sourceMessageIds: const [],
             createdAt: DateTime.now(),
             updatedAt: DateTime.now(),
           ),
         ]);
-        DebugLogger.log('指令模块', '✅ 工具记录确认: [$category] $content');
+        DebugLogger.log('指令模块', '✅ 工具记录确认: [${category.isEmpty ? '其他' : category}] $content');
         return _ToolResult(true, '已记录：[$category] $content');
       }
       DebugLogger.log('指令模块', '⛔ 工具记录失败: 会话未创建');
