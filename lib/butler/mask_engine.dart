@@ -16,6 +16,7 @@
 ///   - 替换错了 → 标签长度排序逻辑问题
 ///   - 反向替换失败 → sessionMap 被清空了
 
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -100,6 +101,13 @@ class MaskEngine {
   /// 规律变化了 → 重新附一次，让男主知道情绪变了。
   PatternEngine? patternEngine;
 
+  // ── 每身份平均情绪累积（平均情感基线）──
+  // <identityId, <情绪维度, 滚动平均值>>；样本数单独记录
+  final Map<String, Map<String, double>> _identityMoodAvg = {};
+  final Map<String, int> _identityMoodCount = {};
+  static const String _moodAvgPrefsKey = 'mask_identity_mood_avg_v1';
+  static const String _moodCountPrefsKey = 'mask_identity_mood_count_v1';
+
   // ── 唯一标识符序号池 ──
   final Map<String, int> _codeCounters = {};
   final Map<String, String> _identityCodes = {};
@@ -136,6 +144,7 @@ class MaskEngine {
     } catch (e) {
       print('[MaskEngine] 加载身份存储失败: $e');
     }
+    await loadIdentityMoodAverages();
   }
 
   /// 已注册的全部身份（给管理页用）
@@ -143,6 +152,64 @@ class MaskEngine {
 
   /// 身份对应的代号（给管理页用）
   String? codeFor(String identityId) => _identityCodes[identityId];
+
+  // ── 每身份平均情绪（平均情感基线）──
+
+  /// 从持久化加载每身份平均情绪（APP 启动时调用）
+  Future<void> loadIdentityMoodAverages() async {
+    final prefs = await SharedPreferences.getInstance();
+    try {
+      final rawAvg = prefs.getString(_moodAvgPrefsKey);
+      if (rawAvg != null) {
+        final decoded = jsonDecode(rawAvg) as Map<String, dynamic>;
+        for (final e in decoded.entries) {
+          final dims = (e.value as Map<String, dynamic>)
+              .map((k, v) => MapEntry(k, (v as num).toDouble()));
+          _identityMoodAvg[e.key] = Map<String, double>.from(dims);
+        }
+      }
+      final rawCount = prefs.getString(_moodCountPrefsKey);
+      if (rawCount != null) {
+        final decoded = jsonDecode(rawCount) as Map<String, dynamic>;
+        for (final e in decoded.entries) {
+          _identityMoodCount[e.key] = (e.value as num).toInt();
+        }
+      }
+      print('[MaskEngine] 加载每身份平均情绪 ${_identityMoodAvg.length} 个');
+    } catch (e) {
+      print('[MaskEngine] 加载每身份平均情绪失败: $e');
+    }
+  }
+
+  /// 持久化每身份平均情绪
+  Future<void> _saveIdentityMoodAverages() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_moodAvgPrefsKey, jsonEncode(_identityMoodAvg));
+    await prefs.setString(_moodCountPrefsKey, jsonEncode(_identityMoodCount));
+  }
+
+  /// 累积某身份的平均情绪（滚动平均：新值按 1/n 权重混入）
+  void _accumulateIdentityMood(String identityId, Map<String, double> mood) {
+    final n = (_identityMoodCount[identityId] ?? 0) + 1;
+    _identityMoodCount[identityId] = n;
+    final avg = _identityMoodAvg.putIfAbsent(identityId, () => {});
+    for (final e in mood.entries) {
+      final cur = avg[e.key] ?? 0.0;
+      avg[e.key] = cur + (e.value - cur) / n;
+    }
+    _saveIdentityMoodAverages();
+  }
+
+  /// 某身份的平均情感基线描述（不含真实称呼，只含代号+情绪维度）
+  /// 如："[家人1]：你提到 ta 时，平均情绪：依恋 65、烦躁 20"
+  String? _buildAverageMoodDescription(IdentityEntry entry, String code) {
+    final avg = _identityMoodAvg[entry.id];
+    if (avg == null || avg.isEmpty) return null;
+    final sorted = avg.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final top = sorted.take(3).map((e) => '${e.key} ${e.value.round()}').join('、');
+    return '$code：你提到 ta 时，平均情绪：$top';
+  }
 
   // ── 身份管理 ──
 
@@ -208,6 +275,9 @@ class MaskEngine {
     for (final entry in sortedIdentities) {
       if (!modified.contains(entry.realLabel)) continue;
 
+      // 累积该身份的平均情绪（平均情感基线数据源）
+      _accumulateIdentityMood(entry.id, _latestMood);
+
       final isFirstTime = !sessionMap.containsKey(entry.id);
       String code;
 
@@ -215,11 +285,17 @@ class MaskEngine {
         // 首次：分配纯代号（描述不固化进映射，避免"每次描述都一样"）
         code = _identityCodes[entry.id] ?? '[其他]';
         sessionMap[entry.id] = code;
-        // 只附中性情绪规律（不含真实称呼）——男主不需要知道代号对应谁，
-        // 代号就是普通内容；首次也不附身份描述（用户 18:09：带身份描述=泄露）
-        final patternDesc = _buildPatternDescription(entry);
-        if (patternDesc != null) {
-          maskHints.add('$code：$patternDesc');
+        // 首次附：平均情感基线（出现一次即可——后续对话自带记忆/上下文）
+        // + 中性情绪规律（不含真实称呼，男主不需要知道代号对应谁）
+        // 用户 18:32：基线只出现一次；规律/记忆描述正常提到就拼接
+        final moodBase = _buildAverageMoodDescription(entry, code);
+        final patternDesc = _buildPatternDescription(entry, code);
+        final parts = [
+          if (moodBase != null) moodBase,
+          if (patternDesc != null) patternDesc,
+        ];
+        if (parts.isNotEmpty) {
+          maskHints.add(parts.join('；'));
           _sessionDescribed.putIfAbsent(sessionId, () => {})[entry.id] =
               DateTime.now();
         }
@@ -229,7 +305,7 @@ class MaskEngine {
         // 开关"每次都附上"（DeepSeek 无后台记忆）→ 每轮都附情绪规律参考
         // （只附中性情绪规律，不附身份描述——男主不需要知道代号对应谁）
         // 或该身份出现了新确认的规律（情绪变了）→ 附规律描述
-        final patternDesc = _buildPatternDescription(entry);
+        final patternDesc = _buildPatternDescription(entry, code);
         if (hintsEveryTurn && patternDesc != null) {
           maskHints.add('$code：$patternDesc');
         } else if (_hasNewPattern(entry, sessionId)) {
@@ -309,8 +385,9 @@ class MaskEngine {
 
   /// 规律联动描述：从规律引擎找该身份相关的已确认规律，
   /// 生成中性描述（不提具体称呼，只说情绪关联），如：
-  /// "最近聊到这位家人时，你的情绪上升12%的烦躁（和唠叨有关）"
-  String? _buildPatternDescription(IdentityEntry entry) {
+  /// "曾经（[家人1]+小猫）：依恋 12% → 现在 20%"
+  /// 关键词里的真实称呼一律替换成代号（用户 18:32：'代号＋小猫'，不泄露称呼）
+  String? _buildPatternDescription(IdentityEntry entry, String code) {
     final engine = patternEngine;
     if (engine == null) return null;
     final matches = engine.confirmedPatterns
@@ -323,7 +400,10 @@ class MaskEngine {
     // 曾经 vs 现在 对比格式（用户 16:13）：
     // 曾经（小猫+狗狗+…）：依恋 12%
     // 现在：依恋 20%
-    final combo = p.keywords.join('+');
+    // 真实称呼 → 代号（防泄露）
+    final combo = p.keywords
+        .map((k) => k == entry.realLabel ? code : k)
+        .join('+');
     final lastHit = p;
 
     String? dimValue(String label, double shift, List<String> keys) {
