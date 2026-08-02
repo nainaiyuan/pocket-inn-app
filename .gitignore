@@ -55,3 +55,4 @@ AGENTS.md
 plans/
 # Android local config (machine-specific)
 android/local.properties
+gh_token
