@@ -145,9 +145,9 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
                   const SizedBox(height: 10),
                   DropdownButtonFormField<int>(
                     initialValue: coolDown,
-                    decoration: _deco('冷却（触发后多久不重复挖空）'),
+                    decoration: _deco('持续窗口（聊到该词后多久算持续中，强度+1）'),
                     items: const [
-                      DropdownMenuItem(value: 0, child: Text('0 分钟（每次都挖）')),
+                      DropdownMenuItem(value: 0, child: Text('0 分钟（不累计持续时间）')),
                       DropdownMenuItem(value: 5, child: Text('5 分钟')),
                       DropdownMenuItem(value: 10, child: Text('10 分钟')),
                       DropdownMenuItem(value: 30, child: Text('30 分钟')),
@@ -343,7 +343,7 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
                       Expanded(
                         child: Text(
                           '聊到敏感词时挖空成 [PRIVACY_MARK]，男主理解情绪、不脑补内容。'
-                          '不是所有时候都敏感：白名单覆盖 + 冷却期内不重复触发。',
+                          '强度判定：A+B搭配更敏感、单词需情感浓度/基线/持续时间达标才挖。',
                           style: TextStyle(
                             fontSize: 12,
                             height: 1.5,
@@ -432,7 +432,7 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
                                       ? '替换：${w.replacement}'
                                       : '挖空',
                                 ),
-                                _tag('冷却 ${w.coolDownMinutes}分'),
+                                _tag('持续 ${w.coolDownMinutes}分'),
                               ],
                             ),
                           ),

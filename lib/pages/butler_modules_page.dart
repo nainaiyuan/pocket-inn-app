@@ -4,6 +4,7 @@ import '../../butler/modules/butler_module.dart';
 import '../../butler/modules/butler_module_hub.dart';
 import 'mask_rules_page.dart';
 import 'risk_words_page.dart';
+import 'system_view_page.dart';
 
 /// 管家模块管理页 — 显示所有模块 + 开关
 ///
@@ -71,6 +72,8 @@ class _ButlerModulesPageState extends State<ButlerModulesPage> {
               ],
               const SizedBox(height: 8),
               _RiskWordsEntry(),
+              const SizedBox(height: 8),
+              _SystemViewEntry(),
               const SizedBox(height: 8),
               _Note(),
             ],
@@ -319,6 +322,77 @@ class _RiskWordsEntry extends StatelessWidget {
                     SizedBox(height: 3),
                     Text(
                       '自己填敏感词、分类、替换词、冷却时间',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF6A4A5A),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.chevron_right,
+                color: Color(0xFFC896B4),
+                size: 20,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SystemViewEntry extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: const Color(0xFF6A4A5A).withValues(alpha: 0.08),
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const SystemViewPage()),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFC896B4).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.article_outlined,
+                  color: Color(0xFFC896B4),
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '系统提示查看',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF6A4A5A),
+                      ),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      '看每次聊天到底带了什么系统信息（模板+人设+注入）',
                       style: TextStyle(
                         fontSize: 12,
                         color: Color(0xFF6A4A5A),

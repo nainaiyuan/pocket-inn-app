@@ -196,19 +196,14 @@ class ButlerEngine {
           '（${sensitiveWords.map((w) => w.word).join('/')}）',
         );
 
-        // 记录情感快照（情感驱动冷却：跨度大/依恋降下来才放行）
-        final snapMood = KeywordMoodAnalyzer().analyze(text).dimensions;
+        // 记录触发时间（持续时间因子：持续聊同一话题 → 强度 +1）
         for (final w in sensitiveWords) {
-          _riskCooldowns[w.word] = _RiskCooldown(
-            time: DateTime.now(),
-            emotion: snapMood,
-          );
+          _lastTriggerTime[w.word] = DateTime.now();
         }
         DebugLogger.log(
           '管家流程',
-          '已记录情感快照：${sensitiveWords.map((w) => w.word).join('/')} '
-          '（依恋 ${(snapMood['依恋'] ?? 0).round()}，'
-          '${sensitiveWords.map((w) => '${w.coolDownMinutes}分钟超时').join('/')}）',
+          '已记录触发时间：${sensitiveWords.map((w) => w.word).join('/')} '
+          '（持续窗口 ${sensitiveWords.map((w) => '${w.coolDownMinutes}分钟').join('/')}）',
         );
 
         // 3. 有替换时 → 生成心情标签助理解读
@@ -277,8 +272,6 @@ class ButlerEngine {
     final exceptions = RiskWordStore.instance.cachedExceptions;
     final now = DateTime.now();
     final hits = <RiskWord>[];
-    // 当前文本情绪（放行判定用：情感跨度/依恋变化）
-    final currentMood = KeywordMoodAnalyzer().analyze(text).dimensions;
     for (final w in words) {
       if (!text.contains(w.word)) continue;
       // 白名单覆盖 → 该词在此场景不敏感
@@ -287,65 +280,66 @@ class ButlerEngine {
       )) {
         continue;
       }
-      // 情感驱动冷却：还在同一个情感区间 → 不重复触发；
-      // 情感跨度大 / 依恋降下来 / 超时 → 放行
-      final last = _riskCooldowns[w.word];
-      if (last != null) {
-        final timedOut =
-            now.difference(last.time).inMinutes >= w.coolDownMinutes;
-        final gap = _emotionGap(currentMood, last.emotion);
-        final attachment = currentMood['依恋'] ?? 0;
-        final attachmentDrop =
-            (last.emotion['依恋'] ?? 0) - attachment;
-        if (!timedOut &&
-            gap < _emotionGapThreshold &&
-            attachmentDrop < _attachmentDropThreshold) {
-          continue; // 冷却中（情感没变）
-        }
-        // 放行：情感已到另一个区间 → 清冷却，重新触发
-        _riskCooldowns.remove(w.word);
-      }
       hits.add(w);
     }
     if (hits.isEmpty) return hits;
 
+    // 强度判定（用户 16:23）：
+    // - A词+B词（≥2 命中）更敏感 → 强度 ≥1 就挖空
+    // - 单词（hard）没那么敏感 → 需强度 ≥2 才挖空
+    // - soft 单词 → 不挖空
+    // 强度分 = 情感浓度 + 基线偏离 + 持续时间（聊到敏感话题持续多久）
+    final analyzer = KeywordMoodAnalyzer();
+    final mood = analyzer.analyze(text);
+    var score = 0;
+
+    // ① 情感浓度：high ≥60 → +2；medium ≥30 → +1
+    final cv = mood.concentrationValue;
+    if (cv >= 60) {
+      score += 2;
+    } else if (cv >= 30) {
+      score += 1;
+    }
+
+    // ② 情感基线偏离：当前情绪 vs 基线差 ≥20 → +1
+    final baseline = analyzer.getBaseline();
+    if (baseline.isNotEmpty) {
+      for (final e in mood.dimensions.entries) {
+        final b = baseline[e.key];
+        if (b != null && (e.value - b).abs() >= 20) {
+          score += 1;
+          break;
+        }
+      }
+    }
+
+    // ③ 持续时间：距上次触发 < 持续窗口（coolDownMinutes）→ 持续中 +1
+    final anyRecent = hits.any((w) {
+      final last = _lastTriggerTime[w.word];
+      return last != null &&
+          now.difference(last).inMinutes < w.coolDownMinutes;
+    });
+    if (anyRecent) score += 1;
+
     final hardCount = hits.where((h) => h.isHard).length;
-    final softCount = hits.length - hardCount;
-    // 只有 soft 且浓度不足 → 不触发（该词在此场景不是敏感词）
-    if (hardCount == 0 && softCount < 2) return [];
+    if (hits.length >= 2) {
+      // A+B 搭配 → 强度 ≥1 触发
+      if (score < 1) return [];
+    } else if (hardCount == 1) {
+      // 单词 hard → 强度 ≥2 触发（"单词还没那么敏感"）
+      if (score < 2) return [];
+    } else {
+      // soft 单词 → 不触发（该词在此场景不是敏感词）
+      return [];
+    }
     return hits;
   }
 
   /// 检测降温话题
   /// 这些话题不触发 PRIVACY_MARK，但触发"需要降温"提示
-  /// 敏感词冷却记录：词 → 触发时的情感快照
-  ///
-  /// 冷却不是固定时间（用户 16:13）：
-  /// 放行条件 = 情感跨度大（最大维度差 ≥30）或 依恋下降 ≥20
-  /// （到了另一个情感区间才放行），超时（coolDownMinutes）兜底。
-  final Map<String, _RiskCooldown> _riskCooldowns = {};
-
-  /// 情感跨度阈值：最大维度差 ≥ 此值 → 视为"到了另一个情感区间"
-  static const double _emotionGapThreshold = 30;
-
-  /// 依恋下降阈值：依恋比触发时低 ≥ 此值 → 放行
-  static const double _attachmentDropThreshold = 20;
-
-  /// 情感跨度：两个情绪快照的最大维度差（0-100）
-  double _emotionGap(
-    Map<String, double> a,
-    Map<String, double> b,
-  ) {
-    double maxGap = 0;
-    for (final e in a.entries) {
-      final other = b[e.key];
-      if (other != null) {
-        final gap = (e.value - other).abs();
-        if (gap > maxGap) maxGap = gap;
-      }
-    }
-    return maxGap;
-  }
+  /// 敏感词最近触发时间：词 → 上次触发（持续时间因子：
+  /// 距上次触发 < 持续窗口 → 算"持续聊这个话题"，强度 +1）
+  final Map<String, DateTime> _lastTriggerTime = {};
 
   bool _hasCoolDownTopics(String text) {
     const coolDownTopics = [
@@ -479,12 +473,4 @@ class ButlerCommandResult {
     this.reply,
     this.needsHelp = false,
   });
-}
-
-/// 敏感词情感快照（冷却记录）
-class _RiskCooldown {
-  final DateTime time;
-  final Map<String, double> emotion;
-
-  _RiskCooldown({required this.time, required this.emotion});
 }
