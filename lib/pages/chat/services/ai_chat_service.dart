@@ -28,7 +28,7 @@ class AiChatService {
   ///
   /// [personaId] 决定用哪个男主的 Provider 绑定与自动切换设置；
   /// [personaName] 用于组装人设提示词；
-  /// [skillContext] 管家技能注入（如情绪洞察），拼入 system 让男主自然接住。
+  /// [userProfile] 用户状态注入（情绪洞察/温控/获准记忆），拼入 USER_PROFILE 模块。
   /// 返回完整结果（含实际用的 Provider 与切换痕迹，供 UI 展示）。
   /// 男主可调用的工具定义（function calling，OpenAI 兼容格式）
   static const List<Map<String, dynamic>> butlerTools = [
@@ -197,7 +197,9 @@ class AiChatService {
     String personaId, {
     String personaName = '角色',
     String personaPrompt = '',
-    String? skillContext,
+    // 用户 8-03 02:41 模块化重构：原 skillContext 拆成两块
+    String? userProfile, // USER_PROFILE：用户状态（技能注入/温控/获准记忆）
+    String? taskState, // TASK_STATE：任务状态（审批反馈/工具强制提示）
     bool toolRound = false,
     List<AIChatMessage>? toolMessages,
     String? sessionId,
@@ -261,7 +263,10 @@ class AiChatService {
       personaName: personaName,
       personaPrompt: personaPrompt,
       needsWindow: needsWindow,
-      skillContext: skillContext,
+      // 用户 8-03 02:41 模块化重构：skillContext 拆成 userProfile（用户状态）
+      // 和 taskState（任务状态），各归各位，不再混成一个字符串
+      userProfile: userProfile,
+      taskState: taskState,
       // stateful：AI 服务端记得对话 → 不重复带固定模板（只带人设+当前技能注入）
       // stateless：前缀稳定 → 缓存命中 → 每次带全量反而便宜
       light: stateful && !statefulRecover,
@@ -340,23 +345,35 @@ class AiChatService {
     }
     final hasToolCalls = result.toolCalls != null && result.toolCalls!.isNotEmpty;
     if (result.text.trim().isEmpty && !hasToolCalls && !toolRound) {
-      // DeepSeek 偶发空回复：自动重试一次（工具轮不重试，由 chat_page 循环处理）
-      DebugLogger.log('AI路由', '⚠️ 空回复，自动重试一次');
-      // 重试保持带 tools（用户 8-03 01:26：男主说调用了工具但日志没体现——
-      // 重试不带 tools → 男主想调工具也调不了。保持与主调用一致的调用能力）
+      // DeepSeek 偶发空回复：自动重试（用户 8-03 02:26：空回复直接弹"发送失败"，
+      // 像技能被拦截什么都不输出——空回复不该是异常，要尽力救回来）
+      DebugLogger.log('AI路由', '⚠️ 空回复，重试第 1 次（带工具）');
+      // 第 1 次重试带 tools（用户 01:26：重试不带 tools → 男主想调工具也调不了）
       final retry = await manager.chat(
         personaId,
         messages,
         tools: toolRound ? null : butlerTools,
       );
-      if (retry.text.trim().isEmpty &&
-          (retry.toolCalls == null || retry.toolCalls!.isEmpty)) {
-        throw const FormatException('AI 返回了空回复');
+      if (retry.text.trim().isNotEmpty ||
+          (retry.toolCalls != null && retry.toolCalls!.isNotEmpty)) {
+        return retry;
       }
-      return retry;
+      // 第 2 次重试不带 tools：空回复可能是工具定义干扰 → 排除后至少能正常聊天
+      // （01:26 改坏的点：只重试一次且带 tools，空回复救不回来就直接抛异常）
+      DebugLogger.log('AI路由', '⚠️ 空回复，重试第 2 次（不带工具）');
+      final retry2 = await manager.chat(personaId, messages);
+      if (retry2.text.trim().isNotEmpty) {
+        return retry2;
+      }
+      // 两次重试都空 → 返回空结果，不抛异常（chat_page 侧轻提示，不弹红色报错）
+      DebugLogger.log('AI路由', '⚠️ 空回复重试 2 次仍为空，返回空结果（不抛异常）');
+      return AIProviderResult(text: '', toolCalls: null, usage: result.usage);
     }
     if (result.text.trim().isEmpty && !hasToolCalls) {
-      throw const FormatException('AI 返回了空回复');
+      // 工具轮空文本：工具已执行（气泡已反馈），男主"调用完不说话"是合法行为，
+      // 不是异常 → 返回空结果（用户 8-03 02:26：空回复不该弹"发送失败"）
+      DebugLogger.log('AI路由', '🔧 工具轮空文本（工具已完成，男主未补充说话）→ 返回空结果');
+      return AIProviderResult(text: '', toolCalls: null, usage: result.usage);
     }
     // token 追踪：API 精确 usage → 管家累计 + 记得清单更新
     try {

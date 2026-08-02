@@ -5,6 +5,7 @@ import 'ai_provider/ai_provider_manager.dart';
 import 'core/error_handler.dart';
 import 'core/service_locator.dart';
 import 'butler/modules/butler_module_hub.dart';
+import 'butler/system_template.dart';
 import 'data/app_settings.dart';
 import 'pages/home/home_page.dart';
 
@@ -71,6 +72,8 @@ class _BootstrapPageState extends State<_BootstrapPage> {
       final hub = ButlerModuleHub.instance;
       await hub.loadPersistentData();
       await hub.loadSettings();
+      // 用户 8-03 02:49：加载用户编辑过的固定模板覆盖（没有则用默认）
+      await SystemTemplate.loadCoreOverride();
 
       if (!mounted) return;
       // 初始化完成，进入主界面

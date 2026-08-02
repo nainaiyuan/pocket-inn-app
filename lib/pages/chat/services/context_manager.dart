@@ -160,14 +160,16 @@ class ContextManager {
     if (recovery != null && recovery.isNotEmpty) {
       out.add(AIChatMessage(
         role: 'system',
-        content: '【上次的上下文（你提前写好的恢复包）】\n$recovery',
+        content: '【MEMORY_SUMMARY·恢复包】（你提前写好的上下文存档）\n$recovery',
       ));
     }
 
     // 摘要区（一条 system 消息，前缀稳定 → 缓存命中）
+    // 用户 8-03 02:41 模块化：长期记忆不拼 prompt，男主自己查工具；
+    // 摘要区只留"提醒索引"（每天要记得的事/影响后续对话的约定）
     final summaries = _summaries[personaId];
     if (summaries != null && summaries.isNotEmpty) {
-      final sb = StringBuffer('【对话摘要（按话题）】');
+      final sb = StringBuffer('【MEMORY_SUMMARY·对话摘要（提醒索引）】');
       for (final s in summaries) {
         sb.write('\n- $s');
       }
