@@ -360,7 +360,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           DebugLogger.log('AI路由',
               '🔧 管家解析到男主工具指令: ${intent.map((c) => c['name']).join('、')}');
           result = AIProviderResult(
-            text: result.text,
+            // 剥离 ⟨工具:…⟩ 块，用户只看到男主自然的话
+            text: ToolIntentParser.stripToolBlocks(result.text),
             toolCalls: intent,
             usage: result.usage,
             providerName: result.providerName,

@@ -22,13 +22,43 @@ class ToolIntentParser {
     'query_diary': ['查日记', '查一下日记', '翻日记', '看看日记', '之前聊过什么', '我说过什么'],
   };
 
-  /// 统一入口：先 JSON 后中文，都识别不到返回 null
+  /// ⟨工具:name⟩{json}⟨/工具⟩ 文本协议块（37批 TextProtocolAdapter 同款格式）
+  static final RegExp _toolBlock =
+      RegExp(r'⟨工具:([a-zA-Z_]+)⟩(.*?)⟨/工具⟩', dotAll: true);
+
+  /// 统一入口：⟨工具:⟩块 → JSON → 中文，都识别不到返回 null
+  /// （用户 8-03 05:42：不默认 AI 走哪个通道，管家认所有格式，
+  ///   不同命令格式，同一个底层执行）
   static List<Map<String, dynamic>>? extract(String text) {
     if (text.trim().isEmpty) return null;
+    final blocks = extractToolBlocks(text);
+    if (blocks != null && blocks.isNotEmpty) return blocks;
     final json = extractJsonToolCalls(text);
     if (json != null && json.isNotEmpty) return json;
     return extractChineseToolIntents(text);
   }
+
+  /// 解析 ⟨工具:name⟩{json}⟨/工具⟩ 文本协议块
+  static List<Map<String, dynamic>>? extractToolBlocks(String text) {
+    final results = <Map<String, dynamic>>[];
+    for (final m in _toolBlock.allMatches(text)) {
+      final name = m.group(1) ?? '';
+      final jsonStr = m.group(2) ?? '';
+      Map<String, dynamic> args = {};
+      try {
+        final decoded = jsonDecode(jsonStr);
+        if (decoded is Map<String, dynamic>) args = decoded;
+      } catch (_) {}
+      if (name.isNotEmpty) {
+        results.add({'name': name, 'arguments': args});
+      }
+    }
+    return results.isEmpty ? null : results;
+  }
+
+  /// 从回复文本里剥离 ⟨工具:…⟩ 块（用户只看到男主自然的话）
+  static String stripToolBlocks(String text) =>
+      text.replaceAll(_toolBlock, '').trim();
 
   /// 从文本里提取 JSON 工具调用指令
   /// 兼容：完整 tool_calls 数组 / 单对象 / function 包裹 / 混在自然语言里
