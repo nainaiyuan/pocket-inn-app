@@ -76,7 +76,21 @@ class ChatInputArea extends StatelessWidget {
             keyboardType: TextInputType.multiline,
             textInputAction: TextInputAction.newline,
             // 敏感信息（身份证/手机号/银行卡/邮箱）直接不让输入
-            inputFormatters: [SensitiveInfoFormatter()],
+            inputFormatters: [
+              SensitiveInfoFormatter(
+                onBlocked: (name) {
+                  ScaffoldMessenger.of(context)
+                    ..hideCurrentSnackBar()
+                    ..showSnackBar(
+                      SnackBar(
+                        backgroundColor: const Color(0xFF6A4A5A),
+                        duration: const Duration(seconds: 2),
+                        content: Text('检测到$name，已阻止输入（保护隐私）'),
+                      ),
+                    );
+                },
+              ),
+            ],
             decoration: InputDecoration(
               hintText: '输入消息',
               hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),

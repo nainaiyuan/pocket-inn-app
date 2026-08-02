@@ -165,8 +165,11 @@ class ButlerEngine {
     var text = userText;
     String? moodContext;
 
-    // 1. 假面层替换
-    if (_config.maskLayerEnabled) {
+    // 1. 假面层替换（复述/跟念指令绕过：男主需要原文才能念出来）
+    //    "跟我念:妈妈" → 假面层若把妈妈换成 [family1]，男主喊不出口
+    //    仅绕过假面层；敏感词与固定格式照常检测（"跟我念:身份证号"仍会拦）
+    final repeatInstruction = _isRepeatInstruction(text);
+    if (_config.maskLayerEnabled && !repeatInstruction) {
       final maskResult = _maskEngine.replaceSensitive(
         text: text,
         characterId: characterId,
@@ -179,6 +182,11 @@ class ButlerEngine {
           '① 假面替换：把敏感称呼替换为代号（共 ${maskResult.appliedMappings.length} 处）',
         );
       }
+    } else if (repeatInstruction) {
+      DebugLogger.log(
+        '管家流程',
+        '① 假面层：检测到复述/跟念指令（${_repeatWords.join('/')} 命中）→ 跳过替换，原文发送',
+      );
     }
 
     // 2. 关键词替换（PRIVACY_MARK）——三档：直接屏蔽 / 提醒（弹窗问用户）/ 放行
@@ -299,6 +307,20 @@ class ButlerEngine {
     '介绍一下', '介绍下', '什么感觉', '什么体验', '科普', '含义',
     '告诉我', '知道吗', '了解吗', '怎么写', '怎么读',
   ];
+
+  /// 复述/跟念指令词：用户明确要求男主念出内容
+  static const _repeatWords = [
+    '跟我念', '跟我读', '念一遍', '读一遍', '说一遍', '复述',
+    '跟着说', '跟我喊', '喊一遍', '喊一声', '叫一声', '你念', '你喊',
+    '你读', '跟我叫', '叫一遍', '念给我听',
+  ];
+
+  /// 检测复述/跟念指令（"跟我念:妈妈"、"你念一下"）
+  /// 命中 → 绕过假面层，男主直接念原文（敏感词/固定格式照常）
+  bool _isRepeatInstruction(String text) {
+    final t = text.trim().toLowerCase();
+    return _repeatWords.any((w) => t.contains(w));
+  }
 
   bool _isCuriosityIntent(String text) {
     // 常见求知句式直接命中（无问号也算）

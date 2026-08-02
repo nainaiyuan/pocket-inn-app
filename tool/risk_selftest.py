@@ -148,6 +148,27 @@ for text, prefs, temps, sev, expect in cases:
     print(f'{mark} "{text}" → {verdict} {words} | {detail} | 预期：{expect}')
 
 print()
+print('═══ 复述/跟念指令验证（butler_engine._isRepeatInstruction）═══')
+REPEAT_WORDS = ['跟我念', '跟我读', '念一遍', '读一遍', '说一遍', '复述', '跟着说',
+                '跟我喊', '喊一遍', '喊一声', '叫一声', '你念', '你喊', '你读',
+                '跟我叫', '叫一遍', '念给我听']
+def is_repeat(t):
+    t = t.strip().lower()
+    return any(w in t for w in REPEAT_WORDS)
+
+repeat_cases = [
+    ('跟我念:妈妈', True), ('跟我读：爸爸', True), ('你念一遍"妈妈"', True),
+    ('复述一下这句话', True), ('喊一声老公', True), ('我想你了妈妈', False),
+    ('妈妈在干嘛', False),
+]
+for t, expect in repeat_cases:
+    got = is_repeat(t)
+    mark = '✅' if got == expect else '❌'
+    if mark == '❌':
+        ok = False
+    print(f'{mark} "{t}" → {"复述指令（绕过假面层）" if got else "正常"} | 预期：{"复述" if expect else "正常"}')
+
+print()
 print('═══ 固定格式正则验证（对照 mask_engine.applyFormatMask）═══')
 fmt_cases = [
     ('我的身份证是110101199003071234，收一下', ['身份证号', '银行卡号']),  # 18位数字同时命中银行卡规则（真实行为，都挖空）

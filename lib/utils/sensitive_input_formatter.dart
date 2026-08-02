@@ -8,6 +8,14 @@ import 'package:flutter/services.dart';
 /// 用法：TextField(inputFormatters: [SensitiveInfoFormatter()])
 /// 或黑名单模式：SensitiveInfoFormatter(blockList: true) 拦截所有命中格式
 class SensitiveInfoFormatter extends TextInputFormatter {
+  /// 拦截回调：命中敏感格式时通知 UI（弹提示，让用户知道被拦了）
+  final void Function(String name)? onBlocked;
+
+  /// 提示节流：同一格式 1.5 秒内只提示一次（连续输入第 11 位不会刷屏）
+  static String? _lastHintName;
+  static DateTime _lastHintAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  const SensitiveInfoFormatter({this.onBlocked});
   /// 身份证：17 位数字 + 数字/X
   static final RegExp _idCard = RegExp(r'\b\d{17}[\dXx]\b');
 
@@ -43,6 +51,15 @@ class SensitiveInfoFormatter extends TextInputFormatter {
     // 新输入里出现敏感格式 → 拒绝（保留旧值，输入不进去）
     if (newValue.text.isNotEmpty &&
         _patterns.any((p) => p.hasMatch(newValue.text))) {
+      final name = matchName(newValue.text) ?? '敏感信息';
+      final now = DateTime.now();
+      if (onBlocked != null &&
+          (name != _lastHintName ||
+              now.difference(_lastHintAt).inMilliseconds > 1500)) {
+        _lastHintName = name;
+        _lastHintAt = now;
+        onBlocked!(name);
+      }
       return oldValue;
     }
     return newValue;

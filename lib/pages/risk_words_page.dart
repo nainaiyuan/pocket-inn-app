@@ -140,6 +140,13 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
             '确认，默认不发送（本地不记录原文）',
             style: TextStyle(fontSize: 11, height: 1.5, color: Color(0xFF6A4A5A)),
           ),
+          const SizedBox(height: 4),
+          const Text(
+            '注意：家人称呼（如爸爸/妈妈）若已在假面层配置为身份，会先被假面层替换成代号'
+            '（如 [family1]），敏感词不生效；"跟我念/念一遍"等复述指令会绕过假面层，'
+            '男主直接念原文（敏感词仍会弹窗确认）',
+            style: TextStyle(fontSize: 11, height: 1.5, color: Color(0xFF6A4A5A)),
+          ),
         ],
       ),
     );
