@@ -316,11 +316,13 @@ class OpenAICompatibleApiService implements IOpenAiApiService {
     }
 
     final OpenAIChatCompletionResponse completionResponse;
+    final Map<String, dynamic> decodedBody;
     try {
       final decoded = jsonDecode(response.body);
       if (decoded is! Map<String, dynamic>) {
         throw const FormatException('聊天接口返回不是合法 JSON 对象');
       }
+      decodedBody = decoded;
       completionResponse = OpenAIChatCompletionResponse.fromJson(decoded);
     } on FormatException {
       rethrow;
@@ -361,7 +363,20 @@ class OpenAICompatibleApiService implements IOpenAiApiService {
       throw const FormatException('聊天接口返回了空回复');
     }
 
-    final thinkingChain = firstChoice.resolvedReasoning.trim();
+    // 8-03 06:57：DeepSeek 思考模式 reasoning_content 可能在
+    // message / choice / 顶层三个位置；且要求"原样回传"→ 不 trim。
+    // 三处全读，取第一个非空；原样保留（思考模式回传必须一字不差）
+    var thinkingRaw = firstChoice.resolvedReasoning;
+    if (thinkingRaw.isEmpty) {
+      for (final key in const ['reasoning_content', 'reasoning', 'thinking']) {
+        final v = decodedBody[key];
+        if (v is String && v.trim().isNotEmpty) {
+          thinkingRaw = v;
+          break;
+        }
+      }
+    }
+    final thinkingChain = thinkingRaw;
     await ApiRequestLogService.instance.append(
       configName: config.name,
       model: config.model,
