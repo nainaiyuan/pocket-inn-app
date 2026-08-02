@@ -288,6 +288,10 @@ ToolFormatAdapter resolveToolFormat(
   if (toolFormatOverride == 'text') return const TextProtocolAdapter();
   if (toolFormatOverride == 'none') return const NoToolAdapter();
   final url = baseUrl.toLowerCase();
+  // 用户 8-03 05:38：DeepSeek 实测原生 tool_calls 不响应（空回复/只说文本），
+  // 而早期 #A# 文本协议时代调用正常 → DeepSeek 默认走 text 文本协议兜底
+  //（男主写 ⟨工具:name⟩{json}⟨/工具⟩ 块，管家解析执行，零空回复）
+  if (url.contains('deepseek')) return const TextProtocolAdapter();
   if (url.contains('anthropic')) return const AnthropicAdapter();
   if (url.contains('generativelanguage') || url.contains('gemini')) {
     return const GeminiAdapter();
