@@ -113,18 +113,22 @@ class ContextManager {
     }
 
     // 当前话题原文（user/assistant 交替）
+    // ⚠️ 不能用 insert(1)：无摘要时 out 为空 → RangeError 越界（重启后首条必崩）
     final t = _topics[personaId];
     if (t != null && t.raw.isNotEmpty) {
       var total = 0;
+      final lines = <AIChatMessage>[];
       // 从尾部取（保留最近），预算内
       for (var i = t.raw.length - 1; i >= 0; i--) {
         total += t.raw[i].length;
         if (total > topicBudgetChars(personaId)) break;
         final line = t.raw[i];
-        out.insert(1, line.startsWith('男主：')
+        lines.add(line.startsWith('男主：')
             ? AIChatMessage(role: 'assistant', content: line.substring(3))
             : AIChatMessage(role: 'user', content: line.substring(3)));
       }
+      // 倒序收集后正序追加（摘要区之后、当前消息之前）
+      out.addAll(lines.reversed);
     }
     return out;
   }
