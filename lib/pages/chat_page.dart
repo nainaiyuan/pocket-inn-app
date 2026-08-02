@@ -451,12 +451,80 @@ class _ChatPageState extends State<ChatPage> {
 
     _textController.clear();
     try {
-      await _viewModel.sendMessage(text);
+      await _viewModel.sendMessage(
+        text,
+        onAskBlock: _askBlockDialog,
+        onMaskResult: _showMaskResult,
+      );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    }
+  }
+
+  /// 提醒档敏感词弹窗：返回 true=屏蔽并记住，false=这次不屏蔽（临时豁免），null=关闭
+  Future<bool?> _askBlockDialog(List<String> words) async {
+    if (!mounted) return null;
+    return showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        title: const Text(
+          '检测到敏感词',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF6A4A5A),
+          ),
+        ),
+        content: Text(
+          '这条消息里有敏感词「${words.join('、')}」。\n\n'
+          '屏蔽：男主看不到具体内容，只回应情绪（下次同类不再问）。\n'
+          '不屏蔽：原文发给男主，30 分钟内不再屏蔽这个词。',
+          style: const TextStyle(fontSize: 13, height: 1.6, color: Color(0xFF6A4A5A)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(false),
+            child: const Text(
+              '这次不屏蔽',
+              style: TextStyle(color: Color(0xFFC896B4)),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(true),
+            child: const Text(
+              '屏蔽并记住',
+              style: TextStyle(color: Color(0xFF6A4A5A)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 告知用户本次屏蔽/放行了什么词
+  void _showMaskResult(List<String> blocked, List<String> allowed) {
+    if (!mounted) return;
+    if (blocked.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF6A4A5A),
+          content: Text(
+            '已屏蔽：${blocked.join('、')}（男主会理解情绪，不追问具体内容）',
+          ),
+        ),
+      );
+    } else if (allowed.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '已放行：${allowed.join('、')}（30 分钟内不再屏蔽，敏感词页可恢复）',
+          ),
         ),
       );
     }

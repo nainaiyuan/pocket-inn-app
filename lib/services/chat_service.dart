@@ -3,6 +3,7 @@ import 'dart:async';
 import '../ai_provider/ai_provider_manager.dart';
 import '../ai_provider/models.dart';
 import '../butler/butler.dart';
+import '../butler/risk_word_store.dart' show RiskWordStore;
 import '../butler/flow/butler_flow.dart';
 import '../butler/modules/butler_module_hub.dart';
 import '../butler/memory/emotion_arc.dart';
@@ -43,12 +44,20 @@ class ChatSendResult {
     required this.assistantNode,
     required this.promptAssembly,
     required this.completion,
+    this.blockedWords = const [],
+    this.allowedWords = const [],
   });
 
   final ChatNode userNode;
   final ChatNode assistantNode;
   final PromptAssemblyResult promptAssembly;
   final ChatCompletionResult completion;
+
+  /// 本次直接屏蔽的敏感词（供 UI 告知用户）
+  final List<String> blockedWords;
+
+  /// 本次用户选择不屏蔽的敏感词（临时豁免）
+  final List<String> allowedWords;
 }
 
 class ChatService {
@@ -113,6 +122,8 @@ class ChatService {
     ChatCompletionCancelToken? cancellationToken,
     void Function(ChatCompletionProgress progress)? onStreamProgress,
     Future<ChatSession> Function()? persistSession,
+    /// 提醒档敏感词确认回调（由 UI 层弹窗）：返回 true=屏蔽，false=不屏蔽，null=用户关闭
+    Future<bool?> Function(List<String> askWords)? onAskBlock,
     /// 自检模式：不真实调用 AI（模拟回复），不写情绪落库，其余流程全跑。
     /// 用于"一键自检"——不手动聊天也能验证技能/工具/Prompt 组装等管家流程。
     bool selfTest = false,
@@ -362,12 +373,17 @@ class ChatService {
         butler!.recordTokenUsage(completion.promptTokens, completion.totalTokens);
       }
 
+      // 重新生成路径：无敏感词确认流程
+      final blockedWords = <String>[];
+      final allowedWords = <String>[];
       ButlerFlowRunner.instance.finishRecording();
       return ChatSendResult(
         userNode: userNode,
         assistantNode: assistantNode,
         promptAssembly: promptAssembly,
         completion: completion,
+        blockedWords: blockedWords,
+        allowedWords: allowedWords,
       );
     } on ChatCompletionCancelledException {
       ButlerFlowRunner.instance.finishRecording(failed: true);

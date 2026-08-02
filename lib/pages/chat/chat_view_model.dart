@@ -539,7 +539,11 @@ class ChatViewModel extends ChangeNotifier {
   // --- 发送 / 重新生成 ---
 
   /// 发送一条用户消息。[rawText] 为未经变量替换的原始输入。
-  Future<void> sendMessage(String rawText) async {
+  Future<void> sendMessage(
+    String rawText, {
+    Future<bool?> Function(List<String> askWords)? onAskBlock,
+    void Function(List<String> blocked, List<String> allowed)? onMaskResult,
+  }) async {
     final session = _activeSession;
     final character = _activeCharacter;
     final text = replaceChatVariables(rawText.trim()).trim();
@@ -592,6 +596,7 @@ class ChatViewModel extends ChangeNotifier {
           }
           notifyListeners();
         },
+        onAskBlock: onAskBlock,
         persistSession: _isDraftSession
             ? () async {
                 final createdSession = await _persistDraftSession();
@@ -600,6 +605,9 @@ class ChatViewModel extends ChangeNotifier {
               }
             : null,
       );
+
+      // 屏蔽结果回传 UI（SnackBar 告知用户屏蔽/放行了什么词）
+      onMaskResult?.call(result.blockedWords, result.allowedWords);
 
       // 保存本次发给男主的完整 prompt（聊天页可查看）
       _lastPromptText = result.promptAssembly.mergedText;

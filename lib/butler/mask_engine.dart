@@ -36,12 +36,24 @@ class ProcessResult {
   /// 只注入 system 层（男主认知），绝不进 user 文本 → 男主不会念出来。
   final List<String> maskHints;
 
+  /// 提醒档敏感词（分数在提醒区间，需用户确认是否屏蔽）
+  final List<String> askWords;
+
+  /// 直接屏蔽档敏感词（最高敏/高分/用户已确认过）
+  final List<String> blockedWords;
+
+  /// 敏感词挖空前的文本（假面层已替换）——用户选"不屏蔽"时用这个
+  final String? maskLayerText;
+
   ProcessResult({
     required this.text,
     this.wasModified = false,
     this.appliedMappings = const {},
     this.moodContext,
     this.maskHints = const [],
+    this.askWords = const [],
+    this.blockedWords = const [],
+    this.maskLayerText,
   });
 }
 

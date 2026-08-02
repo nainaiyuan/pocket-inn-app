@@ -181,10 +181,22 @@ class ButlerEngine {
       }
     }
 
-    // 2. 关键词替换（PRIVACY_MARK）
+    // 2. 关键词替换（PRIVACY_MARK）——三档：直接屏蔽 / 提醒（弹窗问用户）/ 放行
+    var askWords = <String>[];
+    var blockedWords = <String>[];
+    String? maskLayerText; // 敏感词挖空前（假面层已替换）——用户选"不屏蔽"时用
     if (_config.keywordReplaceEnabled) {
-      final sensitiveWords = _detectSensitiveWords(text);
+      final verdict = _detectSensitiveWords(text);
+      // 提醒档：先挖空，用户选"不屏蔽"时用 maskLayerText 恢复
+      final sensitiveWords = [...verdict.block, ...verdict.ask];
+      if (verdict.block.isNotEmpty) {
+        blockedWords = verdict.block.map((w) => w.word).toList();
+      }
+      if (verdict.ask.isNotEmpty) {
+        askWords = verdict.ask.map((w) => w.word).toList();
+      }
       if (sensitiveWords.isNotEmpty) {
+        maskLayerText = text; // 挖空前存档（假面层已替换）
         final privacyResult = _maskEngine.applyPrivacyMark(
           text: text,
           sensitiveWords: sensitiveWords,
@@ -193,7 +205,8 @@ class ButlerEngine {
         DebugLogger.log(
           '管家流程',
           '② 隐私标记：检测到 ${sensitiveWords.length} 类敏感词，已加标记'
-          '（${sensitiveWords.map((w) => w.word).join('/')}）',
+          '（${sensitiveWords.map((w) => w.word).join('/')}）'
+          '${verdict.ask.isNotEmpty ? '（其中 ${verdict.ask.map((w) => w.word).join('/')} 为提醒档，待用户确认）' : ''}',
         );
 
         // 记录触发时间（持续时间因子：持续聊同一话题 → 强度 +1）
@@ -240,6 +253,9 @@ class ButlerEngine {
           ? {'privacy_mark': '敏感词已替换/挖空'}
           : const {},
       moodContext: moodContext,
+      askWords: askWords,
+      blockedWords: blockedWords,
+      maskLayerText: maskLayerText,
     );
   }
 
@@ -288,7 +304,7 @@ class ButlerEngine {
         text.contains('呢');
   }
 
-  List<RiskWord> _detectSensitiveWords(String text) {
+  _Verdict _detectSensitiveWords(String text) {
     final words = RiskWordStore.instance.cachedWords;
     final exceptions = RiskWordStore.instance.cachedExceptions;
     final now = DateTime.now();
@@ -303,7 +319,34 @@ class ButlerEngine {
       }
       hits.add(w);
     }
-    if (hits.isEmpty) return hits;
+    if (hits.isEmpty) return const _Verdict(block: [], ask: []);
+
+    // 临时豁免：用户选过"这次不屏蔽" → 30 分钟内/情感区间内放行
+    RiskWordStore.instance.pruneTempAllows();
+    final tempAllows = RiskWordStore.instance.cachedTempAllows;
+    final exempted = hits.where((w) {
+      final until = tempAllows[w.word];
+      return until != null && until.isAfter(DateTime.now());
+    }).toList();
+    if (exempted.isNotEmpty) {
+      DebugLogger.log(
+        '管家流程',
+        '临时豁免：${exempted.map((w) => w.word).join('/')} 在豁免期内（用户选过不屏蔽）→ 放行',
+      );
+      hits.removeWhere((w) => exempted.contains(w));
+      if (hits.isEmpty) return const _Verdict(block: [], ask: []);
+    }
+
+    // 用户已确认过"屏蔽"的词 → 直接屏蔽（不再问）
+    final prefs = RiskWordStore.instance.cachedUserPrefs;
+    final confirmed = hits.where((w) => prefs[w.word] == RiskWordStore.prefBlock).toList();
+    if (confirmed.isNotEmpty) {
+      DebugLogger.log(
+        '管家流程',
+        '用户已确认屏蔽：${confirmed.map((w) => w.word).join('/')} → 直接屏蔽',
+      );
+      return _Verdict(block: confirmed, ask: const []);
+    }
 
     // 最高敏词（severe，如"做爱"）：任何场景直接屏蔽，求知也不豁免
     // 用户 16:32："做爱是什么感觉？"必须屏蔽，不能让男主展开解释
@@ -313,7 +356,7 @@ class ButlerEngine {
         '管家流程',
         '最高敏词 ${severes.map((w) => w.word).join('/')} 命中 → 直接屏蔽（求知不豁免）',
       );
-      return hits;
+      return _Verdict(block: hits, ask: const []);
     }
 
     // 综合公式判定（用户 16:37：各种信号一起辅助，不是一触发就没了）：
@@ -396,20 +439,28 @@ class ButlerEngine {
       parts.add('求知-1');
     }
 
-    if (score >= 3) {
+    if (score >= 5) {
       DebugLogger.log(
         '管家流程',
         '屏蔽判定：${hits.map((w) => w.word).join('/')} '
-        '（${parts.join('，')} = $score ≥ 3）→ 挖空',
+        '（${parts.join('，')} = $score ≥ 5）→ 直接屏蔽',
       );
-      return hits;
+      return _Verdict(block: hits, ask: const []);
+    }
+    if (score >= 3) {
+      DebugLogger.log(
+        '管家流程',
+        '提醒判定：${hits.map((w) => w.word).join('/')} '
+        '（${parts.join('，')} = $score，3 ≤ score < 5）→ 弹窗问用户',
+      );
+      return _Verdict(block: const [], ask: hits);
     }
     DebugLogger.log(
       '管家流程',
       '屏蔽判定：${hits.map((w) => w.word).join('/')} '
       '（${parts.join('，')} = $score < 3）→ 放行',
     );
-    return [];
+    return _Verdict(block: const [], ask: const []);
   }
 
   /// 检测降温话题
@@ -434,8 +485,8 @@ class ButlerEngine {
   String buildMoodContext(String text) {
     if (!_config.keywordReplaceEnabled) return '';
 
-    final sensitive = _detectSensitiveWords(text);
-    if (sensitive.isNotEmpty) {
+    final verdict = _detectSensitiveWords(text);
+    if (verdict.block.isNotEmpty || verdict.ask.isNotEmpty) {
       return _maskEngine.buildMoodContextString(text);
     }
 
@@ -550,4 +601,12 @@ class ButlerCommandResult {
     this.reply,
     this.needsHelp = false,
   });
+}
+
+/// 敏感词判定结果：直接屏蔽档 + 提醒档（放行=两者都空）
+class _Verdict {
+  final List<RiskWord> block;
+  final List<RiskWord> ask;
+
+  const _Verdict({required this.block, required this.ask});
 }
