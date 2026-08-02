@@ -20,7 +20,7 @@ class ChatStorageService {
     if (_db != null) return _db!;
     _db = await openDatabase(
       p.join(await getDatabasesPath(), 'pocket_inn_chat.db'),
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE messages (
@@ -57,6 +57,11 @@ class ChatStorageService {
             )
           ''');
           await db.execute('CREATE INDEX IF NOT EXISTS idx_memories_persona ON memories(persona_id)');
+        }
+        // 8-03 07:01：消息表加 thinking_chain 列（男主思考链随消息持久化）
+        if (oldVersion < 3) {
+          await db.execute(
+              "ALTER TABLE messages ADD COLUMN thinking_chain TEXT");
         }
       },
     );
@@ -229,6 +234,8 @@ class ChatStorageService {
       id: row['id'] as String,
       text: row['text'] as String,
       isMe: (row['is_me'] as int) == 1,
+      // 8-03 07:01：思考链随消息持久化（历史消息也能展开看）
+      thinkingChain: row['thinking_chain'] as String?,
     );
   }
 
@@ -239,6 +246,7 @@ class ChatStorageService {
       'text': m.text,
       'is_me': m.isMe ? 1 : 0,
       'created_at': DateTime.now().millisecondsSinceEpoch,
+      'thinking_chain': m.thinkingChain,
     };
   }
 }

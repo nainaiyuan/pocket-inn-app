@@ -539,6 +539,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           id: '${DateTime.now().millisecondsSinceEpoch}_ai',
           text: displayText,
           isMe: false,
+          // 8-03 07:01：男主思考链（reasoning_content）随消息显示，
+          // 默认折叠可展开（气泡里小格式展示）
+          thinkingChain: result.reasoningContent,
         ));
       }
       // 男主回复完成：全部已读 + 停止输入

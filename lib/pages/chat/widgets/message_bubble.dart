@@ -6,6 +6,7 @@ import '../../../models/chat_message.dart';
 import '../../../models/user_setting.dart';
 import '../../../services/chat_character_resolver.dart';
 import '../state/chat_presence.dart';
+import 'thinking_chain_widget.dart';
 
 /// 消息气泡
 class MessageBubble extends StatelessWidget {
@@ -185,6 +186,17 @@ class MessageBubble extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // 8-03 07:01：男主的思考链（reasoning_content）——
+                      // 小格式、默认折叠，用户想看再展开，和正文区分
+                      if (!message.isMe &&
+                          message.thinkingChain != null &&
+                          message.thinkingChain!.trim().isNotEmpty) ...[
+                        ThinkingChainWidget(
+                          thinkingChain: message.thinkingChain!,
+                          colorScheme: Theme.of(context).colorScheme,
+                        ),
+                        const SizedBox(height: 8),
+                      ],
                       Text(
                         message.text,
                         style: TextStyle(
