@@ -422,7 +422,11 @@ class _AiConfigPageState extends State<AiConfigPage> {
     AIProviderPreset? preset,
     AIProviderConfig? existing,
   }) async {
-    final result = await showModalBottomSheet<Map<String, String>>(
+    // ⚠️ 泛型必须 Map<String, Object?>：pop 的 map 里 refreshHours 是 int?，
+    // 声明成 Map<String, String> 会在 route 完成时 cast 失败抛 TypeError →
+    // 保存不执行 + sheet 关闭动画卡住（用户 23:14 报：填 API 点确认，
+    // 卡片收不回去、没保存内容）。Dart 泛型是 reified 的，别写窄类型。
+    final result = await showModalBottomSheet<Map<String, Object?>>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
@@ -430,11 +434,11 @@ class _AiConfigPageState extends State<AiConfigPage> {
     );
     if (result == null || !mounted) return;
 
-    final name = result['name'] ?? '';
-    final baseUrl = result['baseUrl'] ?? '';
-    final apiKey = result['apiKey'] ?? '';
-    final model = result['model'] ?? '';
-    final memoryMode = result['memoryMode'] ?? 'stateless';
+    final name = (result['name'] as String?) ?? '';
+    final baseUrl = (result['baseUrl'] as String?) ?? '';
+    final apiKey = (result['apiKey'] as String?) ?? '';
+    final model = (result['model'] as String?) ?? '';
+    final memoryMode = (result['memoryMode'] as String?) ?? 'stateless';
     final refreshHours = result['refreshHours'] as int?;
 
     if (existing != null) {

@@ -409,8 +409,12 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
               runSpacing: 2,
               children: [
                 FilledButton.tonalIcon(
-                  onPressed: () {
+                  onPressed: () async {
+                    // 先关 sheet，等关闭动画完成再 push 配置页
+                    // （避免 pop 后立刻用同一 context push 导致 Navigator 状态异常）
                     Navigator.of(context).pop();
+                    await Future<void>.delayed(const Duration(milliseconds: 250));
+                    if (!context.mounted) return;
                     Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const AiConfigPage()),
                     );
