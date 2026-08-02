@@ -287,6 +287,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           userText: t,
           characterId: personaId,
           characterName: personaName,
+          // 37批：传真实会话 id → 每次新对话重新轮换代号（男主无法把代号绑定到人）
+          sessionId: _chatSessionId ?? 'chat_page',
         );
         sendText = pipeline.maskedText;
         skillInjection = pipeline.skillInjection;
@@ -348,6 +350,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             final category = args['category']?.toString() ?? '';
             _appendToolBubble('正在查记忆：$query…');
             toolResult = await _executeRecallTool(query, category);
+          } else if (name == 'save_identity_memory') {
+            // 37批：男主用原生工具写代号记忆（替代 #A# 文本协议，DeepSeek 更可靠）
+            final code = args['code']?.toString() ?? '';
+            final content = args['content']?.toString() ?? '';
+            _appendToolBubble('男主想记住关于「$code」的事…');
+            toolResult = await _executeSaveIdentityMemoryTool(code, content);
+          } else if (name == 'list_tools') {
+            toolResult = _executeListToolsTool();
           } else {
             toolResult = '未知工具：$name';
           }
@@ -400,9 +410,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       try {
         final butler = ChatService.instance.butler;
         if (butler != null) {
-          displayText = butler.processIncoming(
+          displayText = await butler.processIncoming(
             text: displayText,
-            sessionId: 'chat_page',
+            // 37批：与发送侧一致 → 同一会话内还原正确，新会话重新轮换代号
+            sessionId: _chatSessionId ?? 'chat_page',
           );
         }
       } catch (e) {
@@ -1103,6 +1114,56 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       DebugLogger.log('指令模块', '✖ 工具查记忆失败: $e');
       return '查记忆出错了';
     }
+  }
+
+  /// 工具执行：save_identity_memory（男主写代号人物记忆 → 待确认区，用户确认才生效）
+  /// 37批：原生 function calling 替代 #A# 文本协议（DeepSeek 对文本协议不可靠）
+  Future<String> _executeSaveIdentityMemoryTool(String code, String content) async {
+    if (code.trim().isEmpty || content.trim().isEmpty) {
+      return '参数不完整：需要代号（code）和内容（content）';
+    }
+    final butler = ChatService.instance.butler;
+    if (butler == null || !butler.config.maskLayerEnabled) {
+      return '假面层未开启，无法保存代号记忆';
+    }
+    final sessionId = _chatSessionId ?? 'chat_page';
+    // 会话映射：代号 → 身份 id
+    String? identityId;
+    final mapping = butler.maskEngine.getSessionMapping(sessionId);
+    mapping.forEach((id, c) {
+      if (c == code.trim()) identityId = id;
+    });
+    if (identityId == null) {
+      // 会话映射没有 → 尝试注册时的默认代号（管理页展示用）
+      for (final entry in butler.maskEngine.allIdentities) {
+        if (butler.maskEngine.codeFor(entry.id) == code.trim()) {
+          identityId = entry.id;
+          break;
+        }
+      }
+    }
+    if (identityId == null) {
+      return '无法识别代号「$code」——它不是当前对话里的代号。'
+          '不要追问它代表谁，当作没记住继续聊天即可。';
+    }
+    final String targetId = identityId!;
+    await butler.maskEngine.identityStore?.addIdentityMemory(
+      identityId: targetId,
+      content: content.trim(),
+    );
+    DebugLogger.log('假面层', '✅ 工具保存代号记忆: $code → $content');
+    return '已把「$code」的事记下，等用户确认后生效。'
+        '确认前不要当作已记住的信息使用。';
+  }
+
+  /// 工具执行：list_tools（男主查询自己有哪些工具可用）
+  String _executeListToolsTool() {
+    return '你现在可以使用的工具：\n'
+        '- record_memory：记录用户的事（类别：喜好/约定/日常/事实/其他）\n'
+        '- recall_memory：查看以前记住的关于用户的事\n'
+        '- save_identity_memory：保存关于某位代号人物（如 家人A）的事\n'
+        '- list_tools：查看工具清单（就是现在这个）\n'
+        '调用完成后自然地继续和用户说话。';
   }
 
   /// 男主获准调取记忆 → 异步检索记忆库生成注入文本（按类别/条数）

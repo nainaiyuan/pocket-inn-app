@@ -5,6 +5,7 @@ import 'butler_config.dart';
 import 'butler_database.dart';
 import 'insight/insight_engine.dart';
 import 'ai/butler_ai_service.dart';
+import '../utils/debug_logger.dart' show DebugLogger;
 
 /// 管家总入口
 /// 提供给 APP 调用的统一接口
@@ -67,10 +68,18 @@ class Butler {
   }
 
   /// 处理男主回复（还原假名）
-  String processIncoming({
+  /// 37批：先提取男主回复里的 #代号# 记忆（存 pending 待用户确认），再还原代号
+  Future<String> processIncoming({
     required String text,
     required String sessionId,
-  }) {
+  }) async {
+    if (config.maskLayerEnabled) {
+      try {
+        await maskEngine.extractIdentityMemoriesFromReply(text, sessionId);
+      } catch (e) {
+        DebugLogger.log('假面层', '✖ 提取 #代号# 记忆失败: $e');
+      }
+    }
     return butlerEngine.processIncomingMessage(
       characterReply: text,
       sessionId: sessionId,

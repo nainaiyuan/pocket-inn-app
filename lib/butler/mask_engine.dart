@@ -21,6 +21,7 @@ import 'dart:math';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../utils/debug_logger.dart' show DebugLogger;
 import 'mood_analysis/mood_analyzer_keyword.dart' show KeywordMoodAnalyzer;
 import 'risk_filter_wordlist.dart' show RiskWord;
 import 'sensitive_info/sensitive_info_detector.dart'
@@ -122,6 +123,44 @@ class MaskEngine {
 
   final Random _random = Random();
 
+  /// 生成代号后缀：A、B、…、Z、AA、AB、…（用户 18:58：家人A、家人B，
+  /// 多一个加一个，再多 AA、BB 这种，再多了就 3 位 4 位组合下去）
+  static String _codeSuffix(int n) {
+    var num = n;
+    var suffix = '';
+    while (num >= 0) {
+      suffix = String.fromCharCode(0x41 + (num % 26)) + suffix;
+      num = num ~/ 26 - 1;
+    }
+    return suffix;
+  }
+
+  /// 分配唯一标识符 [家人A]、[朋友B] ...（注册时分配，管理页展示用；
+  /// 实际对话用会话级轮换 [_pickSessionCode]——用户 18:58：
+  /// 代号轮换，男主无法把代号绑定到具体人）
+  void _assignCode(IdentityEntry entry) {
+    final counter = _codeCounters[entry.category] ?? 0;
+    _codeCounters[entry.category] = counter + 1;
+    final pool = _codePools[entry.category] ?? const ['某人'];
+    final label = pool[_random.nextInt(pool.length)];
+    _identityCodes[entry.id] = '[$label${_codeSuffix(counter)}]';
+  }
+
+  /// 会话级代号分配：从该类别的代号池里挑一个本会话未使用的代号。
+  /// 每次新会话（sessionId 变化）重新轮换 → 男主无法积累"代号=谁"的绑定；
+  /// 同一会话内保持一致 → 不影响对话连贯。
+  String _pickSessionCode(IdentityEntry entry, Map<String, String> sessionMap) {
+    final used = sessionMap.values.toSet();
+    final pool = _codePools[entry.category] ?? const ['某人'];
+    final label = pool[_random.nextInt(pool.length)];
+    var idx = 0;
+    while (true) {
+      final code = '[$label${_codeSuffix(idx)}]';
+      if (!used.contains(code)) return code;
+      idx++;
+    }
+  }
+
   // ── 持久化存储（可空 = 纯内存）──
   IdentityStore? _store;
 
@@ -129,6 +168,9 @@ class MaskEngine {
   void attachStore(IdentityStore store) {
     _store = store;
   }
+
+  /// 持久化存储（管理页读待确认记忆用）
+  IdentityStore? get identityStore => _store;
 
   /// 从存储加载身份（APP 启动时调用）
   Future<void> loadFromStore() async {
@@ -150,7 +192,9 @@ class MaskEngine {
   /// 已注册的全部身份（给管理页用）
   List<IdentityEntry> get allIdentities => _identities.values.toList();
 
-  /// 身份对应的代号（给管理页用）
+  /// 身份对应的"示例"代号（管理页展示用）。
+  /// 注意：实际聊天用会话级轮换代号（用户 18:58），同一身份在不同会话
+  /// 可能是 [家人A] 也可能是 [家人B]——管理页这里只是注册时的默认展示。
   String? codeFor(String identityId) => _identityCodes[identityId];
 
   // ── 每身份平均情绪（平均情感基线）──
@@ -201,14 +245,88 @@ class MaskEngine {
   }
 
   /// 某身份的平均情感基线描述（不含真实称呼，只含代号+情绪维度）
-  /// 如："[家人1]：你提到 ta 时，平均情绪：依恋 65、烦躁 20"
+  /// 如："[家人A]：你提到 ta 时，平均情绪：依恋 65、烦躁 20"
+  /// 37批：性别已知时用"她/他"（用户 18:58：添加性别，男主可用她/他）
   String? _buildAverageMoodDescription(IdentityEntry entry, String code) {
     final avg = _identityMoodAvg[entry.id];
     if (avg == null || avg.isEmpty) return null;
     final sorted = avg.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
     final top = sorted.take(3).map((e) => '${e.key} ${e.value.round()}').join('、');
-    return '$code：你提到 ta 时，平均情绪：$top';
+    return '$code：你提到${entry.pronoun}时，平均情绪：$top';
+  }
+
+  /// 该身份已确认的 #代号# 记忆描述（用户 18:58：男主写 #A# 记忆 → 用户确认 →
+  /// 下次轮换后以新代号注入，记忆跟随身份不跟随代号）
+  /// 如："[家人C]：这位家人的喜好：喜欢小猫；讨厌下雨"
+  Future<String?> _buildIdentityMemoriesDescription(
+    IdentityEntry entry,
+    String code,
+  ) async {
+    final store = _store;
+    if (store == null) return null;
+    try {
+      final memories = await store.confirmedMemories(entry.id);
+      if (memories.isEmpty) return null;
+      final contents = memories.map((m) => m.content).toList();
+      return '$code：${entry.pronoun}相关的事：${contents.join('；')}';
+    } catch (e) {
+      print('[MaskEngine] 加载身份记忆失败: $e');
+      return null;
+    }
+  }
+
+  /// 提取男主回复里的 #代号# 记忆（男主写 → 存 pending → 用户确认）
+  /// 格式：#家人A# 她喜欢小猫（每行一条）
+  Future<void> extractIdentityMemoriesFromReply(
+    String reply,
+    String sessionId,
+  ) async {
+    final store = _store;
+    if (store == null) return;
+    final sessionMap = _sessionMappings[sessionId];
+    if (sessionMap == null || sessionMap.isEmpty) return;
+
+    // 反查：代号 → identityId
+    final codeToIdentity = <String, String>{
+      for (final e in sessionMap.entries) e.value: e.key,
+    };
+
+    final lines = reply.split('\n');
+    for (final line in lines) {
+      final trimmed = line.trim();
+      // 匹配 #家人A# 内容 或 #A# 内容（A 为代号字母）
+      final m = RegExp(r'^#([^\s#]+)#\s*(.+)$').firstMatch(trimmed);
+      if (m == null) continue;
+      final tag = m.group(1)!.trim();
+      final content = m.group(2)!.trim();
+      if (content.isEmpty) continue;
+
+      // tag 可能是完整代号 [家人A] / 家人A / 或纯字母 A
+      String? identityId;
+      if (codeToIdentity.containsKey('[$tag]')) {
+        identityId = codeToIdentity['[$tag]'];
+      } else if (codeToIdentity.containsKey(tag)) {
+        identityId = codeToIdentity[tag];
+      } else {
+        // 纯字母：匹配该会话中以该字母结尾的代号
+        final letter = tag.replaceAll(RegExp(r'[\[\]]'), '');
+        for (final e in codeToIdentity.entries) {
+          final codeLetter = e.key.replaceAll(RegExp(r'[\[\]\u4e00-\u9fa5]'), '');
+          if (codeLetter == letter) {
+            identityId = e.value;
+            break;
+          }
+        }
+      }
+      if (identityId == null) continue;
+
+      await store.addIdentityMemory(identityId: identityId, content: content);
+      DebugLogger.log(
+        '假面层',
+        '📝 男主写了 #$tag# 记忆（身份 $identityId），已存待确认：$content',
+      );
+    }
   }
 
   // ── 身份管理 ──
@@ -242,24 +360,17 @@ class MaskEngine {
 
   // ── 核心替换逻辑 ──
 
-  /// 分配唯一标识符 [家人1]、[朋友2] ...
-  void _assignCode(IdentityEntry entry) {
-    final counter = _codeCounters[entry.category] ?? 0;
-    _codeCounters[entry.category] = counter + 1;
-    _identityCodes[entry.id] = '[${entry.category}${counter + 1}]';
-  }
-
   /// 替换敏感信息（用户消息 → 发给男主的版本）
   ///
   /// 描述策略（说一次机制）：
   /// - 会话内首次提到某身份 → 附一条描述（用户描述池随机 / 规律联动 / 内置模板）
   /// - 之后只替换为纯代号（男主已记住映射，不再重复描述 → 降低泄露风险）
   /// - 例外：管家发现该身份的新情绪规律 → 重新附一条规律描述（男主知道情绪变了）
-  ProcessResult replaceSensitive({
+  Future<ProcessResult> replaceSensitive({
     required String text,
     required String characterId,
     required String sessionId,
-  }) {
+  }) async {
     // 记录当前文本情绪（规律"现在"值参照）
     _latestMood = KeywordMoodAnalyzer().analyze(text).dimensions;
     _sessionMappings.putIfAbsent(sessionId, () => {});
@@ -282,17 +393,22 @@ class MaskEngine {
       String code;
 
       if (isFirstTime) {
-        // 首次：分配纯代号（描述不固化进映射，避免"每次描述都一样"）
-        code = _identityCodes[entry.id] ?? '[其他]';
+        // 首次：会话级轮换分配代号（用户 18:58：代号轮换，家人A/B/C…
+        // 一次唯一绑定一个代号直到下一次；男主无法把代号绑定到具体人）
+        code = _pickSessionCode(entry, sessionMap);
         sessionMap[entry.id] = code;
         // 首次附：平均情感基线（出现一次即可——后续对话自带记忆/上下文）
         // + 中性情绪规律（不含真实称呼，男主不需要知道代号对应谁）
+        // + 已确认的 #代号# 记忆（用户 18:58：记忆跟随身份，轮换后以新代号注入）
         // 用户 18:32：基线只出现一次；规律/记忆描述正常提到就拼接
         final moodBase = _buildAverageMoodDescription(entry, code);
         final patternDesc = _buildPatternDescription(entry, code);
+        final identityMemories =
+            await _buildIdentityMemoriesDescription(entry, code);
         final parts = [
           if (moodBase != null) moodBase,
           if (patternDesc != null) patternDesc,
+          if (identityMemories != null) identityMemories,
         ];
         if (parts.isNotEmpty) {
           maskHints.add(parts.join('；'));

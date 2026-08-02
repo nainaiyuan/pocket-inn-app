@@ -225,6 +225,10 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
                     ),
                     const SizedBox(height: 8),
                   ],
+                const SizedBox(height: 8),
+                // 待确认的 #代号# 记忆（男主写的，用户确认后才生效）
+                _PendingMemoriesSection(hub: widget.hub),
+                const SizedBox(height: 8),
               ],
             ),
           ),
@@ -260,6 +264,7 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
     final labelCtrl = TextEditingController();
     final describeCtrl = TextEditingController();
     String category = 'family';
+    String gender = 'female';
     final descCtrls = <TextEditingController>[];
     var generating = false;
 
@@ -472,6 +477,17 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
                   ),
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
+                    initialValue: gender,
+                    decoration: _deco('性别（男主会用她/他称呼）'),
+                    items: const [
+                      DropdownMenuItem(value: 'female', child: Text('女（她）')),
+                      DropdownMenuItem(value: 'male', child: Text('男（他）')),
+                      DropdownMenuItem(value: '', child: Text('不填（ta）')),
+                    ],
+                    onChanged: (v) => setDialogState(() => gender = v ?? 'female'),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
                     initialValue: category,
                     decoration: _deco('分类（可选，可自定义）'),
                     items: [
@@ -613,6 +629,7 @@ class _MaskRulesPageState extends State<MaskRulesPage> {
                   id: '${category}_${DateTime.now().millisecondsSinceEpoch}',
                   realLabel: label,
                   category: category,
+                  gender: gender,
                   descriptions: descriptions,
                 );
                 widget.hub.sharedMaskEngine!.registerIdentity(entry);
@@ -753,6 +770,11 @@ class _IdentityCard extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   _categoryName(entry.category) +
+                      (entry.gender == 'female'
+                          ? ' · 女'
+                          : entry.gender == 'male'
+                              ? ' · 男'
+                              : '') +
                       (entry.descriptions.isEmpty
                           ? ''
                           : ' · ${entry.descriptions.length} 条描述'),
@@ -819,5 +841,138 @@ class _IdentityCard extends StatelessWidget {
       default:
         return category;
     }
+  }
+}
+
+/// 待确认的 #代号# 记忆区块（用户 18:58：男主写什么都要用户确认）
+class _PendingMemoriesSection extends StatefulWidget {
+  final ButlerModuleHub hub;
+
+  const _PendingMemoriesSection({required this.hub});
+
+  @override
+  State<_PendingMemoriesSection> createState() =>
+      _PendingMemoriesSectionState();
+}
+
+class _PendingMemoriesSectionState extends State<_PendingMemoriesSection> {
+  List<IdentityMemory> _pending = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final store = widget.hub.sharedMaskEngine?.identityStore;
+    if (store == null) return;
+    final list = await store.pendingMemories();
+    if (mounted) setState(() => _pending = list);
+  }
+
+  /// 确认/拒绝后刷新
+  Future<void> _update(IdentityMemory mem, String status) async {
+    final store = widget.hub.sharedMaskEngine?.identityStore;
+    if (store == null) return;
+    await store.updateMemoryStatus(mem.id, status);
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_pending.isEmpty) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFC896B4).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFFC896B4).withValues(alpha: 0.3),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.rate_review_outlined,
+                color: Color(0xFFC896B4),
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '男主想记住的事（${_pending.length} 条待确认）',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF6A4A5A),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '男主在聊天里写了 #代号# 记忆。确认后才会生效（下次轮换到新代号时告诉他）；'
+            '不确认就一直放着，不会泄露。',
+            style: TextStyle(fontSize: 11, height: 1.5, color: Color(0xFF6A4A5A)),
+          ),
+          const SizedBox(height: 10),
+          for (final mem in _pending) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.8),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    mem.content,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      height: 1.4,
+                      color: Color(0xFF5A4A52),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => _update(mem, 'rejected'),
+                        child: const Text(
+                          '丢弃',
+                          style: TextStyle(fontSize: 12, color: Color(0xFFE07A7A)),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFC896B4),
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          minimumSize: const Size(0, 30),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        onPressed: () => _update(mem, 'confirmed'),
+                        child: const Text(
+                          '确认记住',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ],
+      ),
+    );
   }
 }

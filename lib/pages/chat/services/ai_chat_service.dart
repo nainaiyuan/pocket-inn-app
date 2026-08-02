@@ -77,6 +77,45 @@ class AiChatService {
         },
       },
     },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'save_identity_memory',
+        'description':
+            '保存关于某位代号人物（如 家人A、朋友B）的重要事情。'
+            '用户消息里出现的代号（如 家人A）代表用户身边的一个真实的人，'
+            '你了解到关于 ta 的喜好、习惯、经历、约定时，用这个工具记下来。'
+            '内容会先经用户确认，确认后下次提到 ta 时会想起来。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'code': {
+              'type': 'string',
+              'description': '代号，如：家人A、朋友B、老板C',
+            },
+            'content': {
+              'type': 'string',
+              'description': '要记住的内容（关于这位代号人物的事），如：她喜欢小猫',
+            },
+          },
+          'required': ['code', 'content'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'list_tools',
+        'description':
+            '查看你现在可以使用的所有工具（能力清单）。'
+            '不确定自己能做什么、或想确认某个能力是否存在时调用，'
+            '会返回工具名和用途说明。',
+        'parameters': {
+          'type': 'object',
+          'properties': {},
+        },
+      },
+    },
   ];
 
   Future<AIProviderResult> generateReply(

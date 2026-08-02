@@ -50,6 +50,7 @@ class AIProviderConfig {
     this.enabled = true,
     this.priority = 100,
     this.note = '',
+    this.toolFormat = 'openai',
   });
 
   /// 稳定唯一 id，如 'preset-deepseek' / 'custom'
@@ -84,6 +85,10 @@ class AIProviderConfig {
   /// 给用户看的说明（如"glm-4-flash 免费"）
   final String note;
 
+  /// 工具格式：'openai' / 'anthropic' / 'gemini' / 'none'
+  /// （工具格式翻译层，见 tool_format_adapter.dart；默认 openai 兼容直通）
+  final String toolFormat;
+
   bool get supportsChat => capabilities.contains(AICapability.chat);
   bool get supportsVision => capabilities.contains(AICapability.vision);
 
@@ -103,6 +108,7 @@ class AIProviderConfig {
     bool? enabled,
     int? priority,
     String? note,
+    String? toolFormat,
   }) {
     return AIProviderConfig(
       id: id ?? this.id,
@@ -116,6 +122,7 @@ class AIProviderConfig {
       enabled: enabled ?? this.enabled,
       priority: priority ?? this.priority,
       note: note ?? this.note,
+      toolFormat: toolFormat ?? this.toolFormat,
     );
   }
 
@@ -131,6 +138,7 @@ class AIProviderConfig {
         'enabled': enabled,
         'priority': priority,
         'note': note,
+        'toolFormat': toolFormat,
       };
 
   factory AIProviderConfig.fromJson(Map<String, dynamic> json) {
@@ -151,6 +159,7 @@ class AIProviderConfig {
       enabled: json['enabled'] as bool? ?? true,
       priority: json['priority'] as int? ?? 100,
       note: json['note'] as String? ?? '',
+      toolFormat: json['toolFormat'] as String? ?? 'openai',
     );
   }
 }

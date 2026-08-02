@@ -19,6 +19,7 @@ class IdentityEntry {
   final String relationType; // 旧版字段（兼容历史数据，新 UI 不再使用）
   final String importance; // core / normal / temp（内部用，UI 不再让用户选）
   final String? attitude; // 用户对该人的态度（保留兼容）
+  final String gender; // 性别：female / male / ''（用户 18:58：添加性别，男主可用"她/他"）
 
   const IdentityEntry({
     required this.id,
@@ -28,6 +29,7 @@ class IdentityEntry {
     this.relationType = '',
     this.importance = 'normal',
     this.attitude,
+    this.gender = '',
     this.createdAt,
   });
 
@@ -35,6 +37,9 @@ class IdentityEntry {
   final DateTime? createdAt;
 
   DateTime get createdTime => createdAt ?? DateTime.now();
+
+  /// 性别代词（描述用）：女→她，男→他，未知→ta
+  String get pronoun => gender == 'female' ? '她' : (gender == 'male' ? '他' : 'ta');
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -44,6 +49,7 @@ class IdentityEntry {
     'relationType': relationType,
     'importance': importance,
     'attitude': attitude,
+    'gender': gender,
     'createdAt': (createdAt ?? DateTime.now()).toIso8601String(),
   };
 
@@ -55,6 +61,7 @@ class IdentityEntry {
     relationType: json['relationType'] as String? ?? '',
     importance: json['importance'] as String? ?? 'normal',
     attitude: json['attitude'] as String?,
+    gender: json['gender'] as String? ?? '',
     createdAt: DateTime.tryParse(json['createdAt'] as String? ?? ''),
   );
 
@@ -78,6 +85,40 @@ class IdentityEntry {
   }
 }
 
+/// 身份记忆条目（#A# 记忆：男主写的、用户确认的、跟随身份不跟随代号）
+class IdentityMemory {
+  final String id;
+  final String identityId;
+  final String content;
+  final String status; // pending / confirmed / rejected
+  final DateTime createdAt;
+
+  const IdentityMemory({
+    required this.id,
+    required this.identityId,
+    required this.content,
+    this.status = 'pending',
+    required this.createdAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'identityId': identityId,
+    'content': content,
+    'status': status,
+    'createdAt': createdAt.toIso8601String(),
+  };
+
+  factory IdentityMemory.fromJson(Map<String, dynamic> json) => IdentityMemory(
+    id: json['id'] as String,
+    identityId: json['identityId'] as String,
+    content: json['content'] as String,
+    status: json['status'] as String? ?? 'pending',
+    createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ??
+        DateTime.now(),
+  );
+}
+
 /// 身份映射存储
 class IdentityStore extends ButlerStore {
   @override
@@ -88,6 +129,7 @@ class IdentityStore extends ButlerStore {
 
   static const String table = 'identity_mappings';
   static const String sessionTable = 'session_mappings';
+  static const String memoryTable = 'identity_memories';
 
   @override
   Future<void> createTables(Database db) async {
@@ -100,6 +142,7 @@ class IdentityStore extends ButlerStore {
         descriptions TEXT DEFAULT '[]',
         importance TEXT DEFAULT 'normal',
         attitude TEXT,
+        gender TEXT DEFAULT '',
         createdAt TEXT NOT NULL
       )
     ''');
@@ -111,6 +154,16 @@ class IdentityStore extends ButlerStore {
         relationSummary TEXT,
         createdAt TEXT NOT NULL,
         PRIMARY KEY (sessionId, identityId)
+      )
+    ''');
+    // 身份记忆区（用户 18:58：#A# 记忆，跟随身份不跟随代号）
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $memoryTable (
+        id TEXT PRIMARY KEY,
+        identityId TEXT NOT NULL,
+        content TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        createdAt TEXT NOT NULL
       )
     ''');
   }
@@ -128,6 +181,13 @@ class IdentityStore extends ButlerStore {
     if (!hasDescriptions) {
       await db.execute(
         "ALTER TABLE $table ADD COLUMN descriptions TEXT DEFAULT '[]'",
+      );
+    }
+    // 37批：gender 列（老库没有时补上）
+    final hasGender = cols.any((c) => c['name'] == 'gender');
+    if (!hasGender) {
+      await db.execute(
+        "ALTER TABLE $table ADD COLUMN gender TEXT DEFAULT ''",
       );
     }
   }
@@ -194,4 +254,51 @@ class IdentityStore extends ButlerStore {
 
   /// 数量
   Future<int> countAll() => super.count(table);
+
+  // ── 身份记忆区（#A# 记忆，跟随身份不跟随代号）──
+
+  /// 新增一条身份记忆（男主写的，默认 pending 待用户确认）
+  Future<void> addIdentityMemory({
+    required String identityId,
+    required String content,
+  }) async {
+    await insert(memoryTable, IdentityMemory(
+      id: '${identityId}_${DateTime.now().millisecondsSinceEpoch}',
+      identityId: identityId,
+      content: content,
+      createdAt: DateTime.now(),
+    ).toJson());
+  }
+
+  /// 加载某身份的已确认记忆（注入用）
+  Future<List<IdentityMemory>> confirmedMemories(String identityId) async {
+    final results = await db.query(
+      memoryTable,
+      where: 'identityId = ? AND status = ?',
+      whereArgs: [identityId, 'confirmed'],
+      orderBy: 'createdAt DESC',
+    );
+    return results.map((r) => IdentityMemory.fromJson(r)).toList();
+  }
+
+  /// 加载全部待确认记忆（用户确认页）
+  Future<List<IdentityMemory>> pendingMemories() async {
+    final results = await db.query(
+      memoryTable,
+      where: 'status = ?',
+      whereArgs: ['pending'],
+      orderBy: 'createdAt DESC',
+    );
+    return results.map((r) => IdentityMemory.fromJson(r)).toList();
+  }
+
+  /// 更新记忆状态（pending → confirmed / rejected）
+  Future<void> updateMemoryStatus(String id, String status) async {
+    await update(
+      memoryTable,
+      {'status': status},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
 }

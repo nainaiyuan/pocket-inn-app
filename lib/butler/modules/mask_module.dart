@@ -47,7 +47,7 @@ class MaskModule extends ButlerModule {
 
     // 1. 假面层替换
     if (_config.maskLayerEnabled) {
-      final maskResult = maskEngine.replaceSensitive(
+      final maskResult = await maskEngine.replaceSensitive(
         text: current,
         characterId: context.characterId,
         sessionId: context.sessionId,

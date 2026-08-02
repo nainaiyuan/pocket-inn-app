@@ -1045,7 +1045,7 @@ class ChatService {
 
   /// 管家：还原 AI 回复中的假名
   /// 用之前发送消息时建立的会话映射还原真实名称
-  String restoreButlerMask(String text, String sessionId) {
+  Future<String> restoreButlerMask(String text, String sessionId) async {
     if (butler == null || !butler!.config.maskLayerEnabled) return text;
     return butler!.processIncoming(text: text, sessionId: sessionId);
   }

@@ -23,6 +23,7 @@ import '../utils/debug_logger.dart';
 import 'failover_router.dart';
 import 'models.dart';
 import 'provider_presets.dart';
+import 'tool_format_adapter.dart';
 
 class AIProviderManager {
   AIProviderManager._();
@@ -425,18 +426,53 @@ class AIProviderManager {
         allowFailover: autoSwitchFor(personaId),
         isAbort: (error) => error is ChatCompletionCancelledException,
         action: (config) async {
+          // 工具格式翻译层（用户 19:29/19:34/19:42 设计）：
+          // 底层调用/参数/执行不变，只翻译"工具声明/返回"格式。
+          // - openai：直通（translateTools 原样返回）
+          // - anthropic/gemini：未来原生 API 的 ApiService 用 adapter 翻译
+          // - text：本地模型文本协议兜底——不传原生 tools，
+          //   工具说明注入 system；回复里 ⟨工具:…⟩JSON⟨/工具⟩ 块解析执行
+          final adapter = resolveToolFormat(
+            config.baseUrl,
+            toolFormatOverride: config.toolFormat,
+          );
+          final translatedTools = adapter.translateTools(tools ?? const []);
+          // 文本协议：把工具说明拼进 system（不传原生 tools）
+          var effectiveMessages = messages;
+          if (adapter.formatId == 'text' && (tools?.isNotEmpty ?? false)) {
+            final hint = adapter.buildToolHint(tools!);
+            if (hint.isNotEmpty) {
+              effectiveMessages = [
+                AIChatMessage(role: 'system', content: hint),
+                ...messages,
+              ];
+            }
+          }
           final apiResult = await _api.createChatCompletion(
             _resolve(config),
-            messages: [for (final message in messages) message.toApiJson()],
+            messages: [
+              for (final message in effectiveMessages) message.toApiJson(),
+            ],
             defaults: defaults,
-            tools: tools,
+            tools: translatedTools,
             cancellationToken: cancellationToken,
           );
+          // 文本协议：从回复文本解析 ⟨工具:…⟩ 块 → 内部统一 toolCalls，
+          // 并把块从文本里剥掉（用户只看到男主自然的话）
+          var finalText = apiResult.text;
+          var finalToolCalls = apiResult.toolCalls;
+          if (adapter.formatId == 'text') {
+            final textCalls = adapter.parseToolCallsFromText(apiResult.text);
+            if (textCalls.isNotEmpty) {
+              finalToolCalls = [...?finalToolCalls, ...textCalls];
+              finalText = adapter.stripToolBlocks(apiResult.text);
+            }
+          }
           return AIProviderResult(
-            text: apiResult.text,
+            text: finalText,
             thinking: apiResult.thinkingChain ?? '',
             usage: apiResult.usage,
-            toolCalls: apiResult.toolCalls,
+            toolCalls: finalToolCalls,
           );
         },
       );

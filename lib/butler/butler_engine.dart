@@ -167,8 +167,9 @@ class ButlerEngine {
 
     // 1. 假面层替换（统一替换，不因"跟我念"等指令放行——用户 17:57：
     //    不能一个一个词放行。男主把代号当普通内容，念代号 → 还原层还原成真实称呼）
+    //    37批：代号会话级轮换（每次新对话重新分配），男主无法把代号绑定到具体人
     if (_config.maskLayerEnabled) {
-      final maskResult = _maskEngine.replaceSensitive(
+      final maskResult = await _maskEngine.replaceSensitive(
         text: text,
         characterId: characterId,
         sessionId: sessionId,
