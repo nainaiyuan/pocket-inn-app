@@ -18,6 +18,7 @@
 
 import 'dart:math';
 
+import 'risk_filter_wordlist.dart' show RiskWord, privacyMark;
 import 'storage/identity_store.dart' show IdentityEntry, IdentityStore;
 import 'patterns/pattern_engine.dart' show PatternEngine;
 
@@ -365,17 +366,21 @@ class MaskEngine {
     return pool[_random.nextInt(pool.length)];
   }
 
-  /// 隐私标记替换（PRIVACY_MARK模式）
-  /// 用*替换敏感词
+  /// 隐私标记替换（PRIVACY_MARK 模式）
+  /// 替换策略：有 replacement 直接替换；没有 → 挖空为 [PRIVACY_MARK]
+  /// （挖个坑让男主自己理解意图，不脑补具体内容）
   ProcessResult applyPrivacyMark({
     required String text,
-    required List<String> sensitiveWords,
+    required List<RiskWord> sensitiveWords,
   }) {
     var modified = text;
     int replaceCount = 0;
 
-    for (final word in sensitiveWords) {
-      modified = modified.replaceAll(word, '*' * word.length);
+    // 长词先替换（避免子串干扰）
+    final sorted = [...sensitiveWords]..sort((a, b) => b.word.length.compareTo(a.word.length));
+    for (final word in sorted) {
+      final to = word.replacement ?? privacyMark;
+      modified = modified.replaceAll(word.word, to);
       replaceCount++;
     }
 

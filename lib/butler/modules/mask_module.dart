@@ -9,6 +9,7 @@ library;
 
 import '../butler_config.dart';
 import '../mask_engine.dart';
+import '../risk_filter_wordlist.dart' show RiskWord, riskWordlist, privacyMark;
 import '../modules/butler_module.dart';
 
 /// 假面层模块
@@ -89,47 +90,16 @@ class MaskModule extends ButlerModule {
     return ButlerModuleResult(text: restored);
   }
 
-  /// 简单敏感词检测（与 ButlerEngine 保持一致）
-  List<String> _detectSensitiveWords(String text) {
-    const baseSensitive = [
-      '亲',
-      '吻',
-      '抱',
-      '摸',
-      '舔',
-      '咬',
-      '揉',
-      '捏',
-      '含',
-      '吸',
-      '啃',
-      '胸',
-      '腿',
-      '臀',
-      '腰',
-      '口',
-      '唇',
-      '舌',
-      '插',
-      '入',
-      '抽',
-      '送',
-      '顶',
-      '进',
-      '塞',
-      '脱',
-      '裸',
-      '湿',
-      '流',
-      '颤',
-    ];
-
-    final found = <String>[];
-    for (final word in baseSensitive) {
-      if (text.contains(word)) {
-        found.add(word);
-      }
+  /// 风险词检测（与 ButlerEngine 保持一致：分级 + 搭配 + 浓度判定）
+  List<RiskWord> _detectSensitiveWords(String text) {
+    final hits = <RiskWord>[];
+    for (final w in riskWordlist) {
+      if (text.contains(w.word)) hits.add(w);
     }
-    return found;
+    if (hits.isEmpty) return hits;
+    final hardCount = hits.where((h) => h.isHard).length;
+    final softCount = hits.length - hardCount;
+    if (hardCount == 0 && softCount < 2) return [];
+    return hits;
   }
 }

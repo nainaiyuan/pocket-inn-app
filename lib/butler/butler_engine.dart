@@ -1,4 +1,5 @@
 import 'mask_engine.dart';
+import 'risk_filter_wordlist.dart' show RiskWord, riskWordlist, privacyMark;
 import 'butler_config.dart';
 import 'ai/butler_ai_service.dart';
 import '../utils/debug_logger.dart';
@@ -187,18 +188,30 @@ class ButlerEngine {
         text = privacyResult.text;
         DebugLogger.log(
           '管家流程',
-          '② 隐私标记：检测到 ${sensitiveWords.length} 类敏感词，已加标记',
+          '② 隐私标记：检测到 ${sensitiveWords.length} 类敏感词，已加标记'
+          '（${sensitiveWords.map((w) => w.word).join('/')}）',
         );
 
         // 3. 有替换时 → 生成心情标签助理解读
         moodContext = _maskEngine.buildMoodContextString(userText);
         DebugLogger.log('管家流程', '③ 心情标签已生成，附给男主辅助理解');
+
+        // 4. 全挖空兜底：替换后文本没有可读内容 → 用情绪标签生成 fallback，
+        //    男主依然能理解意图（设计：全挖空 → fallback 文本）
+        final stripped = text.replaceAll(privacyMark, '').trim();
+        if (stripped.isEmpty && moodContext != null) {
+          text = '$privacyMark（$moodContext）';
+          DebugLogger.log('管家流程', '④ 全挖空 → 用情绪标签生成 fallback 文本');
+        }
       }
     }
 
     return ProcessResult(
       text: text,
       wasModified: text != userText || moodContext != null,
+      appliedMappings: text != userText
+          ? {'privacy_mark': '敏感词已替换/挖空'}
+          : const {},
       moodContext: moodContext,
     );
   }
@@ -220,24 +233,24 @@ class ButlerEngine {
     return restored;
   }
 
-  /// 简单敏感词检测（后续可扩展为AI判断）
-  List<String> _detectSensitiveWords(String text) {
-    // 基础敏感词表（排除降温话题）
-    const baseSensitive = [
-      '亲', '吻', '抱', '摸', '舔', '咬',
-      '揉', '捏', '含', '吸', '舔', '啃',
-      '胸', '腿', '臀', '腰', '口', '唇', '舌',
-      '插', '入', '抽', '送', '顶', '进', '塞',
-      '脱', '裸', '湿', '流', '颤',
-    ];
-
-    final found = <String>[];
-    for (final word in baseSensitive) {
-      if (text.contains(word)) {
-        found.add(word);
-      }
+  /// 风险词检测（分级 + 搭配 + 浓度判定——敏感词不一定是敏感词）
+  ///
+  /// 判定规则：
+  /// - hard 词（动作类）单独命中 → 触发
+  /// - soft 词（身体部位/日常常见词）单独命中 → 不触发（避免误伤"嘴唇干/腰疼/进来"）
+  /// - soft 词与 hard 词同现，或 soft 命中 ≥2 → 触发（浓度达标）
+  List<RiskWord> _detectSensitiveWords(String text) {
+    final hits = <RiskWord>[];
+    for (final w in riskWordlist) {
+      if (text.contains(w.word)) hits.add(w);
     }
-    return found;
+    if (hits.isEmpty) return hits;
+
+    final hardCount = hits.where((h) => h.isHard).length;
+    final softCount = hits.length - hardCount;
+    // 只有 soft 且浓度不足 → 不触发（该词在此场景不是敏感词）
+    if (hardCount == 0 && softCount < 2) return [];
+    return hits;
   }
 
   /// 检测降温话题
