@@ -310,16 +310,157 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
                   );
                   return;
                 }
-                if (_words.any((x) => x.word == word)) {
+                final repl = replCtrl.text.trim();
+                // 用户 8-03 00:59：重复词不再拦截——用户重加就是想改档位
+                // （原逻辑：'这个词已经在了' → 添加失败，用户以为设了最高级
+                // 实际没设上 → '设了最高级也没弹窗'的根因之一）
+                final existed = _words.any((x) => x.word == word);
+                final newWord = RiskWord(
+                  word,
+                  kind: kind,
+                  category: category,
+                  replacement: repl.isEmpty ? null : repl,
+                  coolDownMinutes: coolDown,
+                );
+                Navigator.pop(ctx);
+                _save(existed
+                    ? [
+                        newWord,
+                        ..._words.where((x) => x.word != word),
+                      ]
+                    : [
+                        newWord,
+                        ..._words,
+                      ]);
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                    content: Text(existed ? '已更新「$word」的档位设置' : '已添加「$word」'),
+                  ));
+                }
+              },
+              child: const Text('添加'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 编辑已有敏感词（用户 8-03 00:59：列表没有编辑功能，想改档位只能删了重加。
+  /// 现在点词条直接编辑，预填当前设置）
+  void _showEditDialog(RiskWord w) {
+    final wordCtrl = TextEditingController(text: w.word);
+    final replCtrl = TextEditingController(text: w.replacement ?? '');
+    String category = w.category;
+    String kind = w.kind;
+    int coolDown = w.coolDownMinutes;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFFFDF7F9),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: const Text(
+            '编辑敏感词',
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF6A4A5A),
+            ),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: wordCtrl,
+                    decoration: _deco('敏感词'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: replCtrl,
+                    decoration: _deco('替换词（不填 = 挖空 [PRIVACY_MARK]）'),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    initialValue: category,
+                    decoration: _deco('分类（辅助判定）'),
+                    items: const [
+                      DropdownMenuItem(value: '亲密', child: Text('亲密')),
+                      DropdownMenuItem(value: '身体', child: Text('身体')),
+                      DropdownMenuItem(value: '家人', child: Text('家人')),
+                      DropdownMenuItem(value: '脏话', child: Text('脏话')),
+                      DropdownMenuItem(value: '其他', child: Text('其他')),
+                    ],
+                    onChanged: (v) =>
+                        setDialogState(() => category = v ?? '亲密'),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    initialValue: kind,
+                    decoration: _deco('强度'),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'severe',
+                        child: Text('最高敏（任何场景都挖，求知也不放）'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'hard',
+                        child: Text('强（需公式强度达标，求知可放）'),
+                      ),
+                      DropdownMenuItem(value: 'soft', child: Text('弱（需搭配或浓度达标）')),
+                    ],
+                    onChanged: (v) => setDialogState(() => kind = v ?? 'hard'),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<int>(
+                    initialValue: coolDown,
+                    decoration: _deco('持续窗口（聊到该词后多久算持续中，强度+1）'),
+                    items: const [
+                      DropdownMenuItem(value: 0, child: Text('0 分钟（不累计持续时间）')),
+                      DropdownMenuItem(value: 5, child: Text('5 分钟')),
+                      DropdownMenuItem(value: 10, child: Text('10 分钟')),
+                      DropdownMenuItem(value: 30, child: Text('30 分钟')),
+                      DropdownMenuItem(value: 60, child: Text('60 分钟')),
+                    ],
+                    onChanged: (v) =>
+                        setDialogState(() => coolDown = v ?? 10),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text(
+                '取消',
+                style: TextStyle(color: Color(0xFF6A4A5A)),
+              ),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFC896B4),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed: () {
+                final word = wordCtrl.text.trim();
+                if (word.isEmpty) {
                   ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(content: Text('这个词已经在了')),
+                    const SnackBar(content: Text('敏感词不能为空')),
                   );
                   return;
                 }
                 final repl = replCtrl.text.trim();
                 Navigator.pop(ctx);
-                // 用户 8-03 00:55：新加的敏感词排最前面（原来 append 到最后，
-                // 列表长时看不见，以为没加成功）
                 _save([
                   RiskWord(
                     word,
@@ -328,10 +469,10 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
                     replacement: repl.isEmpty ? null : repl,
                     coolDownMinutes: coolDown,
                   ),
-                  ..._words,
+                  ..._words.where((x) => x.word != w.word),
                 ]);
               },
-              child: const Text('添加'),
+              child: const Text('保存'),
             ),
           ],
         ),
@@ -536,6 +677,8 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
                           ),
                         ),
                         child: ListTile(
+                          // 用户 8-03 00:59：点词条编辑档位（原来只有删除）
+                          onTap: () => _showEditDialog(w),
                           title: Text(
                             w.word,
                             style: const TextStyle(
@@ -551,13 +694,19 @@ class _RiskWordsPageState extends State<RiskWordsPage> {
                               runSpacing: 4,
                               children: [
                                 _tag(w.category),
-                                _tag(w.isHard ? '强' : '弱'),
+                                // 用户 8-03 01:07：最高敏被显示成"弱"——isHard 只认
+                                // kind=='hard'，severe 不是 hard → 误显示弱。
+                                // 修正：severe → 最高敏，hard → 强，soft → 弱
+                                _tag(
+                                  w.isSevere
+                                      ? '最高敏'
+                                      : (w.isHard ? '强' : '弱'),
+                                ),
                                 _tag(
                                   w.replacement != null
                                       ? '替换：${w.replacement}'
                                       : '挖空',
                                 ),
-                                if (w.isSevere) _tag('最高敏'),
                                 _tag('持续 ${w.coolDownMinutes}分'),
                               ],
                             ),
