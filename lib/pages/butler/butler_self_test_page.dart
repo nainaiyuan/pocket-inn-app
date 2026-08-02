@@ -26,6 +26,48 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
   final _simController = TextEditingController();
   List<Map<String, dynamic>>? _simCalls;
   String _simStripped = '';
+  List<ButlerSelfTestItem> _simResults = [];
+
+  /// 内置男主回复样本（用户 8-03 06:01：男主会怎么说 → 一键全测）
+  static const List<(String, String)> _butlerSamples = [
+    ('中文格式', '好的，记住啦。记住我喜欢喝美式咖啡'),
+    ('⟨工具:⟩块', '我记住啦。\n⟨工具:record_memory⟩{"content":"喜欢美式","category":"喜好"}⟨/工具⟩'),
+    ('代码块JSON', '```json\n{"name": "list_tools", "arguments": {}}\n```'),
+    ('混在话里JSON', '我帮你查一下。{"name": "recall_memory", "arguments": {"query": "咖啡"}} 查到这些'),
+    ('完整tool_calls', '{"id":"call_1","type":"function","function":{"name":"write_diary","arguments":"{\\"content\\":\\"今天散步了\\"}"}}'),
+    ('纯聊天(应无工具)', '今天天气真好，我们去散步吧'),
+  ];
+
+  /// 一键测试：内置男主回复样本全部跑一遍（不走 AI）
+  void _runSimAll() {
+    final items = <ButlerSelfTestItem>[];
+    for (final (label, text) in _butlerSamples) {
+      final calls = ToolIntentParser.extract(text);
+      final names =
+          calls?.map((c) => c['name']).join('、') ?? '（没抓到工具）';
+      final expectTool = label != '纯聊天(应无工具)';
+      final hit = calls != null && calls.isNotEmpty;
+      items.add(ButlerSelfTestItem(
+        message: '男主说（$label）',
+        expected: expectTool ? '抓到工具指令' : '不识别任何工具',
+        actual: names,
+        passed: expectTool ? hit : !hit,
+        failedReason: expectTool
+            ? (hit ? null : '管家没抓住男主这句话')
+            : (hit ? '纯聊天被误判成工具调用' : null),
+        guidance: expectTool
+            ? '检查 tool_intent_parser.dart 是否覆盖该格式'
+            : '中文词表太宽泛？检查 chineseIntents',
+      ));
+    }
+    setState(() {
+      _simResults = items;
+      _simCalls = null;
+      _simStripped = '';
+    });
+    final pass = items.where((i) => i.passed).length;
+    DebugLogger.log('工具自测', '■ 模拟男主回复一键测试: $pass/${items.length} 通过');
+  }
 
   /// 模拟男主回复（用户 8-03 05:59：不走 AI，直接喂男主说的话给管家解析）
   /// 把男主在日志页的回复原文粘进来 → 立刻知道管家抓不抓得住
@@ -39,11 +81,6 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
     DebugLogger.log('工具自测', '▶ 模拟男主回复: ${input.length > 60 ? input.substring(0, 60) + '…' : input}');
     DebugLogger.log('工具自测',
         '■ 解析结果: ${calls == null ? '（没抓到工具）' : calls.map((c) => c['name']).join('、')}');
-  }
-
-  void _fillSimPreset(String label, String text) {
-    _simController.text = text;
-    _simulateButlerReply(text);
   }
 
   @override
@@ -392,44 +429,29 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
               border: Border.all(color: const Color(0xFFE8D5DE)),
             ),
             child: const Text(
-              '🗣 模拟男主回复（用户 8-03 05:59：不走 AI，直接找 bug）\n'
-              '把男主在日志页「AI路由」里的回复原文粘进来，'
-              '立刻看管家抓不抓得住工具指令、剥离后用户看到什么。\n\n'
-              '预设格式点下面的标签一键填入：',
+              '🗣 模拟男主回复（用户 8-03 06:01：一键测试男主那边是不是出问题了）\n'
+              '内置男主可能说的 6 种话，一键跑完，管家抓不抓得住一目了然。\n'
+              '全过 → 管家识别层没问题，问题在男主（AI）实际回复格式\n'
+              '（去日志页「AI路由」看男主回复原文，粘到下面输入框再测一次）。\n\n'
+              '点「一键测试」或把男主回复原文粘进输入框：',
               style: TextStyle(color: Colors.black54, fontSize: 12, height: 1.6),
             ),
           ),
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _PresetChip(
-                label: '代码块JSON',
-                onTap: () => _fillSimPreset('代码块JSON',
-                    '```json\n{"name": "list_tools", "arguments": {}}\n```'),
-              ),
-              _PresetChip(
-                label: '嵌套JSON',
-                onTap: () => _fillSimPreset('嵌套JSON',
-                    '{"name": "record_memory", "arguments": {"content": "喜欢美式", "category": "喜好"}}'),
-              ),
-              _PresetChip(
-                label: '⟨工具:⟩块',
-                onTap: () => _fillSimPreset('⟨工具:⟩块',
-                    '我记住啦。\n⟨工具:record_memory⟩{"content":"喜欢美式","category":"喜好"}⟨/工具⟩'),
-              ),
-              _PresetChip(
-                label: '中文词',
-                onTap: () => _fillSimPreset('中文词', '记住我喜欢喝美式咖啡'),
-              ),
-              _PresetChip(
-                label: '纯聊天',
-                onTap: () => _fillSimPreset('纯聊天', '今天天气真好，我们去散步吧'),
-              ),
-            ],
+          FilledButton.icon(
+            onPressed: _runSimAll,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF6A8FA8),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            icon: const Icon(Icons.playlist_play),
+            label: const Text('一键测试：内置男主回复 × 6'),
           ),
-          const SizedBox(height: 10),
+          if (_simResults.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            for (final item in _simResults) _ResultCard(item: item),
+          ],
+          const SizedBox(height: 16),
           TextField(
             controller: _simController,
             maxLines: 4,
@@ -502,24 +524,6 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
           ],
         ],
       ),
-    );
-  }
-}
-
-class _PresetChip extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-
-  const _PresetChip({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return ActionChip(
-      label: Text(label, style: const TextStyle(fontSize: 12)),
-      backgroundColor: const Color(0xFFF3E8EE),
-      side: const BorderSide(color: Color(0xFFE8D5DE)),
-      labelStyle: const TextStyle(color: Color(0xFF6A4A5A)),
-      onPressed: onTap,
     );
   }
 }

@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import '../../ai_provider/models.dart';
 import '../../butler/tools/tool_intent_parser.dart';
 import '../../models/male_lead.dart';
-import '../../services/character_service.dart';
 import '../../services/chat_database_service.dart';
 import '../../services/chat_memory_service.dart';
 import '../../models/chat_memory.dart';
@@ -311,35 +310,26 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       final toolHint = _buildExplicitToolHint(t);
       // 用户 8-03 05:31：用户直接发 JSON 工具指令（兼容不同 AI 的指令格式）→
       // 不走男主主调用（男主收到 JSON 会空回复），直接进工具轮执行，
-      // 工具结果回传男主后再由男主说话
-      // 用户 8-03 05:59：改认全部格式（⟨工具:⟩块/JSON/中文），与男主回复解析一致
-      final userJsonCalls = ToolIntentParser.extract(t);
-      // 工具调用轮（function calling）：模型请求工具 → 执行（弹窗审批）→ 回传 → 再生成
-      var result;
-      if (userJsonCalls != null && userJsonCalls.isNotEmpty) {
-        result = AIProviderResult(text: '', toolCalls: userJsonCalls);
-        DebugLogger.log('AI路由',
-            '🔧 用户消息含 JSON 工具指令: ${userJsonCalls.map((c) => c['name']).join('、')}');
-      } else {
-        result = await _aiSvc.generateReply(
-          sendText,
-          personaId,
-          personaName: personaName,
-          personaPrompt: _currentPersonaPrompt(),
-          sessionId: _chatSessionId,
-          // 用户 8-03 02:41 模块化重构：技能注入 + 温控询问 + 获准记忆 → USER_PROFILE
-          //（用户状态）；审批反馈 + 工具强制提示 → TASK_STATE（任务状态）
-          userProfile: [
-            if (skillInjection != null) skillInjection,
-            if (keywordAsk != null) keywordAsk,
-            ...recallInjection,
-          ].join('\n'),
-          taskState: [
-            if (_pendingFeedback != null) _pendingFeedback!,
-            if (toolHint != null) toolHint,
-          ].join('\n'),
-        );
-      }
+      // 用户 8-03 06:01：撤销用户消息直连工具——调工具是男主的技能，
+      // 用户消息一律走男主，由男主决定是否调用（男主回复由管家解析执行）
+      var result = await _aiSvc.generateReply(
+        sendText,
+        personaId,
+        personaName: personaName,
+        personaPrompt: _currentPersonaPrompt(),
+        sessionId: _chatSessionId,
+        // 用户 8-03 02:41 模块化重构：技能注入 + 温控询问 + 获准记忆 → USER_PROFILE
+        //（用户状态）；审批反馈 + 工具强制提示 → TASK_STATE（任务状态）
+        userProfile: [
+          if (skillInjection != null) skillInjection,
+          if (keywordAsk != null) keywordAsk,
+          ...recallInjection,
+        ].join('\n'),
+        taskState: [
+          if (_pendingFeedback != null) _pendingFeedback!,
+          if (toolHint != null) toolHint,
+        ].join('\n'),
+      );
       // 用完即清（反馈/记忆只注入一次）
       _pendingFeedback = null;
       _pendingRecall = null;
