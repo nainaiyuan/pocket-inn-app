@@ -200,11 +200,14 @@ class _MessageBubbleState extends State<MessageBubble>
           // 头像 + 气泡 + 气泡框外居中的已读（8-03 18:43 用户要求）：
           // 左消息：头像＋气泡＋已读（气泡右侧，垂直居中）
           // 右消息：已读＋气泡＋头像（气泡左侧，垂直居中）
+          // 8-03 19:1x（用户反馈怼穿）：Flexible 必须直接在外层 Row（内层
+          // Row 包裹会破坏宽度约束 → 长文本撑穿到用户那边）；crossAxisAlignment
+          // 用 center 让已读动态垂直居中于气泡框
           Row(
             mainAxisAlignment: message.isMe
                 ? MainAxisAlignment.end
                 : MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // 分组模式：只有组内第一条才显示头像（用户没插话 = 连着说）
               if (!message.isMe && (!widget.isGrouped || widget.isGroupStart)) ...[
@@ -216,16 +219,10 @@ class _MessageBubbleState extends State<MessageBubble>
                 ),
                 const SizedBox(width: 8),
               ],
-              // 气泡 + 已读：内层 Row 让已读垂直居中于气泡框，
-              // 外层 Row 保持 end 让头像贴底
-              Row(
-                mainAxisSize: MainAxisSize.max,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // 用户消息（右对齐）：已读在气泡左侧（男主那一侧）
-                  if (message.isMe) _ReadTag(message: message),
-                  // 气泡
-                  Flexible(
+              // 用户消息（右对齐）：已读在气泡左侧（男主那一侧）
+              if (message.isMe) _ReadTag(message: message),
+              // 气泡
+              Flexible(
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
@@ -348,10 +345,8 @@ class _MessageBubbleState extends State<MessageBubble>
                   ),
                 ),
               ),
-                  // 男主消息（左对齐）：已读在气泡右侧（用户那一侧）
-                  if (!message.isMe) _ReadTag(message: message),
-                ],
-              ),
+              // 男主消息（左对齐）：已读在气泡右侧（用户那一侧）
+              if (!message.isMe) _ReadTag(message: message),
               if (message.isMe && (!widget.isGrouped || widget.isGroupStart)) ...[
                 const SizedBox(width: 8),
                 _Avatar(isUser: true),

@@ -271,6 +271,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final userMsgId = DateTime.now().millisecondsSinceEpoch.toString();
     // 本轮男主第一句话气泡 id 重置（工具气泡只挂本轮第一句话头上）
     _firstAiMsgId = null;
+    // 8-03 19:1x：记录本轮用户消息 id（工具气泡固定插它后面）
+    _lastUserMsgId = userMsgId;
     _msgKey.currentState?.appendMessage(ChatMessage(id: userMsgId, text: t, isMe: true));
     final lid = _state.leadId;
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
@@ -481,32 +483,69 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             }
             // 8-03 06:37：男主写的完整句（content）原样保存 + 关键词落库
             _appendToolBubble('正在记录：「$content」（$category）…');
-            toolResult = await _executeRecordTool(
-              category,
-              content,
-              keywords: words,
-            );
+            // 8-03 19:1x（用户要求：调工具要确认）：写记忆前让用户点头
+            final ok = await _approveToolCall('记录', '「$content」\n\n类别：$category\n\n要让他记住吗？');
+            if (!ok) {
+              _appendToolBubble('❌ 你拒绝了记录「$content」');
+              toolResult = _ToolResult(false, '用户拒绝：暂不记录「$content」');
+            } else {
+              toolResult = await _executeRecordTool(
+                category,
+                content,
+                keywords: words,
+              );
+            }
           } else if (name == 'recall_memory') {
             final query = args['query']?.toString() ?? '';
             final category = args['category']?.toString() ?? '';
             _appendToolBubble('正在查记忆：$query…');
-            toolResult = await _executeRecallTool(query, category);
+            // 8-03 19:1x（用户要求：调工具要确认）：查记忆是读用户隐私，
+            // 必须先问用户（和文本协议 #查记忆# 的 _approveRecall 一致）
+            final ok = await _approveToolCall('查记忆', '他想查关于「$query」的记忆，允许吗？');
+            if (!ok) {
+              _appendToolBubble('❌ 你拒绝了查「$query」');
+              toolResult = _ToolResult(false, '用户拒绝：暂不查「$query」');
+            } else {
+              toolResult = await _executeRecallTool(query, category);
+            }
           } else if (name == 'save_identity_memory') {
             // 37批：男主用原生工具写代号记忆（替代 #A# 文本协议，DeepSeek 更可靠）
             final code = args['code']?.toString() ?? '';
             final content = args['content']?.toString() ?? '';
             _appendToolBubble('男主想记住关于「$code」的事…');
-            toolResult = await _executeSaveIdentityMemoryTool(code, content);
+            // 8-03 19:1x：写代号记忆也确认
+            final ok = await _approveToolCall('记住代号', '「$code」：$content\n\n要让他记住吗？');
+            if (!ok) {
+              _appendToolBubble('❌ 你拒绝了记住「$code」');
+              toolResult = _ToolResult(false, '用户拒绝：暂不记住「$code」');
+            } else {
+              toolResult = await _executeSaveIdentityMemoryTool(code, content);
+            }
           } else if (name == 'list_tools') {
+            // 8-03 19:1x：list_tools 也出"正在…"气泡（之前只有结果气泡，
+            // 用户反馈"根本没看见工具气泡"）——工具调用必须有可见反馈
+            _appendToolBubble('男主想查看工具清单…');
             toolResult = _executeListToolsTool();
           } else if (name == 'write_diary') {
             final content = args['content']?.toString() ?? '';
             _appendToolBubble('男主在写日记…');
-            toolResult = await _executeWriteDiaryTool(content);
+            final ok = await _approveToolCall('写日记', '「$content」\n\n要让他记下来吗？');
+            if (!ok) {
+              _appendToolBubble('❌ 你拒绝了写日记');
+              toolResult = _ToolResult(false, '用户拒绝：暂不写日记');
+            } else {
+              toolResult = await _executeWriteDiaryTool(content);
+            }
           } else if (name == 'query_diary') {
             final keyword = args['keyword']?.toString() ?? '';
             _appendToolBubble('男主在翻日记：$keyword…');
-            toolResult = await _executeQueryDiaryTool(keyword);
+            final ok = await _approveToolCall('翻日记', '他想查日记里关于「$keyword」的内容，允许吗？');
+            if (!ok) {
+              _appendToolBubble('❌ 你拒绝了翻日记');
+              toolResult = _ToolResult(false, '用户拒绝：暂不翻日记');
+            } else {
+              toolResult = await _executeQueryDiaryTool(keyword);
+            }
           } else {
             toolResult = _ToolResult(false, '未知工具：$name');
           }
@@ -1122,10 +1161,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     );
     final area = _msgKey.currentState;
     if (area != null) {
-      // 8-03 18:2x：工具气泡挂男主第一句话头上（第一句话上方）。
-      // 用户要求：调工具显示在第一句话的顶部，第二句话在第一句话下面，
-      // 工具始终跟第一句话绑定。没有第一句话（男主直接调工具）→ 正常追加。
-      area.appendMessage(msg, insertBeforeId: _firstAiMsgId);
+      // 8-03 19:1x（用户反馈"工具气泡看不见"）：不挂男主第一句话头上了，
+      // 固定插到本轮用户消息后面（insertBeforeId: _lastUserMsgId）——
+      // 用户消息 → 🔧 工具气泡 → 男主第一句话，位置固定用户必见。
+      // 之前挂 _firstAiMsgId：男主直接调工具（第一轮无文本）时 id 为 null，
+      // 或残留/找不到目标时插入位置漂移，气泡跑到屏幕外看不见。
+      area.appendMessage(msg, insertBeforeId: _lastUserMsgId);
     } else {
       // 聊天页没挂载（切走/后台）→ 只落库，回来从 DB 加载能看到
       ChatStorageService().appendMessage(personaId, msg);
@@ -1141,6 +1182,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 8-03 18:2x：本轮男主第一句话气泡 id——工具气泡都挂在它头上
   /// （用户要求：调工具显示在第一句话的上方，后续句子在下方）
   String? _firstAiMsgId;
+
+  /// 8-03 19:1x：本轮用户消息气泡 id——工具气泡固定插在它后面
+  /// （用户消息 → 🔧 工具气泡 → 男主第一句话，用户必见）
+  String? _lastUserMsgId;
 
   /// 男主回复 → 用户可见文本（剥离工具块 + #指令 + 还原代号）。
   /// 8-03 18:2x：渐进显示用——每轮文本单独显示，不等全部跑完
@@ -1191,6 +1236,38 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   /// 记录审批：男主想记用户喜好 → 用户确认/拒绝 → 反馈男主
+  /// 8-03 19:1x（用户要求：调工具要确认）：原生工具轮通用确认弹窗。
+  /// 有副作用/涉及用户隐私的工具执行前让用户点头（list_tools 无副作用不弹）。
+  /// 用户拒绝 → 返回 false → 工具结果里带"用户拒绝"，男主自然应对，不卡流程。
+  Future<bool> _approveToolCall(String toolName, String description) async {
+    if (!mounted) return true; // 页面已关闭不阻塞工具
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('🔧 男主想$toolName'),
+        content: Text(
+          description,
+          style: const TextStyle(fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('不允许', style: TextStyle(color: Color(0xFF8A7A80))),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFC896B4)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('允许'),
+          ),
+        ],
+      ),
+    );
+    return approved == true;
+  }
+
   Future<void> _approveRecord(String content) async {
     if (content.isEmpty) return;
     if (!mounted) return;
