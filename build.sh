@@ -41,41 +41,43 @@ curl -s -X POST -H "Authorization: token $TOKEN" -H "Accept: application/vnd.git
 
 echo "=== 3/4 等待构建完成（最多 15 分钟）==="
 RUN_ID=""
-for i in $(seq 1 90); do
+# 8-03 18:5x：dispatch 后先按 head_sha 找到"本次"的 run（API 有延迟，
+#   直接找最新 completed 会撞到旧 run 导致误报 cancelled/失败）
+MY_RUN=""
+for i in $(seq 1 30); do
   sleep 10
-  RUN_ID=$(curl -s -H "Authorization: token $TOKEN" \
-    "https://api.github.com/repos/$REPO/actions/runs?per_page=5&event=workflow_dispatch" | \
+  MY_RUN=$(curl -s -H "Authorization: token $TOKEN" \
+    "https://api.github.com/repos/$REPO/actions/runs?per_page=15&event=workflow_dispatch" | \
     python3 -c "
 import json,sys
 runs=json.load(sys.stdin)['workflow_runs']
 for r in runs:
-    if r['status'] in ('queued','in_progress','waiting','requested'):
-        print(r['id']); break
+    if r['head_sha'] == '$LOCAL_SHA':
+        print(r['id'], r['status']); break
 ")
-  # 找最新一条已完成的 workflow_dispatch run
-  DONE=$(curl -s -H "Authorization: token $TOKEN" \
-    "https://api.github.com/repos/$REPO/actions/runs?per_page=5&event=workflow_dispatch" | \
-    python3 -c "
-import json,sys
-runs=json.load(sys.stdin)['workflow_runs']
-for r in runs:
-    if r['status'] == 'completed':
-        print(r['id'], r['head_sha'], r['conclusion']); break
-")
-  if [ -n "$DONE" ]; then
-    DID=$(echo $DONE | cut -d' ' -f1)
-    DSHA=$(echo $DONE | cut -d' ' -f2)
-    DCONC=$(echo $DONE | cut -d' ' -f3)
-    echo "run $DID 完成：$DCONC（sha=$DSHA）"
-    if [ "$DCONC" != "success" ]; then
-      echo "✖ 构建失败或取消（$DCONC）→ 看 https://github.com/$REPO/actions/runs/$DID"
+  if [ -n "$MY_RUN" ]; then break; fi
+done
+if [ -z "$MY_RUN" ]; then
+  echo "✖ 5 分钟没看到本次 HEAD（$LOCAL_SHA）的 run，放弃"
+  exit 1
+fi
+MY_ID=$(echo $MY_RUN | cut -d' ' -f1)
+echo "本次 run：$MY_ID（HEAD=$LOCAL_SHA）"
+
+for i in $(seq 1 60); do
+  sleep 10
+  ST=$(curl -s -H "Authorization: token $TOKEN" \
+    "https://api.github.com/repos/$REPO/actions/runs/$MY_ID" | \
+    python3 -c "import json,sys; r=json.load(sys.stdin); print(r['status'], r['conclusion'])")
+  S=$(echo $ST | cut -d' ' -f1)
+  if [ "$S" = "completed" ]; then
+    C=$(echo $ST | cut -d' ' -f2)
+    echo "run $MY_ID 完成：$C"
+    if [ "$C" != "success" ]; then
+      echo "✖ 构建失败或取消（$C）→ 看 https://github.com/$REPO/actions/runs/$MY_ID"
       exit 1
     fi
-    if [ "$DSHA" != "$LOCAL_SHA" ]; then
-      echo "✖ 构建的不是本地 HEAD（$DSHA != $LOCAL_SHA）→ 先 push 再构建"
-      exit 1
-    fi
-    RUN_ID=$DID
+    RUN_ID=$MY_ID
     break
   fi
   if [ $((i % 12)) -eq 0 ]; then echo "  ...已等 $((i * 10)) 秒"; fi
