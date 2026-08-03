@@ -20,6 +20,7 @@ import '../services/api_config_service.dart';
 import '../services/i_openai_api_service.dart';
 import '../services/openai_compatible_api_service.dart';
 import '../utils/debug_logger.dart';
+import '../pages/chat/services/mock_ai_provider.dart';
 import 'failover_router.dart';
 import 'models.dart';
 import 'provider_presets.dart';
@@ -27,6 +28,32 @@ import 'tool_format_adapter.dart';
 
 class AIProviderManager {
   AIProviderManager._();
+
+  /// 内置测试 AI 的固定 id（用户 8-03 20:38 要求：内置一个 AI，
+  /// 不用配置 API 就能测——模拟器扮演 DeepSeek，不联网不花 token）
+  static const String builtinMockId = 'builtin-mock';
+
+  /// 内置测试 AI 的 provider 定义（不持久化，每次启动自动有）
+  AIProviderConfig get _builtinMockConfig => const AIProviderConfig(
+        id: builtinMockId,
+        name: '🧪 测试AI（内置）',
+        type: ProviderType.local,
+        baseUrl: 'mock://builtin',
+        model: 'mock-1',
+        note: '内置模拟器：不联网不花token，测试对话/工具调用链路用',
+        priority: 99999,
+      );
+
+  final MockAIProvider _builtinMock = MockAIProvider();
+
+  /// 全部 provider（含内置测试AI），按优先级排序
+  List<AIProviderConfig> _allProviders() {
+    final list = _sorted();
+    if (!list.any((c) => c.id == builtinMockId)) {
+      list.add(_builtinMockConfig);
+    }
+    return list;
+  }
 
   static final AIProviderManager instance = AIProviderManager._();
 
@@ -151,12 +178,12 @@ class AIProviderManager {
   // 只读
   // ---------------------------------------------------------------------------
 
-  /// 全部 Provider，按优先级排序。
-  List<AIProviderConfig> get providers => List.unmodifiable(_sorted());
+  /// 全部 Provider，按优先级排序（含内置测试AI）。
+  List<AIProviderConfig> get providers => List.unmodifiable(_allProviders());
 
   /// 带运行时健康状态的列表（UI 展示用）。
   List<AIProviderState> get providerStates => [
-        for (final config in _sorted())
+        for (final config in _allProviders())
           _router.stateOf(config.id) ?? AIProviderState(config: config),
       ];
 
@@ -208,7 +235,7 @@ class AIProviderManager {
   /// 有绑定 = 绑定顺序；无绑定 = 全局优先级顺序。只含启用的。
   List<AIProviderConfig> candidatesFor(String? personaId) {
     final binding = bindingFor(_settingsKey(personaId));
-    final all = _sorted();
+    final all = _allProviders();
     if (binding != null && binding.isNotEmpty) {
       final byId = {for (final config in all) config.id: config};
       return [
@@ -426,6 +453,23 @@ class AIProviderManager {
         allowFailover: autoSwitchFor(personaId),
         isAbort: (error) => error is ChatCompletionCancelledException,
         action: (config) async {
+          // 内置测试 AI：不走网络，模拟器扮演 DeepSeek
+          // （用户 8-03 20:38 要求：不用配置 API 就能测）
+          if (config.id == builtinMockId) {
+            final mock = _builtinMock.chat(
+              messages,
+              toolRound: messages.any((m) => m.role == 'tool'),
+            );
+            return AIProviderResult(
+              text: mock.text,
+              thinking: mock.thinking,
+              reasoningContent: mock.reasoningContent,
+              toolCalls: mock.toolCalls,
+              usage: mock.usage,
+              providerId: builtinMockId,
+              providerName: config.name,
+            );
+          }
           // 工具格式翻译层（用户 19:29/19:34/19:42 设计）：
           // 底层调用/参数/执行不变，只翻译"工具声明/返回"格式。
           // - openai：直通（translateTools 原样返回）

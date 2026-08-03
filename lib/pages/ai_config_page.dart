@@ -109,7 +109,8 @@ class _AiConfigPageState extends State<AiConfigPage> {
                 )
               else
                 for (var i = 0; i < providers.length; i++)
-                  _buildProviderRow(providers[i], i, providers.length, states),
+                  if (providers[i].id != AIProviderManager.builtinMockId)
+                    _buildProviderRow(providers[i], i, providers.length, states),
               const SizedBox(height: 16),
 
               // ---- 添加 AI ----

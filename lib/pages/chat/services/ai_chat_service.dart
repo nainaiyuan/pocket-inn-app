@@ -5,7 +5,6 @@ import '../../../ai_provider/models.dart';
 import '../../../ai_provider/price_table.dart';
 import '../../../services/openai_compatible_api_service.dart' show ChatCompletionCancelToken;
 import 'context_manager.dart';
-import 'mock_ai_provider.dart';
 import 'chat_storage_service.dart';
 import '../../../models/chat_message.dart';
 import '../../../butler/context/context_tracker.dart';
@@ -25,14 +24,9 @@ class AiChatService {
   /// 最近一次组装好的完整 prompt（📄 按钮查看：男主"知道什么"一目了然）
   String? lastPromptText;
 
-  /// 🧪 模拟 AI 模式（找bug工具，用户 8-03 20:3x 要求）：
-  /// 开 → 不走真实 API，由 MockAIProvider 扮演 DeepSeek（脚本化行为 +
-  /// 工具轮回传格式校验），验证程序链路是否有 bug；关 → 真实 AI。
-  bool mockMode = false;
-  final MockAIProvider mockAI = MockAIProvider();
-
-  /// 统一聊天入口：mock 模式走模拟器，否则走真实 AIProviderManager
-  /// （重试路径也走这里 → mock 时全链路 100% 一致）
+  /// 统一聊天入口（8-03 20:3x 引入，保留统一出口；mock 已由路由层
+  /// AIProviderManager 处理——选中内置"🧪 测试AI（内置）"即走模拟器，
+  /// 不联网不花 token，不用手动开关）
   Future<AIProviderResult> _chat(
     String? personaId,
     List<AIChatMessage> messages, {
@@ -41,9 +35,6 @@ class AiChatService {
     List<Map<String, dynamic>>? tools,
     ChatCompletionCancelToken? cancellationToken,
   }) {
-    if (mockMode) {
-      return Future.value(mockAI.chat(messages, toolRound: toolRound));
-    }
     return AIProviderManager.instance.chat(
       personaId,
       messages,

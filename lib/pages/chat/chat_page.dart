@@ -1148,9 +1148,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   // ===== 话术栏（找bug工具，8-03 20:3x 用户要求）=====
-  // 预设用户话术一键发送 + 🤖/☁️ 模拟AI切换。
-  // 模拟AI模式：不走真实API，MockAIProvider 扮演 DeepSeek（思考/调工具/
-  // 校验工具轮回传格式），观察管家全链路处理，判断是程序bug还是AI行为。
+  // 预设用户话术一键发送（走完整真实链路）。
+  // 测试 AI 不用手动开关：右上角 AI 选择里选"🧪 测试AI（内置）"即可
+  // ——模拟器扮演 DeepSeek（思考/调工具/校验工具轮回传格式），
+  // 不联网不花 token，用户不用配置 API。
   static const _scriptPhrases = [
     '你好呀',
     '记住我喜欢喝美式咖啡',
@@ -1166,40 +1167,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       child: ListView(
         scrollDirection: Axis.horizontal,
         children: [
-          // 🤖/☁️ 模拟AI切换
-          GestureDetector(
-            onTap: () {
-              setState(() => _aiSvc.mockMode = !_aiSvc.mockMode);
-              DebugLogger.log('模拟AI',
-                  '${_aiSvc.mockMode ? '🤖 已开启模拟AI模式（不走真实API）' : '☁️ 已关闭模拟AI，走真实API'}');
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text(_aiSvc.mockMode
-                    ? '🤖 模拟AI模式：男主由模拟器扮演，不花token'
-                    : '☁️ 真实AI模式：对话走真实API'),
-                duration: const Duration(seconds: 2),
-              ));
-            },
-            child: Container(
-              margin: const EdgeInsets.only(right: 6),
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              decoration: BoxDecoration(
-                color: _aiSvc.mockMode
-                    ? const Color(0xFF7BA88F)
-                    : Colors.black12,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Center(
-                child: Text(
-                  _aiSvc.mockMode ? '🤖 模拟AI' : '☁️ 真实AI',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: _aiSvc.mockMode ? Colors.white : Colors.black54,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-          ),
           // 预设话术
           for (final p in _scriptPhrases)
             GestureDetector(
