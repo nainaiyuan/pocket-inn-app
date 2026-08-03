@@ -253,10 +253,9 @@ class AiChatService {
         }
       }
     }
-    // 记录用户消息（话题检测，本地免费）
-    if (!toolRound && message.trim().isNotEmpty) {
-      ContextManager.instance.feedUserMessage(personaId, message);
-    }
+    // 记录用户消息（话题检测，本地免费）——已移到 history 组装之后
+    // （8-03 19:4x 用户反馈"没写当前消息、聊天全混在一起"：先 feed 再组装
+    // 会把当前消息混进【上下文参考】，模型看到两条相同消息分不清哪条要回复）
     // 首次请求：恢复摘要区（不重建历史原文——历史=本次对话实时记录，
     // DB 里是原始/还原后文本，硬拉会泄露真实称呼，用户 20:08 指示）
     if (!_contextRestored.contains(personaId)) {
@@ -288,6 +287,16 @@ class AiChatService {
     final historyMsgs = (stateful && !statefulRecover) || toolRound
         ? <AIChatMessage>[]
         : ContextManager.instance.buildHistoryMessages(personaId);
+    // 8-03 19:4x（用户反馈"没写当前消息、聊天全混在一起"）：
+    // 当前消息在 history 组装【之后】再 feed——之前先 feed 再组装，
+    // 当前消息混进【上下文参考】被标"无需回复"，又单独拼成 user，
+    // 模型看到两条相同消息分不清哪条要回复 → 男主分段回复错乱、
+    // 第一段紧贴用户消息。现在历史里只有【已聊过的】内容，
+    // 当前消息只在【User】出现一次，边界清楚。
+    // （compact/summarize 仍在 feed 前跑：总结的是不含当前消息的旧原文）
+    if (!toolRound && message.trim().isNotEmpty) {
+      ContextManager.instance.feedUserMessage(personaId, message);
+    }
     // 透明化：保存完整 prompt 供 📄 按钮查看
     // 用户 8-03 00:07：标签不该叫"历史"，是"上下文参考"——
     // 本次对话实时记录（用户+男主交替），不是档案历史
