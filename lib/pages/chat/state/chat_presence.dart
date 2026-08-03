@@ -152,6 +152,38 @@ class ChatPresence extends ChangeNotifier {
     if (changed) notifyListeners();
   }
 
+  /// 8-03 18:27（用户语义）："正在输出"只在男主打字时显示，
+  /// 调工具/执行工具期间不显示。引用计数——
+  /// 每轮生成（generateReply）前 begin，该轮文字播完（打字机 done）end；
+  /// 工具轮之间不 begin → 工具阶段自动不显示
+  int _typingRefs = 0;
+
+  void beginTyping() {
+    _typingRefs++;
+    if (!_isTyping) {
+      _isTyping = true;
+      _isViewing = true;
+      notifyListeners();
+    }
+  }
+
+  void endTyping() {
+    if (_typingRefs > 0) _typingRefs--;
+    if (_typingRefs == 0 && _isTyping) {
+      _isTyping = false;
+      notifyListeners();
+    }
+  }
+
+  /// 强制清零（整轮流程结束/异常兜底/切换角色）
+  void resetTyping() {
+    _typingRefs = 0;
+    if (_isTyping) {
+      _isTyping = false;
+      notifyListeners();
+    }
+  }
+
   /// 男主开始看消息（还没输入）—— 预留：延迟模拟"先看到再打字"
   void setViewing(bool viewing) {
     final changed = _isViewing != viewing;

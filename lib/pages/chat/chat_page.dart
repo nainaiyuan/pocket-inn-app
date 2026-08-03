@@ -331,6 +331,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 生成请求发出（男主开始处理）→ 用户消息立即变"已读"；
       // 不再等回复完成才 markAllRead
       ChatPresence.instance.markRead(userMsgId);
+      // 8-03 18:27（用户语义）：生成中 = "正在输出"（男主打字阶段）
+      ChatPresence.instance.beginTyping();
       var result = await _aiSvc.generateReply(
         sendText,
         personaId,
@@ -394,7 +396,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             isMe: false,
             thinkingChain: result.reasoningContent,
           ));
+          // 文字进入打字机播放 → "正在输出"由打字机播完时 endTyping 关闭
+        } else {
+          // 文本被剥离成空（纯指令/工具块）→ 本轮没有打字 → 关"正在输出"
+          ChatPresence.instance.endTyping();
         }
+      } else {
+        // 第一轮没说话（直接调工具）→ 工具阶段不显示"正在输出"
+        ChatPresence.instance.endTyping();
       }
       // function calling 循环：模型请求工具 → 执行 → 回传 → 再生成（最多3轮防死循环）
       // 用户 8-03 00:55：日志里看不见工具调用 → 每个工具调用都记日志
@@ -532,6 +541,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                 '基于结果自然地回复用户，不要再调用工具。',
           ));
         }
+        // 8-03 18:27：工具轮生成也是男主打字阶段 → 显示"正在输出"
+        ChatPresence.instance.beginTyping();
         result = await _aiSvc.generateReply(
           '',
           personaId,
@@ -552,7 +563,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               isMe: false,
               thinkingChain: result.reasoningContent,
             ));
+            // 打字机接管，"正在输出"由播完时 endTyping 关闭
+          } else {
+            ChatPresence.instance.endTyping();
           }
+        } else {
+          // 工具轮没说话（可能又调工具）→ 工具阶段不显示
+          ChatPresence.instance.endTyping();
         }
       }
 
@@ -646,8 +663,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     } finally {
       // 生成锁释放（无论如何）
       _generating = false;
-      // 无论如何：停止"正在输入"（失败则保持未读，男主没读到）
-      ChatPresence.instance.setTyping(false);
+      // 无论如何：清零"正在输出"（打字机播完已 endTyping，这里兜底；
+      // 失败则保持未读，男主没读到）
+      ChatPresence.instance.resetTyping();
       // 作息规律：当天首次聊天 → 记开始时间（用户一般几点来找男主）
       if (personaId.isNotEmpty) {
         unawaited(_recordChatStart());

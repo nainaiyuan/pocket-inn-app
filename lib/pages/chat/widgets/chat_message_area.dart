@@ -47,8 +47,8 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
     super.didUpdateWidget(old);
     if (old.currentPersona?.id != widget.currentPersona?.id) {
       _exitSelectMode();
-      // 切换角色：清掉"正在输入"状态
-      ChatPresence.instance.setTyping(false);
+      // 切换角色：清掉"正在输出"状态（引用计数一并清零）
+      ChatPresence.instance.resetTyping();
       _loadMessages();
     }
   }
@@ -334,6 +334,8 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
                             if (msg.id != null) {
                               ChatPresence.instance.markRead(msg.id!);
                             }
+                            // 8-03 18:27：打字机播完 = 这轮打字结束 → 关"正在输出"
+                            ChatPresence.instance.endTyping();
                             // 打字机播完：气泡长定型，滚到底让全文可见
                             WidgetsBinding.instance
                                 .addPostFrameCallback((_) {
