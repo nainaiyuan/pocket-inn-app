@@ -3,7 +3,9 @@ import 'dart:async';
 import '../../../ai_provider/ai_provider_manager.dart';
 import '../../../ai_provider/models.dart';
 import '../../../ai_provider/price_table.dart';
+import '../../../services/openai_compatible_api_service.dart' show ChatCompletionCancelToken;
 import 'context_manager.dart';
+import 'mock_ai_provider.dart';
 import 'chat_storage_service.dart';
 import '../../../models/chat_message.dart';
 import '../../../butler/context/context_tracker.dart';
@@ -22,6 +24,34 @@ class AiChatService {
 
   /// 最近一次组装好的完整 prompt（📄 按钮查看：男主"知道什么"一目了然）
   String? lastPromptText;
+
+  /// 🧪 模拟 AI 模式（找bug工具，用户 8-03 20:3x 要求）：
+  /// 开 → 不走真实 API，由 MockAIProvider 扮演 DeepSeek（脚本化行为 +
+  /// 工具轮回传格式校验），验证程序链路是否有 bug；关 → 真实 AI。
+  bool mockMode = false;
+  final MockAIProvider mockAI = MockAIProvider();
+
+  /// 统一聊天入口：mock 模式走模拟器，否则走真实 AIProviderManager
+  /// （重试路径也走这里 → mock 时全链路 100% 一致）
+  Future<AIProviderResult> _chat(
+    String? personaId,
+    List<AIChatMessage> messages, {
+    bool toolRound = false,
+    Map<String, dynamic>? defaults,
+    List<Map<String, dynamic>>? tools,
+    ChatCompletionCancelToken? cancellationToken,
+  }) {
+    if (mockMode) {
+      return Future.value(mockAI.chat(messages, toolRound: toolRound));
+    }
+    return AIProviderManager.instance.chat(
+      personaId,
+      messages,
+      defaults: defaults,
+      tools: tools,
+      cancellationToken: cancellationToken,
+    );
+  }
 
   /// 已做过上下文恢复的 persona（防重复恢复）
   final Set<String> _contextRestored = {};
@@ -315,7 +345,8 @@ class AiChatService {
               '这些是已经聊过的内容，你只需要参考它们保持人设和记忆连贯，'
               '【不要回复】它们——你只需要回复最后一条【用户】消息）\n'
               '${historyMsgs.map((m) => '[${m.role}] ${m.content}').join('\n')}';
-    lastPromptText = '【System】\n$systemPrompt$historyText\n\n【User】\n$message';
+    lastPromptText = '【System】\n$systemPrompt$historyText\n\n'
+        '【User·当前消息】（这是用户刚刚发的消息，只需要回复这一条）\n$message';
     DebugLogger.log('Prompt', '本次组装完成（${lastPromptText!.length} 字，可点 📄 查看）');
     // 上下文参考作为一条 system 消息（role: system 明确是"参考"不是"待回复"），
     // 与当前 user 消息彻底分开 → 男主不会把历史当待回复内容
@@ -334,12 +365,13 @@ class AiChatService {
     ];
     late final AIProviderResult result;
     try {
-      result = await manager.chat(
+      result = await _chat(
         personaId,
         messages,
         // 工具轮不带工具定义（避免模型再次调用）；正常轮始终带
         // （文本与工具可共存：模型可同时说话+调工具，chat_page 分步处理）
         tools: toolRound ? null : butlerTools,
+        toolRound: toolRound,
       );
     } on Object catch (e) {
       // 上下文超限 → 窗口自动校准（表值只是起点，真实 API 行为说了算）
@@ -381,10 +413,11 @@ class AiChatService {
       // 像技能被拦截什么都不输出——空回复不该是异常，要尽力救回来）
       DebugLogger.log('AI路由', '⚠️ 空回复，重试第 1 次（带工具）');
       // 第 1 次重试带 tools（用户 01:26：重试不带 tools → 男主想调工具也调不了）
-      final retry = await manager.chat(
+      final retry = await _chat(
         personaId,
         messages,
         tools: toolRound ? null : butlerTools,
+        toolRound: toolRound,
       );
       if (retry.text.trim().isNotEmpty ||
           (retry.toolCalls != null && retry.toolCalls!.isNotEmpty)) {
@@ -401,7 +434,7 @@ class AiChatService {
       // 第 2 次重试不带 tools：空回复可能是工具定义干扰 → 排除后至少能正常聊天
       // （01:26 改坏的点：只重试一次且带 tools，空回复救不回来就直接抛异常）
       DebugLogger.log('AI路由', '⚠️ 空回复，重试第 2 次（不带工具）');
-      final retry2 = await manager.chat(personaId, messages);
+      final retry2 = await _chat(personaId, messages, toolRound: toolRound);
       if (retry2.text.trim().isNotEmpty) {
         // 8-03 20:1x：重试第2次成功同样要 feed（同上）
         ContextManager.instance
@@ -569,7 +602,7 @@ class AiChatService {
         light: _statefulInfoFor(personaId).$1,
       );
       final historyMsgs = ContextManager.instance.buildHistoryMessages(personaId);
-      final res = await manager.chat(
+      final res = await _chat(
         personaId,
         [
           AIChatMessage(role: 'system', content: systemPrompt),

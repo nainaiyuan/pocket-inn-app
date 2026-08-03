@@ -1032,6 +1032,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                       ],
                     ),
                   ),
+                  // 8-03 20:3x（用户要求）：话术栏——预设用户话术一键发送 +
+                  // 🤖/☁️ 模拟AI切换（找bug工具：不连真实API也能走完整链路）
+                  _buildScriptBar(),
                   ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
                     onPlusTap: _togglePlus, onSendTap: _sendMsg),
                 ],
@@ -1142,6 +1145,93 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   void _showDebugLog() {
     showDebugLogSheet(context);
+  }
+
+  // ===== 话术栏（找bug工具，8-03 20:3x 用户要求）=====
+  // 预设用户话术一键发送 + 🤖/☁️ 模拟AI切换。
+  // 模拟AI模式：不走真实API，MockAIProvider 扮演 DeepSeek（思考/调工具/
+  // 校验工具轮回传格式），观察管家全链路处理，判断是程序bug还是AI行为。
+  static const _scriptPhrases = [
+    '你好呀',
+    '记住我喜欢喝美式咖啡',
+    '我之前说过喜欢什么吗',
+    '你有什么工具',
+    '帮我写日记',
+  ];
+
+  Widget _buildScriptBar() {
+    return Container(
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          // 🤖/☁️ 模拟AI切换
+          GestureDetector(
+            onTap: () {
+              setState(() => _aiSvc.mockMode = !_aiSvc.mockMode);
+              DebugLogger.log('模拟AI',
+                  '${_aiSvc.mockMode ? '🤖 已开启模拟AI模式（不走真实API）' : '☁️ 已关闭模拟AI，走真实API'}');
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(_aiSvc.mockMode
+                    ? '🤖 模拟AI模式：男主由模拟器扮演，不花token'
+                    : '☁️ 真实AI模式：对话走真实API'),
+                duration: const Duration(seconds: 2),
+              ));
+            },
+            child: Container(
+              margin: const EdgeInsets.only(right: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: _aiSvc.mockMode
+                    ? const Color(0xFF7BA88F)
+                    : Colors.black12,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Center(
+                child: Text(
+                  _aiSvc.mockMode ? '🤖 模拟AI' : '☁️ 真实AI',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _aiSvc.mockMode ? Colors.white : Colors.black54,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // 预设话术
+          for (final p in _scriptPhrases)
+            GestureDetector(
+              onTap: () {
+                if (_generating) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('男主正在回复，稍等一下'),
+                    duration: Duration(seconds: 1),
+                  ));
+                  return;
+                }
+                _sendMsg(p);
+              },
+              child: Container(
+                margin: const EdgeInsets.only(right: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF3E8EE),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFD9C3CE), width: 0.5),
+                ),
+                child: Center(
+                  child: Text(
+                    p,
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF6A4A5A)),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   /// 🧪 找bug工具（用户 8-03 20:0x 要求）：预设对话 + 手动写男主回复，
