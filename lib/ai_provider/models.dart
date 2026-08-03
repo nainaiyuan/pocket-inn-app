@@ -50,7 +50,7 @@ class AIProviderConfig {
     this.enabled = true,
     this.priority = 100,
     this.note = '',
-    this.toolFormat = 'openai',
+    this.toolFormat = 'auto',
     this.memoryMode = 'stateless',
     this.refreshHours,
   });
@@ -183,7 +183,7 @@ class AIProviderConfig {
       enabled: json['enabled'] as bool? ?? true,
       priority: json['priority'] as int? ?? 100,
       note: json['note'] as String? ?? '',
-      toolFormat: json['toolFormat'] as String? ?? 'openai',
+      toolFormat: json['toolFormat'] as String? ?? 'auto',
       memoryMode: json['memoryMode'] as String? ?? 'stateless',
       refreshHours: json['refreshHours'] as int?,
     );

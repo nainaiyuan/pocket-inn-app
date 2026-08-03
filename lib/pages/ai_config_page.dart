@@ -440,6 +440,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
     final model = (result['model'] as String?) ?? '';
     final memoryMode = (result['memoryMode'] as String?) ?? 'stateless';
     final refreshHours = result['refreshHours'] as int?;
+    final toolFormat = result['toolFormat'] as String?;
 
     if (existing != null) {
       // 编辑：整体保存
@@ -451,10 +452,11 @@ class _AiConfigPageState extends State<AiConfigPage> {
           model: model,
           memoryMode: memoryMode,
           refreshHours: refreshHours,
+          toolFormat: toolFormat,
         ),
       );
       DebugLogger.log(
-          'AI管理', '编辑 AI: $name（memoryMode=$memoryMode, refreshHours=$refreshHours）');
+          'AI管理', '编辑 AI: $name（memoryMode=$memoryMode, refreshHours=$refreshHours, toolFormat=$toolFormat）');
     } else if (preset != null) {
       await manager.addProviderFromPreset(preset, name: name, apiKey: apiKey);
     } else {
@@ -472,6 +474,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
           priority: 500,
           memoryMode: memoryMode,
           refreshHours: refreshHours,
+          toolFormat: toolFormat ?? 'auto',
         ),
       );
     }
@@ -635,6 +638,10 @@ class _ProviderFormState extends State<_ProviderForm> {
   /// 后台记忆模式（stateless/stateful，默认 stateless）
   String _memoryMode = 'stateless';
 
+  /// 8-03 17:36：接口格式（auto = 按 baseUrl 自动识别，其余显式指定）。
+  /// 未来任何厂商新格式：注册表加一条 / 这里加一个选项，核心代码不动
+  String _toolFormat = 'auto';
+
   /// stateful 模式的刷新周期（小时），null = 还没确定
   int? _refreshHours;
 
@@ -678,6 +685,7 @@ class _ProviderFormState extends State<_ProviderForm> {
     _customModel = !_modelOptions.contains(currentModel);
     _model = TextEditingController(text: currentModel);
     _memoryMode = existing?.memoryMode ?? 'stateless';
+    _toolFormat = existing?.toolFormat ?? 'auto';
     _refreshHours = existing?.refreshHours;
     if (_refreshHours != null) {
       _refreshHoursCtrl.text = '$_refreshHours';
@@ -808,6 +816,33 @@ class _ProviderFormState extends State<_ProviderForm> {
               ),
               const SizedBox(height: 8),
             ],
+            // ---- 接口格式（8-03 17:36：未来新厂商格式直接在这选，零改代码）----
+            DropdownButtonFormField<String>(
+              value: _toolFormat,
+              decoration: const InputDecoration(
+                labelText: '接口格式',
+                helperText:
+                    '自动 = 按地址识别（DeepSeek/通义/智谱/Kimi/本地等都走 OpenAI 兼容，'
+                    'Claude/Gemini 也能走兼容端点）；'
+                    '只有厂商是自家原生格式且没有兼容端点时才手动指定',
+              ),
+              items: const [
+                DropdownMenuItem(value: 'auto', child: Text('自动识别（默认，推荐）')),
+                DropdownMenuItem(
+                    value: 'openai', child: Text('OpenAI 兼容（DeepSeek/通义/智谱/Kimi/本地…）')),
+                DropdownMenuItem(value: 'anthropic', child: Text('Anthropic 原生（Claude）')),
+                DropdownMenuItem(value: 'gemini', child: Text('Gemini 原生（Google）')),
+                DropdownMenuItem(
+                    value: 'text', child: Text('文本协议（⟨工具:⟩ 块，最弱模型兜底）')),
+                DropdownMenuItem(value: 'none', child: Text('不用工具（纯聊天）')),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() => _toolFormat = value);
+                }
+              },
+            ),
+            const SizedBox(height: 8),
             // ---- 后台记忆模式（用户 21:19：两种 AI 分开）----
             DropdownButtonFormField<String>(
               value: _memoryMode,
@@ -917,6 +952,8 @@ class _ProviderFormState extends State<_ProviderForm> {
                     'model': _model.text,
                     'memoryMode': memoryMode,
                     'refreshHours': refreshHours,
+                    // auto = 自动识别（合法持久化值，resolve 时走注册表）
+                    'toolFormat': _toolFormat,
                   });
                 },
                 child: const Text('保存'),

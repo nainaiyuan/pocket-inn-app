@@ -315,23 +315,85 @@ class NoToolAdapter extends ToolFormatAdapter {
 
 /// 按 baseUrl / 厂商特征选择适配器。
 ///
+/// 工具格式注册表（8-03 17:36 用户需求：未来任何厂商新格式都能
+/// "一下子匹配上"，核心代码不动）。
+///
+/// 接新 AI 的最小动作：
+/// ① 有 OpenAI 兼容端点（90% 厂商都有，含 Claude 走 OpenRouter、
+///    Gemini 走官方 OpenAI 兼容端点）→ **零改动**，兜底自动匹配
+/// ② 只有自家原生端点 → 写一个 [ToolFormatAdapter] 子类（或复用现有），
+///    在 [_entries] 注册一行匹配规则
+/// ③ 用户配置里也可直接指定 [AIProviderConfig.toolFormat]，显式选择
+///    格式（openai/anthropic/gemini/text/none），不依赖 URL 识别
+class ToolFormatRegistry {
+  ToolFormatRegistry._();
+
+  /// 注册表：按顺序匹配，先到先得；最后一条是 OpenAI 兼容兜底
+  static final List<ToolFormatEntry> _entries = [
+    ToolFormatEntry(
+      match: (url) => url.contains('anthropic'),
+      adapter: const AnthropicAdapter(),
+    ),
+    ToolFormatEntry(
+      match: (url) =>
+          url.contains('generativelanguage') || url.contains('gemini'),
+      adapter: const GeminiAdapter(),
+    ),
+    // DeepSeek：OpenAI 兼容直通（原生 function calling + 思考模式工具调用，
+    // V3.2 起支持；工具轮 id 配对 + reasoning_content 原样回传由 chat_page
+    // 双通道处理——8-03 17:24 用户指示研究原生调用，不再绕文本协议）
+    ToolFormatEntry(
+      match: (url) => url.contains('deepseek'),
+      adapter: const OpenAICompatAdapter(),
+    ),
+    // 兜底：OpenAI 兼容（通义/智谱/Kimi/豆包/火山/硅基/Groq/Ollama/
+    // LM Studio/vLLM… 国内外绝大多数 API 与本地推理框架）
+    ToolFormatEntry(
+      match: (_) => true,
+      adapter: const OpenAICompatAdapter(),
+    ),
+  ];
+
+  /// 解析：用户显式指定优先（toolFormat），否则注册表按 baseUrl 匹配
+  static ToolFormatAdapter resolve(
+    String baseUrl, {
+    String? toolFormatOverride,
+  }) {
+    switch (toolFormatOverride) {
+      case 'text':
+        return const TextProtocolAdapter();
+      case 'none':
+        return const NoToolAdapter();
+      case 'anthropic':
+        return const AnthropicAdapter();
+      case 'gemini':
+        return const GeminiAdapter();
+      case 'openai':
+        return const OpenAICompatAdapter();
+    }
+    final url = baseUrl.toLowerCase();
+    for (final entry in _entries) {
+      if (entry.match(url)) return entry.adapter;
+    }
+    return const OpenAICompatAdapter();
+  }
+}
+
+/// 注册表条目：URL 匹配规则 + 对应的适配器
+class ToolFormatEntry {
+  const ToolFormatEntry({required this.match, required this.adapter});
+
+  final bool Function(String url) match;
+  final ToolFormatAdapter adapter;
+}
+
 /// [toolFormatOverride] 来自 AIProviderConfig.toolFormat（用户可手动指定），
 /// 优先于 baseUrl 识别：'text' = 本地模型文本协议兜底，
-/// 'none' = 纯聊天不用工具，其余按 baseUrl 自动识别。
+/// 'none' = 纯聊天不用工具，'anthropic'/'gemini'/'openai' = 显式指定，
+/// 其余按 baseUrl 自动识别（注册表）。
 ToolFormatAdapter resolveToolFormat(
   String baseUrl, {
   String? toolFormatOverride,
-}) {
-  if (toolFormatOverride == 'text') return const TextProtocolAdapter();
-  if (toolFormatOverride == 'none') return const NoToolAdapter();
-  final url = baseUrl.toLowerCase();
-  if (url.contains('anthropic')) return const AnthropicAdapter();
-  if (url.contains('generativelanguage') || url.contains('gemini')) {
-    return const GeminiAdapter();
-  }
-  // DeepSeek 走 OpenAI 兼容直通（原生 function calling + 思考模式工具调用，
-  // V3.2 起支持；工具轮 id 配对 + reasoning_content 原样回传由 chat_page
-  // 双通道处理——8-03 17:24 用户指示研究原生调用，不再绕文本协议）
-  // 其余全部走 OpenAI 兼容（通义/智谱/火山/硅基/Ollama/LM Studio…）
-  return const OpenAICompatAdapter();
-}
+}) =>
+    ToolFormatRegistry.resolve(baseUrl,
+        toolFormatOverride: toolFormatOverride);
