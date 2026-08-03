@@ -73,10 +73,15 @@ class MockAIProvider {
       }
     }
     if (lastUser.contains('记住') || lastUser.contains('喜欢喝')) {
+      // 8-03 22:3x（用户确认设计）：男主记录的是【男主总结的话】，
+      // 不是用户原话——"用户说的乱七八糟 → 男主总结出精炼句"
+      // 原实现直接存 lastUser（用户原话"记住我喜欢喝咖啡"）→ 不符合
+      final summary = _summarizePreference(lastUser);
       return _toolCall('record_memory', {
-        'content': lastUser,
-        'keywords': ['美式咖啡'],
-      }, '模拟思考：用户想让我记住这个偏好，我用 record_memory 存进记忆库。');
+        'content': summary,
+        // 模拟男主提取"关键动词+名词"（设计：a+b+c 组合找规律用）
+        'keywords': ['喜欢', '咖啡'],
+      }, '模拟思考：用户想让我记住这个偏好，我总结成一句话用 record_memory 存进记忆库。');
     }
     if (lastUser.contains('之前说过') || lastUser.contains('查一下') ||
         lastUser.contains('记得')) {
@@ -96,6 +101,23 @@ class MockAIProvider {
       reasoningContent: '模拟思考：普通聊天，直接自然回复就好。',
       providerName: '模拟AI',
     );
+  }
+
+  /// 模拟男主总结：用户原话（可能啰嗦/带指令）→ 精炼的总结句
+  /// "记住我喜欢喝咖啡" → "用户喜欢喝咖啡"
+  /// "帮我记住我讨厌下雨天" → "用户讨厌下雨天"
+  String _summarizePreference(String raw) {
+    var s = raw;
+    for (final p in ['请你记住', '帮我记住', '请记住', '记住']) {
+      if (s.startsWith(p)) {
+        s = s.substring(p.length);
+        break;
+      }
+    }
+    s = s.trim();
+    // 人称统一成男主口中的"用户"（真实 DeepSeek 也会这样总结）
+    s = s.replaceFirst(RegExp(r'^(我|人家)'), '用户');
+    return s;
   }
 
   AIProviderResult _toolCall(
