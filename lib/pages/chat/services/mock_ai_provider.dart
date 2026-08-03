@@ -48,9 +48,11 @@ class MockAIProvider {
           .toList();
       if (history.isNotEmpty) {
         // 检查上下文参考里有没有男主消息（用户 20:03 反馈"男主对话被抛弃"）
+        // 注意：buildHistoryMessages 输出格式是 [user]/[assistant] 前缀
+        // （8-03 21:25 修：原来数"用户：/男主："永远 0 条，误报"男主消息丢失"）
         final raw = history.first.content;
-        final userCount = '用户：'.allMatches(raw).length;
-        final aiCount = '男主：'.allMatches(raw).length;
+        final userCount = RegExp(r'\[user\]').allMatches(raw).length;
+        final aiCount = RegExp(r'\[assistant\]').allMatches(raw).length;
         DebugLogger.log(
             '模拟AI',
             '📊 上下文参考里 用户 $userCount 条 / 男主 $aiCount 条'

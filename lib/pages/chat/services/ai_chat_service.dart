@@ -426,12 +426,21 @@ class AiChatService {
       // （01:26 改坏的点：只重试一次且带 tools，空回复救不回来就直接抛异常）
       DebugLogger.log('AI路由', '⚠️ 空回复，重试第 2 次（不带工具）');
       final retry2 = await _chat(personaId, messages, toolRound: toolRound);
-      if (retry2.text.trim().isNotEmpty) {
+      // 8-03 21:25（用户实测测试AI）：重试第2次返回了 tool_calls 但 text 空，
+      // 原判断只看 text → 工具调用被当"仍为空"丢弃（男主调工具没反应）。
+      // 成功标准 = 有文本 **或** 有 tool_calls，且返回原样结果（不能构造空结果丢 toolCalls）
+      if (retry2.text.trim().isNotEmpty ||
+          (retry2.toolCalls != null && retry2.toolCalls!.isNotEmpty)) {
         // 8-03 20:1x：重试第2次成功同样要 feed（同上）
-        ContextManager.instance
-            .feedAssistantMessage(personaId, retry2.text.trim());
-        DebugLogger.log('上下文调试',
-            '📝 已记录男主回复（重试第2次）：${retry2.text.length > 40 ? retry2.text.substring(0, 40) + '…' : retry2.text}');
+        if (retry2.text.trim().isNotEmpty) {
+          ContextManager.instance
+              .feedAssistantMessage(personaId, retry2.text.trim());
+          DebugLogger.log('上下文调试',
+              '📝 已记录男主回复（重试第2次）：${retry2.text.length > 40 ? retry2.text.substring(0, 40) + '…' : retry2.text}');
+        } else {
+          DebugLogger.log('上下文调试',
+              '📝 重试第2次返回工具调用（${retry2.toolCalls!.map((c) => c['name']).join('、')}），照常返回走工具轮');
+        }
         return retry2;
       }
       // 两次重试都空 → 返回空结果，不抛异常（chat_page 侧轻提示，不弹红色报错）
