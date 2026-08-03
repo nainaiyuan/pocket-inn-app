@@ -64,8 +64,11 @@ class ToolIntentParser {
     // 宽松块：[工具:name] / 【工具:name】 / 工具:name（无括号）
     // 只认已知工具名；跳过已被严格块覆盖的位置（用 lastIndex 简单去重）
     for (final m in _toolBlockLoose.allMatches(text)) {
-      final name = m.group(1) ?? '';
-      if (name.isEmpty || !_knownToolNames.contains(name)) continue;
+      final raw = m.group(1) ?? '';
+      if (raw.isEmpty) continue;
+      // 8-03 19:2x：拼错工具名 → 模糊纠正
+      final name = _fuzzyMatchToolName(raw);
+      if (name == null) continue;
       if (results.any((r) => r['name'] == name)) continue;
       results.add({'name': name, 'arguments': <String, dynamic>{}});
     }
@@ -105,14 +108,63 @@ class ToolIntentParser {
     if (results.isNotEmpty) return results;
     // 容错兜底：JSON 解析失败但能提取到已知工具名 → 降级空参数
     // （覆盖 {"name":"list_tools","arguments":!} 这类残缺 JSON）
+    // 8-03 19:2x（用户反馈"deepseek骗人"根因）：AI 念 JSON 时工具名拼错
+    // （如 list_toos → list_tools）→ 模糊匹配纠正，别让拼写错误吞掉工具调用
     final nameRegex = RegExp(r'"name"\s*:\s*"([a-zA-Z_]+)"');
     for (final m in nameRegex.allMatches(text)) {
-      final name = m.group(1) ?? '';
-      if (name.isEmpty || !_knownToolNames.contains(name)) continue;
+      final raw = m.group(1) ?? '';
+      if (raw.isEmpty) continue;
+      final name = _fuzzyMatchToolName(raw) ?? raw;
+      if (!_knownToolNames.contains(name)) continue;
       if (results.any((r) => r['name'] == name)) continue;
       results.add({'name': name, 'arguments': <String, dynamic>{}});
     }
     return results.isEmpty ? null : results;
+  }
+
+  /// 工具名模糊纠正（8-03 19:2x）：
+  /// AI 在文本里念工具调用时容易拼错（list_toos / recrd_memory / recall_memry），
+  /// 编辑距离 ≤ 1 直接纠正；距离 2 且长度接近也纠正（防乱匹配）。
+  /// 返回纠正后的已知工具名；匹配不上返回 null。
+  static String? _fuzzyMatchToolName(String name) {
+    if (_knownToolNames.contains(name)) return name;
+    String? best;
+    var bestDist = 3;
+    for (final known in _knownToolNames) {
+      final d = _levenshtein(name, known);
+      if (d < bestDist) {
+        bestDist = d;
+        best = known;
+      }
+    }
+    if (best == null) return null;
+    if (bestDist <= 1) return best;
+    if (bestDist == 2 && (name.length - best.length).abs() <= 1) return best;
+    return null;
+  }
+
+  static int _levenshtein(String a, String b) {
+    if (a == b) return 0;
+    if (a.isEmpty) return b.length;
+    if (b.isEmpty) return a.length;
+    final dp =
+        List.generate(a.length + 1, (i) => List.filled(b.length + 1, 0));
+    for (var i = 0; i <= a.length; i++) {
+      dp[i][0] = i;
+    }
+    for (var j = 0; j <= b.length; j++) {
+      dp[0][j] = j;
+    }
+    for (var i = 1; i <= a.length; i++) {
+      for (var j = 1; j <= b.length; j++) {
+        dp[i][j] = [
+          dp[i - 1][j] + 1,
+          dp[i][j - 1] + 1,
+          dp[i - 1][j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1),
+        ].reduce((x, y) => x < y ? x : y);
+      }
+    }
+    return dp[a.length][b.length];
   }
 
   static void _tryDecode(String jsonText, List<Map<String, dynamic>> results) {
@@ -151,6 +203,10 @@ class ToolIntentParser {
       arguments = fn['arguments'];
     }
     if (name == null || name.isEmpty) return null;
+    // 8-03 19:2x：拼错工具名 → 模糊纠正（list_toos → list_tools）
+    final corrected = _fuzzyMatchToolName(name);
+    if (corrected == null) return null; // 未知工具（且不像任何已知）→ 忽略
+    name = corrected;
     // arguments 归一：Map 直接用；JSON 字符串解析；缺失给空 Map
     Map<String, dynamic> args = {};
     if (arguments is Map<String, dynamic>) {
