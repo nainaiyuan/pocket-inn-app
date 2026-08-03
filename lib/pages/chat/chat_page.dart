@@ -271,8 +271,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final userMsgId = DateTime.now().millisecondsSinceEpoch.toString();
     // 本轮男主第一句话气泡 id 重置（工具气泡只挂本轮第一句话头上）
     _firstAiMsgId = null;
-    // 8-03 19:1x：记录本轮用户消息 id（工具气泡固定插它后面）
-    _lastUserMsgId = userMsgId;
     _msgKey.currentState?.appendMessage(ChatMessage(id: userMsgId, text: t, isMe: true));
     final lid = _state.leadId;
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
@@ -525,7 +523,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             // 8-03 19:1x：list_tools 也出"正在…"气泡（之前只有结果气泡，
             // 用户反馈"根本没看见工具气泡"）——工具调用必须有可见反馈
             _appendToolBubble('男主想查看工具清单…');
-            toolResult = _executeListToolsTool();
+            // 8-03 19:35（用户实测反馈）：list_tools 也要确认——
+            // 用户要求所有工具调用都先问他允不允许
+            final ok = await _approveToolCall(
+                '查看工具清单', '他想看看自己现在有哪些能力可用，允许吗？');
+            if (!ok) {
+              _appendToolBubble('❌ 你拒绝了查看工具清单');
+              toolResult = _ToolResult(false, '用户拒绝：暂不查看工具清单');
+            } else {
+              toolResult = _executeListToolsTool();
+            }
           } else if (name == 'write_diary') {
             final content = args['content']?.toString() ?? '';
             _appendToolBubble('男主在写日记…');
@@ -1161,12 +1168,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     );
     final area = _msgKey.currentState;
     if (area != null) {
-      // 8-03 19:1x（用户反馈"工具气泡看不见"）：不挂男主第一句话头上了，
-      // 固定插到本轮用户消息后面（insertBeforeId: _lastUserMsgId）——
-      // 用户消息 → 🔧 工具气泡 → 男主第一句话，位置固定用户必见。
-      // 之前挂 _firstAiMsgId：男主直接调工具（第一轮无文本）时 id 为 null，
-      // 或残留/找不到目标时插入位置漂移，气泡跑到屏幕外看不见。
-      area.appendMessage(msg, insertBeforeId: _lastUserMsgId);
+      // 8-03 19:35（用户实测反馈）：insertBefore 是"插到该消息前面"——
+      // 之前挂 _lastUserMsgId 把工具气泡插到了用户气泡上面。改回挂男主
+      // 第一句话头上：男主第一句话已 append（工具轮在第一句话之后跑），
+      // 插到它前面 = 用户消息和男主回复之间 ✅
+      // 男主第一轮无文本（直接调工具）→ _firstAiMsgId 为 null → append
+      // 尾部 = 用户消息之后，顺序同样正确 ✅
+      area.appendMessage(msg, insertBeforeId: _firstAiMsgId);
     } else {
       // 聊天页没挂载（切走/后台）→ 只落库，回来从 DB 加载能看到
       ChatStorageService().appendMessage(personaId, msg);
@@ -1182,10 +1190,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 8-03 18:2x：本轮男主第一句话气泡 id——工具气泡都挂在它头上
   /// （用户要求：调工具显示在第一句话的上方，后续句子在下方）
   String? _firstAiMsgId;
-
-  /// 8-03 19:1x：本轮用户消息气泡 id——工具气泡固定插在它后面
-  /// （用户消息 → 🔧 工具气泡 → 男主第一句话，用户必见）
-  String? _lastUserMsgId;
 
   /// 男主回复 → 用户可见文本（剥离工具块 + #指令 + 还原代号）。
   /// 8-03 18:2x：渐进显示用——每轮文本单独显示，不等全部跑完
