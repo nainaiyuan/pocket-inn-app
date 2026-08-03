@@ -1595,64 +1595,32 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }) async {
     if (content.isEmpty) return const _ToolResult(false, '内容为空，无法记录');
     if (!mounted) return const _ToolResult(false, '用户不在，记录未确认');
-    final approved = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFFFDF7F9),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('💌 男主想记住这个'),
-        content: Text(
-          [
-            '「$content」',
-            '类别：${category.isEmpty ? '其他' : category}',
-            if (keywords.isNotEmpty) '关键词：${keywords.join('、')}',
-            '',
-            '要让他记住吗？',
-          ].join('\n'),
-          style: const TextStyle(fontSize: 14, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('不记', style: TextStyle(color: Color(0xFF8A7A80))),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('让他记住'),
-          ),
-        ],
-      ),
-    );
-    if (approved == true) {
-      // 用户 8-03 05:53：会话未创建时静默跳过 = 假成功（用户以为记住了实际没写库）
-      // → 先补建会话再插入；补建失败明确报错，绝不假成功
-      if (_chatSessionId == null) {
-        await _ensureChatSession(_state.personaId ?? '', '');
-      }
-      if (_chatSessionId != null) {
-        // 8-03 06:41：男主写的完整句 + 关键词都落库
-        final parts = <String>['[${category.isEmpty ? '其他' : category}] $content'];
-        if (keywords.isNotEmpty) parts.add('关键词：${keywords.join('、')}');
-        await ChatDatabaseService.instance.insertMemoriesInTx([
-          MemoryNode(
-            id: 'mem_${DateTime.now().millisecondsSinceEpoch}',
-            sessionId: _chatSessionId!,
-            branchLeafId: _chatLeafId ?? '',
-            content: parts.join('\n'),
-            sourceMessageIds: const [],
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
-          ),
-        ]);
-        DebugLogger.log('指令模块', '✅ 工具记录确认: [${category.isEmpty ? '其他' : category}] $content');
-        return _ToolResult(true, '已记录：[$category] $content');
-      }
-      DebugLogger.log('指令模块', '⛔ 工具记录失败: 会话未创建');
-      return const _ToolResult(false, '记忆库不可用（会话未创建），请稍后再试');
+    // 8-03 22:0x（用户实测：点"让他记住"弹两个确认窗）：
+    // 工具轮 485 行 _approveToolCall 已确认过 → 这里 #记# 时代遗留的
+    // 老弹窗（💌 男主想记住这个）造成双重确认 → 移除，直接执行
+    if (_chatSessionId == null) {
+      await _ensureChatSession(_state.personaId ?? '', '');
     }
-    DebugLogger.log('指令模块', '⛔ 工具记录被拒: $content');
-    return _ToolResult(false, '用户拒绝了记录：「$content」。如果想知道原因，可以自然地问她。');
+    if (_chatSessionId != null) {
+      // 8-03 06:41：男主写的完整句 + 关键词都落库
+      final parts = <String>['[${category.isEmpty ? '其他' : category}] $content'];
+      if (keywords.isNotEmpty) parts.add('关键词：${keywords.join('、')}');
+      await ChatDatabaseService.instance.insertMemoriesInTx([
+        MemoryNode(
+          id: 'mem_${DateTime.now().millisecondsSinceEpoch}',
+          sessionId: _chatSessionId!,
+          branchLeafId: _chatLeafId ?? '',
+          content: parts.join('\n'),
+          sourceMessageIds: const [],
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ),
+      ]);
+      DebugLogger.log('指令模块', '✅ 工具记录确认: [${category.isEmpty ? '其他' : category}] $content');
+      return _ToolResult(true, '已记录：[$category] $content');
+    }
+    DebugLogger.log('指令模块', '⛔ 工具记录失败: 会话未创建');
+    return const _ToolResult(false, '记忆库不可用（会话未创建），请稍后再试');
   }
 
   /// 工具执行：recall_memory（检索 → 弹窗授权 → 返回记忆给模型）
@@ -1675,33 +1643,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         return _ToolResult(false, '没有找到关于「${query.isEmpty ? category : query}」的记忆');
       }
       if (!mounted) return const _ToolResult(false, '用户不在，查询未授权');
-      final approved = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: const Color(0xFFFDF7F9),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('🔍 男主想翻你的记忆'),
-          content: Text(
-            '查到了 ${memories.length} 条关于「${query.isEmpty ? category : query}」的记忆，'
-            '允许他看吗？（最多显示 5 条）',
-            style: const TextStyle(fontSize: 14, height: 1.5),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('不允许', style: TextStyle(color: Color(0xFF8A7A80))),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('允许'),
-            ),
-          ],
-        ),
-      );
-      if (approved != true) {
-        return const _ToolResult(false, '用户拒绝了查看记忆的请求，不要追问');
-      }
+      // 8-03 22:0x（与记录双弹窗同批）：工具轮 502 行 _approveToolCall
+      // 已确认过 → 这里 #查# 时代遗留的老弹窗（🔍 男主想翻你的记忆）
+      // 造成双重确认 → 移除，直接返回结果
       // 21:02：记忆库存的是用户原文（可能含真实称呼）→ 返回给模型前替换成代号
       final butler = ChatService.instance.butler;
       final maskEnabled = butler != null && butler.config.maskLayerEnabled;
