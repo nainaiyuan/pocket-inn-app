@@ -1093,9 +1093,12 @@ class ChatService {
           }
         }
       } catch (_) {}
-      if (dimensions.isEmpty) return;
 
-      // 合并男主推测关键词（#keywords 暂存队列）→ 规律引擎据此积累
+      // 合并男主推测关键词（#keywords / record_memory 暂存队列）→
+      // 规律引擎据此积累。8-03 22:2x（用户确认设计：提取关键词
+      // a+b+c 一直加下去 → 以后找规律）：必须在 dimensions.isEmpty
+      // 判断【之前】并入——否则用户下一轮普通聊天无情绪波动 →
+      // 提前 return → 关键词丢失，关键词网络就断了
       if (ButlerPipelineResult.pendingKeywords.isNotEmpty) {
         for (final k in ButlerPipelineResult.pendingKeywords) {
           if (!keywords.contains(k)) keywords.add(k);
@@ -1108,6 +1111,15 @@ class ChatService {
         ButlerPipelineResult.pendingKeywords.clear();
       }
 
+      // 无情绪波动：且无任何关键词 → 真·无事发生，跳过；
+      // 有关键词（如 record_memory 刚存的喜好）→ 仍创建"无偏离弧线"
+      // （峰值=基线），规律引擎走偏移0分支记录组合存在——
+      // "a 连着 a1/a2/a3" 的关联网络在普通聊天中也能持续累积
+      if (dimensions.isEmpty && keywords.isEmpty) return;
+      final noMood = dimensions.isEmpty;
+      final peakMood = noMood ? patternEngine.baseline.allValues : dimensions;
+      final endMood = peakMood;
+
       final now = DateTime.now();
       final arc = EmotionArc(
         id: 'arc_${now.millisecondsSinceEpoch}',
@@ -1115,8 +1127,8 @@ class ChatService {
         characterId: characterId,
         triggerKeywords: keywords,
         startMood: patternEngine.baseline.allValues,
-        peakMood: dimensions,
-        endMood: dimensions,
+        peakMood: peakMood,
+        endMood: endMood,
         returnedToBaseline: !isAnomaly,
         durationMinutes: 1,
       );
