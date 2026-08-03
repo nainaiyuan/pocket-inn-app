@@ -296,7 +296,16 @@ class AiChatService {
     // （compact/summarize 仍在 feed 前跑：总结的是不含当前消息的旧原文）
     if (!toolRound && message.trim().isNotEmpty) {
       ContextManager.instance.feedUserMessage(personaId, message);
+      // 8-03 20:1x（调试：用户怀疑男主对话被抛弃）——feed 全链路日志
+      DebugLogger.log(
+          '上下文调试',
+          '📝 已记录用户消息（$personaName）：${message.length > 40 ? message.substring(0, 40) + '…' : message}');
     }
+    // 8-03 20:1x（调试）：组装结果日志——发给模型的历史里到底有什么
+    DebugLogger.log('上下文调试',
+        '📦 本次发给模型的历史 ${historyMsgs.length} 条：'
+        '${historyMsgs.map((m) => '[${m.role}]${m.content.length > 30 ? m.content.substring(0, 30) + '…' : m.content}').join(' | ')}'
+        '${historyMsgs.isEmpty ? '（空——stateless 正常时不该空，若持续为空请查 stateful 配置）' : ''}');
     // 透明化：保存完整 prompt 供 📄 按钮查看
     // 用户 8-03 00:07：标签不该叫"历史"，是"上下文参考"——
     // 本次对话实时记录（用户+男主交替），不是档案历史
@@ -357,6 +366,14 @@ class AiChatService {
     // 男主回复进上下文（当前话题原文）
     if (result.text.trim().isNotEmpty) {
       ContextManager.instance.feedAssistantMessage(personaId, result.text.trim());
+      // 8-03 20:1x（调试：用户怀疑男主对话被抛弃）——feed 全链路日志
+      DebugLogger.log(
+          '上下文调试',
+          '📝 已记录男主回复（$personaName）：${result.text.length > 40 ? result.text.substring(0, 40) + '…' : result.text}');
+    } else {
+      // 8-03 20:1x（调试）：男主本轮无文本（原生 tool_calls 轮/空回复）→ 没记录
+      DebugLogger.log('上下文调试',
+          '⚠️ 男主本轮无文本（${result.toolCalls?.isNotEmpty ?? false ? '原生工具调用轮' : '空回复'}）→ 上下文不记录（工具轮回复会在下一轮记录）');
     }
     final hasToolCalls = result.toolCalls != null && result.toolCalls!.isNotEmpty;
     if (result.text.trim().isEmpty && !hasToolCalls && !toolRound) {

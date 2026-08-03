@@ -1090,6 +1090,23 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             onPickBg: _pickBgImage,
           )),
 
+        // ===== 🧪 模拟测试按钮（找bug工具，8-03 20:1x 用户要求）=====
+        // 预设对话 + 手动写男主回复，走真实 feed/build/解析流程，
+        // 看"发给模型的历史"里男主消息到底在不在
+        Positioned(
+          right: 72, top: MediaQuery.of(context).padding.top + 4,
+          child: GestureDetector(
+            onTap: _showSimulation,
+            child: Container(
+              width: 28, height: 28,
+              decoration: BoxDecoration(
+                color: Colors.black26, shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.science_outlined, size: 15, color: Colors.white70),
+            ),
+          ),
+        ),
+
         // ===== 📄 prompt 查看按钮（透明化：男主"知道什么"一目了然）=====
         Positioned(
           right: 38, top: MediaQuery.of(context).padding.top + 4,
@@ -1125,6 +1142,99 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   void _showDebugLog() {
     showDebugLogSheet(context);
+  }
+
+  /// 🧪 找bug工具（用户 8-03 20:0x 要求）：预设对话 + 手动写男主回复，
+  /// 走真实 ContextManager.feed → buildHistoryMessages → ToolIntentParser 流程，
+  /// 每步显示结果 → 验证"男主消息到底有没有进发给模型的历史"。
+  /// 用独立 pid（sim_xxx）空间，不污染真实对话上下文。
+  Future<void> _showSimulation() async {
+    final pid = 'sim_${DateTime.now().millisecondsSinceEpoch}';
+    final sb = StringBuffer();
+    sb.writeln('🧪 模拟对话测试（男主话=手动预设，独立上下文空间）');
+    sb.writeln('══════════════════════════════════════');
+
+    Future<void> round(int n, String userText, String aiText,
+        {String note = ''}) async {
+      sb.writeln('\n──── 轮$n　用户：「$userText」────');
+      if (note.isNotEmpty) sb.writeln('　⚙️ $note');
+      // 1) generateReply 真实顺序：先组装历史（此刻不含本条用户消息）
+      final hist = ContextManager.instance.buildHistoryMessages(pid);
+      sb.writeln('▶ 发给模型的历史 ${hist.length} 条：');
+      if (hist.isEmpty) sb.writeln('　（空）');
+      for (final h in hist) {
+        sb.writeln('　[${h.role}] ${h.content.replaceAll(RegExp(r'\\s+'), ' ')}');
+      }
+      // 2) feed 用户消息（真实）
+      ContextManager.instance.feedUserMessage(pid, userText);
+      sb.writeln('▶ feed 用户 ✅');
+      // 3) feed 男主回复（手动写，走真实 feedAssistantMessage）
+      ContextManager.instance.feedAssistantMessage(pid, aiText);
+      sb.writeln('▶ feed 男主：「$aiText」✅');
+      // 4) 工具指令解析（真实 ToolIntentParser）
+      final intent = ToolIntentParser.extract(aiText);
+      if (intent != null && intent.isNotEmpty) {
+        sb.writeln('▶ 男主话解析出工具：${intent.map((c) => c['name']).join('、')}');
+      } else {
+        sb.writeln('▶ 男主话无工具指令（纯文本）');
+      }
+    }
+
+    await round(1, '你好呀', '你好，今天过得怎么样？');
+    await round(2, '记住我喜欢喝美式咖啡', '好的，我记住了，你爱喝美式咖啡。',
+        note: '场景A：男主正常文本回复');
+    await round(3, '我之前说过喜欢什么吗', '我查查看。',
+        note: '场景B：男主只调工具没说话（真实=原生tool_calls无文本）→ 这轮男主话不进上下文');
+    await round(4, '那你查到了吗', '查到了，你说过喜欢猫。',
+        note: '场景C：关键验证——上一轮男主"我查查看"还在历史里吗？');
+    await round(5, '你都记得我什么呀', '记得你爱喝美式咖啡、喜欢猫。',
+        note: '场景D：男主话含中文意图词，验证解析');
+
+    sb.writeln('\n════════ 当前上下文全貌（peekRaw）════════');
+    final rawAll = ContextManager.instance.peekRaw(pid);
+    sb.writeln(rawAll.isEmpty ? '（空）' : rawAll);
+    sb.writeln('\n════════ 结论判断 ════════');
+    final raw = rawAll;
+    final userCount = '用户：'.allMatches(raw).length;
+    final aiCount = '男主：'.allMatches(raw).length;
+    sb.writeln('上下文里 用户 $userCount 条 / 男主 $aiCount 条');
+    sb.writeln(aiCount >= userCount - 1
+        ? '✅ 男主消息正常进上下文（说明链路OK，问题在AI侧/工具轮）'
+        : '❌ 男主消息丢失（$aiCount 少于 ${userCount - 1}）→ 查 feedAssistantMessage 调用链');
+
+    DebugLogger.log('模拟测试', sb.toString());
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          '🧪 模拟对话测试',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF6A4A5A),
+          ),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 460,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              sb.toString(),
+              style: const TextStyle(color: Color(0xFF6A4A5A), fontSize: 12, height: 1.5),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ===== 管家对话记录（隐式会话 + 记忆提取）=====
