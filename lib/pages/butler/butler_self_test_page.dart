@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../../ai_provider/models.dart';
@@ -184,6 +186,41 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
           r8Injected.first.content.contains('妈妈喜欢猫'),
       failedReason: r8HasToolCall ? 'translateToolRound 没丢弃 tool_calls' : null,
       guidance: '检查 TextProtocolAdapter.translateToolRound',
+    ));
+
+    // ── R9（8-03 17:24）：原生工具轮回传格式 ──
+    // 用户指示"AI 需要什么给什么"：研究 DeepSeek 原生调用后——
+    // assistant 工具轮 content 原样 + tool_calls 带 id + reasoning_content 原样
+    // （官方文档：append response.choices[0].message，思考模式必须原样回传）
+    final r9Msg = AIChatMessage(
+      role: 'assistant',
+      content: '我记住了',
+      toolCalls: [
+        {
+          'name': 'record_memory',
+          'arguments': <String, dynamic>{'content': '妈妈喜欢猫'},
+          'id': 'call_abc123',
+        },
+      ],
+      reasoningContent: '  思考内容原样保留  ',
+    );
+    final r9Json = r9Msg.toApiJson();
+    final r9Calls = (r9Json['tool_calls'] as List?) ?? const [];
+    final r9Ok = r9Json['content'] == '我记住了' &&
+        r9Calls.isNotEmpty &&
+        (r9Calls.first as Map)['id'] == 'call_abc123' &&
+        ((r9Calls.first as Map)['function'] as Map)['name'] ==
+            'record_memory' &&
+        r9Json['reasoning_content'] == '  思考内容原样保留  ';
+    items.add(ButlerSelfTestItem(
+      message: 'R9 原生工具轮回传格式',
+      expected: 'content原样+tool_calls带id+reasoning_content原样',
+      actual: r9Ok
+          ? '✅ 格式正确（id配对+原样回传）'
+          : '❌ 格式异常：${jsonEncode(r9Json)}',
+      passed: r9Ok,
+      failedReason: r9Ok ? null : 'toApiJson 输出不符合 DeepSeek 思考模式要求',
+      guidance: '检查 AIChatMessage.toApiJson',
     ));
 
     // ── R7（8-03 06:41）：男主写的完整句 + 关键词都要保存 ──
@@ -628,7 +665,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
               'R3a 代码块JSON · R3b 残缺JSON容错\n'
               'R4 reasoning_content 回传（DeepSeek 400）\n'
               'R5 类别兜底 · R6 关键词并入规律引擎 · R7 完整句+关键词保存\n'
-              'R8 文本协议工具轮回传（DeepSeek 400 根治）',
+              'R8 文本协议工具轮回传 · R9 原生工具轮配对回传',
               style: TextStyle(color: Colors.black54, fontSize: 12, height: 1.6),
             ),
           ),
@@ -649,7 +686,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
                     ),
                   )
                 : const Icon(Icons.bug_report),
-            label: Text(_regRunning ? '回归测试中…' : '开始 Bug 回归测试 × 9'),
+            label: Text(_regRunning ? '回归测试中…' : '开始 Bug 回归测试 × 10'),
           ),
           if (_regReport != null) ...[
             const SizedBox(height: 16),

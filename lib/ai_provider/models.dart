@@ -319,12 +319,14 @@ class AIChatMessage {
     if (role == 'tool' && toolCallId != null) {
       return {'role': 'tool', 'tool_call_id': toolCallId, 'content': content};
     }
-    // assistant 工具轮：{role: assistant, content: null, tool_calls,
+    // assistant 工具轮：{role: assistant, content, tool_calls,
     //                    reasoning_content（思考模式必须回传）}
+    // 8-03 17:24：content 原样回传（官方示例 append 整个 message；
+    // 空则 null，DeepSeek 工具调用时 content 常为空）
     if (toolCalls != null && toolCalls!.isNotEmpty) {
       return {
         'role': 'assistant',
-        'content': null,
+        'content': content.isEmpty ? null : content,
         if (reasoningContent != null && reasoningContent!.isNotEmpty)
           'reasoning_content': reasoningContent,
         'tool_calls': [

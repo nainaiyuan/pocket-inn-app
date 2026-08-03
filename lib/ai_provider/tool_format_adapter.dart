@@ -329,13 +329,9 @@ ToolFormatAdapter resolveToolFormat(
   if (url.contains('generativelanguage') || url.contains('gemini')) {
     return const GeminiAdapter();
   }
-  // 8-03 17:19（用户实测 17:05 仍 400）：DeepSeek 不支持原生 function
-  // calling（忽略 tools 参数），且思考模式对原生 tool_calls 回传要求苛刻：
-  // reasoning_content 原样回传 + tool 消息必须配对（伪造的 tool_calls 无 id
-  // 直接 400 "must be followed by tool messages"）。统一走文本协议：
-  // 第一轮 ⟨工具:⟩ 块解析 + 工具轮 translateToolRound 翻译（丢弃原生
-  // tool_calls、工具结果注入 user 消息），全链路纯文本，零 400
-  if (url.contains('deepseek')) return const TextProtocolAdapter();
+  // DeepSeek 走 OpenAI 兼容直通（原生 function calling + 思考模式工具调用，
+  // V3.2 起支持；工具轮 id 配对 + reasoning_content 原样回传由 chat_page
+  // 双通道处理——8-03 17:24 用户指示研究原生调用，不再绕文本协议）
   // 其余全部走 OpenAI 兼容（通义/智谱/火山/硅基/Ollama/LM Studio…）
   return const OpenAICompatAdapter();
 }

@@ -373,16 +373,32 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         toolLoop++;
         toolExecuted = true;
         DebugLogger.log('AI路由', '🔧 第 $toolLoop 轮：男主请求 ${result.toolCalls!.length} 个工具');
+        // 8-03 17:24（用户指示：AI 需要什么给什么，研究 DeepSeek 原生调用）：
+        // 工具轮双通道——
+        // ① 原生 tool_calls（模型 API 返回，带 id）：原样回传 assistant
+        //   （content + reasoning_content + tool_calls 含 id），tool 消息
+        //   用模型给的 id 配对（官方文档：append response.choices[0].message，
+        //   思考模式 tool_calls 必须配 id 回传，否则 400）
+        // ② 文本块工具（⟨工具:⟩ 解析，无 id）：不发伪造原生 tool_calls，
+        //   工具结果合并注入 user 消息（文本协议兜底，本地/不支持原生工具的模型用）
+        final nativeCalls = result.toolCalls!
+            .where((c) => (c['id']?.toString() ?? '').isNotEmpty)
+            .toList();
+        final textCalls = result.toolCalls!
+            .where((c) => (c['id']?.toString() ?? '').isEmpty)
+            .toList();
         final toolMessages = <AIChatMessage>[
-          AIChatMessage(
-            role: 'assistant',
-            content: '',
-            toolCalls: result.toolCalls,
-            // 8-03 06:29：DeepSeek 思考模式必须原样回传 reasoning_content，
-            // 否则 HTTP 400（"reasoning_content must be passed back"）
-            reasoningContent: result.reasoningContent,
-          ),
+          if (nativeCalls.isNotEmpty)
+            AIChatMessage(
+              role: 'assistant',
+              // 官方示例：整个 message 原样回传（含 content 原文）
+              content: result.text,
+              toolCalls: nativeCalls,
+              // 思考模式必须原样回传 reasoning_content（toApiJson 原样输出）
+              reasoningContent: result.reasoningContent,
+            ),
         ];
+        final textToolResults = <String>[];
         var loopExceeded = false;
         for (final call in result.toolCalls!) {
           final name = call['name']?.toString() ?? '';
@@ -455,11 +471,17 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           // 完成/失败气泡（用户 8-03 01:57）：执行完必须给用户明确反馈
           _appendToolResultBubble(name, toolResult);
           DebugLogger.log('AI路由', '🔧 工具 $name 结果：${toolResult.text.length > 80 ? toolResult.text.substring(0, 80) + '…' : toolResult.text}');
-          toolMessages.add(AIChatMessage(
-            role: 'tool',
-            content: toolResult.text,
-            toolCallId: 'call_${toolLoop}_$name',
-          ));
+          if (nativeCalls.contains(call)) {
+            // 原生：tool 消息必须用模型给的 id 配对（不能自己编 id）
+            toolMessages.add(AIChatMessage(
+              role: 'tool',
+              content: toolResult.text,
+              toolCallId: call['id']?.toString() ?? 'call_${toolLoop}_$name',
+            ));
+          } else {
+            // 文本块：结果收集，最后合并注入 user 消息
+            textToolResults.add('【工具 $name】${toolResult.text}');
+          }
           // 防死循环：同一工具连续调用 ≥3 次 → 停止本轮
           final n = (consecutiveToolCounts[name] ?? 0) + 1;
           consecutiveToolCounts[name] = n;
@@ -469,6 +491,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           }
         }
         if (loopExceeded) break;
+        // 文本块工具结果：合并注入 user 消息（不走原生 tool_calls，兜底通道）
+        if (textToolResults.isNotEmpty) {
+          toolMessages.add(AIChatMessage(
+            role: 'user',
+            content: '【工具执行结果】\n${textToolResults.join('\n')}\n\n'
+                '基于结果自然地回复用户，不要再调用工具。',
+          ));
+        }
         result = await _aiSvc.generateReply(
           '',
           personaId,
