@@ -414,6 +414,7 @@ class AIProviderResult {
     String? providerId,
     String? providerName,
     Map<String, dynamic>? usage,
+    List<Map<String, dynamic>>? toolCalls,
     List<String>? failedProviders,
     bool? done,
   }) {
@@ -424,6 +425,14 @@ class AIProviderResult {
       providerId: providerId ?? this.providerId,
       providerName: providerName ?? this.providerName,
       usage: usage ?? this.usage,
+      // 8-03 21:4x（用户实测测试AI"工具调用被当空回复"的【真正根因】）：
+      // 原来漏了 toolCalls → executeWithFailover 的
+      // result.copyWith(providerId/providerName/failedProviders) 会把
+      // 模型返回的 tool_calls 清成 null → hasToolCalls=false →
+      // 男主调工具被当"空回复"进重试 → 重试再被清 → "仍为空"。
+      // 这同时是 20:03 用户反馈"工具完全无效"的系统性根因
+      // （影响所有 Provider 的原生 function calling）。
+      toolCalls: toolCalls ?? this.toolCalls,
       failedProviders: failedProviders ?? this.failedProviders,
       done: done ?? this.done,
     );
