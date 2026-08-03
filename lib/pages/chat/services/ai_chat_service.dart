@@ -54,6 +54,11 @@ class AiChatService {
               'type': 'string',
               'description': '要记录的内容，如：她喜欢猫',
             },
+            'keywords': {
+              'type': 'array',
+              'items': {'type': 'string'},
+              'description': '内容里的关键名词动词，越具体越好（找规律要用），如：["妈妈","喜欢","猫"]',
+            },
           },
           'required': ['category', 'content'],
         },
@@ -117,7 +122,6 @@ class AiChatService {
             '会返回工具名和用途说明。',
         'parameters': {
           'type': 'object',
-          'properties': {},
         },
       },
     },
