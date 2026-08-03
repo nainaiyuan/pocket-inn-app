@@ -197,14 +197,15 @@ class _MessageBubbleState extends State<MessageBubble>
             ? CrossAxisAlignment.end
             : CrossAxisAlignment.start,
         children: [
-          // 头像 + 气泡
+          // 头像 + 气泡 + 气泡框外居中的已读（8-03 18:43 用户要求）：
+          // 左消息：头像＋气泡＋已读（气泡右侧，垂直居中）
+          // 右消息：已读＋气泡＋头像（气泡左侧，垂直居中）
           Row(
             mainAxisAlignment: message.isMe
                 ? MainAxisAlignment.end
                 : MainAxisAlignment.start,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              // 分组模式：只有组内最后一条才显示头像（仿微信连续对话）
               // 分组模式：只有组内第一条才显示头像（用户没插话 = 连着说）
               if (!message.isMe && (!widget.isGrouped || widget.isGroupStart)) ...[
                 _Avatar(
@@ -215,8 +216,16 @@ class _MessageBubbleState extends State<MessageBubble>
                 ),
                 const SizedBox(width: 8),
               ],
-              // 气泡
-              Flexible(
+              // 气泡 + 已读：内层 Row 让已读垂直居中于气泡框，
+              // 外层 Row 保持 end 让头像贴底
+              Row(
+                mainAxisSize: MainAxisSize.max,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // 用户消息（右对齐）：已读在气泡左侧（男主那一侧）
+                  if (message.isMe) _ReadTag(message: message),
+                  // 气泡
+                  Flexible(
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
@@ -263,9 +272,8 @@ class _MessageBubbleState extends State<MessageBubble>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // 8-03 18:2x：已读/未读移到气泡内部顶部角——
-                      // 用户气泡靠男主侧（左上）、男主气泡靠用户侧（右上）
-                      _ReadCorner(message: message),
+                      // 8-03 18:43：已读/未读已移出气泡（气泡框外垂直居中，
+                      // 见外层 _ReadTag），气泡内不再显示
                       // 8-03 07:01：男主的思考链（reasoning_content）——
                       // 小格式、默认折叠，用户想看再展开，和正文区分
                       if (!message.isMe &&
@@ -340,13 +348,17 @@ class _MessageBubbleState extends State<MessageBubble>
                   ),
                 ),
               ),
+                  // 男主消息（左对齐）：已读在气泡右侧（用户那一侧）
+                  if (!message.isMe) _ReadTag(message: message),
+                ],
+              ),
               if (message.isMe && (!widget.isGrouped || widget.isGroupStart)) ...[
                 const SizedBox(width: 8),
                 _Avatar(isUser: true),
               ],
             ],
           ),
-          // 时间戳（已读已移到气泡顶部角）
+          // 时间戳（已读已移到气泡框外，8-03 18:43）
           _MetaLine(message: message),
         ],
       ),
@@ -354,13 +366,13 @@ class _MessageBubbleState extends State<MessageBubble>
   }
 }
 
-/// 气泡内部顶部角的已读/未读小标（8-03 18:2x）
-/// - 用户气泡：靠男主那一侧 = 左上角（男主是否已读）
-/// - 男主气泡：靠用户那一侧 = 右上角（用户是否已读完，打字机播完 = 已读）
-class _ReadCorner extends StatelessWidget {
+/// 气泡框外、垂直居中的已读/未读小标（8-03 18:43 用户要求）：
+/// - 用户消息（右对齐）：在气泡左侧（男主那一侧）
+/// - 男主消息（左对齐）：在气泡右侧（用户那一侧）
+class _ReadTag extends StatelessWidget {
   final ChatMessage message;
 
-  const _ReadCorner({required this.message});
+  const _ReadTag({required this.message});
 
   @override
   Widget build(BuildContext context) {
@@ -368,29 +380,17 @@ class _ReadCorner extends StatelessWidget {
     final read = presence.isRead(message.id);
     if (read == null) return const SizedBox.shrink();
 
-    final Color color;
-    if (read == true) {
-      color = const Color(0xFF7BA88F); // 柔和绿
-    } else {
-      color = const Color(0xFFC8966A); // 柔和琥珀（未读）
-    }
-    final label = read ? '已读' : '未读';
-
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        mainAxisAlignment:
-            message.isMe ? MainAxisAlignment.start : MainAxisAlignment.end,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w500,
-              color: color,
-            ),
-          ),
-        ],
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      child: Text(
+        read ? '已读' : '未读',
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w500,
+          color: read
+              ? const Color(0xFF7BA88F) // 柔和绿（已读）
+              : const Color(0xFFC8966A), // 柔和琥珀（未读）
+        ),
       ),
     );
   }
