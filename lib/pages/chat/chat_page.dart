@@ -255,6 +255,19 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   Future<void> _sendMsg(String t) async {
+    // 8-03 18:2x（用户反馈"男主说完话再说话他不理人"）：生成锁——
+    // 男主生成中（含工具轮）新消息直接忽略并提示，防并发上下文混乱
+    if (_generating) {
+      DebugLogger.log('管家流程', '⏳ 男主正在忙（生成中），忽略新消息: $t');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('男主正在忙，等他回完再说…'),
+          duration: Duration(seconds: 2),
+        ));
+      }
+      return;
+    }
+    _generating = true;
     final userMsgId = DateTime.now().millisecondsSinceEpoch.toString();
     _msgKey.currentState?.appendMessage(ChatMessage(id: userMsgId, text: t, isMe: true));
     final lid = _state.leadId;
@@ -360,6 +373,20 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           );
         }
       }
+      // 8-03 18:2x（用户反馈"不连贯，管家不实时显示流程"）：
+      // 第一轮文本立即显示（不等工具轮跑完），
+      // 用户先看到男主说话 → 再看工具气泡 → 再看男主基于结果继续说话
+      if (result.text.trim().isNotEmpty) {
+        final firstText = await _displayableText(result.text);
+        if (firstText.isNotEmpty) {
+          _msgKey.currentState?.appendMessage(ChatMessage(
+            id: '${DateTime.now().microsecondsSinceEpoch}_ai0',
+            text: firstText,
+            isMe: false,
+            thinkingChain: result.reasoningContent,
+          ));
+        }
+      }
       // function calling 循环：模型请求工具 → 执行 → 回传 → 再生成（最多3轮防死循环）
       // 用户 8-03 00:55：日志里看不见工具调用 → 每个工具调用都记日志
       // 用户 8-03 01:57：工具轮不限定轮数（原来最多 3 轮，复杂任务可能不够）；
@@ -384,9 +411,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         final nativeCalls = result.toolCalls!
             .where((c) => (c['id']?.toString() ?? '').isNotEmpty)
             .toList();
-        final textCalls = result.toolCalls!
-            .where((c) => (c['id']?.toString() ?? '').isEmpty)
-            .toList();
+        final textToolResults = <String>[];
         final toolMessages = <AIChatMessage>[
           if (nativeCalls.isNotEmpty)
             AIChatMessage(
@@ -398,7 +423,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               reasoningContent: result.reasoningContent,
             ),
         ];
-        final textToolResults = <String>[];
         var loopExceeded = false;
         for (final call in result.toolCalls!) {
           final name = call['name']?.toString() ?? '';
@@ -510,6 +534,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         );
         if (result.text.trim().isNotEmpty) {
           replyTexts.add(result.text.trim());
+          // 8-03 18:2x：工具轮男主回复也立即追加显示（渐进，不等循环结束）
+          final roundText = await _displayableText(result.text);
+          if (roundText.isNotEmpty) {
+            _msgKey.currentState?.appendMessage(ChatMessage(
+              id: '${DateTime.now().microsecondsSinceEpoch}_ai$toolLoop',
+              text: roundText,
+              isMe: false,
+              thinkingChain: result.reasoningContent,
+            ));
+          }
         }
       }
 
@@ -552,6 +586,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         DebugLogger.log('管家流程', '✖ 代号还原失败: $e');
       }
       // 男主回复落库（静默执行时 displayText 为空 → 只记工具气泡，不记男主空回复）
+      // 注：渐进显示已把各轮文本实时插入 UI（第一轮 _ai0、工具轮 _aiN），
+      // 这里只落库不重复显示
       if (_chatSessionId != null && displayText.trim().isNotEmpty) {
         try {
           final aiNode = await ChatDatabaseService.instance.appendAssistantMessage(
@@ -564,16 +600,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           DebugLogger.log('管家流程', '✖ 对话落库失败（男主回复）: $e');
         }
       }
-      if (displayText.trim().isNotEmpty) {
-        _msgKey.currentState?.appendMessage(ChatMessage(
-          id: '${DateTime.now().millisecondsSinceEpoch}_ai',
-          text: displayText,
-          isMe: false,
-          // 8-03 07:01：男主思考链（reasoning_content）随消息显示，
-          // 默认折叠可展开（气泡里小格式展示）
-          thinkingChain: result.reasoningContent,
-        ));
-      }
+      // 渐进显示已实时插入各轮气泡（第一轮 _ai0、工具轮 _aiN），
+      // 此处不再重复 append（8-03 18:2x 渐进显示改造）
       // 男主回复完成：全部已读 + 停止输入
       ChatPresence.instance.markAllRead();
       // 用户 8-03 02:26：男主空回复（无工具、无文本）不该弹红色报错。
@@ -607,6 +635,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         ));
       }
     } finally {
+      // 生成锁释放（无论如何）
+      _generating = false;
       // 无论如何：停止"正在输入"（失败则保持未读，男主没读到）
       ChatPresence.instance.setTyping(false);
       // 作息规律：当天首次聊天 → 记开始时间（用户一般几点来找男主）
@@ -1075,6 +1105,28 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   /// 工具气泡自增序号（防同一微秒撞 id）
   int _toolBubbleSeq = 0;
+
+  /// 8-03 18:2x：男主生成锁（防并发——男主生成中再发消息会上下文混乱）
+  bool _generating = false;
+
+  /// 男主回复 → 用户可见文本（剥离工具块 + #指令 + 还原代号）。
+  /// 8-03 18:2x：渐进显示用——每轮文本单独显示，不等全部跑完
+  Future<String> _displayableText(String raw) async {
+    var t = ToolIntentParser.stripToolBlocks(raw);
+    t = ButlerCommandParser.instance.strip(t);
+    try {
+      final butler = ChatService.instance.butler;
+      if (butler != null) {
+        t = await butler.processIncoming(
+          text: t,
+          sessionId: _chatSessionId ?? 'chat_page',
+        );
+      }
+    } catch (e) {
+      DebugLogger.log('管家流程', '✖ 代号还原失败（渐进显示）: $e');
+    }
+    return t.trim();
+  }
 
   /// 工具执行完成/失败气泡（用户 8-03 01:57）：执行完必须给用户明确反馈。
   void _appendToolResultBubble(String toolName, _ToolResult r) {
