@@ -482,7 +482,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             // 8-03 06:37：男主写的完整句（content）原样保存 + 关键词落库
             _appendToolBubble('正在记录：「$content」（$category）…');
             // 8-03 19:1x（用户要求：调工具要确认）：写记忆前让用户点头
-            final ok = await _approveToolCall('记录', '「$content」\n\n类别：$category\n\n要让他记住吗？');
+            // 8-03 23:0x（用户要求）：一次弹窗展示全——
+            // 男主想记录的原话 + 类别 + 男主提取的关键词（a+b 找规律用）
+            final ok = await _approveToolCall(
+              '记录',
+              '「$content」\n\n类别：$category\n'
+              '关键词：${words.isEmpty ? '（无）' : words.join('、')}\n\n'
+              '要让他记住吗？',
+            );
             if (!ok) {
               _appendToolBubble('❌ 你拒绝了记录「$content」');
               toolResult = _ToolResult(false, '用户拒绝：暂不记录「$content」');
