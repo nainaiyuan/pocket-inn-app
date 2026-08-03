@@ -118,6 +118,11 @@ class AIProviderManager {
     for (final config in _configs) {
       _router.register(config);
     }
+    // 内置测试 AI（mock）不持久化，但必须注册进路由——否则
+    // hasUsable / resolve / executeWithFailover 永远找不到它，
+    // 选中"🧪 测试AI（内置）"后发消息会被"没有可用 Provider"拦截
+    // （用户 8-03 21:12 反馈：测试AI被检测API拦住了，就是这个原因）
+    _router.register(_builtinMockConfig);
   }
 
   /// 一次性迁移：把旧版「API 设置」（api_configs）里选中的配置
