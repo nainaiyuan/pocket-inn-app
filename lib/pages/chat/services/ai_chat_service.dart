@@ -388,6 +388,14 @@ class AiChatService {
       );
       if (retry.text.trim().isNotEmpty ||
           (retry.toolCalls != null && retry.toolCalls!.isNotEmpty)) {
+        // 8-03 20:1x（用户反馈"男主对话被抛弃"）：重试成功也要 feed——
+        // 之前直接 return 跳过 feedAssistantMessage → 男主话丢出上下文
+        if (retry.text.trim().isNotEmpty) {
+          ContextManager.instance
+              .feedAssistantMessage(personaId, retry.text.trim());
+          DebugLogger.log('上下文调试',
+              '📝 已记录男主回复（重试第1次）：${retry.text.length > 40 ? retry.text.substring(0, 40) + '…' : retry.text}');
+        }
         return retry;
       }
       // 第 2 次重试不带 tools：空回复可能是工具定义干扰 → 排除后至少能正常聊天
@@ -395,6 +403,11 @@ class AiChatService {
       DebugLogger.log('AI路由', '⚠️ 空回复，重试第 2 次（不带工具）');
       final retry2 = await manager.chat(personaId, messages);
       if (retry2.text.trim().isNotEmpty) {
+        // 8-03 20:1x：重试第2次成功同样要 feed（同上）
+        ContextManager.instance
+            .feedAssistantMessage(personaId, retry2.text.trim());
+        DebugLogger.log('上下文调试',
+            '📝 已记录男主回复（重试第2次）：${retry2.text.length > 40 ? retry2.text.substring(0, 40) + '…' : retry2.text}');
         return retry2;
       }
       // 两次重试都空 → 返回空结果，不抛异常（chat_page 侧轻提示，不弹红色报错）
