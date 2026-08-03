@@ -25,6 +25,9 @@ class ChatPresence extends ChangeNotifier {
   /// 用户消息 id → 男主是否已读（null = 非用户消息/未知）
   final Map<String, bool> _readState = {};
 
+  /// 用户消息 id 集合（区分"男主已读用户消息"和"用户已读男主消息"两个方向）
+  final Set<String> _userMsgIds = {};
+
   /// 男主是否正在输入
   bool _isTyping = false;
 
@@ -40,10 +43,16 @@ class ChatPresence extends ChangeNotifier {
     return _timestamps[messageId];
   }
 
-  /// 男主是否已读该消息（用户消息专用）
+  /// 已读状态（用户消息 = 男主是否已读；男主消息 = 用户是否已读）
   bool? isRead(String? messageId) {
     if (messageId == null) return null;
     return _readState[messageId];
+  }
+
+  /// 该消息是否是用户消息（决定已读标记的语义方向）
+  bool isUserMessage(String? messageId) {
+    if (messageId == null) return false;
+    return _userMsgIds.contains(messageId);
   }
 
   /// 记录一批消息的时间戳（加载历史/发送完成后调用）
@@ -80,8 +89,28 @@ class ChatPresence extends ChangeNotifier {
 
   /// 标记消息未读（用户刚发出，男主还没看）
   void markUnread(String messageId) {
+    _userMsgIds.add(messageId);
     _readState[messageId] = false;
     notifyListeners();
+  }
+
+  /// 标记男主消息未读（男主刚发出，用户还没看完）
+  /// 8-03 18:2x：男主消息的已读 = 用户是否看完（打字机播完 = 已读）
+  void markCharacterUnread(String messageId) {
+    _readState[messageId] = false;
+    notifyListeners();
+  }
+
+  /// 男主消息全部已读（用户浏览/历史加载后）
+  void markAllCharacterRead() {
+    var changed = false;
+    for (final key in _readState.keys) {
+      if (!_userMsgIds.contains(key) && _readState[key] == false) {
+        _readState[key] = true;
+        changed = true;
+      }
+    }
+    if (changed) notifyListeners();
   }
 
   /// 迁移已读状态：发送中的临时消息（pending_xxx）重载后变成真实消息，
@@ -90,6 +119,7 @@ class ChatPresence extends ChangeNotifier {
     if (!_readState.containsKey(fromId)) return;
     _readState[toId] = _readState[fromId]!;
     _readState.remove(fromId);
+    if (_userMsgIds.remove(fromId)) _userMsgIds.add(toId);
     notifyListeners();
   }
 
@@ -99,11 +129,13 @@ class ChatPresence extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 全部已读（男主回复完成时调用）
+  /// 全部已读（男主回复完成时调用）——只标用户消息。
+  /// 8-03 18:2x：男主消息的已读只由"打字机播完"触发（用户看完），
+  /// 不在这里批量覆盖（否则未读状态一闪而过）
   void markAllRead() {
     var changed = false;
     for (final key in _readState.keys) {
-      if (_readState[key] == false) {
+      if (_userMsgIds.contains(key) && _readState[key] == false) {
         _readState[key] = true;
         changed = true;
       }
@@ -131,6 +163,7 @@ class ChatPresence extends ChangeNotifier {
   void reset() {
     _timestamps.clear();
     _readState.clear();
+    _userMsgIds.clear();
     _isTyping = false;
     _isViewing = false;
     notifyListeners();

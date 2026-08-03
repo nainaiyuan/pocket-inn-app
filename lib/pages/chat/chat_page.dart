@@ -269,6 +269,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     }
     _generating = true;
     final userMsgId = DateTime.now().millisecondsSinceEpoch.toString();
+    // 本轮男主第一句话气泡 id 重置（工具气泡只挂本轮第一句话头上）
+    _firstAiMsgId = null;
     _msgKey.currentState?.appendMessage(ChatMessage(id: userMsgId, text: t, isMe: true));
     final lid = _state.leadId;
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
@@ -325,6 +327,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 不走男主主调用（男主收到 JSON 会空回复），直接进工具轮执行，
       // 用户 8-03 06:01：撤销用户消息直连工具——调工具是男主的技能，
       // 用户消息一律走男主，由男主决定是否调用（男主回复由管家解析执行）
+      // 8-03 18:2x（用户要求）：男主已读 = 管家已联系男主开始走流程。
+      // 生成请求发出（男主开始处理）→ 用户消息立即变"已读"；
+      // 不再等回复完成才 markAllRead
+      ChatPresence.instance.markRead(userMsgId);
       var result = await _aiSvc.generateReply(
         sendText,
         personaId,
@@ -379,8 +385,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       if (result.text.trim().isNotEmpty) {
         final firstText = await _displayableText(result.text);
         if (firstText.isNotEmpty) {
+          final firstMsgId =
+              '${DateTime.now().microsecondsSinceEpoch}_ai0';
+          _firstAiMsgId = firstMsgId;
           _msgKey.currentState?.appendMessage(ChatMessage(
-            id: '${DateTime.now().microsecondsSinceEpoch}_ai0',
+            id: firstMsgId,
             text: firstText,
             isMe: false,
             thinkingChain: result.reasoningContent,
@@ -1095,8 +1104,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     );
     final area = _msgKey.currentState;
     if (area != null) {
-      // 聊天页挂载 → 实时插入 UI（内部会落库 + 滚到底部）
-      area.appendMessage(msg);
+      // 8-03 18:2x：工具气泡挂男主第一句话头上（第一句话上方）。
+      // 用户要求：调工具显示在第一句话的顶部，第二句话在第一句话下面，
+      // 工具始终跟第一句话绑定。没有第一句话（男主直接调工具）→ 正常追加。
+      area.appendMessage(msg, insertBeforeId: _firstAiMsgId);
     } else {
       // 聊天页没挂载（切走/后台）→ 只落库，回来从 DB 加载能看到
       ChatStorageService().appendMessage(personaId, msg);
@@ -1108,6 +1119,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   /// 8-03 18:2x：男主生成锁（防并发——男主生成中再发消息会上下文混乱）
   bool _generating = false;
+
+  /// 8-03 18:2x：本轮男主第一句话气泡 id——工具气泡都挂在它头上
+  /// （用户要求：调工具显示在第一句话的上方，后续句子在下方）
+  String? _firstAiMsgId;
 
   /// 男主回复 → 用户可见文本（剥离工具块 + #指令 + 还原代号）。
   /// 8-03 18:2x：渐进显示用——每轮文本单独显示，不等全部跑完

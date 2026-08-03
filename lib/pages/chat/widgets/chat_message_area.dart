@@ -69,17 +69,53 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
         _messages = msgs;
         _loading = false;
       });
+      // 历史加载不播打字机（清空实时插入标记）
+      _typewritingIds.clear();
+      // 历史男主消息默认已读（用户在看历史 = 已读）
+      ChatPresence.instance.markAllCharacterRead();
       _scrollToBottom();
     }
   }
 
   /// 追加消息
-  void appendMessage(ChatMessage msg) {
+  /// [insertBeforeId] 不为空时插到该消息之前（工具气泡挂男主第一句话头上）
+  void appendMessage(ChatMessage msg, {String? insertBeforeId}) {
     if (widget.currentPersona == null) return;
-    setState(() => _messages.add(msg));
-    _storage.appendMessage(widget.currentPersona!.id, msg);
+    // 实时插入的男主消息 → 打字机动效 + 未读（历史加载不播）
+    if (!msg.isMe && !msg.text.startsWith('[tool]')) {
+      _typewritingIds.add(msg.id ?? '');
+      if (msg.id != null) ChatPresence.instance.markCharacterUnread(msg.id!);
+    }
+    setState(() {
+      if (insertBeforeId != null) {
+        final idx = _messages.indexWhere((m) => m.id == insertBeforeId);
+        if (idx >= 0) {
+          _messages.insert(idx, msg);
+        } else {
+          _messages.add(msg);
+        }
+      } else {
+        _messages.add(msg);
+      }
+    });
+    if (insertBeforeId != null) {
+      _storage.insertMessageBefore(
+        widget.currentPersona!.id,
+        msg,
+        insertBeforeId,
+        seq: _toolInsertSeq++,
+      );
+    } else {
+      _storage.appendMessage(widget.currentPersona!.id, msg);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
+
+  /// 实时插入的男主消息 id（打字机动画用，历史加载不播）
+  final Set<String> _typewritingIds = {};
+
+  /// 工具气泡插入序号（决定与目标消息的时间差，保持重载顺序稳定）
+  int _toolInsertSeq = 0;
 
   void _scrollToBottom() {
     if (_scrollCtrl.hasClients) {
@@ -290,6 +326,20 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
                           canDelete: false,
                           isBusyRegenerating: false,
                           isBusyImpersonating: false,
+                          // 8-03 18:2x：实时插入的男主消息播打字机动效；
+                          // 播完 = 用户看完 = 标记已读（并从集合移除，滚动回收不重播）
+                          typewriting: _typewritingIds.contains(msg.id ?? ''),
+                          onTypewriterDone: () {
+                            _typewritingIds.remove(msg.id ?? '');
+                            if (msg.id != null) {
+                              ChatPresence.instance.markRead(msg.id!);
+                            }
+                            // 打字机播完：气泡长定型，滚到底让全文可见
+                            WidgetsBinding.instance
+                                .addPostFrameCallback((_) {
+                              if (mounted) _scrollToBottom();
+                            });
+                          },
                         ),
                       ),
                     ],

@@ -83,12 +83,18 @@ class _ChatTopBarState extends State<ChatTopBar> {
             child: GestureDetector(
               onTap: widget.onTapAvatar,
               onLongPress: () => _renameLead(context),
-              // 拟人化状态：男主输入中 → 顶部只显示"正在输入"（仿微信，不显示名字）
+              // 拟人化状态：男主输入中 → 顶部中央显示"正在输出"（仿微信）
+              // 8-03 18:2x：用户要求"正在输出"放正中间（原来偏右）
               child: ListenableBuilder(
                 listenable: ChatPresence.instance,
                 builder: (context, _) {
-                  if (ChatPresence.instance.isTyping) {
-                    return const _TypingIndicator();
+                  final typing = ChatPresence.instance.isTyping;
+                  if (typing) {
+                    // 绝对居中（Align 撑满 Expanded）
+                    return const Align(
+                      alignment: Alignment.center,
+                      child: _TypingIndicator(),
+                    );
                   }
                   return Column(
                     mainAxisSize: MainAxisSize.min,
@@ -274,7 +280,7 @@ class _TypingIndicatorState extends State<_TypingIndicator>
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          '正在输入',
+          '正在输出',
           style: TextStyle(
             fontSize: 11,
             color: const Color(0xFF6A4A5A).withValues(alpha: 0.35),

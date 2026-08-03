@@ -123,6 +123,38 @@ class ChatStorageService {
     } catch (_) {}
   }
 
+  /// 插到指定消息之前（8-03 18:2x：工具气泡挂男主第一句话头上）。
+  /// 列表按 created_at ASC 排序 → 新消息的 created_at 取目标消息的
+  /// 前一刻（按 [seq] 递减，多条插入顺序稳定），保证重载后位置一致。
+  Future<void> insertMessageBefore(
+    String personaId,
+    ChatMessage message,
+    String beforeId, {
+    int seq = 0,
+  }) async {
+    try {
+      final d = await db;
+      final target = await d.query('messages',
+        where: 'id = ? AND persona_id = ?',
+        whereArgs: [beforeId, personaId],
+        limit: 1,
+      );
+      if (target.isEmpty) {
+        await appendMessage(personaId, message);
+        return;
+      }
+      final targetTime = (target.first['created_at'] as int?) ??
+          DateTime.now().millisecondsSinceEpoch;
+      final row = _messageToRow(personaId, message);
+      // seq 越大时间差越小 → ASC 排序后先插入的（seq 小）在上，顺序稳定
+      row['created_at'] = targetTime - (600 - seq % 600) * 1000;
+      await d.insert('messages', row);
+      ChatPresence.instance.recordTimestampsMap({
+        if (message.id != null) message.id!: DateTime.now(),
+      });
+    } catch (_) {}
+  }
+
   Future<void> updateMessage(
       String personaId, String messageId, ChatMessage updated) async {
     try {

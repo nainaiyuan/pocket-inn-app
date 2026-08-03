@@ -9,7 +9,7 @@ import '../state/chat_presence.dart';
 import 'thinking_chain_widget.dart';
 
 /// 消息气泡
-class MessageBubble extends StatelessWidget {
+class MessageBubble extends StatefulWidget {
   final ChatMessage message;
   final UserSetting? userSetting;
   final ResolvedChatCharacter? character;
@@ -40,6 +40,10 @@ class MessageBubble extends StatelessWidget {
   final bool isGroupStart;
   final bool isGroupEnd;
 
+  /// 8-03 18:2x：打字机动效（实时插入的男主消息逐字冒出；历史加载 false）
+  final bool typewriting;
+  final VoidCallback? onTypewriterDone;
+
   const MessageBubble({
     super.key,
     required this.message,
@@ -68,10 +72,81 @@ class MessageBubble extends StatelessWidget {
     this.isGrouped = false,
     this.isGroupStart = false,
     this.isGroupEnd = false,
+    this.typewriting = false,
+    this.onTypewriterDone,
   });
 
   @override
+  State<MessageBubble> createState() => _MessageBubbleState();
+}
+
+class _MessageBubbleState extends State<MessageBubble>
+    with SingleTickerProviderStateMixin {
+  /// 打字机：当前已显示的字数（-1 = 不播，直接全文）
+  int _visibleChars = -1;
+  AnimationController? _twController;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.typewriting && widget.message.text.isNotEmpty) {
+      _startTypewriter();
+    }
+  }
+
+  @override
+  void didUpdateWidget(MessageBubble old) {
+    super.didUpdateWidget(old);
+    // 同一条消息从"实时插入"变"重建"（滚动回收）：若还没播完则继续播
+    if (_visibleChars == -1 &&
+        widget.typewriting &&
+        widget.message.text.isNotEmpty) {
+      _startTypewriter();
+    }
+  }
+
+  void _startTypewriter() {
+    final text = widget.message.text;
+    // 每字 26ms，封顶 6 秒（长文本加速），最短 350ms 保证有动效感
+    final ms = (text.length * 26).clamp(350, 6000);
+    _visibleChars = 0;
+    _twController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: ms),
+    )
+      ..addListener(() {
+        if (!mounted) return;
+        final n = (text.length * _twController!.value).ceil();
+        if (n != _visibleChars) {
+          setState(() => _visibleChars = n);
+        }
+      })
+      ..addStatusListener((status) {
+        if (status == AnimationStatus.completed) {
+          _visibleChars = -1;
+          if (mounted) setState(() {});
+          widget.onTypewriterDone?.call();
+        }
+      })
+      ..forward();
+  }
+
+  @override
+  void dispose() {
+    _twController?.dispose();
+    super.dispose();
+  }
+
+  String get _displayText {
+    if (_visibleChars >= 0) {
+      return widget.message.text.substring(0, _visibleChars);
+    }
+    return widget.message.text;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final message = widget.message;
     // 管家工具气泡：男主头像下的小气泡（🔧 正在查记忆…），无头像、小字
     if (message.text.startsWith('[tool]')) {
       return Padding(
@@ -93,7 +168,9 @@ class MessageBubble extends StatelessWidget {
                   const SizedBox(width: 5),
                   Flexible(
                     child: Text(
-                      message.text.replaceFirst('[tool] ', '').replaceFirst('[tool]', ''),
+                      message.text
+                          .replaceFirst('[tool] ', '')
+                          .replaceFirst('[tool]', ''),
                       style: const TextStyle(
                         fontSize: 11,
                         color: Color(0xFF9A6B84),
@@ -129,12 +206,12 @@ class MessageBubble extends StatelessWidget {
             children: [
               // 分组模式：只有组内最后一条才显示头像（仿微信连续对话）
               // 分组模式：只有组内第一条才显示头像（用户没插话 = 连着说）
-              if (!message.isMe && (!isGrouped || isGroupStart)) ...[
+              if (!message.isMe && (!widget.isGrouped || widget.isGroupStart)) ...[
                 _Avatar(
                   isUser: false,
-                  characterAvatarPath: characterAvatarPath,
-                  onTap: onAvatarTap,
-                  onLongPress: onAvatarLongPress,
+                  characterAvatarPath: widget.characterAvatarPath,
+                  onTap: widget.onAvatarTap,
+                  onLongPress: widget.onAvatarLongPress,
                 ),
                 const SizedBox(width: 8),
               ],
@@ -152,28 +229,28 @@ class MessageBubble extends StatelessWidget {
                     borderRadius: BorderRadius.only(
                       // 分组：组首顶角大 + 头像侧尾巴，中间小圆角，组尾底角收尾
                       // 头像在男主左侧（BL 是尾巴侧）/ 用户右侧（BR 是尾巴侧）
-                      topLeft: isGrouped && !isGroupStart
+                      topLeft: widget.isGrouped && !widget.isGroupStart
                           ? const Radius.circular(6)
                           : const Radius.circular(18),
-                      topRight: isGrouped && !isGroupStart
+                      topRight: widget.isGrouped && !widget.isGroupStart
                           ? const Radius.circular(6)
                           : const Radius.circular(18),
                       bottomLeft: message.isMe
                           ? const Radius.circular(18) // 用户左侧恒 18
-                          : isGrouped
-                          ? isGroupStart
+                          : widget.isGrouped
+                          ? widget.isGroupStart
                                 ? Radius
                                       .zero // 组首尾巴指向头像
-                                : isGroupEnd
+                                : widget.isGroupEnd
                                 ? const Radius.circular(18)
                                 : const Radius.circular(6)
                           : Radius.zero,
                       bottomRight: message.isMe
-                          ? isGrouped
-                                ? isGroupStart
+                          ? widget.isGrouped
+                                ? widget.isGroupStart
                                       ? Radius
                                             .zero // 组首尾巴指向头像
-                                      : isGroupEnd
+                                      : widget.isGroupEnd
                                       ? const Radius.circular(18)
                                       : const Radius.circular(6)
                                 : Radius.zero
@@ -186,6 +263,9 @@ class MessageBubble extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // 8-03 18:2x：已读/未读移到气泡内部顶部角——
+                      // 用户气泡靠男主侧（左上）、男主气泡靠用户侧（右上）
+                      _ReadCorner(message: message),
                       // 8-03 07:01：男主的思考链（reasoning_content）——
                       // 小格式、默认折叠，用户想看再展开，和正文区分
                       if (!message.isMe &&
@@ -198,7 +278,7 @@ class MessageBubble extends StatelessWidget {
                         const SizedBox(height: 8),
                       ],
                       Text(
-                        message.text,
+                        _displayText,
                         style: TextStyle(
                           fontSize: 15,
                           color: const Color(0xFF6A4A5A),
@@ -206,51 +286,51 @@ class MessageBubble extends StatelessWidget {
                         ),
                       ),
                       // 操作按钮（仅在 showActions 时显示）
-                      if (showActions) ...[
+                      if (widget.showActions) ...[
                         const SizedBox(height: 8),
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (onCopy != null)
+                            if (widget.onCopy != null)
                               _ActionButton(
                                 icon: Icons.copy_rounded,
-                                onTap: onCopy!,
+                                onTap: widget.onCopy!,
                               ),
-                            if (canEdit && onEdit != null)
+                            if (widget.canEdit && widget.onEdit != null)
                               _ActionButton(
                                 icon: Icons.edit_rounded,
-                                onTap: onEdit!,
+                                onTap: widget.onEdit!,
                               ),
-                            if (canDelete && onDelete != null)
+                            if (widget.canDelete && widget.onDelete != null)
                               _ActionButton(
                                 icon: Icons.delete_outline_rounded,
-                                onTap: onDelete!,
+                                onTap: widget.onDelete!,
                               ),
-                            if (message.isMe && onGenerate != null)
+                            if (message.isMe && widget.onGenerate != null)
                               _ActionButton(
                                 icon: Icons.refresh_rounded,
-                                onTap: onGenerate!,
+                                onTap: widget.onGenerate!,
                               ),
-                            if (!message.isMe && onRegenerate != null)
+                            if (!message.isMe && widget.onRegenerate != null)
                               _ActionButton(
                                 icon: Icons.replay_rounded,
-                                onTap: onRegenerate!,
+                                onTap: widget.onRegenerate!,
                               ),
-                            if (!message.isMe && onContinue != null)
+                            if (!message.isMe && widget.onContinue != null)
                               _ActionButton(
                                 icon: Icons.play_arrow_rounded,
-                                onTap: onContinue!,
+                                onTap: widget.onContinue!,
                               ),
                             if (message.hasMultiple) ...[
-                              if (onSelectPreviousVariant != null)
+                              if (widget.onSelectPreviousVariant != null)
                                 _ActionButton(
                                   icon: Icons.chevron_left_rounded,
-                                  onTap: onSelectPreviousVariant!,
+                                  onTap: widget.onSelectPreviousVariant!,
                                 ),
-                              if (onSelectNextVariant != null)
+                              if (widget.onSelectNextVariant != null)
                                 _ActionButton(
                                   icon: Icons.chevron_right_rounded,
-                                  onTap: onSelectNextVariant!,
+                                  onTap: widget.onSelectNextVariant!,
                                 ),
                             ],
                           ],
@@ -260,13 +340,13 @@ class MessageBubble extends StatelessWidget {
                   ),
                 ),
               ),
-              if (message.isMe && (!isGrouped || isGroupStart)) ...[
+              if (message.isMe && (!widget.isGrouped || widget.isGroupStart)) ...[
                 const SizedBox(width: 8),
                 _Avatar(isUser: true),
               ],
             ],
           ),
-          // 时间戳 + 已读状态（微信风格小字）
+          // 时间戳（已读已移到气泡顶部角）
           _MetaLine(message: message),
         ],
       ),
@@ -274,9 +354,50 @@ class MessageBubble extends StatelessWidget {
   }
 }
 
-/// 气泡下方的小字：时间戳 + 已读/未读
+/// 气泡内部顶部角的已读/未读小标（8-03 18:2x）
+/// - 用户气泡：靠男主那一侧 = 左上角（男主是否已读）
+/// - 男主气泡：靠用户那一侧 = 右上角（用户是否已读完，打字机播完 = 已读）
+class _ReadCorner extends StatelessWidget {
+  final ChatMessage message;
+
+  const _ReadCorner({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final presence = ChatPresence.instance;
+    final read = presence.isRead(message.id);
+    if (read == null) return const SizedBox.shrink();
+
+    final Color color;
+    if (read == true) {
+      color = const Color(0xFF7BA88F); // 柔和绿
+    } else {
+      color = const Color(0xFFC8966A); // 柔和琥珀（未读）
+    }
+    final label = read ? '已读' : '未读';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        mainAxisAlignment:
+            message.isMe ? MainAxisAlignment.start : MainAxisAlignment.end,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 气泡下方的小字：时间戳（已读/未读已移到气泡顶部角，8-03 18:2x）
 /// 只有记录了时间的消息才显示（旧数据没有时间戳自动隐藏）
-/// 颜色：已读 = 柔和绿（安心），未读 = 柔和琥珀（提醒，不吓人）
 class _MetaLine extends StatelessWidget {
   final ChatMessage message;
 
@@ -286,54 +407,19 @@ class _MetaLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final presence = ChatPresence.instance;
     final time = presence.timestampOf(message.id);
-    final read = presence.isRead(message.id);
 
-    // 都没有就不显示（保持界面干净）
-    if (time == null && read == null) {
+    // 没有时间就不显示（保持界面干净）
+    if (time == null) {
       return const SizedBox.shrink();
-    }
-
-    // 只有已读/未读时给颜色；时间戳保持灰色
-    final Color? statusColor;
-    if (read == true) {
-      statusColor = const Color(0xFF7BA88F); // 柔和绿
-    } else if (read == false) {
-      statusColor = const Color(0xFFC8966A); // 柔和琥珀（不吓人的"未读"）
-    } else {
-      statusColor = null;
     }
 
     return Padding(
       padding: const EdgeInsets.only(top: 3, right: 4, left: 4),
-      child: Text.rich(
-        TextSpan(
-          children: [
-            if (time != null)
-              TextSpan(
-                text: ChatPresence.formatTime(time),
-                style: TextStyle(
-                  fontSize: 10,
-                  color: const Color(0xFF6A4A5A).withValues(alpha: 0.35),
-                ),
-              ),
-            if (time != null && read != null)
-              TextSpan(
-                text: ' · ',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: const Color(0xFF6A4A5A).withValues(alpha: 0.35),
-                ),
-              ),
-            if (read != null)
-              TextSpan(
-                text: read ? '已读' : '未读',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                  color: statusColor,
-                ),
-              ),
-          ],
+      child: Text(
+        ChatPresence.formatTime(time),
+        style: TextStyle(
+          fontSize: 10,
+          color: const Color(0xFF6A4A5A).withValues(alpha: 0.35),
         ),
       ),
     );
