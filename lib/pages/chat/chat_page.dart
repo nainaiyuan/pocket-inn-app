@@ -350,10 +350,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         taskState: [
           if (_pendingFeedback != null) _pendingFeedback!,
           if (toolHint != null) toolHint,
+          // 8-04 18:34：疑似工具调用格式不对 → 提示男主正确格式（下轮注入）
+          if (_formatHint != null) _formatHint!,
         ].join('\n'),
       );
-      // 用完即清（反馈/记忆只注入一次）
+      // 用完即清（反馈/记忆/格式提示只注入一次）
       _pendingFeedback = null;
+      _formatHint = null;
       _pendingRecall = null;
       _pendingRecallCategory = null;
       _pendingRecallLimit = null;
@@ -383,6 +386,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             providerName: result.providerName,
             reasoningContent: result.reasoningContent,
           );
+        } else {
+          // 8-04 18:34（用户设计）：疑似工具调用但格式不对 →
+          // 管家不执行，提示男主正确格式（注入下轮 taskState，用完即清）
+          final hint = ToolIntentParser.detectSuspicious(result.text);
+          if (hint != null) {
+            _formatHint = hint;
+            DebugLogger.log('AI路由', '📐 男主工具格式不对，下轮提示正确格式');
+          }
         }
       }
       // 8-03 18:2x（用户反馈"不连贯，管家不实时显示流程"）：
@@ -1324,6 +1335,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   /// 待反馈给男主的审批结果（下轮注入 prompt：确认/拒绝/帮助文本）
   String? _pendingFeedback;
+  // 8-04 18:34：疑似工具调用格式不对 → 下轮注入男主正确格式提示（用完即清）
+  String? _formatHint;
 
   /// 男主获准调取的记忆查询词（下轮注入检索到的记忆）
   String? _pendingRecall;

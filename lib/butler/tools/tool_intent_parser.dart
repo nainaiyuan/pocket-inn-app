@@ -45,6 +45,29 @@ class ToolIntentParser {
     return extractJsonToolCalls(text);
   }
 
+  /// 疑似工具调用检测（8-04 18:34 用户设计）：
+  /// extract 没抓到明确格式，但文本里有"疑似想调工具"的罕见痕迹 →
+  /// 管家不执行，而是提示男主正确格式（注入下轮，男主下次用对）。
+  /// 特征全选**罕见**的（日常聊天不会出现），误判也只是提示，无害：
+  /// ① 已知工具名英文（record_memory 等）散落在文本里
+  /// ② "工具:" / "工具：" 冒号格式（宽松变体痕迹）
+  /// ③ ⟨工具:xxx⟩ 写了开头没闭合
+  static String? detectSuspicious(String text) {
+    if (text.trim().isEmpty) return null;
+    const knownNames = [
+      'record_memory', 'recall_memory', 'save_identity_memory',
+      'list_tools', 'write_diary', 'query_diary',
+    ];
+    final hasToolName = knownNames.any(text.contains);
+    final hasToolColon = RegExp(r'工具\s*[:：]').hasMatch(text);
+    final hasUnclosed = RegExp(r'⟨工具:[a-zA-Z_]+⟩').hasMatch(text) &&
+        !text.contains('⟨/工具⟩');
+    if (!hasToolName && !hasToolColon && !hasUnclosed) return null;
+    return '你刚才提到工具调用，但格式不对，管家没有执行。'
+        '正确格式：⟨工具:工具名⟩{"参数":"值"}⟨/工具⟩'
+        '（参数可省略；或用原生工具调用）。下次按这个格式写。';
+  }
+
   /// 解析 ⟨工具:name⟩{json}⟨/工具⟩ 文本协议块（仅严格块）
   static List<Map<String, dynamic>>? extractToolBlocks(String text) {
     final results = <Map<String, dynamic>>[];

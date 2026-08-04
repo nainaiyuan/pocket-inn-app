@@ -149,6 +149,23 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
       guidance: '检查 extractToolBlocks 参数解析',
     ));
 
+    // ── R-格式（8-04 18:34）：疑似工具调用但格式不对 → 管家提示纠正 ──
+    // 用户设计：extract 没抓到明确格式但有罕见痕迹（工具名英文/工具:冒号/
+    // ⟨工具未闭合）→ 提示男主正确格式（不执行）；日常聊天不应触发
+    final fmtHint1 = ToolIntentParser.detectSuspicious('工具:list_tools 帮我看看');
+    final fmtHint2 = ToolIntentParser.detectSuspicious('⟨工具:record_memory⟩{"content":"x"}');
+    final fmtHint3 = ToolIntentParser.detectSuspicious('今天天气真好，我们去散步吧');
+    items.add(ButlerSelfTestItem(
+      message: 'R-格式 疑似检测',
+      expected: '宽松格式→提示；严格块→不提示；日常→不提示',
+      actual: '宽松:${fmtHint1 != null} 严格块:${fmtHint2 != null} 日常:${fmtHint3 != null}',
+      passed: fmtHint1 != null && fmtHint2 == null && fmtHint3 == null,
+      failedReason: (fmtHint1 == null || fmtHint2 != null || fmtHint3 != null)
+          ? '疑似检测边界不对（宽松应提示、严格块/日常不应提示）'
+          : null,
+      guidance: '检查 ToolIntentParser.detectSuspicious',
+    ));
+
     // ── R8（8-03 06:54）：文本协议工具轮回传不 400 ──
     // DeepSeek 思考模式：assistant(tool_calls) 必须带 reasoning_content，
     // 拿不到就 400 → 文本协议直接翻译：丢弃原生 tool_calls，
