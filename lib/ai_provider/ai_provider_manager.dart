@@ -35,7 +35,9 @@ class AIProviderManager {
   static const String builtinMockId = 'builtin-mock';
 
   /// 内置测试 AI 的 provider 定义（不持久化，每次启动自动有）
-  AIProviderConfig get _builtinMockConfig => const AIProviderConfig(
+  /// 8-04 20:35（用户）：mock 要能模拟各种配置组合——memoryMode/
+  /// refreshHours 运行时可变（重启还原），配置页"内置模拟 AI"卡片可改
+  AIProviderConfig _builtinMockConfig = const AIProviderConfig(
         id: builtinMockId,
         name: '🧪 测试AI（内置）',
         type: ProviderType.local,
@@ -44,6 +46,30 @@ class AIProviderManager {
         note: '内置模拟器：不联网不花token，测试对话/工具调用链路用',
         priority: 99999,
       );
+
+  /// 当前生效的 mock 配置（给配置页显示/编辑用）
+  AIProviderConfig get builtinMockConfig => _builtinMockConfig;
+
+  /// 更新 mock 配置（内存态，不落 DB；重启还原 stateless）
+  /// memoryMode: stateless（无后台记忆）/ stateful（有后台记忆）
+  void updateBuiltinMock({String? memoryMode, int? refreshHours}) {
+    _builtinMockConfig = AIProviderConfig(
+      id: _builtinMockConfig.id,
+      name: _builtinMockConfig.name,
+      type: _builtinMockConfig.type,
+      baseUrl: _builtinMockConfig.baseUrl,
+      model: _builtinMockConfig.model,
+      note: _builtinMockConfig.note,
+      priority: _builtinMockConfig.priority,
+      memoryMode: memoryMode ?? _builtinMockConfig.memoryMode,
+      refreshHours: refreshHours ?? _builtinMockConfig.refreshHours,
+    );
+    // 同步路由里的 config（AIProviderState.config 可变，直接换引用）
+    _router.stateOf(builtinMockId)?.config = _builtinMockConfig;
+    AiModuleLog.log('模拟AI',
+        '⚙️ mock 配置更新：memoryMode=${_builtinMockConfig.memoryMode}'
+        ' refreshHours=${_builtinMockConfig.refreshHours}');
+  }
 
   final MockAIProvider _builtinMock = MockAIProvider();
 

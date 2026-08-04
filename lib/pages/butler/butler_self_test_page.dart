@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../../ai_provider/mock_ai_provider.dart';
 import '../../ai_provider/models.dart';
 import '../../ai_provider/tool_format_adapter.dart';
 import '../../butler/tools/tool_intent_parser.dart';
@@ -204,6 +205,78 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
       failedReason: r8HasToolCall ? 'translateToolRound 没丢弃 tool_calls' : null,
       guidance: '检查 TextProtocolAdapter.translateToolRound',
     ));
+
+    // ── R-模拟（8-04 20:35 用户：本地 AI 测各种配置组合）──
+    // 模拟器行为断言：思考链开/关 × 工具开/关（不改全局开关，测完还原）
+    final savedReasoning = MockAIProvider.simulateReasoning;
+    final savedTools = MockAIProvider.simulateTools;
+    try {
+      // ① 思考链开 + 工具开：调工具带 reasoningContent
+      MockAIProvider.simulateReasoning = true;
+      MockAIProvider.simulateTools = true;
+      final r1 = MockAIProvider().chat(
+        [const AIChatMessage(role: 'user', content: '记住我喜欢喝咖啡')],
+        toolRound: false,
+      );
+      // ② 思考链关 + 工具开：调工具但 reasoningContent 为 null
+      MockAIProvider.simulateReasoning = false;
+      final r2 = MockAIProvider().chat(
+        [const AIChatMessage(role: 'user', content: '记住我喜欢喝咖啡')],
+        toolRound: false,
+      );
+      // ③ 工具关：纯文本回复，无 toolCalls
+      MockAIProvider.simulateReasoning = true;
+      MockAIProvider.simulateTools = false;
+      final r3 = MockAIProvider().chat(
+        [const AIChatMessage(role: 'user', content: '记住我喜欢喝咖啡')],
+        toolRound: false,
+      );
+      // ④ 工具轮校验在思考链关时不误报
+      MockAIProvider.simulateReasoning = false;
+      MockAIProvider.simulateTools = true;
+      final r4 = MockAIProvider().chat(
+        const [
+          AIChatMessage(role: 'system', content: '系统提示'),
+          AIChatMessage(
+            role: 'assistant',
+            content: '',
+            toolCalls: [
+              {'id': 'call_1', 'name': 'record_memory', 'arguments': <String, dynamic>{}},
+            ],
+            reasoningContent: null,
+          ),
+          AIChatMessage(
+            role: 'tool',
+            content: '已记录',
+            toolCallId: 'call_1',
+          ),
+        ],
+        toolRound: true,
+      );
+      final r1Ok = r1.toolCalls != null &&
+          r1.toolCalls!.isNotEmpty &&
+          (r1.reasoningContent?.isNotEmpty ?? false);
+      final r2Ok = r2.toolCalls != null &&
+          r2.toolCalls!.isNotEmpty &&
+          r2.reasoningContent == null;
+      final r3Ok = (r3.toolCalls == null || r3.toolCalls!.isEmpty) &&
+          r3.text.isNotEmpty;
+      final r4Ok = !r4.text.contains('❌');
+      items.add(ButlerSelfTestItem(
+        message: 'R-模拟 思考链×工具开关',
+        expected: '思考链开→带reasoning；关→null；工具关→纯文本；工具轮不误报',
+        actual: '①${r1Ok ? '✅' : '❌'} ②${r2Ok ? '✅' : '❌'} '
+            '③${r3Ok ? '✅' : '❌'} ④${r4Ok ? '✅' : '❌'}',
+        passed: r1Ok && r2Ok && r3Ok && r4Ok,
+        failedReason: (r1Ok && r2Ok && r3Ok && r4Ok)
+            ? null
+            : '模拟器开关行为不对（见 ①②③④）',
+        guidance: '检查 MockAIProvider.simulateReasoning/simulateTools',
+      ));
+    } finally {
+      MockAIProvider.simulateReasoning = savedReasoning;
+      MockAIProvider.simulateTools = savedTools;
+    }
 
     // ── R9（8-03 17:24）：原生工具轮回传格式 ──
     // 用户指示"AI 需要什么给什么"：研究 DeepSeek 原生调用后——

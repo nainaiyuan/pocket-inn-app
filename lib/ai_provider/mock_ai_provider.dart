@@ -14,6 +14,13 @@ import 'ai_module_log.dart';
 /// 模拟 AI 在工具轮逐项检查，格式不对直接报出来 → 用户立刻知道
 /// 是程序 bug 还是 AI 行为。
 class MockAIProvider {
+  /// 8-04 20:35（用户）：本地模拟 AI 要能模拟各种配置组合——
+  /// 思考链开/关、工具调用开/关，配合配置页的 memoryMode 测
+  /// stateless/stateful × 思考链 × 工具的排列组合。
+  /// 静态开关（配置页"内置模拟 AI"卡片可改，重启还原默认）
+  static bool simulateReasoning = true;
+  static bool simulateTools = true;
+
   /// 上次返回的 assistant 消息摘要（工具轮校验对照用）
   Map<String, dynamic>? _lastAssistant;
 
@@ -46,22 +53,33 @@ class MockAIProvider {
       final history = messages
           .where((m) => m.role == 'system' && m.content.contains('上下文参考'))
           .toList();
+      // 8-04 20:35（用户）：模拟器报告"当前是什么模式"——
+      // 上下文参考条数多 = stateless 全量带；几乎空 = stateful 轻量
       if (history.isNotEmpty) {
-        // 检查上下文参考里有没有男主消息（用户 20:03 反馈"男主对话被抛弃"）
-        // 注意：buildHistoryMessages 输出格式是 [user]/[assistant] 前缀
-        // （8-03 21:25 修：原来数"用户：/男主："永远 0 条，误报"男主消息丢失"）
         final raw = history.first.content;
         final userCount = RegExp(r'\[user\]').allMatches(raw).length;
         final aiCount = RegExp(r'\[assistant\]').allMatches(raw).length;
+        final hasSummary = raw.contains('男主摘要');
+        final hasRecovery = raw.contains('恢复包');
         AiModuleLog.log(
             '模拟AI',
-            '📊 上下文参考里 用户 $userCount 条 / 男主 $aiCount 条'
+            '📊 模式报告：上下文参考 用户 $userCount 条 / 男主 $aiCount 条'
+            '${hasSummary ? ' / 有摘要' : ''}${hasRecovery ? ' / 有恢复包' : ''}'
+            ' → ${userCount == 0 && aiCount == 0 ? '轻量模式（stateful 或首次）' : '全量模式（stateless）'}'
             '${aiCount >= userCount - 1 ? ' ✅ 男主消息在' : ' ❌ 男主消息丢失！'}');
+      } else {
+        AiModuleLog.log('模拟AI', '📊 模式报告：无上下文参考（轻量模式）');
       }
     }
 
     if (toolRound) {
       return _handleToolRound(messages);
+    }
+
+    // 工具调用开关关闭 → 纯文本回复（模拟不支持 function calling 的模型）
+    if (!simulateTools) {
+      AiModuleLog.log('模拟AI', '🔕 工具调用开关已关（simulateTools=false）→ 纯文本回复');
+      return _textReply('（模拟AI）好的呢，我在听。（工具调用已关闭，只聊天不调工具）');
     }
 
     // 非工具轮：按最后一条 user 消息内容触发脚本
@@ -96,12 +114,16 @@ class MockAIProvider {
       return _toolCall('write_diary', {'content': '模拟日记内容'},
           '模拟思考：用户要写日记，我调用 write_diary 存档。');
     }
-    return AIProviderResult(
-      text: '（模拟AI）好的呢，我在听。',
-      reasoningContent: '模拟思考：普通聊天，直接自然回复就好。',
-      providerName: '模拟AI',
-    );
+    return _textReply('（模拟AI）好的呢，我在听。');
   }
+
+  /// 纯文本回复（思考链开关控制是否带 reasoningContent）
+  AIProviderResult _textReply(String text) => AIProviderResult(
+        text: text,
+        reasoningContent:
+            simulateReasoning ? '模拟思考：普通聊天，直接自然回复就好。' : null,
+        providerName: '模拟AI',
+      );
 
   /// 模拟男主总结：用户原话（可能啰嗦/带指令）→ 精炼的总结句
   /// "记住我喜欢喝咖啡" → "用户喜欢喝咖啡"
@@ -138,7 +160,8 @@ class MockAIProvider {
     AiModuleLog.log('模拟AI', '🔧 模拟AI 决定调用工具：$name 参数=$args');
     return AIProviderResult(
       text: '',
-      reasoningContent: reasoning,
+      reasoningContent:
+          simulateReasoning ? reasoning : null, // 思考链开关控制
       toolCalls: [call],
       providerName: '模拟AI',
     );
@@ -172,9 +195,13 @@ class MockAIProvider {
           }
         }
         if (a.reasoningContent == null || a.reasoningContent!.isEmpty) {
-          sb.writeln('❌ assistant 消息 reasoning_content 丢了——'
-              'DeepSeek 思考模式必须原样回传，否则 HTTP 400');
-          ok = false;
+          if (simulateReasoning) {
+            sb.writeln('❌ assistant 消息 reasoning_content 丢了——'
+                'DeepSeek 思考模式必须原样回传，否则 HTTP 400');
+            ok = false;
+          } else {
+            sb.writeln('ℹ️ reasoning_content 为空（思考链开关已关，正常）');
+          }
         } else {
           sb.writeln('✅ reasoning_content 原样带回（${a.reasoningContent!.length} 字）');
         }
@@ -204,7 +231,8 @@ class MockAIProvider {
     AiModuleLog.log('模拟AI', sb.toString());
     return AIProviderResult(
       text: '（模拟AI）$sb',
-      reasoningContent: '模拟思考：工具结果已收到，逐项校验完成。',
+      reasoningContent:
+          simulateReasoning ? '模拟思考：工具结果已收到，逐项校验完成。' : null,
       providerName: '模拟AI',
     );
   }

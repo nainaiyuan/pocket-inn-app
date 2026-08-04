@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../ai_provider/ai_provider_manager.dart';
 import '../ai_provider/capability_probe.dart';
 import '../ai_provider/failover_router.dart';
+import '../ai_provider/mock_ai_provider.dart';
 import '../ai_provider/models.dart';
 import '../ai_provider/provider_presets.dart';
 import '../utils/debug_logger.dart';
@@ -126,6 +127,10 @@ class _AiConfigPageState extends State<AiConfigPage> {
                 for (var i = 0; i < providers.length; i++)
                   if (providers[i].id != AIProviderManager.builtinMockId)
                     _buildProviderRow(providers[i], i, providers.length, states),
+              const SizedBox(height: 8),
+
+              // ---- 内置模拟 AI（8-04 20:35 用户：本地 AI 测各种配置组合）----
+              _buildMockCard(),
               const SizedBox(height: 16),
 
               // ---- 添加 AI ----
@@ -166,6 +171,134 @@ class _AiConfigPageState extends State<AiConfigPage> {
           ),
         ),
       );
+
+  /// 内置模拟 AI 卡片（8-04 20:35 用户：本地 AI 测各种配置组合）：
+  /// 显示当前 记忆模式/思考链/工具 状态，点设置弹 dialog 改
+  Widget _buildMockCard() {
+    final mock = manager.builtinMockConfig;
+    final isStateful = mock.isStateful;
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 8),
+      color: const Color(0xFFF3E8FF).withValues(alpha: 0.6),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            const Icon(Icons.science, size: 20, color: Colors.purple),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    mock.name,
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '记忆：${isStateful ? '有后台记忆（超时 ${mock.refreshHours}h）' : '无后台记忆（每次全量带）'}'
+                    ' ｜ 思考链：${MockAIProvider.simulateReasoning ? '开' : '关'}'
+                    ' ｜ 工具：${MockAIProvider.simulateTools ? '开' : '关'}',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600, height: 1.4),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: _openMockSettings,
+              child: const Text('⚙️ 设置'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// mock 设置 dialog：记忆模式 + 空闲超时 + 思考链 + 工具调用
+  Future<void> _openMockSettings() async {
+    final mock = manager.builtinMockConfig;
+    var memoryMode = mock.memoryMode;
+    var refreshHours = mock.refreshHours?.toString() ?? '24';
+    var reasoning = MockAIProvider.simulateReasoning;
+    var tools = MockAIProvider.simulateTools;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('🧪 模拟 AI 设置', style: TextStyle(fontSize: 17)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('模拟各种 AI 形态，测对话/记忆/工具链路：',
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: memoryMode,
+                  decoration: const InputDecoration(
+                    labelText: '后台记忆模式',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'stateless', child: Text('无后台记忆（每次全量带，DeepSeek 等）')),
+                    DropdownMenuItem(value: 'stateful', child: Text('有后台记忆（服务端记得，prompt 轻量）')),
+                  ],
+                  onChanged: (v) => setDialogState(() => memoryMode = v ?? 'stateless'),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: TextEditingController(text: refreshHours),
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: '空闲超时（小时，有后台记忆时用）',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                    helperText: '超过此时长没聊 → AI 服务端已忘 → 带恢复包+摘要接上',
+                  ),
+                  onChanged: (v) => refreshHours = v,
+                ),
+                const SizedBox(height: 6),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('思考链（reasoning_content）', style: TextStyle(fontSize: 14)),
+                  subtitle: const Text('关 = 模拟无思考链模型', style: TextStyle(fontSize: 11)),
+                  value: reasoning,
+                  onChanged: (v) => setDialogState(() => reasoning = v),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('工具调用', style: TextStyle(fontSize: 14)),
+                  subtitle: const Text('关 = 模拟不支持 function calling 的模型', style: TextStyle(fontSize: 11)),
+                  value: tools,
+                  onChanged: (v) => setDialogState(() => tools = v),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            FilledButton(
+              onPressed: () {
+                manager.updateBuiltinMock(
+                  memoryMode: memoryMode,
+                  refreshHours: int.tryParse(refreshHours.trim()),
+                );
+                MockAIProvider.simulateReasoning = reasoning;
+                MockAIProvider.simulateTools = tools;
+                setState(() {});
+                Navigator.pop(ctx);
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _buildProviderRow(
     AIProviderConfig config,
