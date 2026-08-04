@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import '../../../models/chat_message.dart';
+import '../../../utils/debug_logger.dart';
 import '../state/chat_presence.dart';
 
 /// 聊天消息持久化服务（SQLite）
@@ -24,8 +25,12 @@ class ChatStorageService {
     if (_db != null) return _db!;
     _db = await openDatabase(
       p.join(await getDatabasesPath(), 'pocket_inn_chat.db'),
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
+        // ⚠️ 8-04 16:2x 血泪教训：8-03 加 thinking_chain 列时只改了
+        // onUpgrade 分支，忘了 onCreate —— 全新安装的库 messages 表
+        // 缺这列，每次 insert 都报错被静默吞掉 → "退出重进对话全没了"
+        // （用户实测：prompt_logs 2 条成功、messages 0 条）。两边必须同步！
         await db.execute('''
           CREATE TABLE messages (
             id TEXT NOT NULL,
@@ -33,6 +38,7 @@ class ChatStorageService {
             text TEXT NOT NULL,
             is_me INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL,
+            thinking_chain TEXT,
             PRIMARY KEY (id, persona_id)
           )
         ''');
@@ -88,6 +94,17 @@ class ChatStorageService {
           ''');
           await db.execute('CREATE INDEX IF NOT EXISTS idx_prompt_logs_persona_time ON prompt_logs(persona_id, created_at DESC)');
         }
+        // 8-04 16:2x 修复：老库 messages 表可能缺 thinking_chain 列
+        // （v4 全新安装的库 onCreate 漏了这列）→ 检查补列，否则 insert 全失败
+        if (oldVersion < 5) {
+          final cols = await db.rawQuery('PRAGMA table_info(messages)');
+          final hasThinkingChain =
+              cols.any((c) => c['name'] == 'thinking_chain');
+          if (!hasThinkingChain) {
+            await db.execute(
+                "ALTER TABLE messages ADD COLUMN thinking_chain TEXT");
+          }
+        }
       },
     );
     return _db!;
@@ -117,7 +134,8 @@ class ChatStorageService {
       }
       ChatPresence.instance.recordTimestampsMap(ts);
       return rows.map((r) => _rowToMessage(r)).toList();
-    } catch (_) {
+    } catch (e) {
+      DebugLogger.log('存储', '❌ 消息加载失败（persona=$personaId）：$e');
       return [];
     }
   }
@@ -145,7 +163,15 @@ class ChatStorageService {
       ChatPresence.instance.recordTimestampsMap({
         if (message.id != null) message.id!: DateTime.now(),
       });
-    } catch (_) {}
+    } catch (e) {
+      // 8-04 16:2x：之前静默吞掉 → "退出重进对话全没了"查不出原因。
+      // 落库失败必须留痕（运行日志可见）。
+      DebugLogger.log(
+        '存储',
+        '❌ 消息落库失败（${message.isMe ? '用户' : '男主'}，'
+            'id=${message.id ?? 'null'}，persona=$personaId）：$e',
+      );
+    }
   }
 
   /// 插到指定消息之前（8-03 18:2x：工具气泡挂男主第一句话头上）。

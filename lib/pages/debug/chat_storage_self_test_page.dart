@@ -40,6 +40,11 @@ class _ChatStorageSelfTestPageState extends State<ChatStorageSelfTestPage> {
   List<ChatMessage> _recent = [];
   String _recentPersonaId = '';
 
+  // messages 表实际列（8-04 16:2x：缺 thinking_chain 列会导致 insert 全失败）
+  List<String> _messageColumns = [];
+  String? _insertTestResult;
+  bool _insertTestOk = false;
+
   @override
   void initState() {
     super.initState();
@@ -74,6 +79,12 @@ class _ChatStorageSelfTestPageState extends State<ChatStorageSelfTestPage> {
           'SELECT COUNT(*) AS c FROM prompt_logs');
       final promptCount = (promptRows.first['c'] as int?) ?? 0;
 
+      // 2.5 messages 表实际列（缺列 = insert 全失败）
+      final cols = await d.rawQuery('PRAGMA table_info(messages)');
+      final messageColumns = [
+        for (final c in cols) (c['name'] as String? ?? '?'),
+      ];
+
       // 3. 最近消息（按 persona 分组取各自最近 5 条）
       final recentPersonaId = perPersona.keys.isNotEmpty
           ? perPersona.keys.first
@@ -92,6 +103,7 @@ class _ChatStorageSelfTestPageState extends State<ChatStorageSelfTestPage> {
         _totalMessages = total;
         _perPersona = perPersona;
         _promptLogCount = promptCount;
+        _messageColumns = messageColumns;
         _recent = recent;
         _recentPersonaId = recentPersonaId;
         _loading = false;
@@ -101,6 +113,54 @@ class _ChatStorageSelfTestPageState extends State<ChatStorageSelfTestPage> {
       setState(() {
         _error = e.toString();
         _loading = false;
+      });
+    }
+  }
+
+  /// 直插测试：走真实 appendMessage 链路插一条，验证落库通路
+  /// （8-04 16:2x 用户实测 prompt_logs 成功但 messages 0 条 → 加这个
+  /// 按钮当场验证 insert 通不通，失败原因直接显示出来）
+  Future<void> _runInsertTest() async {
+    setState(() {
+      _insertTestResult = null;
+      _insertTestOk = false;
+    });
+    final testId = 'self_test_${DateTime.now().millisecondsSinceEpoch}';
+    final testPersona = 'self-test';
+    try {
+      final d = await ChatStorageService().db;
+      // 走真实 insert（带 thinking_chain 字段，复现线上路径）
+      await d.insert('messages', {
+        'id': testId,
+        'persona_id': testPersona,
+        'text': '【自检消息】落库通路验证',
+        'is_me': 1,
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+        'thinking_chain': null,
+      });
+      // 读回来确认
+      final back = await d.query('messages',
+          where: 'id = ?', whereArgs: [testId], limit: 1);
+      final ok = back.isNotEmpty;
+      // 清理测试数据
+      await d.delete('messages',
+          where: 'id = ?', whereArgs: [testId]);
+      if (!mounted) return;
+      setState(() {
+        _insertTestOk = ok;
+        _insertTestResult = ok
+            ? '✅ 插入+读取成功 → 落库链路通'
+            : '❌ 插入成功但读不回来（异常）';
+      });
+      if (ok) {
+        // 通路确认 → 刷新统计
+        await _run();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _insertTestOk = false;
+        _insertTestResult = '❌ 插入失败：$e';
       });
     }
   }
@@ -164,6 +224,50 @@ class _ChatStorageSelfTestPageState extends State<ChatStorageSelfTestPage> {
                             .map((e) => ('  · persona ${e.key}', '${e.value} 条')),
                         if (_perPersona.isEmpty) ('  ·（空）', '没有任何消息落库'),
                       ],
+                    ),
+                    _card(
+                      title: '🧬 messages 表实际列',
+                      rows: [
+                        (
+                          '列',
+                          _messageColumns.isEmpty
+                              ? '（读不到）'
+                              : _messageColumns.join(' / ')
+                        ),
+                        (
+                          '检查',
+                          _messageColumns.contains('thinking_chain')
+                              ? '✅ thinking_chain 列在，insert 不会因缺列失败'
+                              : '❌ 缺 thinking_chain 列！'
+                                  '所有 insert 都会失败被静默吞掉（8-04 已修复，'
+                                  '升级 v5 后此列会自动补上）'
+                        ),
+                      ],
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          FilledButton.tonalIcon(
+                            onPressed: _insertTestOk ? null : _runInsertTest,
+                            icon: const Icon(Icons.fact_check_outlined,
+                                size: 18),
+                            label: Text(_insertTestOk
+                                ? '✅ 直插测试通过（真实链路可用）'
+                                : '🧪 直插测试：往 messages 表插一条自检消息'),
+                          ),
+                          if (_insertTestResult != null) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              _insertTestResult!,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: _insertTestOk
+                                    ? Colors.green.shade700
+                                    : Colors.redAccent,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
                     _card(
                       title: '📄 发给男主的完整内容（prompt_logs 表）',
