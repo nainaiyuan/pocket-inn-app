@@ -17,7 +17,7 @@ class ChatDatabaseService {
   static final ChatDatabaseService instance = ChatDatabaseService._();
   final ValueNotifier<int> changeNotifier = ValueNotifier<int>(0);
 
-  static const int _dbVersion = 6;
+  static const int _dbVersion = 7;
   static const String _dbName = 'pocket_inn_chat.db';
 
   Database? _database;
@@ -139,6 +139,12 @@ class ChatDatabaseService {
     }
     if (oldVersion < 6 && newVersion >= 6) {
       // v6: 恢复包（stateful 空闲超时前男主写的"下次要带的上下文"）
+      await _createRecoverySchema(db);
+    }
+    // v7（8-04 22:2x）：修 v6 漏建表——_createSchema 曾漏掉
+    // context_recovery，全新安装的库没有恢复包表；且老库版本已是 6，
+    // 不升版本号则 onUpgrade 永不触发。升 7 强制所有库补建。
+    if (oldVersion < 7 && newVersion >= 7) {
       await _createRecoverySchema(db);
     }
     // v3: 仅调整 _dbVersion 占位，无 schema 变更。
@@ -353,6 +359,7 @@ class ChatDatabaseService {
   Future<void> _createSchema(Database db) async {
     await _createSummariesSchema(db);
     await _createDiarySchema(db);
+    await _createRecoverySchema(db);
     await db.execute('''
       CREATE TABLE chat_sessions (
         id TEXT PRIMARY KEY,
