@@ -1841,8 +1841,17 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 每 3 轮对话提取一次记忆（LLM 总结 → 用户记忆库 → 记忆检索技能可查）
 
   /// 查看最近一次发给男主的完整 prompt（透明化：男主"知道什么"一目了然）
-  void _showPromptDialog() {
-    final promptText = _aiSvc.lastPromptText;
+  /// 8-04 16:4x：完整内容已落库 prompt_logs —— 重启后内存为空时
+  /// 从 DB 读最近一条，弹窗不再是"还没有记录"。
+  Future<void> _showPromptDialog() async {
+    var promptText = _aiSvc.lastPromptText;
+    if (promptText == null || promptText.isEmpty) {
+      final personaId = _state.personaId ?? '';
+      if (personaId.isNotEmpty) {
+        promptText = await ChatStorageService().loadLatestPromptLog(personaId);
+      }
+    }
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(

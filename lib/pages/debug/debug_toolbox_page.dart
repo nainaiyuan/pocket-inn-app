@@ -6,6 +6,7 @@ import '../butler/butler_self_test_page.dart';
 import '../butler/butler_skill_library_page.dart';
 import '../chat/gesture_test_page.dart';
 import '../chat/widgets/debug_log_sheet.dart';
+import 'chat_storage_self_test_page.dart';
 
 /// 🧰 调试工具箱 —— 所有"测 bug 工具"的集中入口（2026-08-04 用户要求）。
 ///
@@ -54,6 +55,15 @@ class DebugToolboxPage extends StatelessWidget {
               title: '技能库',
               subtitle: '管家技能/模板管理',
               page: const ButlerSkillLibraryPage(),
+            ),
+          ]),
+          _section('聊天', [
+            _Entry(
+              icon: Icons.forum_outlined,
+              iconColor: const Color(0xFFD8A85C),
+              title: '聊天记录自检',
+              subtitle: '对话落库/加载/persona 归属/完整内容收录（8-04 用户报"退出后对话全没了"）',
+              page: const ChatStorageSelfTestPage(),
             ),
           ]),
           _section('系统', [

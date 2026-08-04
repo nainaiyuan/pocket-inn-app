@@ -330,15 +330,27 @@ class AiChatService {
     // 透明化：保存完整 prompt 供 📄 按钮查看
     // 用户 8-03 00:07：标签不该叫"历史"，是"上下文参考"——
     // 本次对话实时记录（用户+男主交替），不是档案历史
-    final historyText = historyMsgs.isEmpty
+    //
+    // 8-04 16:4x（用户反馈"完整内容里没有男主上下文和用户消息"）：
+    // 发给模型的 messages 里，stateful 模式为了省 token 不带历史
+    // （服务端记得）——但"发给男主的完整内容"是给【用户】看的，
+    // 必须展示男主收到的全部信息。所以这里从 ContextManager 单独拼
+    // 一份"上下文参考"（运行内实时记录，用户+男主交替），
+    // 无论 stateful 与否都完整呈现；并落库 prompt_logs 表
+    // （重启后 📄 弹窗仍能看，且按时间可查）。
+    final displayHistory =
+        ContextManager.instance.buildHistoryMessages(personaId);
+    final historyText = displayHistory.isEmpty
         ? ''
         : '\n\n【上下文参考】（本次对话实时记录，含你（男主）自己的回答。'
               '这些是已经聊过的内容，你只需要参考它们保持人设和记忆连贯，'
               '【不要回复】它们——你只需要回复最后一条【用户】消息）\n'
-              '${historyMsgs.map((m) => '[${m.role}] ${m.content}').join('\n')}';
+              '${displayHistory.map((m) => '[${m.role}] ${m.content}').join('\n')}';
     lastPromptText = '【System】\n$systemPrompt$historyText\n\n'
         '【User·当前消息】（这是用户刚刚发的消息，只需要回复这一条）\n$message';
     DebugLogger.log('Prompt', '本次组装完成（${lastPromptText!.length} 字，可点 📄 查看）');
+    // 完整内容落库（按时间存，重启后仍可查）
+    unawaited(ChatStorageService().savePromptLog(personaId, lastPromptText!));
     // 上下文参考作为一条 system 消息（role: system 明确是"参考"不是"待回复"），
     // 与当前 user 消息彻底分开 → 男主不会把历史当待回复内容
     final messages = <AIChatMessage>[

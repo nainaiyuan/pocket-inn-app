@@ -9,6 +9,10 @@ import '../state/chat_presence.dart';
 /// messages:   消息本体（id / persona_id / text / is_me / created_at）
 /// memories:   男主对本次聊天的总结（persona_id / summary / created_at）
 ///              给管家用：即使清空聊天记录，总结也在
+/// prompt_logs:每次发给男主的完整内容（persona_id / prompt_text / created_at）
+///              8-04 16:4x（用户反馈"完整内容没收录、没按时间存"）：
+///              发送的完整 prompt 落库，左上角 📄 弹窗重启后也能看，
+///              且按时间可查——不再只是内存里的临时变量。
 class ChatStorageService {
   static final ChatStorageService _instance = ChatStorageService._();
   factory ChatStorageService() => _instance;
@@ -20,7 +24,7 @@ class ChatStorageService {
     if (_db != null) return _db!;
     _db = await openDatabase(
       p.join(await getDatabasesPath(), 'pocket_inn_chat.db'),
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE messages (
@@ -45,6 +49,15 @@ class ChatStorageService {
           )
         ''');
         await db.execute('CREATE INDEX idx_memories_persona ON memories(persona_id)');
+        await db.execute('''
+          CREATE TABLE prompt_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            persona_id TEXT NOT NULL,
+            prompt_text TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+          )
+        ''');
+        await db.execute('CREATE INDEX idx_prompt_logs_persona_time ON prompt_logs(persona_id, created_at DESC)');
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -62,6 +75,18 @@ class ChatStorageService {
         if (oldVersion < 3) {
           await db.execute(
               "ALTER TABLE messages ADD COLUMN thinking_chain TEXT");
+        }
+        // 8-04 16:4x：新增 prompt_logs 表（发给男主的完整内容，按时间存）
+        if (oldVersion < 4) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS prompt_logs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              persona_id TEXT NOT NULL,
+              prompt_text TEXT NOT NULL,
+              created_at INTEGER NOT NULL
+            )
+          ''');
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_prompt_logs_persona_time ON prompt_logs(persona_id, created_at DESC)');
         }
       },
     );
@@ -257,6 +282,70 @@ class ChatStorageService {
         where: 'persona_id = ?',
         whereArgs: [personaId]);
     } catch (_) {}
+  }
+
+  // ═══════════════════════════════════
+  // 完整 prompt 记录（8-04 16:4x：发给男主的完整内容，按时间持久化）
+  // ═══════════════════════════════════
+
+  /// 保存一次发给男主的完整内容
+  Future<void> savePromptLog(String personaId, String promptText) async {
+    if (promptText.trim().isEmpty) return;
+    try {
+      final d = await db;
+      await d.insert('prompt_logs', {
+        'persona_id': personaId,
+        'prompt_text': promptText,
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+      });
+    } catch (_) {}
+  }
+
+  /// 读取某个角色最近的完整 prompt（弹窗用：内存为空时从 DB 兜底）
+  Future<String?> loadLatestPromptLog(String personaId) async {
+    try {
+      final d = await db;
+      final rows = await d.query('prompt_logs',
+        where: 'persona_id = ?',
+        whereArgs: [personaId],
+        orderBy: 'created_at DESC',
+        limit: 1,
+      );
+      if (rows.isEmpty) return null;
+      return rows.first['prompt_text'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 按时间段列出某个角色的完整 prompt 记录（记忆树/会话记录入口用）
+  Future<List<Map<String, dynamic>>> queryPromptLogs(
+    String personaId, {
+    DateTime? from,
+    DateTime? to,
+    int limit = 20,
+  }) async {
+    try {
+      final d = await db;
+      final conditions = <String>['persona_id = ?'];
+      final args = <dynamic>[personaId];
+      if (from != null) {
+        conditions.add('created_at >= ?');
+        args.add(from.millisecondsSinceEpoch);
+      }
+      if (to != null) {
+        conditions.add('created_at <= ?');
+        args.add(to.millisecondsSinceEpoch);
+      }
+      return await d.query('prompt_logs',
+        where: conditions.join(' AND '),
+        whereArgs: args,
+        orderBy: 'created_at DESC',
+        limit: limit,
+      );
+    } catch (_) {
+      return [];
+    }
   }
 
   // ─── 辅助 ───
