@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 import '../../models/chat_message.dart';
+import '../../services/chat_service.dart';
 import '../chat/services/chat_storage_service.dart';
 import '../chat/widgets/debug_log_sheet.dart';
 
@@ -322,6 +323,27 @@ class _ChatStorageSelfTestPageState extends State<ChatStorageSelfTestPage> {
                               : _contextRawToolCount > 0
                                   ? '✅ 工具记录已进上下文，男主能看到自己做过什么'
                                   : '⚠️ 还没有工具记录。让男主调一次工具（如 record_memory）后这里会出现'
+                        ),                      ],
+                    ),
+                    _card(
+                      title: '📊 Token 用量（AI 自带 usage 精确值，8-04 17:5x）',
+                      rows: [
+                        (
+                          '上次消耗',
+                          '${ChatService.instance.butler.lastPromptTokens} prompt tokens'
+                        ),
+                        (
+                          '累计消耗',
+                          '${ChatService.instance.butler.totalPromptTokens} prompt tokens'
+                        ),
+                        (
+                          '模型窗口',
+                          'deepseek-chat 64K（按实际配置的模型查表）'
+                        ),
+                        (
+                          '说明',
+                          '实际消耗 = AI 服务商 API 返回的 usage（准）；'
+                              '管家估算只用于发之前预判预算（决定何时总结），不记账'
                         ),
                       ],
                     ),
