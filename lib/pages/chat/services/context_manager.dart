@@ -214,40 +214,80 @@ class ContextManager {
       out.add(AIChatMessage(role: 'system', content: sb.toString()));
     }
 
-    // 当前话题原文（user/assistant 交替）
+    // 当前话题原文 —— 8-04 17:2x（用户：工具历史要独立分区，别混在对话里）：
+    // 工具行 → 【工具使用历史】system 块（时间+工具名+成败+失败原因，
+    // 不带调用过程/内容详情——记了什么按时间戳在互动历史里对应）；
+    // 用户/男主行 → 互动历史（user/assistant，保留时间戳）
     // ⚠️ 不能用 insert(1)：无摘要时 out 为空 → RangeError 越界（重启后首条必崩）
     final t = _topics[personaId];
     if (t != null && t.raw.isNotEmpty) {
       var total = 0;
       final lines = <AIChatMessage>[];
+      final toolLines = <String>[];
       // 从尾部取（保留最近），预算内
       for (var i = t.raw.length - 1; i >= 0; i--) {
         total += t.raw[i].length;
         if (total > topicBudgetChars(personaId)) break;
         final line = t.raw[i];
-        // 8-04 17:0x：行格式带时间戳（'用户 [17:05]：xxx'）——
-        // 工具行 role='tool'（男主在上下文里看到自己做过什么工具）
-        final AIChatMessage msg;
-        if (line.startsWith('男主')) {
-          msg = AIChatMessage(role: 'assistant', content: _stripPrefix(line));
-        } else if (line.startsWith('工具')) {
-          msg = AIChatMessage(role: 'tool', content: _stripPrefix(line));
+        if (line.startsWith('工具')) {
+          toolLines.add(line);
+        } else if (line.startsWith('男主')) {
+          lines.add(AIChatMessage(
+              role: 'assistant', content: _stripPrefix(line, keepTs: true)));
         } else {
-          msg = AIChatMessage(role: 'user', content: _stripPrefix(line));
+          lines.add(AIChatMessage(
+              role: 'user', content: _stripPrefix(line, keepTs: true)));
         }
-        lines.add(msg);
       }
-      // 倒序收集后正序追加（摘要区之后、当前消息之前）
+      // 工具使用历史：独立 system 块（在互动历史之前）
+      if (toolLines.isNotEmpty) {
+        final sb = StringBuffer(
+            '【工具使用历史】（男主执行过的工具，时间戳与互动历史对应；'
+            '成功时记了什么、失败时原因是什么，按时间戳在互动历史里对照）');
+        for (final l in toolLines.reversed) {
+          sb.write('\n${_toolHistoryLine(l)}');
+        }
+        out.add(AIChatMessage(role: 'system', content: sb.toString()));
+      }
+      // 互动历史（倒序收集后正序追加，摘要区之后、当前消息之前）
       out.addAll(lines.reversed);
     }
     return out;
   }
 
-  /// 去掉行前缀（'用户 [17:05]：xxx' / '用户：xxx' / '工具 [17:05]：a ✅成功：b'）
-  /// → 只保留第一个 '：' 之后的内容（工具结果里的冒号保留）
-  static String _stripPrefix(String line) {
+  /// 工具历史条目：只显示状态，不带调用过程/内容详情。
+  /// '工具 [17:04]：query_diary ❌失败：未找到相关日记'
+  ///   → '- [17:04] query_diary ❌失败：未找到相关日记'
+  /// '工具 [17:02]：record_memory ✅成功：已记录…'
+  ///   → '- [17:02] record_memory ✅成功'（成功只报状态，记了什么看互动历史）
+  static String _toolHistoryLine(String rawLine) {
+    final first = rawLine.split('\n').first;
+    final m = RegExp(r'^工具 (\[[^\]]+\])：(.+?) (✅成功|❌失败)')
+        .firstMatch(first);
+    if (m == null) {
+      return '- ${first.replaceFirst('工具 ', '')}';
+    }
+    final ts = m.group(1)!;
+    final name = m.group(2)!.trim();
+    final status = m.group(3)!;
+    if (status == '✅成功') return '- $ts $name ✅成功';
+    final reason = first.contains('❌失败：')
+        ? first.split('❌失败：').last.trim()
+        : '';
+    return reason.isEmpty ? '- $ts $name ❌失败' : '- $ts $name ❌失败：$reason';
+  }
+
+  /// 去掉行前缀（'用户 [17:05]：xxx' / '用户：xxx'）
+  /// keepTs=true → '[17:05] xxx'（互动历史保留时间戳，用户 8-04 17:2x）
+  static String _stripPrefix(String line, {bool keepTs = false}) {
     final idx = line.indexOf('：');
-    return idx < 0 ? line : line.substring(idx + 1);
+    if (idx < 0) return line;
+    final rest = line.substring(idx + 1);
+    if (!keepTs) return rest;
+    final tsMatch =
+        RegExp(r'\[[^\]]+\]').firstMatch(line.substring(0, idx));
+    final ts = tsMatch?.group(0) ?? '';
+    return ts.isEmpty ? rest : '$ts $rest';
   }
 
   /// 是否需要触发男主总结（当前话题或待总结原文攒够了）
@@ -322,7 +362,7 @@ class ContextManager {
     }
   }
 
-  /// 最近一条用户消息原文（去前缀）。
+  /// 最近一条用户消息原文（去前缀，保留时间戳 '[17:05] xxx'）。
   /// 8-04 17:0x（用户：工具轮组装时📄看不到当前用户消息）：
   /// 工具轮组装发生在用户消息 feed 之后 → 原文最后一条用户消息
   /// 就是"当前这条"，取出来和工具结果合并成【当前互动】。
@@ -332,7 +372,7 @@ class ContextManager {
     for (var i = t.raw.length - 1; i >= 0; i--) {
       final line = t.raw[i];
       if (line.startsWith('用户')) {
-        return _stripPrefix(line);
+        return _stripPrefix(line, keepTs: true);
       }
     }
     return null;

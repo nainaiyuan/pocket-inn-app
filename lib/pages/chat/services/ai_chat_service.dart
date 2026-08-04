@@ -357,8 +357,10 @@ class AiChatService {
         ContextManager.instance.buildHistoryMessages(personaId);
     final historyText = displayHistory.isEmpty
         ? ''
-        : '\n\n【上下文参考】（本次对话实时记录，含你（男主）自己的回答。'
-              '这些是已经聊过的内容，你只需要参考它们保持人设和记忆连贯，'
+        : '\n\n【上下文参考】（本次对话已聊过的内容，含你（男主）自己的回答。'
+              '分两个区阅读：【工具使用历史】= 你执行过的工具（时间+成败+失败原因），'
+              '【互动历史】= 时间戳对应的对话（几点谁说了什么）。'
+              '你只需要参考它们保持人设和记忆连贯，'
               '【不要回复】它们——你只需要回复最后一条【用户】消息）\n'
               '${displayHistory.map((m) => '[${m.role}] ${m.content}').join('\n')}';
     // 8-04 16:4x（用户反馈"📄 里没有当前消息"）：工具轮组装时
@@ -970,15 +972,17 @@ class AiChatService {
     }
   }
 
-  /// 工具轮【当前互动】展示：用户刚发的消息 + 男主执行的工具结果（简化）。
+  /// 工具轮【当前互动】展示：用户刚发的消息（带时间戳）+ 男主执行的工具结果。
   /// 8-04 17:0x（用户："工具轮和用户当前消息合并成当前互动；历史工具轮
   /// 简化成 成功写了什么/失败返回什么，不占位置"）。
+  /// 8-04 17:2x（用户分区结构：（当前互动）= 几点用户说了什么 + 当前工具调用怎么样了）
   /// 工具结果格式统一为 chat_page 拼的 【工具 名】✅成功/❌失败：结果。
   String _toolRoundInteraction(
       String personaId, List<AIChatMessage>? toolMessages) {
     final sb = StringBuffer();
     sb.writeln('（这是用户刚发的消息 + 男主为回复它执行的工具，只需回复这一条）');
-    sb.writeln('用户：${ContextManager.instance.lastUserMessageFor(personaId) ?? '（无）'}');
+    sb.writeln(
+        '用户：${ContextManager.instance.lastUserMessageFor(personaId) ?? '（无）'}');
     sb.writeln('（男主执行的工具结果）');
     if (toolMessages == null || toolMessages.isEmpty) {
       sb.writeln('（无工具调用）');
