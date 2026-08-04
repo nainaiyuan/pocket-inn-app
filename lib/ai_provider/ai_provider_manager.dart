@@ -19,9 +19,10 @@ import '../models/api_config.dart';
 import '../services/api_config_service.dart';
 import '../services/i_openai_api_service.dart';
 import '../services/openai_compatible_api_service.dart';
-import '../utils/debug_logger.dart';
-import '../pages/chat/services/mock_ai_provider.dart';
+import 'ai_module_log.dart';
+import 'capability_probe.dart';
 import 'failover_router.dart';
+import 'mock_ai_provider.dart';
 import 'models.dart';
 import 'provider_presets.dart';
 import 'tool_format_adapter.dart';
@@ -68,6 +69,7 @@ class AIProviderManager {
   static const String customProviderId = 'custom';
 
   final FailoverRouter _router = FailoverRouter();
+  final CapabilityProbe _probe = CapabilityProbe();
   final List<PersonaAIBinding> _bindings = [];
 
   /// personaId → 行为设置。'' = 全局默认。
@@ -79,7 +81,12 @@ class AIProviderManager {
   /// 配置变更时 +1，设置页 UI 监听它刷新。
   final ValueNotifier<int> changeNotifier = ValueNotifier<int>(0);
 
-  IOpenAiApiService get _api => OpenAICompatibleApiService.instance;
+  /// 底层 API 实现（可注入，默认 OpenAI 兼容实现；测试/换 transport 时
+  /// 用 [configureApi] 替换，模块代码零改动）。
+  IOpenAiApiService _api = OpenAICompatibleApiService.instance;
+
+  /// 注入自定义 API 实现（测试或未来接原生 transport 时调用）。
+  void configureApi(IOpenAiApiService api) => _api = api;
 
   /// 首次使用前必须调用（app 启动时）。
   Future<void> initialize() async {
@@ -103,7 +110,7 @@ class AIProviderManager {
         ..addAll(_decodePersonaSettings(prefs.getString(_storageKeyPersonaSettings)));
       _syncRouter();
       _initialized = true;
-      DebugLogger.log(
+      AiModuleLog.log(
         'AI管理',
         '初始化完成，共 ${_configs.length} 个 Provider，'
         '可用 ${_router.resolve().length} 个，绑定 ${_bindings.length} 个男主',
@@ -170,12 +177,12 @@ class AIProviderManager {
       _configs = [..._configs, config];
       _syncRouter();
       await _persist();
-      DebugLogger.log(
+      AiModuleLog.log(
         'AI管理',
         '已从旧配置迁移: ${provider.name} / $modelId',
       );
     } on Object catch (error) {
-      DebugLogger.log('AI管理', '旧配置迁移失败(可忽略): $error');
+      AiModuleLog.log('AI管理', '旧配置迁移失败(可忽略): $error');
     }
   }
 
@@ -257,7 +264,7 @@ class AIProviderManager {
     final current = _personaSettings[key] ?? const PersonaAISettings();
     _personaSettings[key] = current.copyWith(autoSwitch: value);
     await _persist();
-    DebugLogger.log(
+    AiModuleLog.log(
       'AI管理',
       '自动切换 ${value ? '开启' : '关闭'} (${key.isEmpty ? '全局' : key})',
     );
@@ -361,7 +368,7 @@ class AIProviderManager {
     _configs = [..._configs, config];
     _syncRouter();
     await _persist();
-    DebugLogger.log('AI管理', '已添加 AI: ${config.name} (${config.id})');
+    AiModuleLog.log('AI管理', '已添加 AI: ${config.name} (${config.id})');
   }
 
   /// 通用保存：新增或整体更新一个 AI（编辑表单用，全字段可改）。
@@ -374,7 +381,7 @@ class AIProviderManager {
     }
     _syncRouter();
     await _persist();
-    DebugLogger.log('AI管理', '已保存 AI: ${config.name}');
+    AiModuleLog.log('AI管理', '已保存 AI: ${config.name}');
   }
 
   /// 删除一个 AI（同时清理男主绑定里的引用）。
@@ -389,7 +396,7 @@ class AIProviderManager {
     _bindings.removeWhere((binding) => binding.providerIds.isEmpty);
     _syncRouter();
     await _persist();
-    DebugLogger.log('AI管理', '已删除 AI: $id');
+    AiModuleLog.log('AI管理', '已删除 AI: $id');
   }
 
   /// 一键清空所有 AI 配置（含绑定）。
@@ -475,58 +482,44 @@ class AIProviderManager {
               providerName: config.name,
             );
           }
-          // 工具格式翻译层（用户 19:29/19:34/19:42 设计）：
-          // 底层调用/参数/执行不变，只翻译"工具声明/返回"格式。
-          // - openai：直通（translateTools 原样返回）
-          // - anthropic/gemini：未来原生 API 的 ApiService 用 adapter 翻译
-          // - text：本地模型文本协议兜底——不传原生 tools，
-          //   工具说明注入 system；回复里 ⟨工具:…⟩JSON⟨/工具⟩ 块解析执行
-          final adapter = resolveToolFormat(
-            config.baseUrl,
-            toolFormatOverride: config.toolFormat,
-          );
-          final translatedTools = adapter.translateTools(tools ?? const []);
-          // 文本协议：工具轮翻译（不发原生 tool_calls，DeepSeek 思考模式
-          // 回传 reasoning_content 拿不到就 400，8-03 06:54）+ 工具说明拼进 system
-          var effectiveMessages = messages;
-          if (adapter.formatId == 'text') {
-            effectiveMessages = adapter.translateToolRound(messages);
-            if (tools?.isNotEmpty ?? false) {
-              final hint = adapter.buildToolHint(tools!);
-              if (hint.isNotEmpty) {
-                effectiveMessages = [
-                  AIChatMessage(role: 'system', content: hint),
-                  ...effectiveMessages,
-                ];
+          // 通用适配层（2026-08-04）：
+          // ① 取能力画像（缓存命中直接用，miss 才实测，绝不阻塞聊天）；
+          // ② 按降级链尝试调用方式：openai → 文本协议 → 纯聊天；
+          // ③ 只有"格式类错误"才降级；网络/鉴权/超时直接抛给 failover 换 Provider
+          //    （防把网络抖动误判成格式问题）。
+          final caps = await capabilitiesFor(config.id);
+          final chain = _formatFallbackChain(config, caps);
+          Object? lastFormatError;
+          for (final formatId in chain) {
+            try {
+              return await _chatWithFormat(
+                config,
+                formatId,
+                messages,
+                defaults: defaults,
+                tools: tools,
+                cancellationToken: cancellationToken,
+              );
+            } on ChatCompletionCancelledException {
+              rethrow;
+            } on Object catch (error) {
+              if (isFormatError(error)) {
+                lastFormatError = error;
+                AiModuleLog.log(
+                  'AI路由',
+                  '⚠️ ${config.name} 的 $formatId 格式调用失败（格式类错误）→ '
+                  '降级下一种: ${_truncateForLog(error.toString())}',
+                );
+                continue;
               }
+              rethrow;
             }
           }
-          final apiResult = await _api.createChatCompletion(
-            _resolve(config),
-            messages: [
-              for (final message in effectiveMessages) message.toApiJson(),
-            ],
-            defaults: defaults,
-            tools: translatedTools,
-            cancellationToken: cancellationToken,
-          );
-          // 文本协议：从回复文本解析 ⟨工具:…⟩ 块 → 内部统一 toolCalls，
-          // 并把块从文本里剥掉（用户只看到男主自然的话）
-          var finalText = apiResult.text;
-          var finalToolCalls = apiResult.toolCalls;
-          if (adapter.formatId == 'text') {
-            final textCalls = adapter.parseToolCallsFromText(apiResult.text);
-            if (textCalls.isNotEmpty) {
-              finalToolCalls = [...?finalToolCalls, ...textCalls];
-              finalText = adapter.stripToolBlocks(apiResult.text);
-            }
-          }
-          return AIProviderResult(
-            text: finalText,
-            thinking: apiResult.thinkingChain ?? '',
-            reasoningContent: apiResult.thinkingChain,
-            usage: apiResult.usage,
-            toolCalls: finalToolCalls,
+          // 所有调用方式都失败 → 抛给上层：UI 把该 AI 标红"一种都不能用"
+          throw AIFormatAllFailedException(
+            providerName: config.name,
+            formats: chain,
+            lastError: lastFormatError,
           );
         },
       );
@@ -534,14 +527,14 @@ class AIProviderManager {
       _logRouting('chat', personaId, result);
       return result;
     } on AIAllProvidersFailedException catch (e) {
-      DebugLogger.log(
+      AiModuleLog.log(
         'AI路由',
         '❌ 全部失败: ${e.tried.isEmpty ? '(无可用)' : e.tried.join('、')}'
         ' 最后错误: ${e.lastError}',
       );
       rethrow;
     } on AIProviderUnavailableException catch (e) {
-      DebugLogger.log(
+      AiModuleLog.log(
         'AI路由',
         '❌ 自动切换已关闭，${e.providerName} 不可用: ${e.cause}',
       );
@@ -589,14 +582,14 @@ class AIProviderManager {
         yield chunk;
       }
     } on AIAllProvidersFailedException catch (e) {
-      DebugLogger.log(
+      AiModuleLog.log(
         'AI路由',
         '❌ 流式全部失败: ${e.tried.isEmpty ? '(无可用)' : e.tried.join('、')}'
         ' 最后错误: ${e.lastError}',
       );
       rethrow;
     } on AIProviderUnavailableException catch (e) {
-      DebugLogger.log(
+      AiModuleLog.log(
         'AI路由',
         '❌ 流式自动切换已关闭，${e.providerName} 不可用: ${e.cause}',
       );
@@ -633,13 +626,13 @@ class AIProviderManager {
   void _logRouting(String mode, String? personaId, AIProviderResult result) {
     final who = personaId == null || personaId.isEmpty ? '全局' : personaId;
     if (result.failedProviders.isNotEmpty) {
-      DebugLogger.log(
+      AiModuleLog.log(
         'AI路由',
         '$mode 故障切换: ${result.failedProviders.join('、')} → '
         '${result.providerName} (persona: $who)',
       );
     } else {
-      DebugLogger.log(
+      AiModuleLog.log(
         'AI路由',
         '$mode 使用 ${result.providerName} (persona: $who)',
       );
@@ -664,10 +657,176 @@ class AIProviderManager {
     }
     try {
       final result = await _api.testConnection(_resolve(config));
-      return (success: result.success, message: result.message);
+      if (!result.success) {
+        return (success: false, message: result.message);
+      }
+      // 连通 OK → 顺带做能力探测（缓存 miss 才发探测请求，探测失败自动
+      // 降级为 URL 猜测，不会让"测试连接"按钮报错）
+      final caps = await capabilitiesFor(id);
+      final summary = caps.isProbed
+          ? '能力实测：${caps.systemLabel}（${caps.capabilitySummary}）'
+          : '能力未实测（猜测）：${caps.systemLabel}（${caps.capabilitySummary}）';
+      return (success: true, message: '${result.message}；$summary');
     } on Object catch (error) {
       return (success: false, message: '$error');
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 能力探测（通用 AI 适配层，2026-08-04）
+  // ---------------------------------------------------------------------------
+
+  /// 取某 Provider 的能力画像：缓存命中直接返回；miss 才实测。
+  /// - 缓存 key = `baseUrl|model`：同 API 不同模型各存各的
+  ///   （如 DeepSeek 有的版本要思考链、有的不要）
+  /// - 探测失败静默降级为 URL 猜测，绝不阻塞聊天
+  /// - 内置测试 AI 跳过探测（已知能力）
+  Future<AIProviderCapabilities> capabilitiesFor(String id) async {
+    final config = _configById(id);
+    if (config == null) {
+      return const AIProviderCapabilities(
+        toolFormat: 'openai',
+        supportsReasoning: false,
+        supportsStreaming: true,
+      );
+    }
+    if (config.id == builtinMockId) {
+      return const AIProviderCapabilities(
+        toolFormat: 'openai',
+        supportsReasoning: true,
+        supportsStreaming: true,
+        probeSource: 'guess',
+      );
+    }
+    final resolved = _resolve(config);
+    final key = CapabilityCache.keyFor(resolved);
+    final cached = await CapabilityCache.instance.get(key);
+    if (cached != null) {
+      return cached;
+    }
+    AIProviderCapabilities caps;
+    try {
+      caps = await _probe.probe(resolved);
+      AiModuleLog.log(
+        'AI探测',
+        '${config.name}(${config.model}) 实测: ${caps.systemLabel} · '
+        '${caps.capabilitySummary}',
+      );
+    } on Object catch (error) {
+      caps = _probe.guess(resolved);
+      AiModuleLog.log(
+        'AI探测',
+        '⚠️ ${config.name} 探测失败，用 URL 猜测(${caps.systemLabel}): '
+        '${_truncateForLog(error.toString())}',
+      );
+    }
+    await CapabilityCache.instance.put(key, caps);
+    return caps;
+  }
+
+  /// 只读能力画像（UI 列表展示用，不触发探测）。
+  Future<AIProviderCapabilities?> cachedCapabilitiesFor(String id) async {
+    final config = _configById(id);
+    if (config == null) {
+      return null;
+    }
+    final resolved = _resolve(config);
+    return CapabilityCache.instance.get(CapabilityCache.keyFor(resolved));
+  }
+
+  AIProviderConfig? _configById(String id) {
+    for (final config in _configs) {
+      if (config.id == id) {
+        return config;
+      }
+    }
+    return null;
+  }
+
+  /// 格式降级链：用户显式指定 → 只试那一种（尊重用户，不自动降级）；
+  /// 'auto' → 探测首选 + 兜底顺序（openai → 文本协议 → 纯聊天）。
+  List<String> _formatFallbackChain(
+    AIProviderConfig config,
+    AIProviderCapabilities caps,
+  ) {
+    final explicit = config.toolFormat;
+    if (explicit != 'auto' && explicit.isNotEmpty) {
+      return [explicit];
+    }
+    switch (caps.toolFormat) {
+      case 'text':
+        return ['text', 'none'];
+      case 'none':
+        return ['none'];
+      default:
+        return ['openai', 'text', 'none'];
+    }
+  }
+
+  /// 用指定调用方式执行一次非流式聊天（格式翻译逻辑，formatId 由降级链传入）。
+  /// 底层工具调用/参数/执行不变，只翻译"工具声明/返回"格式。
+  Future<AIProviderResult> _chatWithFormat(
+    AIProviderConfig config,
+    String formatId,
+    List<AIChatMessage> messages, {
+    Map<String, dynamic>? defaults,
+    List<Map<String, dynamic>>? tools,
+    ChatCompletionCancelToken? cancellationToken,
+  }) async {
+    final adapter = resolveToolFormat(
+      config.baseUrl,
+      toolFormatOverride: formatId,
+    );
+    final translatedTools = adapter.translateTools(tools ?? const []);
+    // 文本协议：工具轮翻译（不发原生 tool_calls，DeepSeek 思考模式
+    // 回传 reasoning_content 拿不到就 400，8-03 06:54）+ 工具说明拼进 system
+    var effectiveMessages = messages;
+    if (adapter.formatId == 'text') {
+      effectiveMessages = adapter.translateToolRound(messages);
+      if (tools?.isNotEmpty ?? false) {
+        final hint = adapter.buildToolHint(tools!);
+        if (hint.isNotEmpty) {
+          effectiveMessages = [
+            AIChatMessage(role: 'system', content: hint),
+            ...effectiveMessages,
+          ];
+        }
+      }
+    }
+    final apiResult = await _api.createChatCompletion(
+      _resolve(config),
+      messages: [
+        for (final message in effectiveMessages) message.toApiJson(),
+      ],
+      defaults: defaults,
+      tools: translatedTools,
+      cancellationToken: cancellationToken,
+    );
+    // 文本协议：从回复文本解析 ⟨工具:…⟩ 块 → 内部统一 toolCalls，
+    // 并把块从文本里剥掉（用户只看到男主自然的话）
+    var finalText = apiResult.text;
+    var finalToolCalls = apiResult.toolCalls;
+    if (adapter.formatId == 'text') {
+      final textCalls = adapter.parseToolCallsFromText(apiResult.text);
+      if (textCalls.isNotEmpty) {
+        finalToolCalls = [...?finalToolCalls, ...textCalls];
+        finalText = adapter.stripToolBlocks(apiResult.text);
+      }
+    }
+    return AIProviderResult(
+      text: finalText,
+      thinking: apiResult.thinkingChain ?? '',
+      reasoningContent: apiResult.thinkingChain,
+      usage: apiResult.usage,
+      toolCalls: finalToolCalls,
+    );
+  }
+
+  String _truncateForLog(String value, {int maxLength = 160}) {
+    if (value.length <= maxLength) {
+      return value;
+    }
+    return '${value.substring(0, maxLength)}…';
   }
 
   // ---------------------------------------------------------------------------

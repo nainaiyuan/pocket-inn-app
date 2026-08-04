@@ -274,6 +274,7 @@ class TextProtocolAdapter extends ToolFormatAdapter {
   /// 文本协议干脆不发原生 tool_calls：丢弃 assistant(tool_calls) 与
   /// tool 消息，把工具结果合并成一条 user 消息注入，男主看到结果继续说话。
   /// 非工具轮消息（无 tool/assistant(tool_calls)）原样返回，零副作用。
+  @override
   List<AIChatMessage> translateToolRound(List<AIChatMessage> messages) {
     final toolResults = <String>[];
     final filtered = <AIChatMessage>[];

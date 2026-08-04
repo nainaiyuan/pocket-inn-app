@@ -5,7 +5,7 @@ import '../../butler/modules/butler_module_hub.dart';
 import '../ai_config_page.dart';
 import '../butler_modules_page.dart';
 import '../butler_task_page.dart';
-import '../chat/widgets/debug_log_sheet.dart';
+import '../debug/debug_toolbox_page.dart';
 import '../mood_analysis_page.dart';
 import '../pattern_memory_page.dart';
 
@@ -164,13 +164,17 @@ class ButlerPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
 
-                  // ---- 日志（真功能）----
+                  // ---- 调试工具箱（8-04：所有测 bug 工具集中在这里）----
                   _EntryCard(
-                    icon: Icons.article_outlined,
+                    icon: Icons.build_circle_outlined,
                     iconColor: const Color(0xFFD8A8C8),
-                    title: '运行日志',
-                    subtitle: '看 AI 路由、管家、调试信息（给开发用）',
-                    onTap: (context) => showDebugLogSheet(context),
+                    title: '调试工具箱',
+                    subtitle: '日志、API 记录、一键自检、AI 能力检测…全在这',
+                    onTap: (context) => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const DebugToolboxPage(),
+                      ),
+                    ),
                   ),
                 ],
               ),

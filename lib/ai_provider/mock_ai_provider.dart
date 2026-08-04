@@ -1,7 +1,7 @@
 import 'dart:convert';
 
-import '../../../ai_provider/models.dart';
-import '../../../utils/debug_logger.dart';
+import 'models.dart';
+import 'ai_module_log.dart';
 
 /// 🧪 模拟 AI（找bug工具，用户 8-03 20:3x 要求）：
 /// 代替 DeepSeek 走完整聊天链路（feed→组装→工具轮→回传→回复），
@@ -22,15 +22,15 @@ class MockAIProvider {
     List<AIChatMessage> messages, {
     required bool toolRound,
   }) {
-    DebugLogger.log('模拟AI', '🤖 模拟AI 收到 ${messages.length} 条消息：');
+    AiModuleLog.log('模拟AI', '🤖 模拟AI 收到 ${messages.length} 条消息：');
     for (final m in messages) {
       final extra = (m.toolCalls != null && m.toolCalls!.isNotEmpty)
           ? ' tool_calls=${m.toolCalls!.map((c) => c['name']).join('、')}'
           : (m.toolCallId != null ? ' tool_call_id=${m.toolCallId}' : '');
       final content = m.content.length > 50
-          ? m.content.substring(0, 50) + '…'
+          ? '${m.content.substring(0, 50)}…'
           : m.content;
-      DebugLogger.log('模拟AI', '  [${m.role}] $content$extra');
+      AiModuleLog.log('模拟AI', '  [${m.role}] $content$extra');
     }
 
     // 结构检查：发给模型的 user 消息应该只有 1 条（当前消息）
@@ -38,7 +38,7 @@ class MockAIProvider {
     if (!toolRound) {
       final userMsgs = messages.where((m) => m.role == 'user').length;
       if (userMsgs > 1) {
-        DebugLogger.log(
+        AiModuleLog.log(
             '模拟AI',
             '⚠️ 检测到 $userMsgs 条 user 消息（应该只有 1 条当前消息）——'
             '上下文参考混进对话流了，男主会分不清哪条要回复！');
@@ -53,7 +53,7 @@ class MockAIProvider {
         final raw = history.first.content;
         final userCount = RegExp(r'\[user\]').allMatches(raw).length;
         final aiCount = RegExp(r'\[assistant\]').allMatches(raw).length;
-        DebugLogger.log(
+        AiModuleLog.log(
             '模拟AI',
             '📊 上下文参考里 用户 $userCount 条 / 男主 $aiCount 条'
             '${aiCount >= userCount - 1 ? ' ✅ 男主消息在' : ' ❌ 男主消息丢失！'}');
@@ -135,7 +135,7 @@ class MockAIProvider {
       'reasoning': reasoning,
       'content': '',
     };
-    DebugLogger.log('模拟AI', '🔧 模拟AI 决定调用工具：$name 参数=$args');
+    AiModuleLog.log('模拟AI', '🔧 模拟AI 决定调用工具：$name 参数=$args');
     return AIProviderResult(
       text: '',
       reasoningContent: reasoning,
@@ -193,7 +193,7 @@ class MockAIProvider {
           ok = false;
         } else {
           sb.writeln('✅ tool 结果配对 tool_call_id=${t.toolCallId}：'
-              '「${t.content.length > 30 ? t.content.substring(0, 30) + '…' : t.content}」');
+              '「${t.content.length > 30 ? '${t.content.substring(0, 30)}…' : t.content}」');
         }
       }
     }
@@ -201,7 +201,7 @@ class MockAIProvider {
     sb.writeln(ok
         ? '✅ 校验通过：回传格式符合 DeepSeek 原生规范'
         : '❌ 校验失败：程序回传格式有 bug（见上）');
-    DebugLogger.log('模拟AI', sb.toString());
+    AiModuleLog.log('模拟AI', sb.toString());
     return AIProviderResult(
       text: '（模拟AI）$sb',
       reasoningContent: '模拟思考：工具结果已收到，逐项校验完成。',

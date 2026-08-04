@@ -455,3 +455,22 @@ class AIAllProvidersFailedException implements Exception {
     return '所有 AI Provider 都失败了：$tried';
   }
 }
+
+/// 单个 Provider 的所有调用方式（openai → 文本协议 → 纯聊天）都失败时抛出。
+/// UI 据此把该 AI 标红："一种都不能用"（2026-08-04 通用适配层）。
+class AIFormatAllFailedException implements Exception {
+  const AIFormatAllFailedException({
+    required this.providerName,
+    required this.formats,
+    this.lastError,
+  });
+
+  final String providerName;
+  final List<String> formats;
+  final Object? lastError;
+
+  @override
+  String toString() =>
+      '「$providerName」的所有调用方式（${formats.join(' → ')}）都失败'
+      '${lastError == null ? '' : '：$lastError'}';
+}

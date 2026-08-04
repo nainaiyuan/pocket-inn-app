@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../ai_provider/ai_provider_manager.dart';
+import '../../../ai_provider/capability_probe.dart';
 import '../../../ai_provider/failover_router.dart';
 import '../../../ai_provider/models.dart';
 import '../../../utils/debug_logger.dart';
@@ -28,7 +29,7 @@ Future<void> showAiProviderSheet({
       return SafeArea(
         child: ValueListenableBuilder<int>(
           valueListenable: manager.changeNotifier,
-          builder: (context, _, __) {
+          builder: (context, _, _) {
             return _AiProviderSheetBody(
               personaId: personaId,
               personaName: personaName,
@@ -62,6 +63,28 @@ class _AiProviderSheetBody extends StatefulWidget {
 class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
   final manager = AIProviderManager.instance;
   bool _testing = false;
+
+  /// providerId → 能力画像（只读缓存，打开弹层时加载，不触发探测）
+  Map<String, AIProviderCapabilities> _capsCache = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCapabilities();
+  }
+
+  Future<void> _loadCapabilities() async {
+    final map = <String, AIProviderCapabilities>{};
+    for (final provider in manager.providers) {
+      final caps = await manager.cachedCapabilitiesFor(provider.id);
+      if (caps != null) {
+        map[provider.id] = caps;
+      }
+    }
+    if (mounted) {
+      setState(() => _capsCache = map);
+    }
+  }
 
   AIProviderConfig? _configById(String id) {
     for (final config in manager.providers) {
@@ -114,6 +137,9 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
     if (!mounted) return;
     setState(() => _testing = false);
     final config = _configById(id);
+    // 测试会顺带做能力探测 → 刷新缓存展示
+    await _loadCapabilities();
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -490,15 +516,22 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
           ],
         ],
       ),
-      subtitle: Text(
-        [
-          config.model,
-          config.type == ProviderType.local ? '本地' : null,
-          if (!enabled) '已禁用',
-          if (state?.health == ProviderHealth.cooling) '冷却中',
-        ].whereType<String>().join(' · '),
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 12, color: enabled ? null : Colors.grey),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            [
+              config.model,
+              config.type == ProviderType.local ? '本地' : null,
+              if (!enabled) '已禁用',
+              if (state?.health == ProviderHealth.cooling) '冷却中',
+            ].whereType<String>().join(' · '),
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: enabled ? null : Colors.grey),
+          ),
+          const SizedBox(height: 3),
+          _CapabilityLights(caps: _capsCache[config.id]),
+        ],
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -532,6 +565,103 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
         ],
       ),
       onTap: enabled ? () => _toggle(config.id, !checked) : null,
+    );
+  }
+}
+
+/// 能力灯（2026-08-04 通用适配层）：系别标签 + 能用哪个亮哪个。
+/// - 原生工具 / 思考链 / 流式：支持的亮绿色圆点 + 文字，不支持的**不显示**
+/// - 一个都不支持 → 显示"⚠️ 仅文本协议（AI 可能不配合）"
+/// - 还没探测过 → 显示"未检测，点 📡 测试连接自动检测"
+class _CapabilityLights extends StatelessWidget {
+  const _CapabilityLights({this.caps});
+
+  final AIProviderCapabilities? caps;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    if (caps == null) {
+      return Text(
+        '未检测（点 📡 自动检测）',
+        style: TextStyle(fontSize: 11, color: colorScheme.outline),
+      );
+    }
+
+    final lights = <Widget>[
+      _light(context, colorScheme, '工具', caps!.toolFormat == 'openai'),
+      _light(context, colorScheme, '思考链', caps!.supportsReasoning),
+      _light(context, colorScheme, '流式', caps!.supportsStreaming),
+    ];
+    final anySupported = caps!.toolFormat == 'openai' ||
+        caps!.supportsReasoning ||
+        caps!.supportsStreaming;
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 2,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+          decoration: BoxDecoration(
+            color: colorScheme.primary.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: colorScheme.primary.withValues(alpha: 0.25),
+            ),
+          ),
+          child: Text(
+            caps!.systemLabel,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: colorScheme.primary,
+            ),
+          ),
+        ),
+        if (anySupported)
+          ...lights
+        else
+          Text(
+            '⚠️ 仅文本协议（AI 可能不配合）',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Colors.orange.shade800,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _light(
+    BuildContext context,
+    ColorScheme colorScheme,
+    String label,
+    bool supported,
+  ) {
+    if (!supported) {
+      // 不能用的不显示（能用哪个亮哪个）
+      return const SizedBox.shrink();
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: const BoxDecoration(
+            color: Colors.green,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 3),
+        Text(
+          label,
+          style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
+        ),
+      ],
     );
   }
 }

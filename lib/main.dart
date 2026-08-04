@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'ai_provider/ai_module_log.dart';
 import 'ai_provider/ai_provider_manager.dart';
 import 'core/error_handler.dart';
 import 'core/service_locator.dart';
@@ -8,6 +9,7 @@ import 'butler/modules/butler_module_hub.dart';
 import 'butler/system_template.dart';
 import 'data/app_settings.dart';
 import 'pages/home/home_page.dart';
+import 'utils/debug_logger.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -65,6 +67,8 @@ class _BootstrapPageState extends State<_BootstrapPage> {
       await setupServiceLocator();
 
       setState(() => _status = '正在初始化 AI 路由…');
+      // 装配 AI 模块的"插座"：日志接入项目 DebugLogger（2026-08-04 解耦）
+      AiModuleLog.configure(DebugLogger.log);
       await AIProviderManager.instance.initialize();
 
       setState(() => _status = '正在加载管家数据…');
