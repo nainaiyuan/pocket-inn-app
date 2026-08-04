@@ -255,7 +255,11 @@ class AiChatService {
     // （自检页直接调同一实现验证 stateless/stateful/切换/超时逻辑）
     final decision = assembleDecision(personaId, toolRound: toolRound);
     var statefulRecover = decision.idleExpired;
-    if (!toolRound && personaPrompt.isNotEmpty) {
+    // 8-04 23:0x（验收⑤⑦根因）：原来条件带 personaPrompt.isNotEmpty——
+    // 新角色没写人设（prompt 空）→ 整个上下文管理块跳过 → 总结/沉淀
+    // 永不触发。总结/沉淀是管家职责，不该被人设是否为空卡死
+    // （人设空只影响 system 组装，不影响 needsSummarize/沉淀判断）
+    if (!toolRound) {
       if (decision.stateful) {
         // 用户发消息 → 重置定时沉淀（新一轮空闲期）
         scheduleStatefulSettle(personaId, personaName, personaPrompt);
