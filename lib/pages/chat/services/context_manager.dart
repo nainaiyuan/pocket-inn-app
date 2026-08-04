@@ -543,6 +543,13 @@ class ContextManager {
     } catch (_) {}
   }
 
+  /// 验收/测试钩子（8-04 21:3x 用户：stateful 空闲超时路径也要测）：
+  /// 模拟"上次聊天时间"，自检页 T13 + 一键验收 ⑦沉淀/⑧超时恢复 用。
+  /// 只改内存（持久化 lastChat 由 feed 维护，测试结束不残留）。
+  void debugSetLastChatAt(String personaId, DateTime time) {
+    _lastChatMs[personaId] = time.millisecondsSinceEpoch;
+  }
+
   static const _stopWords = {
     '的', '了', '吗', '呢', '啊', '吧', '我', '你', '他', '她', '它',
     '这', '那', '是', '在', '有', '和', '就', '都', '也', '很', '还',

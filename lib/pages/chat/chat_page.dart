@@ -1496,12 +1496,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
     try {
       // ── ① AI A（无记忆）：建立话题（短消息，不灌长文本）──
-      await sw('builtin-mock', '①/⑥ AI A 无记忆·思考开 — 建立话题');
+      await sw('builtin-mock', '①/⑧ AI A 无记忆·思考开 — 建立话题');
       note('📋 ① AI A：建立话题');
       await say('你好呀，我来验收啦。先记住：我喜欢蓝色，爱喝美式咖啡。');
 
       // ── ② 切 AI B（无记忆·思考关）：验证切换后上下文不丢 ──
-      await sw('builtin-mock-b', '②/⑥ AI B 无记忆·思考关 — 验证切换不失忆');
+      await sw('builtin-mock-b', '②/⑧ AI B 无记忆·思考关 — 验证切换不失忆');
       note('📋 ② 切 AI B：验证切换后不失忆');
       await say('我刚才说我喜欢的颜色是什么？');
       final histB = ctx.buildHistoryMessages(pid, modelHint: 'mock-1');
@@ -1511,7 +1511,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       note('📋 ② ${bOk ? '✓' : '✗'} 切B后带${histB.length}条历史');
 
       // ── ③ 切 AI C（有记忆1h）：验证 stateful 切换全量带 ──
-      await sw('builtin-mock-c', '③/⑥ AI C 有记忆1h — 验证 stateful 切换');
+      await sw('builtin-mock-c', '③/⑧ AI C 有记忆1h — 验证 stateful 切换');
       note('📋 ③ 切 AI C：验证 stateful 切换全量带');
       await say('我们刚才聊了哪两件事？');
       var d = svc.assembleDecision(pid, toolRound: false);
@@ -1522,7 +1522,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       note('📋 ③ ${cOk ? '✓' : '✗'} stateful切换全量=${d.needRecover}');
 
       // ── ④ AI C 连续使用：验证轻量 ──
-      await sw('builtin-mock-c', '④/⑥ AI C 连续使用 — 验证轻量');
+      await sw('builtin-mock-c', '④/⑧ AI C 连续使用 — 验证轻量');
       note('📋 ④ AI C 连续使用：验证轻量');
       await say('那你觉得蓝色和美式咖啡配吗？');
       d = svc.assembleDecision(pid, toolRound: false);
@@ -1534,7 +1534,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // ── ⑤ 切回 AI A（stateless）+ 调小窗口：token 满 → 男主总结 ──
       // 8-04 21:2x 用户："别塞那么多上下文，token 调小就好了"
       // 注意：stateful AI 不本地总结（服务端自己记），总结是 stateless 的行为
-      await sw('builtin-mock', '⑤/⑥ 调小token窗口 → 男主主动总结');
+      await sw('builtin-mock', '⑤/⑧ 调小token窗口 → 男主主动总结');
       note('📋 ⑤ 切回 AI A：调小窗口，灌少量消息触发总结');
       ContextTracker.instance.setWindow(pid, 2000); // 预算≈200字，短消息即触发
       await say('我们今天还聊了散步、读书、做饭、旅行、听音乐，'
@@ -1549,7 +1549,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       note('📋 ⑤ ${sumOk ? '✓' : '✗'} 摘要区 ${summaries.length} 条');
 
       // ── ⑥ 切 AI E（无记忆·工具关）：验证总结后上下文不丢 ──
-      await sw('builtin-mock-e', '⑥/⑥ AI E 无记忆·工具关 — 验证总结后不失忆');
+      await sw('builtin-mock-e', '⑥/⑧ AI E 无记忆·工具关 — 验证总结后不失忆');
       note('📋 ⑥ 切 AI E：验证总结后上下文不丢');
       await say('刚才我们聊了好多，你能总结一下都聊了什么吗？');
       final histE = ctx.buildHistoryMessages(pid, modelHint: 'mock-1');
@@ -1559,6 +1559,38 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       record('⑥ 总结后切换带摘要', eOk,
           eOk ? null : '切 E 后历史里没有【男主摘要】——总结丢了，男主失忆');
       note('📋 ⑥ ${eOk ? '✓' : '✗'} 含摘要=${hasSummary}');
+
+      // ── ⑦ 切回 AI C（有记忆1h）：1h 快到之前 → 男主写三类存档 ──
+      // 8-04 21:3x 用户："超过1小时没聊，1小时快到之前就要让AI做总结，
+      // 下次聊把上下文/总结/恢复包扔给他，不然全都没了"
+      // 模拟：距上次聊天 40 分钟（> 超时一半 30min）→ 下次聊天时补沉淀
+      await sw('builtin-mock-c', '⑦/⑧ AI C 有记忆1h — 模拟空闲40分钟→沉淀');
+      note('📋 ⑦ 切 AI C：模拟 40 分钟没聊 → 男主应写三类存档（摘要+恢复包）');
+      await say('我们约好了周末去爬山，别忘啦。');
+      ctx.debugSetLastChatAt(pid, DateTime.now().subtract(const Duration(minutes: 40)));
+      await say('在吗？刚想到爬山的事，周末天气怎么样都去对吧？');
+      final recovery7 = ctx.recoveryFor(pid);
+      final sum7 = ctx.summariesFor(pid);
+      final gOk = recovery7 != null && recovery7.isNotEmpty && sum7.isNotEmpty;
+      record('⑦ 空闲过半触发沉淀（恢复包+摘要）', gOk,
+          gOk ? null : '恢复包=${recovery7 == null ? '无' : '有'} 摘要=${sum7.length}条——'
+              '没触发沉淀。日志看「上下文管理」有没有"📝 空闲超时…趁 AI 还记得"');
+      note('📋 ⑦ ${gOk ? '✓' : '✗'} 恢复包=${recovery7 == null ? '无' : '有'} 摘要=${sum7.length}条');
+
+      // ── ⑧ 模拟超过 1h：下次聊 → 带恢复包+摘要接上 ──
+      await sw('builtin-mock-c', '⑧/⑧ 模拟超时1h → 带恢复包接上');
+      note('📋 ⑧ 模拟超过 1 小时没聊 → 应判空闲超时，全量带恢复包');
+      ctx.debugSetLastChatAt(pid, DateTime.now().subtract(const Duration(hours: 2)));
+      await say('我回来了，我们继续聊吧。');
+      d = svc.assembleDecision(pid, toolRound: false);
+      final histRec = ctx.buildHistoryMessages(pid, modelHint: 'mock-1');
+      final hasRec = histRec.any((m) =>
+          m.role == 'system' && m.content.contains('恢复包'));
+      final hOk = d.idleExpired && d.needRecover && hasRec;
+      record('⑧ 超时后带恢复包接上', hOk,
+          hOk ? null : 'idleExpired=${d.idleExpired} needRecover=${d.needRecover} '
+              '含恢复包=$hasRec——超时后没带恢复包，男主失忆');
+      note('📋 ⑧ ${hOk ? '✓' : '✗'} idleExpired=${d.idleExpired} 含恢复包=$hasRec');
 
       final pass = results.where((r) => r.ok).length;
       final total = results.length;

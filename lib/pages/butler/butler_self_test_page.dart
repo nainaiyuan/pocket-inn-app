@@ -772,6 +772,29 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
             : '工具轮还触发切换/恢复，会干扰工具结果回传',
         guidance: '检查 assembleDecision：toolRound 直接返回全 false',
       ));
+
+      // ── T13：stateful 空闲超时 → 恢复（8-04 21:3x 用户：
+      // "1小时快到之前让AI做总结，超过1小时下次聊要带恢复包接上"）──
+      manager.updateBuiltinMock(memoryMode: 'stateful', refreshHours: 1);
+      await manager.setPersonaBinding(pid, [idA]); // 主实例（现在是 stateful 1h）
+      d = svc.assembleDecision(pid, toolRound: false); // 记为主实例
+      ctx.debugSetLastChatAt(
+          pid, DateTime.now().subtract(const Duration(hours: 2)));
+      d = svc.assembleDecision(pid, toolRound: false);
+      items.add(ButlerSelfTestItem(
+        message: 'T13 空闲超时 → 恢复',
+        expected: '距上次聊天2h ≥ 超时1h → idleExpired=true 且 needRecover=true',
+        actual: 'idleExpired=${d.idleExpired} needRecover=${d.needRecover}',
+        passed: d.idleExpired && d.needRecover,
+        failedReason: (d.idleExpired && d.needRecover)
+            ? null
+            : '空闲超时没触发恢复——下次聊不带恢复包，男主失忆',
+        guidance: '检查 assembleDecision：stateful 且 since ≥ refreshHours → '
+            'idleExpired=true → needRecover 全量带',
+      ));
+      // T13 用后还原主实例为 stateless（finally 也会还原，这里先回 stateless
+      // 保证 T11 之后的状态一致——T11 之前是 stateless）
+      manager.updateBuiltinMock(memoryMode: 'stateless');
     } finally {
       // 还原主实例配置 + 清理测试 persona 绑定/话题
       manager.updateBuiltinMock(
@@ -1194,6 +1217,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
               'T7 stateless 组装历史（男主不失忆）\n'
               'T8 token 满 → 触发男主总结\n'
               'T9-T10 变体开关行为 · T11 没填超时→降级 · T12 工具轮不决策\n'
+              'T13 空闲超时→恢复（模拟2h没聊，1h超时→全量带恢复包）\n'
               '全程不联网不花 token，直接跑真代码（assembleDecision 与聊天同款）。',
               style: TextStyle(color: Colors.black54, fontSize: 12, height: 1.6),
             ),
@@ -1215,7 +1239,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
                     ),
                   )
                 : const Icon(Icons.auto_awesome),
-            label: Text(_aiRunning ? '测试中…' : '开始 AI 逻辑测试 × 12'),
+            label: Text(_aiRunning ? '测试中…' : '开始 AI 逻辑测试 × 13'),
           ),
           if (_aiReport != null) ...[
             const SizedBox(height: 16),
