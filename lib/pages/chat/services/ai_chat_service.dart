@@ -266,10 +266,10 @@ class AiChatService {
         // 防 APP 被杀/定时器丢：下次聊天时若已过半且没沉淀过 → 补沉淀
         await _maybeSettleStateful(personaId, personaName);
       } else {
-        if (ContextManager.instance.needsCompact(personaId)) {
+        if (ContextManager.instance.needsCompact(personaId, modelHint: _modelHintFor(personaId))) {
           await _compactSummaries(personaId, personaName);
         }
-        if (ContextManager.instance.needsSummarize(personaId)) {
+        if (ContextManager.instance.needsSummarize(personaId, modelHint: _modelHintFor(personaId))) {
           await _summarize(personaId, personaName);
         }
       }
@@ -281,7 +281,7 @@ class AiChatService {
     // DB 里是原始/还原后文本，硬拉会泄露真实称呼，用户 20:08 指示）
     if (!_contextRestored.contains(personaId)) {
       _contextRestored.add(personaId);
-      await ContextManager.instance.restore(personaId, sessionId);
+      await ContextManager.instance.restore(personaId, sessionId, modelHint: _modelHintFor(personaId));
     }
     final needsWindow = !ContextTracker.instance.windowConfirmed(personaId);
     final stateful = _statefulInfoFor(personaId).$1;
@@ -320,7 +320,7 @@ class AiChatService {
     // 明确"无需回复，只回复最新一条用户消息"→ 男主不会逐条回历史。
     final historyMsgs = (stateful && !needRecover) || toolRound
         ? <AIChatMessage>[]
-        : ContextManager.instance.buildHistoryMessages(personaId);
+        : ContextManager.instance.buildHistoryMessages(personaId, modelHint: _modelHintFor(personaId));
     // 8-03 19:4x（用户反馈"没写当前消息、聊天全混在一起"）：
     // 当前消息在 history 组装【之后】再 feed——之前先 feed 再组装，
     // 当前消息混进【上下文参考】被标"无需回复"，又单独拼成 user，
@@ -354,7 +354,7 @@ class AiChatService {
     // 无论 stateful 与否都完整呈现；并落库 prompt_logs 表
     // （重启后 📄 弹窗仍能看，且按时间可查）。
     final displayHistory =
-        ContextManager.instance.buildHistoryMessages(personaId);
+        ContextManager.instance.buildHistoryMessages(personaId, modelHint: _modelHintFor(personaId));
     final historyText = displayHistory.isEmpty
         ? ''
         : '\n\n【上下文参考】（本次对话已聊过的内容，含你（男主）自己的回答。'
@@ -584,6 +584,21 @@ class AiChatService {
     return (false, null, null);
   }
 
+
+  /// 当前 persona 配的模型名（预算按实际模型窗口算，不写死 deepseek——
+  /// 用户 8-04 17:4x：云端有对话的 AI 按它自己的上下文窗口多大）。
+  String _modelHintFor(String personaId) {
+    try {
+      final manager = AIProviderManager.instance;
+      final pid = manager.lastProviderFor(personaId);
+      if (pid == null) return '';
+      for (final p in manager.providers) {
+        if (p.id == pid) return p.model;
+      }
+    } catch (_) {}
+    return '';
+  }
+
   /// stateful 模式：上下文管理 = 空闲超时前沉淀三类内容（日记/摘要/恢复包）。
   /// 用户 21:52 澄清：不能等超时到了才写（那时 AI 全忘了，写不出来）——
   /// 要在记忆消失之前，也就是"用户最后一次对话 + 空闲超时的一半"时，
@@ -626,7 +641,7 @@ class AiChatService {
       // 男主被唤醒时也要恢复摘要区（否则重启后男主失忆）
       if (!_contextRestored.contains(personaId)) {
         _contextRestored.add(personaId);
-        await ContextManager.instance.restore(personaId, sessionId);
+        await ContextManager.instance.restore(personaId, sessionId, modelHint: _modelHintFor(personaId));
       }
       final needsWindow = !ContextTracker.instance.windowConfirmed(personaId);
       final systemPrompt = SystemTemplate.build(
@@ -641,7 +656,7 @@ class AiChatService {
             '不需要等她回复，说完就好。',
         light: _statefulInfoFor(personaId).$1,
       );
-      final historyMsgs = ContextManager.instance.buildHistoryMessages(personaId);
+      final historyMsgs = ContextManager.instance.buildHistoryMessages(personaId, modelHint: _modelHintFor(personaId));
       final res = await _chat(
         personaId,
         [

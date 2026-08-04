@@ -43,21 +43,34 @@ class ContextManager {
   /// 无窗口信息时的兜底窗口（deepseek 查表失败用）
   static const int fallbackWindow = 65536;
 
-  /// 当前模型窗口（token）：已确认用确认值，否则查表，再兜底
-  int _windowTokens(String personaId) {
+  /// 当前模型窗口（token）：已确认用确认值，否则按实际模型查表，
+  /// 再兜底 deepseek-chat 查表，最后 fallback。
+  /// 8-04 17:4x（用户：云端有对话的 AI 按它自己的上下文窗口算，
+  /// 不是写死 deepseek）→ 调用方传 modelHint（当前 persona 配的模型）。
+  int _windowTokens(String personaId, {String? modelHint}) {
     final w = ContextTracker.instance.windowOf(personaId);
     if (w > 0) return w;
+    if (modelHint != null && modelHint.isNotEmpty) {
+      final h = ContextTracker.instance.windowByModelHint(modelHint);
+      if (h > 0) return h;
+    }
     final hint = ContextTracker.instance.windowByModelHint('deepseek-chat');
     return hint > 0 ? hint : fallbackWindow;
   }
 
   /// 当前话题原文预算（字符数）→ 触发总结（窗口越大，原文窗口越大）
-  int topicBudgetChars(String personaId) =>
-      (_windowTokens(personaId) * topicWindowRatio * tokenToChar).round();
+  int topicBudgetChars(String personaId, {String? modelHint}) =>
+      (_windowTokens(personaId, modelHint: modelHint) *
+              topicWindowRatio *
+              tokenToChar)
+          .round();
 
   /// 摘要区预算（字符数）→ 触发合并缩减
-  int summaryBudgetChars(String personaId) =>
-      (_windowTokens(personaId) * summaryWindowRatio * tokenToChar).round();
+  int summaryBudgetChars(String personaId, {String? modelHint}) =>
+      (_windowTokens(personaId, modelHint: modelHint) *
+              summaryWindowRatio *
+              tokenToChar)
+          .round();
 
   /// 话题切换的相似度阈值（关键词 Jaccard 低于此值视为换话题）
   static const double topicSwitchThreshold = 0.15;
@@ -189,7 +202,7 @@ class ContextManager {
 
   /// 组装历史消息（摘要区 + 当前话题原文），插在 system 之后。
   /// 当前话题原文超过预算时截断最旧部分（兜底；正常由总结触发清空）。
-  List<AIChatMessage> buildHistoryMessages(String personaId) {
+  List<AIChatMessage> buildHistoryMessages(String personaId, {String? modelHint}) {
     final out = <AIChatMessage>[];
 
     // 恢复包（stateful 空闲超时后 AI 忘了 → 本次带"下次要带的上下文"接上；
@@ -207,7 +220,9 @@ class ContextManager {
     // 摘要区只留"提醒索引"（每天要记得的事/影响后续对话的约定）
     final summaries = _summaries[personaId];
     if (summaries != null && summaries.isNotEmpty) {
-      final sb = StringBuffer('【MEMORY_SUMMARY·对话摘要（提醒索引）】');
+      final sb = StringBuffer(
+        '【男主摘要】（你上次洗牌时总结的——下次聊天必带；'
+        '它平时不动，只有工具历史+对话重新洗牌时才更新）');
       for (final s in summaries) {
         sb.write('\n- $s');
       }
@@ -227,7 +242,7 @@ class ContextManager {
       // 从尾部取（保留最近），预算内
       for (var i = t.raw.length - 1; i >= 0; i--) {
         total += t.raw[i].length;
-        if (total > topicBudgetChars(personaId)) break;
+        if (total > topicBudgetChars(personaId, modelHint: modelHint)) break;
         final line = t.raw[i];
         if (line.startsWith('工具')) {
           toolLines.add(line);
@@ -342,14 +357,14 @@ class ContextManager {
   }
 
   /// 是否需要触发男主总结（当前话题或待总结原文攒够了）
-  bool needsSummarize(String personaId) {
+  bool needsSummarize(String personaId, {String? modelHint}) {
     final t = _topics[personaId];
     if (t == null) return false;
     var total = 0;
     for (final line in t.raw) {
       total += line.length;
     }
-    return total >= topicBudgetChars(personaId);
+    return total >= topicBudgetChars(personaId, modelHint: modelHint);
   }
 
   /// 取走全部待总结原文（当前话题原文），并清空。
@@ -374,7 +389,7 @@ class ContextManager {
   /// （DB 里用户消息是原始文本，硬拉会泄露真实称呼——用户 20:04 反馈）。
   /// 现在 feed 时同步落库【假面层替换后的干净文本】镜像（context_raw_logs），
   /// 重启后从这里重建原文 → 男主记得聊过什么，且不泄露称呼。
-  Future<void> restore(String personaId, String? sessionId) async {
+  Future<void> restore(String personaId, String? sessionId, {String? modelHint}) async {
     try {
       _loadLastChat(personaId);
       final saved = await ChatDatabaseService.instance.loadSummaries(personaId);
@@ -400,7 +415,7 @@ class ContextManager {
                 _ts(DateTime.fromMillisecondsSinceEpoch(m.createdAt));
             final line = '${m.role} [$ts]：${m.text}';
             total += line.length;
-            if (total > topicBudgetChars(personaId)) break;
+            if (total > topicBudgetChars(personaId, modelHint: modelHint)) break;
             fresh.raw.add(line);
           }
           _topics[personaId] = fresh;
@@ -456,14 +471,14 @@ class ContextManager {
   String? recoveryFor(String personaId) => _recovery[personaId];
 
   /// 摘要区是否需要合并缩减
-  bool needsCompact(String personaId) {
+  bool needsCompact(String personaId, {String? modelHint}) {
     final list = _summaries[personaId];
     if (list == null || list.isEmpty) return false;
     var total = 0;
     for (final s in list) {
       total += s.length;
     }
-    return total >= summaryBudgetChars(personaId);
+    return total >= summaryBudgetChars(personaId, modelHint: modelHint);
   }
 
   /// 取走摘要区全文并清空（供缩减轮使用）——同步清 DB
