@@ -535,6 +535,14 @@ class ContextManager {
     return switched;
   }
 
+  /// 清掉"最近使用 AI"记录（8-04 21:1x 自检页 T2 二次跑失败修复：
+  /// 测试 persona 上次跑的 lastProvider 残留 → 再跑变"连续使用"而非"首次"）
+  Future<void> clearProviderUsed(String personaId) async {
+    try {
+      await StorageService.instance.remove('$_providerKeyPrefix$personaId');
+    } catch (_) {}
+  }
+
   static const _stopWords = {
     '的', '了', '吗', '呢', '啊', '吧', '我', '你', '他', '她', '它',
     '这', '那', '是', '在', '有', '和', '就', '都', '也', '很', '还',

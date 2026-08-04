@@ -613,6 +613,9 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
     final savedHours = manager.builtinMockConfig.refreshHours;
     try {
       // ── T1/T2：stateless 判定 + 首次/连续使用 ──
+      // 清残留"最近使用 AI"记录：上次跑测试留下的 lastProvider 会让
+      // T2"首次=切换"误判成"连续使用"（8-04 21:08 用户二次跑 T2 失败）
+      await ctx.clearProviderUsed(pid);
       await manager.clearPersonaBinding(pid);
       await manager.setPersonaBinding(pid, [idA]);
       var d = svc.assembleDecision(pid, toolRound: false);
@@ -778,6 +781,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
       );
       await manager.clearPersonaBinding(pid);
       ctx.takePendingRaw(pid);
+      await ctx.clearProviderUsed(pid); // 下次跑仍是"首次使用"（T2 稳定通过）
     }
     sw.stop();
     if (!mounted) return;
