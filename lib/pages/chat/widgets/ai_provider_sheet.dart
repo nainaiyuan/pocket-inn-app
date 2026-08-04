@@ -8,6 +8,7 @@ import '../../../ai_provider/capability_probe.dart';
 import '../../../ai_provider/failover_router.dart';
 import '../../../ai_provider/models.dart';
 import '../../../utils/debug_logger.dart';
+import '../../../widgets/capability_lights.dart';
 import '../../ai_config_page.dart';
 
 /// 聊天页的 AI 设置弹层：
@@ -579,7 +580,7 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
             style: TextStyle(fontSize: 12, color: enabled ? null : Colors.grey),
           ),
           const SizedBox(height: 3),
-          _CapabilityLights(
+          CapabilityLights(
             caps: _capsCache[config.id],
             probing: _autoProbing.contains(config.id),
             onRetest: () => _reprobe(config.id),
@@ -618,173 +619,6 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
         ],
       ),
       onTap: enabled ? () => _toggle(config.id, !checked) : null,
-    );
-  }
-}
-
-/// 能力灯（2026-08-04 通用适配层）：系别标签 + 能用哪个亮哪个。
-/// - 原生工具 / 思考链 / 流式：支持的亮绿色圆点 + 文字，不支持的**不显示**
-/// - 一个都不支持 → 显示"⚠️ 仅文本协议（AI 可能不配合）"
-/// - 还没探测过 → 显示"未检测" + 自动探测中/重测按钮
-/// - 信号台按钮（🛰 重测）：保底，用户觉得能力灯不对就再点一次
-class _CapabilityLights extends StatelessWidget {
-  const _CapabilityLights({this.caps, this.probing = false, this.onRetest});
-
-  final AIProviderCapabilities? caps;
-
-  /// 正在探测中（添加后自动测 / 手动重测）
-  final bool probing;
-
-  /// 信号台重测回调
-  final VoidCallback? onRetest;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    if (caps == null) {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (probing) ...[
-            const SizedBox(
-              width: 12,
-              height: 12,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              '检测中…',
-              style: TextStyle(fontSize: 11, color: colorScheme.outline),
-            ),
-          ] else ...[
-            Text(
-              '未检测',
-              style: TextStyle(fontSize: 11, color: colorScheme.outline),
-            ),
-            const SizedBox(width: 4),
-            _RetestButton(onPressed: onRetest),
-          ],
-        ],
-      );
-    }
-
-    final lights = <Widget>[
-      _light(context, colorScheme, '工具', caps!.toolFormat == 'openai'),
-      _light(context, colorScheme, '思考链', caps!.supportsReasoning),
-      _light(context, colorScheme, '流式', caps!.supportsStreaming),
-    ];
-    final anySupported = caps!.toolFormat == 'openai' ||
-        caps!.supportsReasoning ||
-        caps!.supportsStreaming;
-
-    return Wrap(
-      spacing: 8,
-      runSpacing: 2,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-          decoration: BoxDecoration(
-            color: colorScheme.primary.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: colorScheme.primary.withValues(alpha: 0.25),
-            ),
-          ),
-          child: Text(
-            caps!.systemLabel,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: colorScheme.primary,
-            ),
-          ),
-        ),
-        if (anySupported)
-          ...lights
-        else
-          Text(
-            '⚠️ 仅文本协议（AI 可能不配合）',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: Colors.orange.shade800,
-            ),
-          ),
-        if (probing) ...[
-          const SizedBox(
-            width: 12,
-            height: 12,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-        ] else
-          _RetestButton(onPressed: onRetest),
-      ],
-    );
-  }
-
-  Widget _light(
-    BuildContext context,
-    ColorScheme colorScheme,
-    String label,
-    bool supported,
-  ) {
-    if (!supported) {
-      // 不能用的不显示（能用哪个亮哪个）
-      return const SizedBox.shrink();
-    }
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 6,
-          height: 6,
-          decoration: const BoxDecoration(
-            color: Colors.green,
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 3),
-        Text(
-          label,
-          style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
-        ),
-      ],
-    );
-  }
-}
-
-/// 信号台小按钮：🛰 重测能力（保底，觉得不对再点一次）。
-class _RetestButton extends StatelessWidget {
-  const _RetestButton({this.onPressed});
-
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onPressed,
-      borderRadius: BorderRadius.circular(999),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.sensors, size: 13, color: colorScheme.outline),
-            const SizedBox(width: 2),
-            Text(
-              '重测',
-              style: TextStyle(
-                fontSize: 10,
-                color: colorScheme.outline,
-                decoration: TextDecoration.underline,
-                decorationColor: colorScheme.outline.withValues(alpha: 0.5),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

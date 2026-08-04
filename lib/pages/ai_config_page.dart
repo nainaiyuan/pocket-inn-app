@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../ai_provider/ai_provider_manager.dart';
+import '../ai_provider/capability_probe.dart';
 import '../ai_provider/failover_router.dart';
 import '../ai_provider/models.dart';
 import '../ai_provider/provider_presets.dart';
 import '../utils/debug_logger.dart';
+import '../widgets/capability_lights.dart';
 
 /// AI 配置页（管家页入口）：
 /// - 全局默认自动切换开关
@@ -28,6 +30,30 @@ class _AiConfigPageState extends State<AiConfigPage> {
 
   /// 正在重测能力的 provider（信号台按钮的转圈状态）
   String? _probingId;
+
+  /// providerId → 能力画像（8-04 15:3x 用户要求：配置页也要显示能力灯，
+  /// 检测完要能看到变绿，不能只弹提示）
+  Map<String, AIProviderCapabilities> _capsCache = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCapabilities();
+  }
+
+  /// 读能力缓存（不触发探测）；探测完/重测完手动刷新对应行。
+  Future<void> _loadCapabilities() async {
+    final map = <String, AIProviderCapabilities>{};
+    for (final provider in manager.providers) {
+      final caps = await manager.cachedCapabilitiesFor(provider.id);
+      if (caps != null) {
+        map[provider.id] = caps;
+      }
+    }
+    if (mounted) {
+      setState(() => _capsCache = map);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -163,12 +189,17 @@ class _AiConfigPageState extends State<AiConfigPage> {
     Map<String, AIProviderState> states,
   ) {
     final state = states[config.id];
+    final caps = _capsCache[config.id];
 
     Color dotColor;
     String? statusText;
     final missingKey = config.enabled &&
         config.apiKey.trim().isEmpty &&
         config.type != ProviderType.local;
+    // 8-04 15:3x（用户报"永远是待验证"）：能力已实测 → 已验证（绿），
+    // 能力是猜测 → 按地址猜测（橙），都没测过 → 待验证（灰）
+    final probed = caps?.isProbed ?? false;
+    final guessed = caps != null && !caps.isProbed;
     switch (state?.health) {
       case ProviderHealth.healthy:
         dotColor = Colors.green;
@@ -180,12 +211,20 @@ class _AiConfigPageState extends State<AiConfigPage> {
         dotColor = Colors.grey;
         statusText = '已禁用';
       default:
-        dotColor = missingKey
-            ? Colors.orange
-            : (config.enabled ? Colors.grey : Colors.grey.shade300);
-        statusText = missingKey
-            ? '未填 Key（编辑填写）'
-            : (config.enabled ? '待验证' : '已禁用');
+        if (probed) {
+          dotColor = Colors.green;
+          statusText = '已验证';
+        } else if (guessed) {
+          dotColor = Colors.orange;
+          statusText = '按地址猜测';
+        } else {
+          dotColor = missingKey
+              ? Colors.orange
+              : (config.enabled ? Colors.grey : Colors.grey.shade300);
+          statusText = missingKey
+              ? '未填 Key（编辑填写）'
+              : (config.enabled ? '待验证' : '已禁用');
+        }
     }
 
     return Card(
@@ -273,6 +312,19 @@ class _AiConfigPageState extends State<AiConfigPage> {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                    // 能力灯（8-04 15:3x：配置页也显示"流派+工具/思考链/流式"，
+                    // 检测完当场变绿，不再只弹提示）
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: CapabilityLights(
+                        caps: caps,
+                        probing: _probingId == config.id,
+                        onRetest: _probingId == null
+                            ? () => _reprobe(config)
+                            : null,
+                        compact: true,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -346,6 +398,9 @@ class _AiConfigPageState extends State<AiConfigPage> {
     final result = await manager.testProvider(config.id);
     if (!mounted) return;
     setState(() => _testingId = null);
+    // 测试会顺带做能力探测 → 刷新能力灯（8-04 15:3x）
+    await _loadCapabilities();
+    if (!mounted) return;
     DebugLogger.log('AI管理', '测试 ${config.name}: ${result.success ? '✅' : '❌'} ${result.message}');
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -362,7 +417,10 @@ class _AiConfigPageState extends State<AiConfigPage> {
     setState(() => _probingId = config.id);
     final caps = await manager.reprobeProvider(config.id);
     if (!mounted) return;
-    setState(() => _probingId = null);
+    setState(() {
+      _probingId = null;
+      _capsCache[config.id] = caps; // 当场点亮能力灯
+    });
     final summary = caps.isProbed
         ? '实测：${caps.systemLabel}（${caps.capabilitySummary}）'
         : '按地址猜测：${caps.systemLabel}（${caps.capabilitySummary}）';
@@ -529,11 +587,12 @@ class _AiConfigPageState extends State<AiConfigPage> {
   }
 
   /// 添加/编辑保存后立即后台探测能力（不 await，不阻塞 UI）；
-  /// 探测完弹结果，能力灯在聊天页 AI 弹层里实时可见。
+  /// 探测完弹结果 + 刷新配置页能力灯。
   void _probeAfterSave(String id, String name) {
     unawaited(
       manager.capabilitiesFor(id).then((caps) {
         if (!mounted) return;
+        setState(() => _capsCache[id] = caps); // 配置页当场点亮
         final summary = caps.isProbed
             ? '实测：${caps.systemLabel}（${caps.capabilitySummary}）'
             : '按地址猜测：${caps.systemLabel}（${caps.capabilitySummary}）';
