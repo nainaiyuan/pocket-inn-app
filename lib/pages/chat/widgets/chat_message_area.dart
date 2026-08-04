@@ -266,7 +266,14 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
               final msg = _messages[index];
               final mid = msg.id ?? '';
               final selected = _selectedIds.contains(mid);
-              return GestureDetector(
+              // 8-04 17:1x（用户：聊天UI要体现时间，几月几日聊的都不知道）：
+              // 时间分隔条——首条/与上条间隔>10分钟/跨天时显示（微信风格）
+              final sep = _timeSeparator(
+                  index > 0 ? _messages[index - 1] : null, msg);
+              return Column(
+                children: [
+                  if (sep != null) sep,
+                  GestureDetector(
                 onLongPress: () {
                   if (!_selecting) {
                     setState(() {
@@ -347,11 +354,50 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
                     ],
                   ),
                 ),
+                ),
+                ],
               );
             },
           ),
         ),
       ],
+    );
+  }
+
+  /// 8-04 17:1x：时间分隔条（微信风格）——首条消息、或与上一条
+  /// 间隔 >10 分钟、或跨天时显示。旧数据没有时间戳自动隐藏。
+  Widget? _timeSeparator(ChatMessage? prev, ChatMessage msg) {
+    final time = ChatPresence.instance.timestampOf(msg.id);
+    if (time == null) return null;
+    if (prev != null) {
+      final prevTime = ChatPresence.instance.timestampOf(prev.id);
+      if (prevTime != null) {
+        final sameDay = time.year == prevTime.year &&
+            time.month == prevTime.month &&
+            time.day == prevTime.day;
+        final diffMin = time.difference(prevTime).inMinutes.abs();
+        if (sameDay && diffMin < 10) return null;
+      }
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+          decoration: BoxDecoration(
+            color: const Color(0xFF6A4A5A).withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            ChatPresence.formatTime(time),
+            style: const TextStyle(
+              fontSize: 11,
+              color: Color(0xFF8A7A80),
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+      ),
     );
   }
 

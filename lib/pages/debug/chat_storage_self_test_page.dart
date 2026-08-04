@@ -35,6 +35,10 @@ class _ChatStorageSelfTestPageState extends State<ChatStorageSelfTestPage> {
   int _totalMessages = -1;
   Map<String, int> _perPersona = {};
   int _promptLogCount = -1;
+  // 8-04 17:1x：v6 原文镜像表检测（男主记忆持久化 + 工具记录）
+  int _contextRawCount = -1;
+  int _contextRawToolCount = -1;
+  String _contextRawRecent = '';
 
   // 最近消息（DB 直读）
   List<ChatMessage> _recent = [];
@@ -79,6 +83,27 @@ class _ChatStorageSelfTestPageState extends State<ChatStorageSelfTestPage> {
           'SELECT COUNT(*) AS c FROM prompt_logs');
       final promptCount = (promptRows.first['c'] as int?) ?? 0;
 
+      // 8-04 17:1x：原文镜像表（v6）——男主记忆持久化 + 工具记录
+      var contextRawCount = -1;
+      var contextRawToolCount = -1;
+      var contextRawRecent = '';
+      try {
+        final rawRows = await d.rawQuery(
+            'SELECT COUNT(*) AS c FROM context_raw_logs');
+        contextRawCount = (rawRows.first['c'] as int?) ?? 0;
+        final toolRows = await d.rawQuery(
+            "SELECT COUNT(*) AS c FROM context_raw_logs WHERE role = '工具'");
+        contextRawToolCount = (toolRows.first['c'] as int?) ?? 0;
+        final recentRaw = await d.query('context_raw_logs',
+            orderBy: 'created_at DESC', limit: 1);
+        if (recentRaw.isNotEmpty) {
+          final r = recentRaw.first;
+          final text = (r['text'] as String? ?? '');
+          contextRawRecent =
+              '${r['role']}：${text.length > 60 ? text.substring(0, 60) + '…' : text}';
+        }
+      } catch (_) {}
+
       // 2.5 messages 表实际列（缺列 = insert 全失败）
       final cols = await d.rawQuery('PRAGMA table_info(messages)');
       final messageColumns = [
@@ -104,6 +129,9 @@ class _ChatStorageSelfTestPageState extends State<ChatStorageSelfTestPage> {
         _perPersona = perPersona;
         _promptLogCount = promptCount;
         _messageColumns = messageColumns;
+        _contextRawCount = contextRawCount;
+        _contextRawToolCount = contextRawToolCount;
+        _contextRawRecent = contextRawRecent;
         _recent = recent;
         _recentPersonaId = recentPersonaId;
         _loading = false;
@@ -278,6 +306,22 @@ class _ChatStorageSelfTestPageState extends State<ChatStorageSelfTestPage> {
                           _promptLogCount == 0
                               ? '还没收录。发一条消息后这里就会有记录'
                               : '已按时间持久化，重启后 📄 弹窗仍可看'
+                        ),
+                      ],
+                    ),
+                    _card(
+                      title: '🧠 男主记忆原文镜像（context_raw_logs 表，v6）',
+                      rows: [
+                        ('总记录', '$_contextRawCount 条'),
+                        ('工具记录', '$_contextRawToolCount 条'),
+                        ('最近一条', _contextRawRecent.isEmpty ? '（空）' : _contextRawRecent),
+                        (
+                          '检查',
+                          _contextRawCount < 0
+                              ? '❌ 表不存在！需要升级到 v6（DB 版本 6）'
+                              : _contextRawToolCount > 0
+                                  ? '✅ 工具记录已进上下文，男主能看到自己做过什么'
+                                  : '⚠️ 还没有工具记录。让男主调一次工具（如 record_memory）后这里会出现'
                         ),
                       ],
                     ),

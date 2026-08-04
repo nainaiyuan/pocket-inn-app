@@ -413,8 +413,9 @@ class _MetaLine extends StatelessWidget {
       child: Text(
         ChatPresence.formatTime(time),
         style: TextStyle(
-          fontSize: 10,
-          color: const Color(0xFF6A4A5A).withValues(alpha: 0.35),
+          // 8-04 17:1x（用户：时间戳UI要体现）：10号35%太淡看不见 → 加大加深
+          fontSize: 11,
+          color: const Color(0xFF6A4A5A).withValues(alpha: 0.55),
         ),
       ),
     );
