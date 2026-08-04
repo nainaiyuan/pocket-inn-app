@@ -1163,6 +1163,23 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             onPickBg: _pickBgImage,
           )),
 
+        // ===== 🔁 让男主重新认识按钮（8-04 23:4x 用户）=====
+        // 只带【已总结摘要+恢复包+当次未总结原文】（总结过的旧原文不重复扔），
+        // 全量发给男主重新熟悉——不赌 AI 记没记住，错了手动救
+        Positioned(
+          right: 106, top: MediaQuery.of(context).padding.top + 4,
+          child: GestureDetector(
+            onTap: _resyncContext,
+            child: Container(
+              width: 28, height: 28,
+              decoration: BoxDecoration(
+                color: Colors.black26, shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.sync, size: 15, color: Colors.white70),
+            ),
+          ),
+        ),
+
         // ===== 🧪 模拟测试按钮（找bug工具，8-03 20:1x 用户要求）=====
         // 预设对话 + 手动写男主回复，走真实 feed/build/解析流程，
         // 看"发给模型的历史"里男主消息到底在不在
@@ -1269,6 +1286,35 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         ],
       ),
     );
+  }
+
+  /// 🔁 让男主重新认识我们（8-04 23:4x 用户）：
+  /// 只带【已总结摘要+恢复包+当次未总结原文】，全量发给男主重新熟悉。
+  /// 男主回复走工具气泡（_appendToolBubble：显示+落库，不 feed）——
+  /// 不污染原文（重新认识的指令不是"聊天内容"），也不刷新最后聊天时间。
+  Future<void> _resyncContext() async {
+    final pid = _state.personaId;
+    if (pid == null) return;
+    final contextText = ContextManager.instance.buildResyncContext(pid);
+    if (contextText.trim().isEmpty) {
+      _appendToolBubble('🔁 没有可同步的内容（没有摘要/恢复包/新聊天记录）');
+      return;
+    }
+    _appendToolBubble('🔁 正在把上下文重新发给男主…');
+    try {
+      final reply = await _aiSvc.resyncContext(
+        pid,
+        _state.persona?.name ?? '角色',
+        contextText,
+      );
+      if (reply.isNotEmpty) {
+        _appendToolBubble('🔁 男主已重新熟悉 ✅ $reply');
+      } else {
+        _appendToolBubble('🔁 男主没读出内容（回复为空），可再点一次');
+      }
+    } on Object catch (e) {
+      _appendToolBubble('🔁 同步失败：$e');
+    }
   }
 
   /// 🧪 找bug工具（用户 8-03 20:0x 要求）：预设对话 + 手动写男主回复，

@@ -394,6 +394,31 @@ class ContextManager {
   /// 验收/调试：当前话题是否存在（t==null 时 needsSummarize 直接 false）
   bool debugTopicExists(String personaId) => _topics.containsKey(personaId);
 
+  /// 🔁 组装"让男主重新认识"的上下文（8-04 23:4x 用户）：
+  /// 已总结摘要（提醒索引）+ 恢复包（存档）+ 未总结原文。
+  /// 用户明确：总结过的原文不重复扔——总结时 takePendingRaw 已清空 raw，
+  /// 所以 peekRaw 天然就是"当次未总结的部分"；已总结的只带精炼摘要。
+  /// 原文全量不截断（重新认识要的是完整，不是预算内）。
+  String buildResyncContext(String personaId) {
+    final sb = StringBuffer();
+    final summaries = _summaries[personaId];
+    if (summaries != null && summaries.isNotEmpty) {
+      sb.write('【男主摘要】（你之前总结的提醒：约定/承诺/正在做的事）\n');
+      for (final s in summaries) {
+        sb.write('- $s\n');
+      }
+    }
+    final recovery = _recovery[personaId];
+    if (recovery != null && recovery.isNotEmpty) {
+      sb.write('\n【恢复包】（你上次空闲前写的存档）\n$recovery\n');
+    }
+    final raw = peekRaw(personaId);
+    if (raw.trim().isNotEmpty) {
+      sb.write('\n【最近聊天原文】（总结之后新聊的，还没总结过）\n$raw');
+    }
+    return sb.toString();
+  }
+
   /// 重启后恢复：恢复摘要区 + 原文重建。
   /// 8-04 16:4x（用户"切换AI后男主失忆"）：原来只恢复摘要、不重建原文
   /// （DB 里用户消息是原始文本，硬拉会泄露真实称呼——用户 20:04 反馈）。

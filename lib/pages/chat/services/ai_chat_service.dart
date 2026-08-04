@@ -223,6 +223,38 @@ class AiChatService {
     }
   }
 
+  /// 🔁 让男主重新认识我们（8-04 23:4x 用户）：
+  /// 把【已总结摘要+恢复包+未总结原文】全量发给男主重新熟悉。
+  /// 不走 generateReply（独立调用）——避免 feed 污染原文/刷新最后聊天时间；
+  /// 男主回复由调用方显示气泡+落库。
+  Future<String> resyncContext(
+    String personaId,
+    String personaName,
+    String contextText,
+  ) async {
+    if (contextText.trim().isEmpty) return '';
+    final system = '【管家指令】你是「$personaName」。下面是需要你重新熟悉的上下文：'
+        '（① 你之前总结的摘要提醒 ② 你上次写的存档 ③ 总结之后新聊的原文——'
+        '总结过的旧内容不重复给，只给这些）。'
+        '仔细阅读，重新熟悉你们的关系和最近发生的事，'
+        '然后简短回复确认（一两句话即可，不要复述内容）。\n\n$contextText';
+    try {
+      final res = await AIProviderManager.instance.chat(
+        personaId,
+        [
+          AIChatMessage(role: 'system', content: system),
+          AIChatMessage(
+              role: 'user', content: '请重新熟悉上面的上下文，然后简短确认。'),
+        ],
+        tools: null,
+      );
+      return res.text.trim();
+    } on Object catch (e) {
+      DebugLogger.log('上下文管理', '⚠️ 重新认识失败: $e');
+      return '';
+    }
+  }
+
   Future<AIProviderResult> generateReply(
     String message,
     String personaId, {
