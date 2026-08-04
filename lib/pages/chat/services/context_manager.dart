@@ -271,6 +271,22 @@ class ContextManager {
     }
   }
 
+  /// 最近一条用户消息原文（去前缀）。
+  /// 8-04 17:0x（用户：工具轮组装时📄看不到当前用户消息）：
+  /// 工具轮组装发生在用户消息 feed 之后 → 原文最后一条用户消息
+  /// 就是"当前这条"，取出来和工具结果合并成【当前互动】。
+  String? lastUserMessageFor(String personaId) {
+    final t = _topics[personaId];
+    if (t == null) return null;
+    for (var i = t.raw.length - 1; i >= 0; i--) {
+      final line = t.raw[i];
+      if (line.startsWith('用户：')) {
+        return line.substring(3);
+      }
+    }
+    return null;
+  }
+
   /// 追加一条摘要（男主总结输出）——同步持久化到 DB
   Future<void> appendSummary(String personaId, String summary) async {
     final list = _summaries.putIfAbsent(personaId, () => []);

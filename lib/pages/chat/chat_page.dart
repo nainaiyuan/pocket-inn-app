@@ -568,14 +568,17 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           DebugLogger.log('AI路由', '🔧 工具 $name 结果：${toolResult.text.length > 80 ? toolResult.text.substring(0, 80) + '…' : toolResult.text}');
           if (nativeCalls.contains(call)) {
             // 原生：tool 消息必须用模型给的 id 配对（不能自己编 id）
+            // 8-04 17:0x（用户：📄 里工具轮要简化成"成功/失败+一句话"）：
+            // content 统一带【工具 名】+ ✅成功/❌失败 标记 —— 模型看得更清楚，
+            // 📄 展示层也能解析出工具名和结果好坏
             toolMessages.add(AIChatMessage(
               role: 'tool',
-              content: toolResult.text,
+              content: '【工具 $name】${toolResult.ok ? '✅成功' : '❌失败'}：${toolResult.text}',
               toolCallId: call['id']?.toString() ?? 'call_${toolLoop}_$name',
             ));
           } else {
             // 文本块：结果收集，最后合并注入 user 消息
-            textToolResults.add('【工具 $name】${toolResult.text}');
+            textToolResults.add('【工具 $name】${toolResult.ok ? '✅成功' : '❌失败'}：${toolResult.text}');
           }
           // 防死循环：同一工具连续调用 ≥3 次 → 停止本轮
           final n = (consecutiveToolCounts[name] ?? 0) + 1;

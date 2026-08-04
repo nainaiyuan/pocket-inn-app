@@ -364,10 +364,12 @@ class AiChatService {
     // 8-04 16:4x（用户反馈"📄 里没有当前消息"）：工具轮组装时
     // message 传空串 → 【User·当前消息】段空白，还把用户消息轮的
     // 记录覆盖了。工具轮也把"男主收到的内容"（工具结果）展示出来。
+    // 8-04 17:0x（用户反馈"看不到当前用户消息、工具轮太长"）：
+    // 工具轮时【当前互动】= 用户刚发的消息（feed 已发生，从原文取）
+    // + 男主执行的工具结果（简化成 ✅成功/❌失败 + 一句话，不占位置）
     final userText = message.trim().isEmpty
         ? (toolRound
-            ? '（工具轮：男主正在执行工具，以下是它收到的工具结果）\n'
-                '${toolMessages?.map((m) => '[${m.role}] ${m.content}').join('\n') ?? '（无）'}'
+            ? _toolRoundInteraction(personaId, toolMessages)
             : '（空）')
         : message;
     lastPromptText = '【System】\n$systemPrompt$historyText\n\n'
@@ -966,5 +968,42 @@ class AiChatService {
     } catch (_) {
       return '';
     }
+  }
+
+  /// 工具轮【当前互动】展示：用户刚发的消息 + 男主执行的工具结果（简化）。
+  /// 8-04 17:0x（用户："工具轮和用户当前消息合并成当前互动；历史工具轮
+  /// 简化成 成功写了什么/失败返回什么，不占位置"）。
+  /// 工具结果格式统一为 chat_page 拼的 【工具 名】✅成功/❌失败：结果。
+  String _toolRoundInteraction(
+      String personaId, List<AIChatMessage>? toolMessages) {
+    final sb = StringBuffer();
+    sb.writeln('（这是用户刚发的消息 + 男主为回复它执行的工具，只需回复这一条）');
+    sb.writeln('用户：${ContextManager.instance.lastUserMessageFor(personaId) ?? '（无）'}');
+    sb.writeln('（男主执行的工具结果）');
+    if (toolMessages == null || toolMessages.isEmpty) {
+      sb.writeln('（无工具调用）');
+      return sb.toString().trim();
+    }
+    // 解析每行【工具 名】✅成功/❌失败：结果 —— 简化截断，不占位置
+    final re = RegExp(r'【工具 [^】]+】[^【]*');
+    var found = false;
+    for (final m in toolMessages) {
+      var c = m.content.trim();
+      if (m.role == 'user' && c.startsWith('【工具执行结果】')) {
+        // 文本块合并注入的 user 消息：去掉包裹说明，只留工具行
+        c = c
+            .replaceFirst('【工具执行结果】', '')
+            .replaceFirst('基于结果自然地回复用户，不要再调用工具。', '')
+            .trim();
+      }
+      for (final match in re.allMatches(c)) {
+        found = true;
+        final line = match.group(0)!.trim();
+        sb.writeln(
+            line.length > 80 ? '${line.substring(0, 80)}…' : line);
+      }
+    }
+    if (!found) sb.writeln('（无工具调用）');
+    return sb.toString().trim();
   }
 }
