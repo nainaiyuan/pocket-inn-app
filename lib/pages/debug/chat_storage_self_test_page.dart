@@ -330,11 +330,11 @@ class _ChatStorageSelfTestPageState extends State<ChatStorageSelfTestPage> {
                       rows: [
                         (
                           '上次消耗',
-                          '${ChatService.instance.butler.lastPromptTokens} prompt tokens'
+                          '${ChatService.instance.butler?.lastPromptTokens ?? 0} prompt tokens'
                         ),
                         (
                           '累计消耗',
-                          '${ChatService.instance.butler.totalPromptTokens} prompt tokens'
+                          '${ChatService.instance.butler?.totalPromptTokens ?? 0} prompt tokens'
                         ),
                         (
                           '模型窗口',
