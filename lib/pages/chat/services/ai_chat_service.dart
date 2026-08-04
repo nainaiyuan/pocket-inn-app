@@ -323,10 +323,12 @@ class AiChatService {
           '📝 已记录用户消息（$personaName）：${message.length > 40 ? message.substring(0, 40) + '…' : message}');
     }
     // 8-03 20:1x（调试）：组装结果日志——发给模型的历史里到底有什么
+    // 8-04 16:4x：空历史要标注是工具轮（正常）还是 stateless 异常（该查）
     DebugLogger.log('上下文调试',
-        '📦 本次发给模型的历史 ${historyMsgs.length} 条：'
+        '📦 本次发给模型的历史 ${historyMsgs.length} 条'
+        '${toolRound ? '（工具轮：不带历史，正常）' : ''}：'
         '${historyMsgs.map((m) => '[${m.role}]${m.content.length > 30 ? m.content.substring(0, 30) + '…' : m.content}').join(' | ')}'
-        '${historyMsgs.isEmpty ? '（空——stateless 正常时不该空，若持续为空请查 stateful 配置）' : ''}');
+        '${historyMsgs.isEmpty && !toolRound ? '（空——stateless 正常时不该空，若持续为空请查 stateful 配置）' : ''}');
     // 透明化：保存完整 prompt 供 📄 按钮查看
     // 用户 8-03 00:07：标签不该叫"历史"，是"上下文参考"——
     // 本次对话实时记录（用户+男主交替），不是档案历史
@@ -346,8 +348,17 @@ class AiChatService {
               '这些是已经聊过的内容，你只需要参考它们保持人设和记忆连贯，'
               '【不要回复】它们——你只需要回复最后一条【用户】消息）\n'
               '${displayHistory.map((m) => '[${m.role}] ${m.content}').join('\n')}';
+    // 8-04 16:4x（用户反馈"📄 里没有当前消息"）：工具轮组装时
+    // message 传空串 → 【User·当前消息】段空白，还把用户消息轮的
+    // 记录覆盖了。工具轮也把"男主收到的内容"（工具结果）展示出来。
+    final userText = message.trim().isEmpty
+        ? (toolRound
+            ? '（工具轮：男主正在执行工具，以下是它收到的工具结果）\n'
+                '${toolMessages?.map((m) => '[${m.role}] ${m.content}').join('\n') ?? '（无）'}'
+            : '（空）')
+        : message;
     lastPromptText = '【System】\n$systemPrompt$historyText\n\n'
-        '【User·当前消息】（这是用户刚刚发的消息，只需要回复这一条）\n$message';
+        '【User·当前消息】（这是用户刚刚发的消息，只需要回复这一条）\n$userText';
     DebugLogger.log('Prompt', '本次组装完成（${lastPromptText!.length} 字，可点 📄 查看）');
     // 完整内容落库（按时间存，重启后仍可查）
     unawaited(ChatStorageService().savePromptLog(personaId, lastPromptText!));
