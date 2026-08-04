@@ -271,9 +271,16 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
 
   /// 内置男主回复样本（用户 8-03 06:12：模拟男主给管家看，找管家抓不住的）
   /// 8-04 18:2x：中文意图词表已移除——自然语言样本改为"应无工具"验证
+  /// 8-04 18:55（用户）：没按格式来的 → 管家应发提示（(应提示) 样本）
   static const List<(String, String)> _butlerSamples = [
     ('自然语言(应无工具)', '好的，记住啦。记住我喜欢喝美式咖啡'),
     ('自然语言提日记(应无工具)', '那我们一起翻翻以前写的日记吧'),
+    ('说工具二字(应无工具)', '这个工具真好用，推荐给你'),
+    ('纯聊天(应无工具)', '今天天气真好，我们去散步吧'),
+    ('无尖括号(应提示)', '工具:list_tools'),
+    ('方括号(应提示)', '[工具:list_tools]'),
+    ('⟨工具未闭合(应提示)', '⟨工具:list_tools 我看看有哪些'),
+    ('工具名散落(应提示)', '帮我 record_memory 一下'),
     ('⟨工具:⟩块带参数', '我记住啦。\n⟨工具:record_memory⟩{"content":"喜欢美式","category":"喜好"}⟨/工具⟩'),
     ('⟨工具:⟩块空参数', '好的，我看看有哪些。\n⟨工具:list_tools⟩⟨/工具⟩'),
     ('代码块JSON', '```json\n{"name": "list_tools", "arguments": {}}\n```'),
@@ -282,32 +289,52 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
     ('残缺JSON(用户原话)', '{"name": "list_tools", "arguments": !}'),
     ('无arguments', '{"name": "list_tools"}'),
     ('字符串参数', '{"name": "query_diary", "arguments": "{\\"keyword\\":\\"咖啡\\"}"}'),
-    ('无尖括号(应无工具)', '工具:list_tools'),
-    ('方括号(应无工具)', '[工具:list_tools]'),
-    ('说工具二字(应无工具)', '这个工具真好用，推荐给你'),
-    ('纯聊天(应无工具)', '今天天气真好，我们去散步吧'),
   ];
 
   /// 一键测试：内置男主回复样本全部跑一遍（不走 AI）
+  /// 三态期望：label 含 (应无工具) → extract null 且 无提示；
+  ///           label 含 (应提示)   → extract null 但 管家发提示纠正；
+  ///           其他                → extract 抓到工具指令
   void _runSimAll() {
     final items = <ButlerSelfTestItem>[];
     for (final (label, text) in _butlerSamples) {
       final calls = ToolIntentParser.extract(text);
+      final hint = ToolIntentParser.detectSuspicious(text);
       final names =
           calls?.map((c) => c['name']).join('、') ?? '（没抓到工具）';
-      final expectTool = label != '纯聊天(应无工具)';
+      final expectTool = !label.contains('(应无工具)') && !label.contains('(应提示)');
+      final expectHint = label.contains('(应提示)');
       final hit = calls != null && calls.isNotEmpty;
+      final hinted = hint != null;
+      final actual = names + (hinted ? ' 📐+提示' : '');
+      final passed = expectTool
+          ? hit
+          : expectHint
+              ? (!hit && hinted)
+              : (!hit && !hinted);
       items.add(ButlerSelfTestItem(
         message: '男主说（$label）',
-        expected: expectTool ? '抓到工具指令' : '不识别任何工具',
-        actual: names,
-        passed: expectTool ? hit : !hit,
-        failedReason: expectTool
-            ? (hit ? null : '管家没抓住男主这句话')
-            : (hit ? '纯聊天被误判成工具调用' : null),
+        expected: expectTool
+            ? '抓到工具指令'
+            : expectHint
+                ? '不执行，但管家发格式提示'
+                : '不识别、不提示（纯聊天）',
+        actual: actual,
+        passed: passed,
+        failedReason: !passed
+            ? (expectTool
+                ? '管家没抓住男主这句话'
+                : expectHint
+                    ? (hit ? '直接执行了（应只提示不执行）' : '管家没发格式提示')
+                    : (hit
+                        ? '被误判成工具调用'
+                        : hinted
+                            ? '被误判成疑似格式，发了提示'
+                            : null))
+            : null,
         guidance: expectTool
             ? '检查 tool_intent_parser.dart 是否覆盖该格式'
-            : '自然语言被误判成工具调用？检查 extract 是否误抓（中文意图已移除）',
+            : '检查 extract / detectSuspicious 边界（中文意图已移除）',
       ));
     }
     setState(() {

@@ -52,15 +52,19 @@ class ToolIntentParser {
   /// ① 已知工具名英文（record_memory 等）散落在文本里
   /// ② "工具:" / "工具：" 冒号格式（宽松变体痕迹）
   /// ③ ⟨工具:xxx⟩ 写了开头没闭合
+  /// 合法格式（extract 能抓到）→ 返回 null（不提示，走正常执行）
   static String? detectSuspicious(String text) {
     if (text.trim().isEmpty) return null;
+    // 8-04 18:55：合法格式不提示（严格块/JSON 里也含工具名英文，
+    // 必须先排除——否则严格块也被判成"格式不对"）
+    if (extract(text) != null) return null;
     const knownNames = [
       'record_memory', 'recall_memory', 'save_identity_memory',
       'list_tools', 'write_diary', 'query_diary',
     ];
     final hasToolName = knownNames.any(text.contains);
     final hasToolColon = RegExp(r'工具\s*[:：]').hasMatch(text);
-    final hasUnclosed = RegExp(r'⟨工具:[a-zA-Z_]+⟩').hasMatch(text) &&
+    final hasUnclosed = RegExp(r'⟨工具:[a-zA-Z_]+').hasMatch(text) &&
         !text.contains('⟨/工具⟩');
     if (!hasToolName && !hasToolColon && !hasUnclosed) return null;
     return '你刚才提到工具调用，但格式不对，管家没有执行。'
