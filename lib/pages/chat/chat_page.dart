@@ -1533,10 +1533,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
       // ── ⑤ 切回 AI A（stateless）+ 调小窗口：token 满 → 男主总结 ──
       // 8-04 21:2x 用户："别塞那么多上下文，token 调小就好了"
+      // 8-04 21:5x 修：窗口 800 → 预算≈85 字，①-④ 原文 ~130 字已超 →
+      // 第一条消息即触发（之前 2000 → 预算 213 字，短消息喂不满）
       // 注意：stateful AI 不本地总结（服务端自己记），总结是 stateless 的行为
       await sw('builtin-mock', '⑤/⑧ 调小token窗口 → 男主主动总结');
-      note('📋 ⑤ 切回 AI A：调小窗口，灌少量消息触发总结');
-      ContextTracker.instance.setWindow(pid, 2000); // 预算≈200字，短消息即触发
+      note('📋 ⑤ 切回 AI A：调小窗口，少量消息触发总结');
+      ContextTracker.instance.setWindow(pid, 800); // 预算≈85字，短消息即触发
       await say('我们今天还聊了散步、读书、做饭、旅行、听音乐，'
           '这些话题你都记得住吧，我慢慢说给你听。');
       await say('对了，我最近在学做菜，喜欢研究新菜谱，'
@@ -1578,19 +1580,23 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       note('📋 ⑦ ${gOk ? '✓' : '✗'} 恢复包=${recovery7 == null ? '无' : '有'} 摘要=${sum7.length}条');
 
       // ── ⑧ 模拟超过 1h：下次聊 → 带恢复包+摘要接上 ──
+      // 8-04 21:5x 修：assembleDecision 要在 say 前读（say 里 feed 会把
+      // lastChat 刷新成 now，say 后读永远判不出超时）——决策输入验证
+      // 看 say 前，组装结果看 say 后（恢复包在内存，与 lastChat 无关）
       await sw('builtin-mock-c', '⑧/⑧ 模拟超时1h → 带恢复包接上');
       note('📋 ⑧ 模拟超过 1 小时没聊 → 应判空闲超时，全量带恢复包');
       ctx.debugSetLastChatAt(pid, DateTime.now().subtract(const Duration(hours: 2)));
+      final dPre = svc.assembleDecision(pid, toolRound: false);
       await say('我回来了，我们继续聊吧。');
-      d = svc.assembleDecision(pid, toolRound: false);
       final histRec = ctx.buildHistoryMessages(pid, modelHint: 'mock-1');
       final hasRec = histRec.any((m) =>
           m.role == 'system' && m.content.contains('恢复包'));
-      final hOk = d.idleExpired && d.needRecover && hasRec;
+      final hOk = dPre.idleExpired && dPre.needRecover && hasRec;
       record('⑧ 超时后带恢复包接上', hOk,
-          hOk ? null : 'idleExpired=${d.idleExpired} needRecover=${d.needRecover} '
-              '含恢复包=$hasRec——超时后没带恢复包，男主失忆');
-      note('📋 ⑧ ${hOk ? '✓' : '✗'} idleExpired=${d.idleExpired} 含恢复包=$hasRec');
+          hOk ? null : '决策(idleExpired=${dPre.idleExpired} '
+              'needRecover=${dPre.needRecover}) 含恢复包=$hasRec——'
+              '超时后没带恢复包，男主失忆');
+      note('📋 ⑧ ${hOk ? '✓' : '✗'} idleExpired=${dPre.idleExpired} 含恢复包=$hasRec');
 
       final pass = results.where((r) => r.ok).length;
       final total = results.length;

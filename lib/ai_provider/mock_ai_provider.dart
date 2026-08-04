@@ -85,6 +85,42 @@ class MockAIProvider {
       return _handleToolRound(messages);
     }
 
+    // 管家内部指令模拟（8-04 21:5x 验收⑤⑦失败修复）：
+    // _summarize / _generateAndStoreThree 是 generateReply 直调 chat 的
+    // （不走工具轮），mock 必须扮演"会执行指令的男主"——
+    // 否则验收 ⑤ 总结 / ⑦ 三类存档 拿到模板回复 = 白写。
+    // 关键词与普通聊天 system 无冲突（已验证 system_template 不含）。
+    final systemText = messages
+        .where((m) => m.role == 'system')
+        .map((m) => m.content)
+        .join('\n');
+    if (systemText.contains('分类整理好')) {
+      // _generateAndStoreThree 三类存档指令：写日记 + 摘要 + 恢复包
+      AiModuleLog.log('模拟AI', '📦 管家三类存档指令 → 模拟男主写日记+摘要+恢复包');
+      return AIProviderResult(
+        text: '【摘要】\n'
+            '周末约好爬山\n'
+            '她在学做菜、喜欢蓝色和咖啡\n'
+            '【恢复包】\n'
+            '你们聊了颜色、咖啡、爬山、做菜；她喜欢蓝色爱喝美式咖啡；约好周末去爬山',
+        toolCalls: [
+          {
+            'name': 'write_diary',
+            'id': 'mock_diary_${DateTime.now().millisecondsSinceEpoch}',
+            'arguments': {
+              'content': '和她聊了颜色、咖啡、爬山和做菜，她喜欢蓝色，爱喝美式咖啡，约好周末去爬山。',
+            },
+          },
+        ],
+        providerName: '模拟AI',
+      );
+    }
+    if (systemText.contains('提炼')) {
+      // _summarize 总结指令 → 返回提醒列表（整段进摘要区）
+      AiModuleLog.log('模拟AI', '✂️ 管家总结指令 → 模拟男主提炼提醒');
+      return _textReply('周末约好一起爬山\n她在学做菜\n她喜欢蓝色、爱喝美式咖啡');
+    }
+
     // 工具调用开关关闭 → 纯文本回复（模拟不支持 function calling 的模型）
     if (!_tools) {
       AiModuleLog.log('模拟AI', '🔕 工具调用开关已关（_tools=false）→ 纯文本回复');
