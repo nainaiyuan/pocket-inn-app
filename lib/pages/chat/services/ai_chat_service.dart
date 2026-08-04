@@ -251,20 +251,18 @@ class AiChatService {
     // 用户 21:36：stateful 但没确定空闲超时 → 先按 stateless 用（每次全量带）
     // 用户 21:47：空闲超时 = 用户和 AI 多久没聊天 → 服务器释放上下文缓存
     // 用户 21:52：要在记忆消失之前（超时一半）写，等超时到了 AI 全忘了
-    var statefulRecover = false;
+    // 8-04 20:39（用户：一键测试）：决策计算抽到 assembleDecision
+    // （自检页直接调同一实现验证 stateless/stateful/切换/超时逻辑）
+    final decision = assembleDecision(personaId, toolRound: toolRound);
+    var statefulRecover = decision.idleExpired;
     if (!toolRound && personaPrompt.isNotEmpty) {
-      if (_statefulInfoFor(personaId).$1) {
+      if (decision.stateful) {
         // 用户发消息 → 重置定时沉淀（新一轮空闲期）
         scheduleStatefulSettle(personaId, personaName, personaPrompt);
-        // 空闲超时已过 → AI 已不记得 → 本次带恢复包+摘要接上
-        final since = ContextManager.instance.hoursSinceLastChat(personaId);
-        final idle = _statefulInfoFor(personaId).$2;
-        statefulRecover = since != null && idle != null && since >= idle;
         if (statefulRecover) {
           DebugLogger.log(
             '上下文管理',
-            '🧩 空闲超时已过（${since.toStringAsFixed(1)}h ≥ $idle h）→ '
-            '本次带恢复包+摘要接上（AI 已不记得）',
+            '🧩 空闲超时已过 → 本次带恢复包+摘要接上（AI 已不记得）',
           );
         }
         // 防 APP 被杀/定时器丢：下次聊天时若已过半且没沉淀过 → 补沉淀
@@ -288,15 +286,13 @@ class AiChatService {
       await ContextManager.instance.restore(personaId, sessionId, modelHint: _modelHintFor(personaId));
     }
     final needsWindow = !ContextTracker.instance.windowConfirmed(personaId);
-    final stateful = _statefulInfoFor(personaId).$1;
+    final stateful = decision.stateful;
     // 8-04 16:4x（用户："切换AI第一次必须全量带，否则AI不知道发生了什么"）：
     // 记录上次给这个 persona 组装上下文的 provider；切换/首次 → 本次恢复全量
     // （stateful 也带：服务端还没记住这个 persona 的对话）；
     // 连续使用 → stateful 轻量（服务端记得）、stateless 照旧全量。
-    final switchedProvider = !toolRound &&
-        ContextManager.instance.noteProviderUsed(
-            personaId, AIProviderManager.instance.lastProviderFor(personaId));
-    final needRecover = statefulRecover || switchedProvider;
+    final switchedProvider = decision.switched;
+    final needRecover = decision.needRecover;
     if (switchedProvider) {
       DebugLogger.log('上下文管理',
           '🔄 检测到 AI 切换/首次使用 → 本次全量带上下文（stateful 也带）');
@@ -598,6 +594,41 @@ class AiChatService {
       }
     } catch (_) {}
     return (false, null, null);
+  }
+
+  /// 组装决策（8-04 20:39 用户：一键测试 stateless/stateful/切换/超时）：
+  /// generateReply 与自检页共用同一实现，测的就是真代码。
+  /// - stateful：真后台记忆（stateful 且填了空闲超时）
+  /// - idleExpired：空闲超时已过（AI 服务端已忘 → 本次要带恢复包+摘要）
+  /// - switched：AI 切换/首次使用（noteProviderUsed 记录副作用在此发生）
+  /// - needRecover：idleExpired || switched → 本次全量带
+  /// 工具轮不决策（结果 feed 下一轮带，组装走 toolRound 分支）。
+  ({bool stateful, bool idleExpired, bool switched, bool needRecover})
+      assembleDecision(String personaId, {required bool toolRound}) {
+    if (toolRound) {
+      return (
+        stateful: false,
+        idleExpired: false,
+        switched: false,
+        needRecover: false,
+      );
+    }
+    final info = _statefulInfoFor(personaId);
+    final stateful = info.$1;
+    final idle = info.$2;
+    var idleExpired = false;
+    if (stateful) {
+      final since = ContextManager.instance.hoursSinceLastChat(personaId);
+      idleExpired = since != null && idle != null && since >= idle;
+    }
+    final switched = ContextManager.instance.noteProviderUsed(
+        personaId, AIProviderManager.instance.lastProviderFor(personaId));
+    return (
+      stateful: stateful,
+      idleExpired: idleExpired,
+      switched: switched,
+      needRecover: idleExpired || switched,
+    );
   }
 
 

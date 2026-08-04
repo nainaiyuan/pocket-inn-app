@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../ai_provider/ai_provider_manager.dart';
-import '../ai_provider/capability_probe.dart';
 import '../ai_provider/failover_router.dart';
 import '../ai_provider/mock_ai_provider.dart';
 import '../ai_provider/models.dart';
@@ -125,7 +124,8 @@ class _AiConfigPageState extends State<AiConfigPage> {
                 )
               else
                 for (var i = 0; i < providers.length; i++)
-                  if (providers[i].id != AIProviderManager.builtinMockId)
+                  if (!AIProviderManager.builtinMockVariants
+                      .any((v) => v.id == providers[i].id))
                     _buildProviderRow(providers[i], i, providers.length, states),
               const SizedBox(height: 8),
 
@@ -173,7 +173,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
       );
 
   /// 内置模拟 AI 卡片（8-04 20:35 用户：本地 AI 测各种配置组合）：
-  /// 显示当前 记忆模式/思考链/工具 状态，点设置弹 dialog 改
+  /// 显示 5 个固定形态变体 + 主实例手动设置（记忆模式/思考链/工具）
   Widget _buildMockCard() {
     final mock = manager.builtinMockConfig;
     final isStateful = mock.isStateful;
@@ -184,31 +184,72 @@ class _AiConfigPageState extends State<AiConfigPage> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.science, size: 20, color: Colors.purple),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    mock.name,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            Row(
+              children: [
+                const Icon(Icons.science, size: 20, color: Colors.purple),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '🧪 内置模拟 AI（${AIProviderManager.builtinMockVariants.length} 个固定形态）',
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '一键切换即测：不同 记忆/思考链/工具 组合的对话与切换逻辑，'
+                        '不联网不花 token',
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600, height: 1.4),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '记忆：${isStateful ? '有后台记忆（超时 ${mock.refreshHours}h）' : '无后台记忆（每次全量带）'}'
-                    ' ｜ 思考链：${MockAIProvider.simulateReasoning ? '开' : '关'}'
-                    ' ｜ 工具：${MockAIProvider.simulateTools ? '开' : '关'}',
-                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600, height: 1.4),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-            TextButton(
-              onPressed: _openMockSettings,
-              child: const Text('⚙️ 设置'),
+            const SizedBox(height: 4),
+            for (final v in AIProviderManager.builtinMockVariants) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Icon(Icons.circle,
+                        size: 8,
+                        color: v.isStateful ? Colors.orange : Colors.blueGrey),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '${v.name}',
+                        style: const TextStyle(fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (v.id == AIProviderManager.builtinMockId)
+                      Text(
+                        isStateful ? '（手动：有记忆 ${mock.refreshHours}h）' : '（手动：无记忆）',
+                        style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 2),
+            Row(
+              children: [
+                Text(
+                  '主实例开关：思考链 ${MockAIProvider.simulateReasoning ? '开' : '关'}'
+                  ' ｜ 工具 ${MockAIProvider.simulateTools ? '开' : '关'}',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: _openMockSettings,
+                  child: const Text('⚙️ 设置主实例'),
+                ),
+              ],
             ),
           ],
         ),

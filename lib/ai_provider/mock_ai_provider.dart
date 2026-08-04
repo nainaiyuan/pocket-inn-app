@@ -21,6 +21,15 @@ class MockAIProvider {
   static bool simulateReasoning = true;
   static bool simulateTools = true;
 
+  /// 8-04 20:39（用户）：多内置几个固定形态的模拟 AI，一键测——
+  /// 实例级固定开关（变体用）：null = 跟随静态开关（builtin-mock 主实例）
+  MockAIProvider({this.defaultReasoning, this.defaultTools});
+  final bool? defaultReasoning;
+  final bool? defaultTools;
+
+  bool get _reasoning => defaultReasoning ?? simulateReasoning;
+  bool get _tools => defaultTools ?? simulateTools;
+
   /// 上次返回的 assistant 消息摘要（工具轮校验对照用）
   Map<String, dynamic>? _lastAssistant;
 
@@ -77,8 +86,8 @@ class MockAIProvider {
     }
 
     // 工具调用开关关闭 → 纯文本回复（模拟不支持 function calling 的模型）
-    if (!simulateTools) {
-      AiModuleLog.log('模拟AI', '🔕 工具调用开关已关（simulateTools=false）→ 纯文本回复');
+    if (!_tools) {
+      AiModuleLog.log('模拟AI', '🔕 工具调用开关已关（_tools=false）→ 纯文本回复');
       return _textReply('（模拟AI）好的呢，我在听。（工具调用已关闭，只聊天不调工具）');
     }
 
@@ -121,7 +130,7 @@ class MockAIProvider {
   AIProviderResult _textReply(String text) => AIProviderResult(
         text: text,
         reasoningContent:
-            simulateReasoning ? '模拟思考：普通聊天，直接自然回复就好。' : null,
+            _reasoning ? '模拟思考：普通聊天，直接自然回复就好。' : null,
         providerName: '模拟AI',
       );
 
@@ -161,7 +170,7 @@ class MockAIProvider {
     return AIProviderResult(
       text: '',
       reasoningContent:
-          simulateReasoning ? reasoning : null, // 思考链开关控制
+          _reasoning ? reasoning : null, // 思考链开关控制
       toolCalls: [call],
       providerName: '模拟AI',
     );
@@ -195,7 +204,7 @@ class MockAIProvider {
           }
         }
         if (a.reasoningContent == null || a.reasoningContent!.isEmpty) {
-          if (simulateReasoning) {
+          if (_reasoning) {
             sb.writeln('❌ assistant 消息 reasoning_content 丢了——'
                 'DeepSeek 思考模式必须原样回传，否则 HTTP 400');
             ok = false;
@@ -232,7 +241,7 @@ class MockAIProvider {
     return AIProviderResult(
       text: '（模拟AI）$sb',
       reasoningContent:
-          simulateReasoning ? '模拟思考：工具结果已收到，逐项校验完成。' : null,
+          _reasoning ? '模拟思考：工具结果已收到，逐项校验完成。' : null,
       providerName: '模拟AI',
     );
   }

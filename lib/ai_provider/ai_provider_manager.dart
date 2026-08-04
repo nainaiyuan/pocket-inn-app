@@ -52,7 +52,10 @@ class AIProviderManager {
 
   /// 更新 mock 配置（内存态，不落 DB；重启还原 stateless）
   /// memoryMode: stateless（无后台记忆）/ stateful（有后台记忆）
-  void updateBuiltinMock({String? memoryMode, int? refreshHours}) {
+  /// clearRefreshHours: true 时把 refreshHours 清成 null
+  /// （自检页测"stateful 没填超时 → 降级 stateless"用）
+  void updateBuiltinMock(
+      {String? memoryMode, int? refreshHours, bool clearRefreshHours = false}) {
     _builtinMockConfig = AIProviderConfig(
       id: _builtinMockConfig.id,
       name: _builtinMockConfig.name,
@@ -62,7 +65,9 @@ class AIProviderManager {
       note: _builtinMockConfig.note,
       priority: _builtinMockConfig.priority,
       memoryMode: memoryMode ?? _builtinMockConfig.memoryMode,
-      refreshHours: refreshHours ?? _builtinMockConfig.refreshHours,
+      refreshHours: clearRefreshHours
+          ? null
+          : (refreshHours ?? _builtinMockConfig.refreshHours),
     );
     // 同步路由里的 config（AIProviderState.config 可变，直接换引用）
     _router.stateOf(builtinMockId)?.config = _builtinMockConfig;
@@ -71,13 +76,79 @@ class AIProviderManager {
         ' refreshHours=${_builtinMockConfig.refreshHours}');
   }
 
-  final MockAIProvider _builtinMock = MockAIProvider();
+  /// 8-04 20:39（用户：多内置几个固定形态的模拟 AI，一键测逻辑）：
+  /// 变体实例（实例级固定开关，不跟随配置页静态开关）
+  /// builtin-mock 主实例 = 跟随静态开关（配置页可改）
+  final Map<String, MockAIProvider> _mockInstances = {
+    builtinMockId: MockAIProvider(), // 无记忆·思考链·工具 都跟随配置页开关
+    'builtin-mock-b': MockAIProvider(defaultReasoning: false, defaultTools: true), // 无记忆·思考关·工具开
+    'builtin-mock-c': MockAIProvider(defaultReasoning: true, defaultTools: true), // 有记忆(24h)·思考开·工具开
+    'builtin-mock-d': MockAIProvider(defaultReasoning: false, defaultTools: true), // 有记忆(24h)·思考关·工具开
+    'builtin-mock-e': MockAIProvider(defaultReasoning: true, defaultTools: false), // 无记忆·思考开·工具关（纯聊天模型）
+  };
+
+  /// 5 个内置模拟 AI 的固定形态（name 直观显示形态，聊天页/配置页可见）
+  static const List<AIProviderConfig> builtinMockVariants = [
+    AIProviderConfig(
+      id: builtinMockId,
+      name: '🧪模拟A 无记忆·思考开·工具开',
+      type: ProviderType.local,
+      baseUrl: 'mock://builtin',
+      model: 'mock-1',
+      note: '内置模拟器：DeepSeek 形态（stateless 全量带+思考链+工具）',
+      priority: 99999,
+    ),
+    AIProviderConfig(
+      id: 'builtin-mock-b',
+      name: '🧪模拟B 无记忆·思考关·工具开',
+      type: ProviderType.local,
+      baseUrl: 'mock://builtin',
+      model: 'mock-1',
+      note: '内置模拟器：无思考链模型（stateless+工具，reasoning=null）',
+      priority: 99999,
+    ),
+    AIProviderConfig(
+      id: 'builtin-mock-c',
+      name: '🧪模拟C 有记忆·思考开·工具开',
+      type: ProviderType.local,
+      baseUrl: 'mock://builtin',
+      model: 'mock-1',
+      note: '内置模拟器：后台有记忆 AI（stateful 24h，prompt 轻量+超时恢复）',
+      priority: 99999,
+      memoryMode: 'stateful',
+      refreshHours: 24,
+    ),
+    AIProviderConfig(
+      id: 'builtin-mock-d',
+      name: '🧪模拟D 有记忆·思考关·工具开',
+      type: ProviderType.local,
+      baseUrl: 'mock://builtin',
+      model: 'mock-1',
+      note: '内置模拟器：后台有记忆+无思考链（stateful 24h，reasoning=null）',
+      priority: 99999,
+      memoryMode: 'stateful',
+      refreshHours: 24,
+    ),
+    AIProviderConfig(
+      id: 'builtin-mock-e',
+      name: '🧪模拟E 无记忆·思考开·工具关',
+      type: ProviderType.local,
+      baseUrl: 'mock://builtin',
+      model: 'mock-1',
+      note: '内置模拟器：纯聊天模型（无 function calling，只文本回复）',
+      priority: 99999,
+    ),
+  ];
 
   /// 全部 provider（含内置测试AI），按优先级排序
   List<AIProviderConfig> _allProviders() {
     final list = _sorted();
-    if (!list.any((c) => c.id == builtinMockId)) {
-      list.add(_builtinMockConfig);
+    // 8-04 20:39（用户：多内置几个）：5 个固定形态变体全部在列
+    // （聊天页切换器可见可切换；配置页渲染时排除、走专属卡片）
+    for (final v in builtinMockVariants) {
+      if (!list.any((c) => c.id == v.id)) {
+        list.add(v.id == builtinMockId ? _builtinMockConfig : v);
+      }
     }
     return list;
   }
@@ -171,7 +242,12 @@ class AIProviderManager {
     // hasUsable / resolve / executeWithFailover 永远找不到它，
     // 选中"🧪 测试AI（内置）"后发消息会被"没有可用 Provider"拦截
     // （用户 8-03 21:12 反馈：测试AI被检测API拦住了，就是这个原因）
-    _router.register(_builtinMockConfig);
+    // 8-04 20:39（用户：多内置几个）：5 个固定形态变体全部注册
+    for (final v in builtinMockVariants) {
+      _router.register(v);
+    }
+    // 主实例配置（配置页手动改的 memoryMode/refreshHours）覆盖内置形态
+    _router.stateOf(builtinMockId)?.config = _builtinMockConfig;
   }
 
   /// 一次性迁移：把旧版「API 设置」（api_configs）里选中的配置
@@ -525,19 +601,21 @@ class AIProviderManager {
         isAbort: (error) => error is ChatCompletionCancelledException,
         action: (config) async {
           // 内置测试 AI：不走网络，模拟器扮演 DeepSeek
-          // （用户 8-03 20:38 要求：不用配置 API 就能测）
-          if (config.id == builtinMockId) {
-            final mock = _builtinMock.chat(
+          // （用户 8-03 20:38 要求：不用配置 API 就能测；
+          //   8-04 20:39：5 个固定形态变体按 id 分发到独立实例）
+          final mock = _mockInstances[config.id];
+          if (mock != null) {
+            final r = mock.chat(
               messages,
               toolRound: messages.any((m) => m.role == 'tool'),
             );
             return AIProviderResult(
-              text: mock.text,
-              thinking: mock.thinking,
-              reasoningContent: mock.reasoningContent,
-              toolCalls: mock.toolCalls,
-              usage: mock.usage,
-              providerId: builtinMockId,
+              text: r.text,
+              thinking: r.thinking,
+              reasoningContent: r.reasoningContent,
+              toolCalls: r.toolCalls,
+              usage: r.usage,
+              providerId: config.id,
               providerName: config.name,
             );
           }
@@ -749,7 +827,7 @@ class AIProviderManager {
         supportsStreaming: true,
       );
     }
-    if (config.id == builtinMockId) {
+    if (_mockInstances.containsKey(config.id)) {
       return const AIProviderCapabilities(
         toolFormat: 'openai',
         supportsReasoning: true,

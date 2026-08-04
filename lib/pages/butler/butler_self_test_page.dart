@@ -2,10 +2,13 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../../ai_provider/ai_provider_manager.dart';
 import '../../ai_provider/mock_ai_provider.dart';
 import '../../ai_provider/models.dart';
 import '../../ai_provider/tool_format_adapter.dart';
 import '../../butler/tools/tool_intent_parser.dart';
+import '../../pages/chat/services/ai_chat_service.dart';
+import '../../pages/chat/services/context_manager.dart';
 import '../../services/butler_command.dart';
 import '../../services/chat_database_service.dart';
 import '../../services/chat_memory_service.dart';
@@ -31,6 +34,8 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
   ButlerSelfTestReport? _toolReport;
   bool _regRunning = false;
   ButlerSelfTestReport? _regReport;
+  bool _aiRunning = false;
+  ButlerSelfTestReport? _aiReport;
   final _simController = TextEditingController();
   List<Map<String, dynamic>>? _simCalls;
   String _simStripped = '';
@@ -584,6 +589,206 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
         '■ 工具自测完成：${items.where((i) => i.passed).length}/${items.length} 通过');
   }
 
+  /// 🔀 AI 逻辑一键测试（8-04 20:39 用户：多内置几个 AI，一键测
+  /// stateless/stateful/切换/token满总结 等逻辑，一键找 bug）。
+  /// 直接调 assembleDecision（generateReply 同款实现，测的就是真代码）
+  /// + buildHistoryMessages + MockAIProvider 实例开关，全程不联网。
+  Future<void> _runAiLogicTest() async {
+    if (_aiRunning) return;
+    setState(() {
+      _aiRunning = true;
+      _aiReport = null;
+    });
+    DebugLogger.log('AI逻辑测试', '▶ AI 逻辑一键测试开始…');
+    final items = <ButlerSelfTestItem>[];
+    final sw = Stopwatch()..start();
+    const pid = '__ai_logic_test__';
+    const idA = AIProviderManager.builtinMockId; // 无记忆·思考开·工具开
+    const idC = 'builtin-mock-c'; // 有记忆(24h)·思考开·工具开
+    final manager = AIProviderManager.instance;
+    final svc = AiChatService();
+    final ctx = ContextManager.instance;
+    // 备份主实例配置（测完还原）
+    final savedMode = manager.builtinMockConfig.memoryMode;
+    final savedHours = manager.builtinMockConfig.refreshHours;
+    try {
+      // ── T1/T2：stateless 判定 + 首次/连续使用 ──
+      await manager.clearPersonaBinding(pid);
+      await manager.setPersonaBinding(pid, [idA]);
+      var d = svc.assembleDecision(pid, toolRound: false);
+      items.add(ButlerSelfTestItem(
+        message: 'T1 stateless 判定',
+        expected: '无后台记忆 → stateful=false（每次全量带）',
+        actual: 'stateful=${d.stateful}',
+        passed: !d.stateful,
+        failedReason: d.stateful ? 'stateless AI 被判成 stateful，会走轻量丢历史' : null,
+        guidance: '检查 _statefulInfoFor：memoryMode=stateless 必须返回 false',
+      ));
+      items.add(ButlerSelfTestItem(
+        message: 'T2 首次使用 = 切换',
+        expected: 'switched=true（首次 → 全量带，AI 不知道发生了什么）',
+        actual: 'switched=${d.switched}',
+        passed: d.switched,
+        failedReason: d.switched ? null : '首次使用没触发全量带，男主会失忆',
+        guidance: '检查 noteProviderUsed：无历史记录时返回 true',
+      ));
+      d = svc.assembleDecision(pid, toolRound: false);
+      items.add(ButlerSelfTestItem(
+        message: 'T3 连续使用不切换',
+        expected: 'switched=false（同 AI 连续聊 → 不重复全量）',
+        actual: 'switched=${d.switched}',
+        passed: !d.switched,
+        failedReason: d.switched ? '连续使用还判切换，每次全量带浪费 token' : null,
+        guidance: '检查 noteProviderUsed：同 provider 连续使用返回 false',
+      ));
+
+      // ── T4/T5/T6：stateful 判定 + 切换全量 + 连续轻量 ──
+      await manager.setPersonaBinding(pid, [idC]);
+      d = svc.assembleDecision(pid, toolRound: false);
+      items.add(ButlerSelfTestItem(
+        message: 'T4 stateful 判定',
+        expected: '有后台记忆(24h) → stateful=true（prompt 轻量）',
+        actual: 'stateful=${d.stateful}',
+        passed: d.stateful,
+        failedReason: d.stateful ? null : 'stateful AI 没被识别，会一直全量带',
+        guidance: '检查 _statefulInfoFor：memoryMode=stateful 且 refreshHours>0 → true',
+      ));
+      items.add(ButlerSelfTestItem(
+        message: 'T5 切到 stateful → 全量',
+        expected: 'needRecover=true（切换 → stateful 也全量带，服务端还没记住）',
+        actual: 'needRecover=${d.needRecover}',
+        passed: d.needRecover,
+        failedReason: d.needRecover ? null : '切换后 stateful 没全量带，男主失忆',
+        guidance: '检查 needRecover = idleExpired || switched',
+      ));
+      d = svc.assembleDecision(pid, toolRound: false);
+      items.add(ButlerSelfTestItem(
+        message: 'T6 stateful 连续 → 轻量',
+        expected: 'stateful=true 且 needRecover=false → 不带历史（服务端记得）',
+        actual: 'stateful=${d.stateful} needRecover=${d.needRecover}',
+        passed: d.stateful && !d.needRecover,
+        failedReason: (d.stateful && !d.needRecover)
+            ? null
+            : 'stateful 连续使用没走轻量，白带历史浪费 token',
+        guidance: '检查组装规则：stateful && !needRecover → 空历史',
+      ));
+
+      // ── T7：stateless 组装全量（feed 后历史非空）──
+      await manager.setPersonaBinding(pid, [idA]);
+      svc.assembleDecision(pid, toolRound: false); // 记为 A
+      ctx.feedUserMessage(pid, '今天天气不错');
+      ctx.feedAssistantMessage(pid, '（模拟男主）是的呢，适合散步');
+      final hist = ctx.buildHistoryMessages(pid, modelHint: 'mock-1');
+      final hasUser = hist.any((m) => m.role == 'user');
+      final hasAI = hist.any((m) => m.role == 'assistant');
+      items.add(ButlerSelfTestItem(
+        message: 'T7 stateless 组装全量',
+        expected: '历史非空，用户/男主消息都在（男主不能失忆）',
+        actual: '${hist.length} 条（user=$hasUser ai=$hasAI）',
+        passed: hist.isNotEmpty && hasUser && hasAI,
+        failedReason: (hist.isNotEmpty && hasUser && hasAI)
+            ? null
+            : 'stateless 组装历史为空或缺男主消息——男主会前言不搭后语',
+        guidance: '检查 buildHistoryMessages：话题原文 → user/assistant 行',
+      ));
+
+      // ── T8：token 满 → 该总结了 ──
+      ctx.takePendingRaw(pid); // 清空当前话题
+      final big = List.filled(40, '这是一条用来撑爆上下文预算的长消息内容，'
+              '模拟用户和男主聊了很多很多，把模型窗口快用完了。')
+          .join();
+      for (var i = 0; i < 50; i++) {
+        ctx.feedUserMessage(pid, big);
+        ctx.feedAssistantMessage(pid, big);
+      }
+      final needSum = ctx.needsSummarize(pid, modelHint: 'mock-1');
+      final pending = ctx.takePendingRaw(pid);
+      items.add(ButlerSelfTestItem(
+        message: 'T8 token 满 → 要总结',
+        expected: 'needsSummarize=true（窗口快满 → 男主总结 → 摘要区）',
+        actual: 'need=$needSum 原文${pending.length}字',
+        passed: needSum && pending.isNotEmpty,
+        failedReason: (needSum && pending.isNotEmpty)
+            ? null
+            : '窗口快满没触发总结，历史会被截断丢失',
+        guidance: '检查 needsSummarize：原文 ≥ topicBudgetChars',
+      ));
+
+      // ── T9/T10：变体实例开关（模拟不同形态 AI）──
+      final mB = MockAIProvider(defaultReasoning: false, defaultTools: true);
+      final rB = mB.chat(
+        [const AIChatMessage(role: 'user', content: '记住我喜欢喝咖啡')],
+        toolRound: false,
+      );
+      final bOk = (rB.toolCalls?.isNotEmpty ?? false) && rB.reasoningContent == null;
+      items.add(ButlerSelfTestItem(
+        message: 'T9 变体B（思考关·工具开）',
+        expected: '调工具但 reasoning=null（模拟无思考链模型）',
+        actual: 'tools=${rB.toolCalls?.length ?? 0} reasoning=${rB.reasoningContent == null ? 'null' : '有'}',
+        passed: bOk,
+        failedReason: bOk ? null : '思考链关的模型还带 reasoning_content',
+        guidance: '检查 MockAIProvider.defaultReasoning',
+      ));
+      final mE = MockAIProvider(defaultReasoning: true, defaultTools: false);
+      final rE = mE.chat(
+        [const AIChatMessage(role: 'user', content: '记住我喜欢喝咖啡')],
+        toolRound: false,
+      );
+      final eOk = (rE.toolCalls == null || rE.toolCalls!.isEmpty) && rE.text.isNotEmpty;
+      items.add(ButlerSelfTestItem(
+        message: 'T10 变体E（工具关）',
+        expected: '纯文本回复不调工具（模拟纯聊天模型）',
+        actual: 'tools=${rE.toolCalls?.length ?? 0} text=${rE.text.length}字',
+        passed: eOk,
+        failedReason: eOk ? null : '工具关的模型还发 tool_calls，会执行出错',
+        guidance: '检查 MockAIProvider.defaultTools',
+      ));
+
+      // ── T11：stateful 没填超时 → 降级 stateless ──
+      manager.updateBuiltinMock(memoryMode: 'stateful', refreshHours: 0);
+      await manager.setPersonaBinding(pid, [idA]);
+      d = svc.assembleDecision(pid, toolRound: false);
+      items.add(ButlerSelfTestItem(
+        message: 'T11 stateful 没填超时 → 降级',
+        expected: 'stateful=false（没填空闲超时 → 按 stateless 全量带，防丢历史）',
+        actual: 'stateful=${d.stateful}',
+        passed: !d.stateful,
+        failedReason: d.stateful ? '没填超时还走 stateful 轻量，历史会丢' : null,
+        guidance: '检查 _statefulInfoFor：refreshHours 为空/0 → 降级 stateless',
+      ));
+
+      // ── T12：工具轮不决策 ──
+      d = svc.assembleDecision(pid, toolRound: true);
+      items.add(ButlerSelfTestItem(
+        message: 'T12 工具轮不决策',
+        expected: '全 false（工具轮不带历史，结果 feed 下一轮带）',
+        actual: 'stateful=${d.stateful} switched=${d.switched}',
+        passed: !d.stateful && !d.switched && !d.needRecover,
+        failedReason: (!d.stateful && !d.switched && !d.needRecover)
+            ? null
+            : '工具轮还触发切换/恢复，会干扰工具结果回传',
+        guidance: '检查 assembleDecision：toolRound 直接返回全 false',
+      ));
+    } finally {
+      // 还原主实例配置 + 清理测试 persona 绑定/话题
+      manager.updateBuiltinMock(
+        memoryMode: savedMode,
+        refreshHours: savedHours,
+        clearRefreshHours: savedHours == null,
+      );
+      await manager.clearPersonaBinding(pid);
+      ctx.takePendingRaw(pid);
+    }
+    sw.stop();
+    if (!mounted) return;
+    setState(() {
+      _aiReport = ButlerSelfTestReport(items: items, elapsed: sw.elapsed);
+      _aiRunning = false;
+    });
+    DebugLogger.log('AI逻辑测试',
+        '■ AI 逻辑测试完成：${items.where((i) => i.passed).length}/${items.length} 通过');
+  }
+
   Future<void> _run() async {
     if (_running) return;
     setState(() {
@@ -964,6 +1169,84 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
                 ],
               ),
             ),
+          ],
+          const SizedBox(height: 24),
+          const Divider(color: Color(0xFFE8D5DE)),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE8D5DE)),
+            ),
+            child: const Text(
+              '🔀 AI 逻辑一键测试（用户 8-04 20:39：内置几个模拟 AI 一键找 bug）\n'
+              '内置 5 个固定形态模拟 AI（A 无记忆·思考开·工具开 / B 无记忆·思考关 / '
+              'C 有记忆24h·思考开 / D 有记忆24h·思考关 / E 无记忆·工具关），\n'
+              '一键验证核心逻辑：\n'
+              'T1-T3 stateless 判定 / 首次=切换 / 连续不切换\n'
+              'T4-T6 stateful 判定 / 切换→全量 / 连续→轻量\n'
+              'T7 stateless 组装历史（男主不失忆）\n'
+              'T8 token 满 → 触发男主总结\n'
+              'T9-T10 变体开关行为 · T11 没填超时→降级 · T12 工具轮不决策\n'
+              '全程不联网不花 token，直接跑真代码（assembleDecision 与聊天同款）。',
+              style: TextStyle(color: Colors.black54, fontSize: 12, height: 1.6),
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _aiRunning ? null : _runAiLogicTest,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF7B6A8F),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            icon: _aiRunning
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.auto_awesome),
+            label: Text(_aiRunning ? '测试中…' : '开始 AI 逻辑测试 × 12'),
+          ),
+          if (_aiReport != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _aiReport!.allPassed
+                    ? const Color(0xFFEAF7EE)
+                    : const Color(0xFFFFF3F0),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _aiReport!.allPassed ? Icons.check_circle : Icons.error,
+                    color: _aiReport!.allPassed
+                        ? const Color(0xFF4CAF50)
+                        : const Color(0xFFFF8A8A),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${_aiReport!.passCount}/${_aiReport!.items.length} 项通过'
+                      '（耗时 ${_aiReport!.elapsed.inSeconds}s）',
+                      style: const TextStyle(
+                        color: Color(0xFF6A4A5A),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            for (final item in _aiReport!.items) _ResultCard(item: item),
           ],
         ],
       ),
