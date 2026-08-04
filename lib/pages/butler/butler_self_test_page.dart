@@ -153,7 +153,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
     // 用户设计：extract 没抓到明确格式但有罕见痕迹（工具名英文/工具:冒号/
     // ⟨工具未闭合）→ 提示男主正确格式（不执行）；日常聊天不应触发
     final fmtHint1 = ToolIntentParser.detectSuspicious('工具:list_tools 帮我看看');
-    final fmtHint2 = ToolIntentParser.detectSuspicious('⟨工具:record_memory⟩{"content":"x"}');
+    final fmtHint2 = ToolIntentParser.detectSuspicious('⟨工具:record_memory⟩{"content":"x"}⟨/工具⟩');
     final fmtHint3 = ToolIntentParser.detectSuspicious('今天天气真好，我们去散步吧');
     items.add(ButlerSelfTestItem(
       message: 'R-格式 疑似检测',
@@ -397,7 +397,24 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
 
     addParserCase('⟨工具:⟩块', '⟨工具:record_memory⟩{"content":"自测"}⟨/工具⟩', 'record_memory');
     addParserCase('JSON指令', '{"name":"recall_memory","arguments":{"query":"自测"}}', 'recall_memory');
-    addParserCase('中文词', '记住我喜欢喝美式咖啡', 'record_memory');
+    // 8-04 18:2x：中文意图词表已移除——"记住"是自然语言，永不触发
+    {
+      const input = '记住我喜欢喝美式咖啡';
+      final calls = ToolIntentParser.extract(input);
+      final hint = ToolIntentParser.detectSuspicious(input);
+      items.add(ButlerSelfTestItem(
+        message: '解析器：自然语言不触发',
+        expected: '不识别、不提示（中文意图词表已移除）',
+        actual: calls == null
+            ? (hint == null ? '（无工具无提示，正常）' : '误提示: $hint')
+            : '误识别: ${calls.map((c) => c['name']).join('、')}',
+        passed: calls == null && hint == null,
+        failedReason: (calls == null && hint == null)
+            ? null
+            : '自然语言被误判（"记住"→record_memory 是旧词表行为，已移除）',
+        guidance: '中文意图词表已删，自然语言应零副作用',
+      ));
+    }
     // 纯聊天必须零副作用
     {
       const input = '今天天气真好';
@@ -408,7 +425,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
         actual: calls == null ? '（无工具，正常）' : '误识别: ${calls.map((c) => c['name']).join('、')}',
         passed: calls == null,
         failedReason: calls == null ? null : '纯聊天被误判成工具调用',
-        guidance: '中文词表太宽泛？检查 tool_intent_parser.dart 的 chineseIntents',
+        guidance: '自然语言应零副作用（中文意图已移除）',
       ));
     }
 
@@ -633,7 +650,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
             child: const Text(
               '🔧 工具链路自测（用户 8-03 05:44：管家对调用工具没反应时用）\n'
               '逐层验证，卡在哪一层一目了然：\n'
-              '① 解析器识别：⟨工具:⟩块 / JSON指令 / 中文词 / 纯聊天零副作用\n'
+              '① 解析器识别：⟨工具:⟩块 / JSON指令 / 自然语言不触发 / 没按格式→提示\n'
               '② 记忆库读写：写入 → 查到 → 删除\n'
               '③ 日记库读写：写入 → 查到\n\n'
               '如果①②③全过 → 问题在男主没写工具指令（看日志 AI路由）\n'
