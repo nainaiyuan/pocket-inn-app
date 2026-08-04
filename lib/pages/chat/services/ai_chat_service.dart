@@ -271,7 +271,17 @@ class AiChatService {
         if (ContextManager.instance.needsCompact(personaId, modelHint: _modelHintFor(personaId))) {
           await _compactSummaries(personaId, personaName);
         }
-        if (ContextManager.instance.needsSummarize(personaId, modelHint: _modelHintFor(personaId))) {
+        // 8-04 22:5x（验收⑤排查）：needsSummarize 输入输出打日志——
+        // 决策 stateful=false 但"✂️"没出现时，直接看这里为什么 false
+        final _needSum = ContextManager.instance
+            .needsSummarize(personaId, modelHint: _modelHintFor(personaId));
+        DebugLogger.log(
+            'AI验收',
+            '⑤needsSummarize: 话题=${ContextManager.instance.debugTopicExists(personaId)}'
+            ' 原文=${ContextManager.instance.debugRawLength(personaId)}字'
+            ' 预算=${ContextManager.instance.topicBudgetChars(personaId, modelHint: _modelHintFor(personaId))}字'
+            ' → $_needSum');
+        if (_needSum) {
           await _summarize(personaId, personaName);
         }
       }
@@ -754,23 +764,39 @@ class AiChatService {
   Future<bool> _maybeSettleStateful(String personaId, String personaName) async {
     try {
       final info = _statefulInfoFor(personaId);
-      if (!info.$1) return false;
+      if (!info.$1) {
+        DebugLogger.log('上下文管理', '🕵️ 沉淀跳过: 非 stateful（info=$info）');
+        return false;
+      }
       final idleHours = info.$2!;
       final since = ContextManager.instance.hoursSinceLastChat(personaId);
-      if (since == null) return false;
+      if (since == null) {
+        DebugLogger.log('上下文管理', '🕵️ 沉淀跳过: 无最后聊天时间');
+        return false;
+      }
       // 用户 21:52：在空闲超时的一半（2小时 → 1小时时）写——
       // 太早没内容可写（刚聊完），太晚 AI 忘了（写不出来）
       final settleAt = idleHours / 2;
       // 距上次聊天 ≥ 一半 → 该写了；但也要防重复（写过后本次跳过）
-      if (since < settleAt) return false;
-      if (_settledAtHalf[personaId] == true) return false;
+      if (since < settleAt) {
+        DebugLogger.log(
+            '上下文管理', '🕵️ 沉淀跳过: since=${since.toStringAsFixed(2)}h < 一半 $settleAt h');
+        return false;
+      }
+      if (_settledAtHalf[personaId] == true) {
+        DebugLogger.log('上下文管理', '🕵️ 沉淀跳过: 本轮空闲期已写过三类存档');
+        return false;
+      }
       DebugLogger.log(
         '上下文管理',
         '📝 空闲超时 $idleHours h，距上次聊天 ${since.toStringAsFixed(1)}h ≥ '
         '一半 $settleAt h → 趁 AI 还记得，让男主写三类存档…',
       );
       final raw = ContextManager.instance.peekRaw(personaId);
-      if (raw.trim().isEmpty) return false;
+      if (raw.trim().isEmpty) {
+        DebugLogger.log('上下文管理', '🕵️ 沉淀跳过: 原文为空（没聊过？）');
+        return false;
+      }
       // 男主一次写三类：日记 / 摘要 / 恢复包（下次要带的上下文）
       final written = await _generateAndStoreThree(
         personaId, personaName, raw);

@@ -391,6 +391,9 @@ class ContextManager {
   /// 验收/调试：当前话题原文长度（判断 needsSummarize 为什么没触发）
   int debugRawLength(String personaId) => peekRaw(personaId).length;
 
+  /// 验收/调试：当前话题是否存在（t==null 时 needsSummarize 直接 false）
+  bool debugTopicExists(String personaId) => _topics.containsKey(personaId);
+
   /// 重启后恢复：恢复摘要区 + 原文重建。
   /// 8-04 16:4x（用户"切换AI后男主失忆"）：原来只恢复摘要、不重建原文
   /// （DB 里用户消息是原始文本，硬拉会泄露真实称呼——用户 20:04 反馈）。

@@ -1521,11 +1521,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       note('📋 ③ 切 AI C：验证 stateful 切换全量带');
       await say('我们刚才聊了哪两件事？');
       var d = svc.assembleDecision(pid, toolRound: false);
-      final cOk = d.stateful && d.needRecover;
+      // 8-04 22:5x（③ 判定修复）：say 后重算 decision 时 switched 已被
+      // ③ 自己的 noteProviderUsed 消耗（永远 false）——判定改看组装结果：
+      // stateful 判定看决策（C 是 stateful ✓），全量带看组装历史非空
+      final histC = ctx.buildHistoryMessages(pid, modelHint: 'mock-1');
+      final cOk = d.stateful && histC.isNotEmpty;
       record('③ stateful切换全量带', cOk,
-          cOk ? null : 'stateful=${d.stateful} 切换全量=${d.needRecover}——'
+          cOk ? null : 'stateful=${d.stateful} 组装历史=${histC.length}条——'
               '切到有记忆AI没全量带，男主失忆');
-      note('📋 ③ ${cOk ? '✓' : '✗'} stateful切换全量=${d.needRecover}');
+      note('📋 ③ ${cOk ? '✓' : '✗'} stateful=${d.stateful} 组装${histC.length}条');
 
       // ── ④ AI C 连续使用：验证轻量 ──
       await sw('builtin-mock-c', '④/⑧ AI C 连续使用 — 验证轻量');
