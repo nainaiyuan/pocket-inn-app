@@ -438,7 +438,7 @@ class ChatStorageService {
   }
 
   /// 加载最近的原文镜像（按时间正序返回，restore 重建 raw 用）
-  Future<List<({String role, String text})>> loadContextRaw(
+  Future<List<({String role, String text, int createdAt})>> loadContextRaw(
     String personaId, {
     int limit = 200,
   }) async {
@@ -453,6 +453,7 @@ class ChatStorageService {
       return rows.reversed.map((r) => (
         role: (r['role'] as String? ?? '用户'),
         text: (r['text'] as String? ?? ''),
+        createdAt: (r['created_at'] as int? ?? 0),
       )).toList();
     } catch (_) {
       return [];

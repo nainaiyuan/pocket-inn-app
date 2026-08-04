@@ -14,6 +14,7 @@ import '../../services/chat_service.dart';
 import '../../services/butler_command.dart';
 import '../../butler/context/context_tracker.dart';
 import '../../butler/storage/storage_registry.dart';
+import 'services/context_manager.dart';
 import '../../services/local_storage_service.dart';
 import '../../models/chat_message.dart';
 import '../../utils/debug_logger.dart';
@@ -566,6 +567,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           // 完成/失败气泡（用户 8-03 01:57）：执行完必须给用户明确反馈
           _appendToolResultBubble(name, toolResult);
           DebugLogger.log('AI路由', '🔧 工具 $name 结果：${toolResult.text.length > 80 ? toolResult.text.substring(0, 80) + '…' : toolResult.text}');
+          // 8-04 17:0x（用户：上下文要留地方放工具，男主才知道做过什么；
+          // 带时间戳+成败+原因，失败后才能继续调工具解决）：
+          // 工具调用记录进上下文（stateless 全量带 → 男主看得到）
+          ContextManager.instance
+              .feedToolCall(personaId, name, toolResult.ok, toolResult.text);
           if (nativeCalls.contains(call)) {
             // 原生：tool 消息必须用模型给的 id 配对（不能自己编 id）
             // 8-04 17:0x（用户：📄 里工具轮要简化成"成功/失败+一句话"）：

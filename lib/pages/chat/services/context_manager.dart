@@ -113,6 +113,22 @@ class ContextManager {
 
   // ---- 写入 ----
 
+  /// 时间戳（当天 HH:mm，跨天 MM-dd HH:mm）——8-04 17:0x（用户：
+  /// 用户对话/男主对话/工具调用都要带时间戳，才能一一对应）。
+  /// 追加式写在行首，旧行不变 → DeepSeek 前缀缓存不受影响。
+  static String _ts(DateTime t) {
+    final now = DateTime.now();
+    final sameDay = t.year == now.year &&
+        t.month == now.month &&
+        t.day == now.day;
+    final hhmm = '${t.hour.toString().padLeft(2, '0')}:'
+        '${t.minute.toString().padLeft(2, '0')}';
+    return sameDay
+        ? hhmm
+        : '${t.month.toString().padLeft(2, '0')}-'
+            '${t.day.toString().padLeft(2, '0')} $hhmm';
+  }
+
   /// 记录用户消息（同时做话题切换检测）
   void feedUserMessage(String personaId, String text) {
     if (text.trim().isEmpty) return;
@@ -132,13 +148,13 @@ class ContextManager {
       // 旧话题原文并入新话题的 raw（保留男主回答），只重置关键词。
       final oldRaw = t.raw;
       final fresh = TopicState()..raw.addAll(oldRaw);
-      fresh.raw.add('用户：$text');
+      fresh.raw.add('用户 [${_ts(DateTime.now())}]：$text');
       fresh.keywords.addAll(words);
       _topics[personaId] = fresh;
       return;
     }
     t.keywords.addAll(words);
-    t.raw.add('用户：$text');
+    t.raw.add('用户 [${_ts(DateTime.now())}]：$text');
     // 8-04 16:4x：原文镜像落库（干净文本）——重启后 restore 重建用
     unawaited(ChatStorageService().appendContextRaw(personaId, '用户', text));
   }
@@ -147,9 +163,26 @@ class ContextManager {
   void feedAssistantMessage(String personaId, String text) {
     if (text.trim().isEmpty) return;
     final t = _topics.putIfAbsent(personaId, TopicState.new);
-    t.raw.add('男主：$text');
+    t.raw.add('男主 [${_ts(DateTime.now())}]：$text');
     // 8-04 16:4x：原文镜像落库（干净文本）——重启后 restore 重建用
     unawaited(ChatStorageService().appendContextRaw(personaId, '男主', text));
+  }
+
+  /// 记录工具调用（进当前话题原文）——8-04 17:0x（用户：上下文要留
+  /// 地方放工具，男主才知道自己做过什么；成功写了什么/失败原因，
+  /// 失败后才能继续调工具解决）。
+  /// 行格式：'工具 [17:05]：record_memory ✅成功：已记录…'（不截断）
+  /// 只针对 stateless（要带上下文的 AI）：stateful 轻量时不带历史。
+  void feedToolCall(
+      String personaId, String toolName, bool ok, String resultText) {
+    if (toolName.trim().isEmpty) return;
+    final t = _topics.putIfAbsent(personaId, TopicState.new);
+    final mark = ok ? '✅成功' : '❌失败';
+    t.raw.add(
+        '工具 [${_ts(DateTime.now())}]：$toolName $mark：$resultText');
+    // 原文镜像落库（role='工具'，restore 重建时从 created_at 补时间戳）
+    unawaited(ChatStorageService()
+        .appendContextRaw(personaId, '工具', '$toolName $mark：$resultText'));
   }
 
   // ---- 读取 / 组装 ----
@@ -192,14 +225,29 @@ class ContextManager {
         total += t.raw[i].length;
         if (total > topicBudgetChars(personaId)) break;
         final line = t.raw[i];
-        lines.add(line.startsWith('男主：')
-            ? AIChatMessage(role: 'assistant', content: line.substring(3))
-            : AIChatMessage(role: 'user', content: line.substring(3)));
+        // 8-04 17:0x：行格式带时间戳（'用户 [17:05]：xxx'）——
+        // 工具行 role='tool'（男主在上下文里看到自己做过什么工具）
+        final AIChatMessage msg;
+        if (line.startsWith('男主')) {
+          msg = AIChatMessage(role: 'assistant', content: _stripPrefix(line));
+        } else if (line.startsWith('工具')) {
+          msg = AIChatMessage(role: 'tool', content: _stripPrefix(line));
+        } else {
+          msg = AIChatMessage(role: 'user', content: _stripPrefix(line));
+        }
+        lines.add(msg);
       }
       // 倒序收集后正序追加（摘要区之后、当前消息之前）
       out.addAll(lines.reversed);
     }
     return out;
+  }
+
+  /// 去掉行前缀（'用户 [17:05]：xxx' / '用户：xxx' / '工具 [17:05]：a ✅成功：b'）
+  /// → 只保留第一个 '：' 之后的内容（工具结果里的冒号保留）
+  static String _stripPrefix(String line) {
+    final idx = line.indexOf('：');
+    return idx < 0 ? line : line.substring(idx + 1);
   }
 
   /// 是否需要触发男主总结（当前话题或待总结原文攒够了）
@@ -256,7 +304,10 @@ class ContextManager {
           final fresh = TopicState();
           var total = 0;
           for (final m in mirror) {
-            final line = '${m.role}：${m.text}';
+            // 8-04 17:0x：重建时从落库时间补时间戳 → 跨重启也能一一对应
+            final ts =
+                _ts(DateTime.fromMillisecondsSinceEpoch(m.createdAt));
+            final line = '${m.role} [$ts]：${m.text}';
             total += line.length;
             if (total > topicBudgetChars(personaId)) break;
             fresh.raw.add(line);
@@ -280,8 +331,8 @@ class ContextManager {
     if (t == null) return null;
     for (var i = t.raw.length - 1; i >= 0; i--) {
       final line = t.raw[i];
-      if (line.startsWith('用户：')) {
-        return line.substring(3);
+      if (line.startsWith('用户')) {
+        return _stripPrefix(line);
       }
     }
     return null;

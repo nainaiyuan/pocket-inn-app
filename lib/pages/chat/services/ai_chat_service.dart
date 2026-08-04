@@ -984,7 +984,8 @@ class AiChatService {
       sb.writeln('（无工具调用）');
       return sb.toString().trim();
     }
-    // 解析每行【工具 名】✅成功/❌失败：结果 —— 简化截断，不占位置
+    // 解析每行【工具 名】✅成功/❌失败：结果 —— 8-04 17:0x（用户反对截断：
+    // 要能看到成功写了什么/失败原因）→ 完整展示不截断
     final re = RegExp(r'【工具 [^】]+】[^【]*');
     var found = false;
     for (final m in toolMessages) {
@@ -998,9 +999,7 @@ class AiChatService {
       }
       for (final match in re.allMatches(c)) {
         found = true;
-        final line = match.group(0)!.trim();
-        sb.writeln(
-            line.length > 80 ? '${line.substring(0, 80)}…' : line);
+        sb.writeln(match.group(0)!.trim());
       }
     }
     if (!found) sb.writeln('（无工具调用）');
