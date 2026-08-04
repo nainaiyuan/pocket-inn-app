@@ -240,20 +240,71 @@ class ContextManager {
         }
       }
       // 工具使用历史：独立 system 块（在互动历史之前）
+      // 8-04 17:3x（用户：跨天聊天要按日期分区，工具和对话才能对应）：
+      // 工具历史也按日期分组（【工具使用历史 · 2026/6/28】）
       if (toolLines.isNotEmpty) {
         final sb = StringBuffer(
             '【工具使用历史】（男主执行过的工具，时间戳与互动历史对应；'
-            '成功时记了什么、失败时原因是什么，按时间戳在互动历史里对照）');
+            '成功时记了什么、失败时原因是什么，按日期+时间在互动历史里对照）');
+        DateTime? lastDay;
         for (final l in toolLines.reversed) {
+          final ts = _toolTs(l);
+          final day = ts == null ? null : _tsDate(ts);
+          if (day != null && (lastDay == null || !_sameDay(day, lastDay))) {
+            sb.write('\n【工具使用历史 · ${_dateLabel(day)}】');
+            lastDay = day;
+          }
           sb.write('\n${_toolHistoryLine(l)}');
         }
         out.add(AIChatMessage(role: 'system', content: sb.toString()));
       }
       // 互动历史（倒序收集后正序追加，摘要区之后、当前消息之前）
-      out.addAll(lines.reversed);
+      // 8-04 17:3x（用户：跨天聊天按日期分区）：
+      // 日期变化时插入 system 标题行【互动历史 · 2026/6/28】
+      DateTime? lastDay;
+      for (final m in lines.reversed) {
+        final day = _tsDate(m.content);
+        if (day != null && (lastDay == null || !_sameDay(day, lastDay))) {
+          out.add(AIChatMessage(
+              role: 'system',
+              content: '【互动历史 · ${_dateLabel(day)}】（该日期：几点谁说了什么）'));
+          lastDay = day;
+        }
+        out.add(m);
+      }
     }
     return out;
   }
+
+  /// 工具行提取时间戳：'工具 [06-28 17:01]：query_diary …' → '[06-28 17:01]'
+  static String? _toolTs(String rawLine) {
+    final m = RegExp(r'^工具 (\[[^\]]+\])：')
+        .firstMatch(rawLine.split('\n').first);
+    return m?.group(1);
+  }
+
+  /// 从时间戳解析日期：'[17:01]' → 今天；'[06-28 17:01]' → 今年6月28日
+  /// （跨年修正：时间戳月份 > 当前月份 → 去年，如 12/31 聊到 1/1）
+  static DateTime? _tsDate(String ts) {
+    final m = RegExp(r'\[(?:(\d{2})-(\d{2}) )?(\d{2}):(\d{2})\]')
+        .firstMatch(ts);
+    if (m == null) return null;
+    final now = DateTime.now();
+    final hh = int.parse(m.group(3)!);
+    final mm = int.parse(m.group(4)!);
+    if (m.group(1) != null) {
+      final mon = int.parse(m.group(1)!);
+      final y = mon > now.month ? now.year - 1 : now.year;
+      return DateTime(y, mon, int.parse(m.group(2)!), hh, mm);
+    }
+    return DateTime(now.year, now.month, now.day, hh, mm);
+  }
+
+  static bool _sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  /// 日期标题：2026/6/28（用户 8-04 17:3x 指定格式）
+  static String _dateLabel(DateTime d) => '${d.year}/${d.month}/${d.day}';
 
   /// 工具历史条目：只显示状态，不带调用过程/内容详情。
   /// '工具 [17:04]：query_diary ❌失败：未找到相关日记'
