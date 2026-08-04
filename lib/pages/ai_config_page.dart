@@ -31,29 +31,9 @@ class _AiConfigPageState extends State<AiConfigPage> {
   /// 正在重测能力的 provider（信号台按钮的转圈状态）
   String? _probingId;
 
-  /// providerId → 能力画像（8-04 15:3x 用户要求：配置页也要显示能力灯，
-  /// 检测完要能看到变绿，不能只弹提示）
-  Map<String, AIProviderCapabilities> _capsCache = {};
-
-  @override
-  void initState() {
-    super.initState();
-    _loadCapabilities();
-  }
-
-  /// 读能力缓存（不触发探测）；探测完/重测完手动刷新对应行。
-  Future<void> _loadCapabilities() async {
-    final map = <String, AIProviderCapabilities>{};
-    for (final provider in manager.providers) {
-      final caps = await manager.cachedCapabilitiesFor(provider.id);
-      if (caps != null) {
-        map[provider.id] = caps;
-      }
-    }
-    if (mounted) {
-      setState(() => _capsCache = map);
-    }
-  }
+  // 8-04 16:0x：能力灯不再自维护 _capsCache —— 统一从
+  // manager.capabilityStateFor(id) 读单一数据源，监听 capabilityNotifier
+  // 自动刷新（配置页/聊天弹层/工具箱一处检测处处联动）。
 
   @override
   Widget build(BuildContext context) {
@@ -77,7 +57,11 @@ class _AiConfigPageState extends State<AiConfigPage> {
           final states = {
             for (final s in manager.providerStates) s.config.id: s,
           };
-          return ListView(
+          // 嵌套监听能力状态广播：配置页/聊天弹层共用单一数据源，
+          // 任何一处检测完，这里自动刷新能力灯
+          return ValueListenableBuilder<int>(
+            valueListenable: manager.capabilityNotifier,
+            builder: (context, _, ___) => ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             children: [
               // ---- 全局默认 ----
@@ -163,8 +147,9 @@ class _AiConfigPageState extends State<AiConfigPage> {
                 ),
               ),
             ],
-          );
-        },
+          ),
+        );
+      },
       ),
     );
   }
@@ -189,7 +174,8 @@ class _AiConfigPageState extends State<AiConfigPage> {
     Map<String, AIProviderState> states,
   ) {
     final state = states[config.id];
-    final caps = _capsCache[config.id];
+    // 单一数据源：从 manager 读能力状态（配置页/聊天弹层共用，联动刷新）
+    final caps = manager.capabilityStateFor(config.id);
 
     Color dotColor;
     String? statusText;
@@ -398,9 +384,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
     final result = await manager.testProvider(config.id);
     if (!mounted) return;
     setState(() => _testingId = null);
-    // 测试会顺带做能力探测 → 刷新能力灯（8-04 15:3x）
-    await _loadCapabilities();
-    if (!mounted) return;
+    // 测试会顺带做能力探测 → manager 广播，能力灯自动刷新
     DebugLogger.log('AI管理', '测试 ${config.name}: ${result.success ? '✅' : '❌'} ${result.message}');
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -412,15 +396,13 @@ class _AiConfigPageState extends State<AiConfigPage> {
     );
   }
 
-  /// 信号台：强制重测能力（作废缓存 → 实测 → 回写）。
+  /// 信号台：强制重测能力（作废缓存 → 实测 → 回写单一数据源，
+  /// manager 广播后能力灯自动刷新，不用手动 setState）。
   Future<void> _reprobe(AIProviderConfig config) async {
     setState(() => _probingId = config.id);
     final caps = await manager.reprobeProvider(config.id);
     if (!mounted) return;
-    setState(() {
-      _probingId = null;
-      _capsCache[config.id] = caps; // 当场点亮能力灯
-    });
+    setState(() => _probingId = null);
     final summary = caps.isProbed
         ? '实测：${caps.systemLabel}（${caps.capabilitySummary}）'
         : '按地址猜测：${caps.systemLabel}（${caps.capabilitySummary}）';
@@ -587,12 +569,11 @@ class _AiConfigPageState extends State<AiConfigPage> {
   }
 
   /// 添加/编辑保存后立即后台探测能力（不 await，不阻塞 UI）；
-  /// 探测完弹结果 + 刷新配置页能力灯。
+  /// 探测完 manager 广播 → 所有页面能力灯自动联动，这里只弹结果提示。
   void _probeAfterSave(String id, String name) {
     unawaited(
       manager.capabilitiesFor(id).then((caps) {
         if (!mounted) return;
-        setState(() => _capsCache[id] = caps); // 配置页当场点亮
         final summary = caps.isProbed
             ? '实测：${caps.systemLabel}（${caps.capabilitySummary}）'
             : '按地址猜测：${caps.systemLabel}（${caps.capabilitySummary}）';

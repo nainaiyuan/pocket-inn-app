@@ -81,6 +81,22 @@ class AIProviderManager {
   /// 配置变更时 +1，设置页 UI 监听它刷新。
   final ValueNotifier<int> changeNotifier = ValueNotifier<int>(0);
 
+  /// 能力状态单一数据源（8-04 16:0x 用户要求"从一个地方读取，联动好，
+  /// 像可插拔技能一样"）：providerId → 能力画像。
+  /// 探测/重测/加载完成后写入这里并 bump [capabilityNotifier]，
+  /// 配置页 / 聊天弹层 / 工具箱全部从这里读 —— 一处检测，处处联动。
+  final Map<String, AIProviderCapabilities> _capState = {};
+
+  /// 能力状态变更时 +1，UI 能力灯监听它刷新（单一数据源的广播通道）。
+  final ValueNotifier<int> capabilityNotifier = ValueNotifier<int>(0);
+
+  /// 写能力状态并广播（值没变也 +1：ValueNotifier 同值不通知，而
+  /// 探测来源可能从 guess 变 probe，用 +1 保证 UI 每次都刷新）。
+  void _setCapState(String id, AIProviderCapabilities caps) {
+    _capState[id] = caps;
+    capabilityNotifier.value++;
+  }
+
   /// 底层 API 实现（可注入，默认 OpenAI 兼容实现；测试/换 transport 时
   /// 用 [configureApi] 替换，模块代码零改动）。
   IOpenAiApiService _api = OpenAICompatibleApiService.instance;
@@ -384,6 +400,8 @@ class AIProviderManager {
         CapabilityCache.instance.invalidate(
           CapabilityCache.keyFor(_resolve(old)),
         );
+        _capState.remove(config.id);
+        capabilityNotifier.value++;
         AiModuleLog.log('AI探测', '${config.name} 地址/模型变了，旧能力缓存已作废');
       }
       _configs = [..._configs]..[index] = config;
@@ -405,6 +423,8 @@ class AIProviderManager {
       binding.providerIds.remove(id);
     }
     _bindings.removeWhere((binding) => binding.providerIds.isEmpty);
+    _capState.remove(id); // 单一数据源同步清理
+    capabilityNotifier.value++;
     _syncRouter();
     await _persist();
     AiModuleLog.log('AI管理', '已删除 AI: $id');
@@ -414,6 +434,8 @@ class AIProviderManager {
   Future<void> resetToDefaults() async {
     _configs = [];
     _bindings.clear();
+    _capState.clear(); // 单一数据源同步清理
+    capabilityNotifier.value++;
     _syncRouter();
     await _persist();
   }
@@ -713,6 +735,8 @@ class AIProviderManager {
     final key = CapabilityCache.keyFor(resolved);
     final cached = await CapabilityCache.instance.get(key);
     if (cached != null) {
+      // 单一数据源：命中缓存也同步进内存态（页面可能是冷启动后第一次读）
+      _setCapState(config.id, cached);
       return cached;
     }
     AIProviderCapabilities caps;
@@ -732,7 +756,26 @@ class AIProviderManager {
       );
     }
     await CapabilityCache.instance.put(key, caps);
+    _setCapState(config.id, caps); // 广播给所有 UI 能力灯
     return caps;
+  }
+
+  /// 只读能力状态（UI 能力灯统一入口）：内存态优先，miss 返回 null
+  /// （不触发探测，探测走 [capabilitiesFor]）。
+  AIProviderCapabilities? capabilityStateFor(String id) => _capState[id];
+
+  /// 批量把持久化能力缓存载入内存态（页面打开时调用，防冷启动空白）；
+  /// 不触发任何网络探测。
+  Future<void> refreshCapabilityState() async {
+    for (final config in _configs) {
+      final resolved = _resolve(config);
+      final caps =
+          await CapabilityCache.instance.get(CapabilityCache.keyFor(resolved));
+      if (caps != null) {
+        _capState[config.id] = caps;
+      }
+    }
+    capabilityNotifier.value++;
   }
 
   /// 只读能力画像（UI 列表展示用，不触发探测）。

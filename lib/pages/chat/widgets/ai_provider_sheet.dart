@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../ai_provider/ai_provider_manager.dart';
-import '../../../ai_provider/capability_probe.dart';
+
 import '../../../ai_provider/failover_router.dart';
 import '../../../ai_provider/models.dart';
 import '../../../utils/debug_logger.dart';
@@ -67,8 +67,9 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
   final manager = AIProviderManager.instance;
   bool _testing = false;
 
-  /// providerId → 能力画像（只读缓存，打开弹层时加载，不触发探测）
-  Map<String, AIProviderCapabilities> _capsCache = {};
+  // 8-04 16:0x：能力灯不再自维护 _capsCache —— 统一从
+  // manager.capabilityStateFor(id) 读单一数据源（配置页/聊天弹层共用），
+  // 监听 capabilityNotifier 自动刷新，任何一处检测完这里跟着变。
 
   /// 正在自动探测的 provider（8-04 15:0x：打开弹层对未检测的自动测，
   /// 能力灯不等第一次对话）
@@ -77,42 +78,34 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
   @override
   void initState() {
     super.initState();
-    _loadCapabilities();
+    // 冷启动防空白：把持久化能力缓存载入单一数据源（不触发网络）
+    unawaited(manager.refreshCapabilityState());
+    _autoProbeMissing();
   }
 
-  /// 打开弹层：缓存命中的直接用；缓存 miss 的自动实测（用户要求
+  /// 打开弹层：对还没探测过的 provider 自动实测（用户要求
   /// "自动测还是要测的"，信号台按钮只是保底）。
-  Future<void> _loadCapabilities() async {
-    final map = <String, AIProviderCapabilities>{};
+  /// 结果由 manager 写进单一数据源并广播，能力灯自动点亮。
+  Future<void> _autoProbeMissing() async {
     final probing = <String>{};
     for (final provider in manager.providers) {
-      final caps = await manager.cachedCapabilitiesFor(provider.id);
-      if (caps != null) {
-        map[provider.id] = caps;
-      } else {
+      if (manager.capabilityStateFor(provider.id) == null) {
         probing.add(provider.id);
-        // 未检测 → 自动探测（miss 才发请求，结果自动回写缓存）
-        unawaited(
-          manager.capabilitiesFor(provider.id).then((c) {
-            if (!mounted) return;
-            setState(() {
-              _capsCache[provider.id] = c;
-              _autoProbing.remove(provider.id);
-            });
-          }).catchError((Object _) {
-            if (!mounted) return;
-            setState(() => _autoProbing.remove(provider.id));
-          }),
-        );
       }
     }
     if (mounted) {
-      setState(() {
-        _capsCache = map;
-        _autoProbing
-          ..clear()
-          ..addAll(probing);
-      });
+      setState(() => _autoProbing.addAll(probing));
+    }
+    for (final id in probing) {
+      unawaited(
+        manager.capabilitiesFor(id).then((_) {
+          if (!mounted) return;
+          setState(() => _autoProbing.remove(id));
+        }).catchError((Object _) {
+          if (!mounted) return;
+          setState(() => _autoProbing.remove(id));
+        }),
+      );
     }
   }
 
@@ -121,10 +114,7 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
     setState(() => _autoProbing.add(id));
     final caps = await manager.reprobeProvider(id);
     if (!mounted) return;
-    setState(() {
-      _capsCache[id] = caps;
-      _autoProbing.remove(id);
-    });
+    setState(() => _autoProbing.remove(id));
     final config = _configById(id);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -187,9 +177,7 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
     if (!mounted) return;
     setState(() => _testing = false);
     final config = _configById(id);
-    // 测试会顺带做能力探测 → 刷新缓存展示
-    await _loadCapabilities();
-    if (!mounted) return;
+    // 测试会顺带做能力探测 → manager 广播，能力灯自动联动刷新
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -470,11 +458,15 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
                         ],
                       ),
                     )
-                  : ListView(
-                      children: [
-                        for (final config in manager.providers)
-                          _buildRow(config, candidates),
-                      ],
+                  // 监听能力状态广播：任何一处检测完，能力灯自动联动
+                  : ValueListenableBuilder<int>(
+                      valueListenable: manager.capabilityNotifier,
+                      builder: (context, _, __) => ListView(
+                        children: [
+                          for (final config in manager.providers)
+                            _buildRow(config, candidates),
+                        ],
+                      ),
                     ),
             ),
             const SizedBox(height: 8),
@@ -580,8 +572,9 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
             style: TextStyle(fontSize: 12, color: enabled ? null : Colors.grey),
           ),
           const SizedBox(height: 3),
+          // 单一数据源：从 manager 读能力状态（配置页/聊天弹层共用）
           CapabilityLights(
-            caps: _capsCache[config.id],
+            caps: manager.capabilityStateFor(config.id),
             probing: _autoProbing.contains(config.id),
             onRetest: () => _reprobe(config.id),
           ),
