@@ -2,29 +2,28 @@ import 'dart:convert';
 
 /// 工具指令解析器（用户 8-03 05:31：要支持不同 AI 的多种指令格式）
 ///
-/// 识别三种格式，统一转成 toolCalls：
-/// 1. JSON 格式：
+/// 识别两种明确格式，统一转成 toolCalls：
+/// 1. ⟨工具:name⟩{json}⟨/工具⟩ 文本协议块（含宽松变体 [工具:name] / 工具:name）
+/// 2. JSON 格式：
 ///    - 简化单对象：{"name":"record_memory","arguments":{"content":"..."}}
 ///    - 完整 tool_calls：{"id":"call_1","type":"function","function":{"name":"...","arguments":"..."}}
 ///    - tool_calls 数组：[{...},{...}]
-/// 2. 中文文本格式："记住xxx" / "查一下xxx" / "写日记"（原意图词表恢复）
 /// 3. 参数自动归一：arguments 可能是 Map 或 JSON 字符串，统一转 Map
 ///
-/// 纯聊天文本（无任何指令）→ 返回 null → 零副作用照常显示。
+/// ⚠️ 8-04 18:2x（用户明确要求）：**移除中文意图词表**——
+/// 男主正常说话（"翻翻以前写的日记"）会被模糊 contains 误判成工具意图，
+/// 管家就弹窗调工具。DeepSeek 用原生 tool_calls 不需要它；
+/// 文本协议 AI 用 ⟨工具:⟩ 明确块即可（男主按格式写，不与对话冲突）。
+/// 纯聊天文本（无明确指令格式）→ 返回 null → 零副作用照常显示。
 class ToolIntentParser {
-  /// 工具名 → 中文意图词（用户 8-03 03:56 扩充版 + 8-03 04:0x 备份恢复）
-  static const Map<String, List<String>> chineseIntents = {
-    'record_memory': ['记住', '记一下', '记下来', '记着', '别忘了', '你要记住'],
-    'recall_memory': ['查记忆', '查一下记忆', '查看记忆', '查关于', '回忆', '回想', '查一下', '查查', '看看记忆', '记得吗', '想起来'],
-    'save_identity_memory': ['记住代号', '保存代号'],
-    'list_tools': ['有什么工具', '能做什么', '工具清单'],
-    'write_diary': ['写日记', '写一下日记', '记日记'],
-    // 8-04 18:1x（用户：男主说"翻翻以前写的日记"匹配不到查看意图）：
-    // 补"翻翻/翻看/翻一下/以前"等口语词；"翻翻以前写的日记"→ 查日记
-    'query_diary': [
-      '查日记', '查一下日记', '翻日记', '翻翻', '翻看', '翻一下',
-      '看看日记', '之前聊过什么', '我说过什么',
-    ],
+  /// 已知工具名集合（宽松格式/JSON容错只认这些，防误抓）
+  static final Set<String> _knownToolNames = {
+    'record_memory',
+    'recall_memory',
+    'save_identity_memory',
+    'list_tools',
+    'write_diary',
+    'query_diary',
   };
 
   /// ⟨工具:name⟩{json}⟨/工具⟩ 文本协议块（37批 TextProtocolAdapter 同款格式）
@@ -35,19 +34,13 @@ class ToolIntentParser {
       r'[⟨\[【]?\s*工具\s*[:：]\s*([a-zA-Z_]+)\s*[⟩\]】]?',
       dotAll: true);
 
-  /// 已知工具名集合（宽松格式/JSON容错只认这些，防误抓）
-  static final Set<String> _knownToolNames = chineseIntents.keys.toSet();
-
-  /// 统一入口：⟨工具:⟩块 → JSON → 中文，都识别不到返回 null
-  /// （用户 8-03 05:42：不默认 AI 走哪个通道，管家认所有格式，
-  ///   不同命令格式，同一个底层执行）
+  /// 统一入口：⟨工具:⟩块 → JSON，都识别不到返回 null
+  /// （8-04 18:2x：不再走中文意图词表——自然语言会误触发）
   static List<Map<String, dynamic>>? extract(String text) {
     if (text.trim().isEmpty) return null;
     final blocks = extractToolBlocks(text);
     if (blocks != null && blocks.isNotEmpty) return blocks;
-    final json = extractJsonToolCalls(text);
-    if (json != null && json.isNotEmpty) return json;
-    return extractChineseToolIntents(text);
+    return extractJsonToolCalls(text);
   }
 
   /// 解析 ⟨工具:name⟩{json}⟨/工具⟩ 文本协议块（含宽松变体）
@@ -223,38 +216,5 @@ class ToolIntentParser {
       } catch (_) {}
     }
     return {'name': name, 'arguments': args};
-  }
-
-  /// 从文本里提取中文工具指令（原意图词表，参数粗提取）
-  static List<Map<String, dynamic>>? extractChineseToolIntents(String text) {
-    if (text.isEmpty) return null;
-    final calls = <Map<String, dynamic>>[];
-    chineseIntents.forEach((name, intents) {
-      final hit = intents.any(text.contains);
-      if (!hit) return;
-      final args = <String, dynamic>{};
-      // 粗提取参数：意图词后的内容（截到标点/换行，最长 30 字）
-      final m = RegExp('(?:${intents.join('|')})[：:，,\\s]*(.+?)[。！？!?\\n]')
-          .firstMatch(text);
-      final argText = (m?.group(1) ?? '').trim();
-      final arg = argText.length > 30 ? argText.substring(0, 30) : argText;
-      switch (name) {
-        case 'record_memory':
-          args['content'] = arg;
-          args['category'] = '';
-        case 'recall_memory':
-          args['query'] = arg;
-          args['category'] = '';
-        case 'save_identity_memory':
-          args['code'] = arg;
-          args['content'] = '';
-        case 'write_diary':
-          args['content'] = arg;
-        case 'query_diary':
-          args['keyword'] = arg;
-      }
-      calls.add({'name': name, 'arguments': args});
-    });
-    return calls.isEmpty ? null : calls;
   }
 }

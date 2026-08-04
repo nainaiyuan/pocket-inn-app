@@ -363,9 +363,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       if (result.text.trim().isNotEmpty) {
         replyTexts.add(result.text.trim());
       }
-      // 用户 8-03 05:31：男主回复文本里含工具指令（JSON / 中文文本，
+      // 8-03 05:31：男主回复文本里含工具指令（⟨工具:⟩块 / JSON，
       // 兼容不同 AI 的输出格式）→ 管家解析识别 → 转 toolCalls 走工具轮。
-      // 纯聊天文本（无指令）→ 返回 null → 零副作用照常显示
+      // 8-04 18:2x（用户明确要求）：**中文意图词表已移除**——
+      // 管家只认明确指令格式（⟨工具:…⟩块 / JSON），自然语言永不触发，
+      // 男主正常说话（"翻翻以前写的日记"）不会再被误判成工具调用。
+      // 纯聊天文本（无明确指令格式）→ 返回 null → 零副作用照常显示
       if ((result.toolCalls == null || result.toolCalls!.isEmpty) &&
           result.text.trim().isNotEmpty) {
         final intent = ToolIntentParser.extract(result.text);

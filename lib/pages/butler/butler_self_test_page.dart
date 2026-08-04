@@ -253,8 +253,10 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
   }
 
   /// 内置男主回复样本（用户 8-03 06:12：模拟男主给管家看，找管家抓不住的）
+  /// 8-04 18:2x：中文意图词表已移除——自然语言样本改为"应无工具"验证
   static const List<(String, String)> _butlerSamples = [
-    ('中文格式', '好的，记住啦。记住我喜欢喝美式咖啡'),
+    ('自然语言(应无工具)', '好的，记住啦。记住我喜欢喝美式咖啡'),
+    ('自然语言提日记(应无工具)', '那我们一起翻翻以前写的日记吧'),
     ('⟨工具:⟩块带参数', '我记住啦。\n⟨工具:record_memory⟩{"content":"喜欢美式","category":"喜好"}⟨/工具⟩'),
     ('⟨工具:⟩块空参数', '好的，我看看有哪些。\n⟨工具:list_tools⟩⟨/工具⟩'),
     ('代码块JSON', '```json\n{"name": "list_tools", "arguments": {}}\n```'),
@@ -287,7 +289,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
             : (hit ? '纯聊天被误判成工具调用' : null),
         guidance: expectTool
             ? '检查 tool_intent_parser.dart 是否覆盖该格式'
-            : '中文词表太宽泛？检查 chineseIntents',
+            : '自然语言被误判成工具调用？检查 extract 是否误抓（中文意图已移除）',
       ));
     }
     setState(() {
