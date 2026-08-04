@@ -1067,6 +1067,20 @@ class AIProviderManager {
   String _settingsKey(String? personaId) =>
       (personaId == null || personaId.isEmpty) ? globalPersonaId : personaId;
 
+  /// 清掉"上次用的 Provider"（8-04 22:3x 验收⑤⑦⑧修复）：
+  /// assembleDecision 的 stateful 判定读 lastProviderFor（上次用的），
+  /// 验收切换绑定后若上次是 stateful（如模拟C），决策会错误地走
+  /// stateful 分支 → needsSummarize 永不检查。重置后 lastProviderFor
+  /// 回退到 candidates.first（=当前绑定）→ 决策按当前绑定判定。
+  /// 只改内存（不落盘，验收结束自动消失）。
+  void resetLastProvider(String? personaId) {
+    final key = _settingsKey(personaId);
+    final current = _personaSettings[key];
+    if (current == null) return;
+    _personaSettings[key] = current.copyWith(clearLastProvider: true);
+    changeNotifier.value++;
+  }
+
   List<AIProviderConfig> _decodeConfigs(String raw) {
     try {
       final decoded = jsonDecode(raw);

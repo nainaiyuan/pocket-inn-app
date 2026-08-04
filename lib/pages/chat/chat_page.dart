@@ -1492,6 +1492,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     /// 切 AI + 更新横幅
     Future<void> sw(String id, String hint) async {
       await manager.setPersonaBinding(pid, [id]);
+      // 8-04 22:3x（验收⑤⑦⑧修复）：决策的 stateful 读 lastProviderFor
+      // （上次用的）——切换绑定后必须重置，否则上次是 stateful（模拟C）
+      // 时决策误走 stateful 分支 → 总结/沉淀永不触发
+      manager.resetLastProvider(pid);
+      ctx.clearProviderUsed(pid);
       if (mounted) setState(() => _acceptanceNote = hint);
     }
 

@@ -623,6 +623,12 @@ class AiChatService {
     }
     final switched = ContextManager.instance.noteProviderUsed(
         personaId, AIProviderManager.instance.lastProviderFor(personaId));
+    // 8-04 22:3x（验收⑤⑦⑧）：决策值打日志——下次失败直接可见
+    // stateful 读的是 lastProviderFor（上次用的），不是当前绑定！
+    DebugLogger.log('AI验收',
+        '决策: lastProvider=${AIProviderManager.instance.lastProviderFor(personaId)}'
+        ' stateful=$stateful idle=$idle since=${ContextManager.instance.hoursSinceLastChat(personaId)}'
+        ' idleExpired=$idleExpired switched=$switched');
     return (
       stateful: stateful,
       idleExpired: idleExpired,
