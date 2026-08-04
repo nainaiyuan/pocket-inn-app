@@ -72,6 +72,10 @@ class ContextManager {
               tokenToChar)
           .round();
 
+  /// 摘要区条数（验收/调试用：总结后应有 ≥1 条）
+  List<String> summariesFor(String personaId) =>
+      List.unmodifiable(_summaries[personaId] ?? const []);
+
   /// 话题切换的相似度阈值（关键词 Jaccard 低于此值视为换话题）
   static const double topicSwitchThreshold = 0.15;
 

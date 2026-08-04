@@ -20,6 +20,9 @@ Future<void> showAiProviderSheet({
   required BuildContext context,
   required String personaId,
   required String personaName,
+  /// 8-04 21:1x 用户：一键验收 → 自动切换各模拟 AI 跑真实对话。
+  /// 点「🚀 一键验收」→ 关弹层 → 回调聊天页跑验收流程（对话显示在聊天框）。
+  Future<void> Function()? onAcceptance,
 }) {
   final manager = AIProviderManager.instance;
   return showModalBottomSheet<void>(
@@ -38,6 +41,7 @@ Future<void> showAiProviderSheet({
               personaName: personaName,
               colorScheme: colorScheme,
               maxHeight: screenHeight * 0.72,
+              onAcceptance: onAcceptance,
             );
           },
         ),
@@ -52,12 +56,14 @@ class _AiProviderSheetBody extends StatefulWidget {
     required this.personaName,
     required this.colorScheme,
     required this.maxHeight,
+    this.onAcceptance,
   });
 
   final String personaId;
   final String personaName;
   final ColorScheme colorScheme;
   final double maxHeight;
+  final Future<void> Function()? onAcceptance;
 
   @override
   State<_AiProviderSheetBody> createState() => _AiProviderSheetBodyState();
@@ -476,6 +482,22 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
               spacing: 2,
               runSpacing: 2,
               children: [
+                // 8-04 21:1x 用户：一键验收——自动切 5 个模拟 AI 跑真实对话，
+                // 对话显示在聊天框，工具弹窗正常弹（点允许写/允许查即可）。
+                if (widget.onAcceptance != null)
+                  FilledButton.icon(
+                    onPressed: () {
+                      final navigator = Navigator.of(context);
+                      final cb = widget.onAcceptance!;
+                      navigator.pop();
+                      unawaited(cb());
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF7B6A8F),
+                    ),
+                    icon: const Icon(Icons.rocket_launch, size: 18),
+                    label: const Text('🚀 一键验收'),
+                  ),
                 FilledButton.tonalIcon(
                   onPressed: () {
                     // ⚠️ 不能在 pop 后 await 再检查 context.mounted：

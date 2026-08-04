@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../ai_provider/ai_provider_manager.dart';
 import '../../ai_provider/models.dart';
 import '../../butler/tools/tool_intent_parser.dart';
 import '../../models/male_lead.dart';
@@ -20,7 +21,6 @@ import '../../models/chat_message.dart';
 import '../../utils/debug_logger.dart';
 import '../ai_config_page.dart';
 import 'services/ai_chat_service.dart';
-import 'services/context_manager.dart';
 import 'state/chat_presence.dart';
 import 'state/current_character_state.dart';
 import 'widgets/ai_provider_sheet.dart';
@@ -899,6 +899,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       context: context,
       personaId: personaId,
       personaName: personaName,
+      onAcceptance: _runAcceptance,
     );
   }
 
@@ -1033,6 +1034,41 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                     onTapAvatar: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); },
                     onAiTap: _openAiSheet,
                     onNameChanged: () { if (mounted) setState(() {}); }),
+                  // 一键验收横幅（8-04 21:1x：自动切 AI 跑对话时显示进度/结论）
+                  if (_acceptanceNote != null)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      color: const Color(0xFF7B6A8F).withValues(alpha: 0.12),
+                      child: Row(
+                        children: [
+                          if (_accepting)
+                            const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color(0xFF7B6A8F),
+                              ),
+                            )
+                          else
+                            const Icon(Icons.rocket_launch,
+                                size: 14, color: Color(0xFF7B6A8F)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _acceptanceNote!,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF5A4A6A),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   // 聊天消息区域（背景图放在这里，精确对齐内容区）
                   Expanded(
                     child: Stack(
@@ -1389,6 +1425,165 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   /// 8-03 18:2x：男主生成锁（防并发——男主生成中再发消息会上下文混乱）
   bool _generating = false;
+
+  /// 8-04 21:1x：一键验收进行中（自动切 AI 跑真实对话）
+  bool _accepting = false;
+
+  /// 验收顶部横幅当前提示
+  String? _acceptanceNote;
+
+  /// 8-04 21:1x 用户："一键跑对话，自动切换 AI，对话体现在聊天框，
+  /// 我只需要点允许写/允许查，写成一个验收流程看逻辑对不对"
+  /// 真实对话全链路验收：自动切 5 个模拟 AI 形态 + 自动发消息，
+  /// 工具授权弹窗正常弹（用户点）；每步结论以 📋 消息注入聊天框。
+  Future<void> _runAcceptance() async {
+    if (_accepting) return;
+    if (_generating) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('男主正在忙，等他回完再验收…'),
+        duration: Duration(seconds: 2),
+      ));
+      return;
+    }
+    final lid = _state.leadId;
+    if (lid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('先选一个男主再验收'),
+        duration: Duration(seconds: 2),
+      ));
+      return;
+    }
+    final pid = _state.personaId ?? '${lid}_default';
+    final manager = AIProviderManager.instance;
+    final ctx = ContextManager.instance;
+    final svc = AiChatService();
+    // 记录原绑定（测完还原）
+    final before = manager.bindingFor(pid);
+    setState(() {
+      _accepting = true;
+      _acceptanceNote = '🚀 一键验收开始…';
+    });
+    var pass = 0;
+    const total = 5;
+    final results = <String>[];
+
+    /// 注入一条 📋 验收消息到聊天框
+    void note(String text) {
+      _msgKey.currentState?.appendMessage(ChatMessage(
+        id: 'accept_${DateTime.now().millisecondsSinceEpoch}',
+        text: text,
+        isMe: false,
+      ));
+    }
+
+    /// 发消息并等男主回完（含工具授权弹窗等待）
+    Future<void> say(String t) async {
+      await _sendMsg(t);
+      var waited = 0;
+      while (_generating && waited < 240) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        waited++;
+      }
+    }
+
+    /// 切 AI + 更新横幅
+    Future<void> sw(String id, String hint) async {
+      await manager.setPersonaBinding(pid, [id]);
+      if (mounted) setState(() => _acceptanceNote = hint);
+    }
+
+    try {
+      // ── ① AI A（无记忆·思考开·工具开）：建立话题 ──
+      await sw('builtin-mock', '①/⑥ AI A 无记忆·思考开 — 建立话题');
+      note('📋 验收 ①/⑥：切到 AI A（无记忆·思考开·工具开）— 建立话题');
+      await say('你好呀，我来做验收啦。先记住两件事：我最喜欢的颜色是蓝色，我爱喝美式咖啡。');
+      note('📋 验收：话题已建立（颜色=蓝色，饮品=美式咖啡）');
+
+      // ── ② 切 AI B（无记忆·思考关）：验证切换后上下文不丢 ──
+      await sw('builtin-mock-b', '②/⑥ 切到 AI B 无记忆·思考关 — 验证切换后不失忆');
+      note('📋 验收 ②/⑥：切到 AI B（无记忆·思考关）→ 应全量带历史');
+      await say('我刚才说我喜欢的颜色是什么？');
+      final histB = ctx.buildHistoryMessages(pid, modelHint: 'mock-1');
+      final bOk = histB.isNotEmpty;
+      if (bOk) pass++;
+      results.add('②切换AI后带${histB.length}条历史${bOk ? '✓' : '✗'}');
+      note('📋 验收 ②：切换 AI B 后组装 ${histB.length} 条历史（stateless 全量带）'
+          '${bOk ? ' → ✓ 男主没失忆' : ' → ✗ 历史为空，男主会失忆！'}');
+
+      // ── ③ 切 AI C（有记忆24h）：验证 stateful 切换全量带 ──
+      await sw('builtin-mock-c', '③/⑥ 切到 AI C 有记忆24h — 验证 stateful');
+      note('📋 验收 ③/⑥：切到 AI C（有记忆24h·思考开）→ 切换应全量带');
+      await say('我们刚才聊了哪两件事？');
+      var d = svc.assembleDecision(pid, toolRound: false);
+      final cOk = d.stateful && d.needRecover;
+      if (cOk) pass++;
+      results.add('③stateful切换全量${cOk ? '✓' : '✗'}');
+      note('📋 验收 ③：stateful=${d.stateful} 切换全量=${d.needRecover}'
+          '${cOk ? ' → ✓ 服务端还没记住，全量带' : ' → ✗ 没全量带，男主失忆'}');
+
+      // ── ④ AI C 连续使用：验证轻量 ──
+      await sw('builtin-mock-c', '④/⑥ 继续用 AI C — 验证连续轻量');
+      note('📋 验收 ④/⑥：AI C 连续使用 → 应轻量带（服务端记得）');
+      await say('那你觉得蓝色和美式咖啡配吗？');
+      d = svc.assembleDecision(pid, toolRound: false);
+      final dOk = d.stateful && !d.needRecover;
+      if (dOk) pass++;
+      results.add('④stateful连续轻量${dOk ? '✓' : '✗'}');
+      note('📋 验收 ④：连续使用 stateful=${d.stateful} 轻量=${!d.needRecover}'
+          '${dOk ? ' → ✓ 不带历史省 token' : ' → ✗ 还全量带，浪费 token'}');
+
+      // ── ⑤ 灌消息触发男主总结（token 满）──
+      await sw('builtin-mock-c', '⑤/⑥ 灌消息让上下文快满 → 男主应主动总结');
+      note('📋 验收 ⑤/⑥：连续灌消息 → 原文攒够 → 男主主动总结（日志 ✂️ 原文攒够了）');
+      final big = List.filled(90,
+              '我们聊了很多很多内容，包括蓝色、美式咖啡、散步、看书、听音乐、'
+              '做饭、旅行、工作、朋友、家人，这些都是我们讨论过的话题，'
+              '你作为男主应该都记得住，这些内容会占满上下文窗口。')
+          .join();
+      for (var i = 0; i < 4; i++) {
+        await say(big);
+      }
+      final summaries = ctx.summariesFor(pid);
+      final sumOk = summaries.isNotEmpty;
+      if (sumOk) pass++;
+      results.add('⑤token满总结${sumOk ? '✓' : '✗'}');
+      note('📋 验收 ⑤：摘要区 ${summaries.length} 条'
+          '${sumOk ? ' → ✓ 男主总结完成，历史进摘要区' : ' → ✗ 没触发总结，历史会被截断'}');
+
+      // ── ⑥ 切 AI E（无记忆·工具关）：验证总结后切换上下文不丢 ──
+      await sw('builtin-mock-e', '⑥/⑥ 切到 AI E 无记忆·工具关 — 验证总结后不失忆');
+      note('📋 验收 ⑥/⑥：切到 AI E（无记忆·工具关）→ 应带摘要（总结不丢）');
+      await say('刚才我们聊了好多，你能总结一下我们都聊了什么吗？');
+      final histE = ctx.buildHistoryMessages(pid, modelHint: 'mock-1');
+      final hasSummary = histE.any((m) =>
+          m.role == 'system' && m.content.contains('男主摘要'));
+      final eOk = hasSummary;
+      if (eOk) pass++;
+      results.add('⑥总结后切换带摘要${eOk ? '✓' : '✗'}');
+      note('📋 验收 ⑥：切 E 后组装 ${histE.length} 条历史，含摘要=${hasSummary}'
+          '${eOk ? ' → ✓ 总结没丢，男主接得上' : ' → ✗ 摘要丢了，男主失忆'}');
+
+      if (mounted) {
+        setState(() => _acceptanceNote =
+            '✅ 验收完成：$pass/$total 通过（详见 📋 消息）');
+      }
+      note('📋 验收完成：$pass/$total 通过 — ${results.join('；')}');
+      DebugLogger.log('AI验收', '■ 验收完成 $pass/$total：${results.join('；')}');
+    } finally {
+      // 还原 AI 绑定（用户原来的配置）
+      if (before == null) {
+        await manager.clearPersonaBinding(pid);
+      } else {
+        await manager.setPersonaBinding(pid, before);
+      }
+      if (mounted) {
+        setState(() {
+          _accepting = false;
+          _acceptanceNote = null;
+        });
+      }
+    }
+  }
 
   /// 8-03 18:2x：本轮男主第一句话气泡 id——工具气泡都挂在它头上
   /// （用户要求：调工具显示在第一句话的上方，后续句子在下方）
