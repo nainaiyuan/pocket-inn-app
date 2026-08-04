@@ -388,6 +388,9 @@ class ContextManager {
     return t.raw.join('\n');
   }
 
+  /// 验收/调试：当前话题原文长度（判断 needsSummarize 为什么没触发）
+  int debugRawLength(String personaId) => peekRaw(personaId).length;
+
   /// 重启后恢复：恢复摘要区 + 原文重建。
   /// 8-04 16:4x（用户"切换AI后男主失忆"）：原来只恢复摘要、不重建原文
   /// （DB 里用户消息是原始文本，硬拉会泄露真实称呼——用户 20:04 反馈）。

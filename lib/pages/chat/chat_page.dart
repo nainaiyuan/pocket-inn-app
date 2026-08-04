@@ -1457,9 +1457,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final manager = AIProviderManager.instance;
     final ctx = ContextManager.instance;
     final svc = AiChatService();
-    // 记录原绑定 + 原窗口（测完还原）
+    // 记录原绑定 + 原窗口 + 主实例形态（测完还原）
     final before = manager.bindingFor(pid);
     final beforeWindow = ContextTracker.instance.windowOf(pid);
+    final savedMockMode = manager.builtinMockConfig.memoryMode;
     setState(() {
       _accepting = true;
       _acceptanceNote = '🚀 一键验收开始…';
@@ -1533,21 +1534,32 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
       // ── ⑤ 切回 AI A（stateless）+ 调小窗口：token 满 → 男主总结 ──
       // 8-04 21:2x 用户："别塞那么多上下文，token 调小就好了"
-      // 8-04 21:5x 修：窗口 800 → 预算≈85 字，①-④ 原文 ~130 字已超 →
-      // 第一条消息即触发（之前 2000 → 预算 213 字，短消息喂不满）
-      // 注意：stateful AI 不本地总结（服务端自己记），总结是 stateless 的行为
+      // 8-04 21:5x 修：窗口 2000→800（预算≈85 字，①-④ 原文 ~130 字已超）
+      // 8-04 21:5x 二修：① 强制主实例 stateless（防配置页/自检页残留
+      //   stateful 导致 ⑤ 走 stateful 分支不总结）② 消息去掉"记得"等
+      //   关键词（避免 recall_memory 工具轮干扰时序）③ 失败自诊断：
+      //   预算/原文长度/决策 直接显示在弹窗原因里
       await sw('builtin-mock', '⑤/⑧ 调小token窗口 → 男主主动总结');
       note('📋 ⑤ 切回 AI A：调小窗口，少量消息触发总结');
+      manager.updateBuiltinMock(memoryMode: 'stateless'); // 防残留 stateful
       ContextTracker.instance.setWindow(pid, 800); // 预算≈85字，短消息即触发
       await say('我们今天还聊了散步、读书、做饭、旅行、听音乐，'
-          '这些话题你都记得住吧，我慢慢说给你听。');
+          '这些话题我慢慢说给你听。');
       await say('对了，我最近在学做菜，喜欢研究新菜谱，'
           '周末还想去爬山，你觉得怎么样？');
       final summaries = ctx.summariesFor(pid);
       final sumOk = summaries.isNotEmpty;
+      if (!sumOk) {
+        // 自诊断：失败原因直接带数据，弹窗复制发龙虾即可定位
+        final budget = ctx.topicBudgetChars(pid, modelHint: 'mock-1');
+        final rawLen = ctx.debugRawLength(pid);
+        final st = svc.assembleDecision(pid, toolRound: false).stateful;
+        DebugLogger.log('AI验收', '⑤自诊断: 预算=$budget 原文=$rawLen stateful=$st');
+      }
       record('⑤ token满触发男主总结', sumOk,
-          sumOk ? null : '摘要区 0 条——没触发总结。日志看「上下文管理」'
-              '有没有"✂️ 原文攒够了"；没有=窗口预算没到或 AI 绑定不对');
+          sumOk ? null : '摘要区 0 条。诊断:预算=${ctx.topicBudgetChars(pid, modelHint: 'mock-1')}'
+              '字 原文=${ctx.debugRawLength(pid)}字 stateful=${svc.assembleDecision(pid, toolRound: false).stateful}'
+              '——日志看「上下文管理」有无"✂️ 原文攒够了"');
       note('📋 ⑤ ${sumOk ? '✓' : '✗'} 摘要区 ${summaries.length} 条');
 
       // ── ⑥ 切 AI E（无记忆·工具关）：验证总结后上下文不丢 ──
@@ -1610,13 +1622,18 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         await _showAcceptanceResult(results);
       }
     } finally {
-      // 还原 AI 绑定 + 窗口
+      // 还原 AI 绑定 + 窗口 + 主实例形态（⑤ 强制过 stateless）
       if (before == null) {
         await manager.clearPersonaBinding(pid);
       } else {
         await manager.setPersonaBinding(pid, before);
       }
       ContextTracker.instance.setWindow(pid, beforeWindow);
+      try {
+        if (savedMockMode != 'stateless') {
+          manager.updateBuiltinMock(memoryMode: savedMockMode);
+        }
+      } catch (_) {}
       if (mounted) {
         setState(() {
           _accepting = false;
