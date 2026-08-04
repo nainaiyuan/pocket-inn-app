@@ -389,9 +389,22 @@ class AiChatService {
           content: '【上下文参考】（已聊过的内容，无需回复，仅作参考保持连贯）\n'
               '${historyMsgs.map((m) => '[${m.role}] ${m.content}').join('\n')}',
         ),
-      // 工具轮不拼空 user 消息（toolMessages 已含 assistant(tool_calls)+tool 结果，
-      // 空 user 消息会让 DeepSeek 困惑甚至空回复——用户 8-03 00:55 报频繁空回复）
-      if (!toolRound) AIChatMessage(role: 'user', content: message),
+      // 工具轮也拼用户消息（8-04 18:1x 用户：男主前言不搭后语——
+      // 根因：工具轮 messages 里没有用户消息，模型不知道用户在问什么）。
+      // 用户消息放最前（工具调用之前），标注清楚是"用户刚说的"。
+      if (toolRound) {
+        final userMsg =
+            ContextManager.instance.lastUserMessageFor(personaId);
+        if (userMsg != null && userMsg.isNotEmpty) {
+          messages.add(AIChatMessage(
+            role: 'user',
+            content: '【用户当前消息】（这是用户刚发的消息，'
+                '你调用工具就是为了回复它——回复时针对这条）\n$userMsg',
+          ));
+        }
+      } else {
+        messages.add(AIChatMessage(role: 'user', content: message));
+      }
       if (toolMessages != null) ...toolMessages,
     ];
     late final AIProviderResult result;
@@ -991,14 +1004,15 @@ class AiChatService {
   /// 8-04 17:0x（用户："工具轮和用户当前消息合并成当前互动；历史工具轮
   /// 简化成 成功写了什么/失败返回什么，不占位置"）。
   /// 8-04 17:2x（用户分区结构：（当前互动）= 几点用户说了什么 + 当前工具调用怎么样了）
+  /// 8-04 18:1x（用户："当前消息分成当前工具调用和用户当前信息，
+  /// 不然把用户的话塞到工具前面，男主分不清要说什么"）→ 两个明确分区。
   /// 工具结果格式统一为 chat_page 拼的 【工具 名】✅成功/❌失败：结果。
   String _toolRoundInteraction(
       String personaId, List<AIChatMessage>? toolMessages) {
     final sb = StringBuffer();
-    sb.writeln('（这是用户刚发的消息 + 男主为回复它执行的工具，只需回复这一条）');
-    sb.writeln(
-        '用户：${ContextManager.instance.lastUserMessageFor(personaId) ?? '（无）'}');
-    sb.writeln('（男主执行的工具结果）');
+    sb.writeln('【用户当前消息】'
+        '${ContextManager.instance.lastUserMessageFor(personaId) ?? '（无）'}');
+    sb.writeln('【当前工具调用】');
     if (toolMessages == null || toolMessages.isEmpty) {
       sb.writeln('（无工具调用）');
       return sb.toString().trim();
