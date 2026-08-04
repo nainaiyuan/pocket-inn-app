@@ -1457,17 +1457,19 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final manager = AIProviderManager.instance;
     final ctx = ContextManager.instance;
     final svc = AiChatService();
-    // 记录原绑定（测完还原）
+    // 记录原绑定 + 原窗口（测完还原）
     final before = manager.bindingFor(pid);
+    final beforeWindow = ContextTracker.instance.windowOf(pid);
     setState(() {
       _accepting = true;
       _acceptanceNote = '🚀 一键验收开始…';
     });
-    var pass = 0;
-    const total = 5;
-    final results = <String>[];
+    // 验收结果收集：label / 是否通过 / 失败原因（结束弹窗用）
+    final results = <({String label, bool ok, String? reason})>[];
+    void record(String label, bool ok, String? reason) =>
+        results.add((label: label, ok: ok, reason: reason));
 
-    /// 注入一条 📋 验收消息到聊天框
+    /// 注入一条 📋 验收消息到聊天框（精简一行）
     void note(String text) {
       _msgKey.currentState?.appendMessage(ChatMessage(
         id: 'accept_${DateTime.now().millisecondsSinceEpoch}',
@@ -1493,89 +1495,90 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     }
 
     try {
-      // ── ① AI A（无记忆·思考开·工具开）：建立话题 ──
+      // ── ① AI A（无记忆）：建立话题（短消息，不灌长文本）──
       await sw('builtin-mock', '①/⑥ AI A 无记忆·思考开 — 建立话题');
-      note('📋 验收 ①/⑥：切到 AI A（无记忆·思考开·工具开）— 建立话题');
-      await say('你好呀，我来做验收啦。先记住两件事：我最喜欢的颜色是蓝色，我爱喝美式咖啡。');
-      note('📋 验收：话题已建立（颜色=蓝色，饮品=美式咖啡）');
+      note('📋 ① AI A：建立话题');
+      await say('你好呀，我来验收啦。先记住：我喜欢蓝色，爱喝美式咖啡。');
 
       // ── ② 切 AI B（无记忆·思考关）：验证切换后上下文不丢 ──
-      await sw('builtin-mock-b', '②/⑥ 切到 AI B 无记忆·思考关 — 验证切换后不失忆');
-      note('📋 验收 ②/⑥：切到 AI B（无记忆·思考关）→ 应全量带历史');
+      await sw('builtin-mock-b', '②/⑥ AI B 无记忆·思考关 — 验证切换不失忆');
+      note('📋 ② 切 AI B：验证切换后不失忆');
       await say('我刚才说我喜欢的颜色是什么？');
       final histB = ctx.buildHistoryMessages(pid, modelHint: 'mock-1');
       final bOk = histB.isNotEmpty;
-      if (bOk) pass++;
-      results.add('②切换AI后带${histB.length}条历史${bOk ? '✓' : '✗'}');
-      note('📋 验收 ②：切换 AI B 后组装 ${histB.length} 条历史（stateless 全量带）'
-          '${bOk ? ' → ✓ 男主没失忆' : ' → ✗ 历史为空，男主会失忆！'}');
+      record('② 切换AI B后全量带历史', bOk,
+          bOk ? null : '历史为空——stateless 切换后没带上下文，男主会失忆');
+      note('📋 ② ${bOk ? '✓' : '✗'} 切B后带${histB.length}条历史');
 
-      // ── ③ 切 AI C（有记忆24h）：验证 stateful 切换全量带 ──
-      await sw('builtin-mock-c', '③/⑥ 切到 AI C 有记忆24h — 验证 stateful');
-      note('📋 验收 ③/⑥：切到 AI C（有记忆24h·思考开）→ 切换应全量带');
+      // ── ③ 切 AI C（有记忆1h）：验证 stateful 切换全量带 ──
+      await sw('builtin-mock-c', '③/⑥ AI C 有记忆1h — 验证 stateful 切换');
+      note('📋 ③ 切 AI C：验证 stateful 切换全量带');
       await say('我们刚才聊了哪两件事？');
       var d = svc.assembleDecision(pid, toolRound: false);
       final cOk = d.stateful && d.needRecover;
-      if (cOk) pass++;
-      results.add('③stateful切换全量${cOk ? '✓' : '✗'}');
-      note('📋 验收 ③：stateful=${d.stateful} 切换全量=${d.needRecover}'
-          '${cOk ? ' → ✓ 服务端还没记住，全量带' : ' → ✗ 没全量带，男主失忆'}');
+      record('③ stateful切换全量带', cOk,
+          cOk ? null : 'stateful=${d.stateful} 切换全量=${d.needRecover}——'
+              '切到有记忆AI没全量带，男主失忆');
+      note('📋 ③ ${cOk ? '✓' : '✗'} stateful切换全量=${d.needRecover}');
 
       // ── ④ AI C 连续使用：验证轻量 ──
-      await sw('builtin-mock-c', '④/⑥ 继续用 AI C — 验证连续轻量');
-      note('📋 验收 ④/⑥：AI C 连续使用 → 应轻量带（服务端记得）');
+      await sw('builtin-mock-c', '④/⑥ AI C 连续使用 — 验证轻量');
+      note('📋 ④ AI C 连续使用：验证轻量');
       await say('那你觉得蓝色和美式咖啡配吗？');
       d = svc.assembleDecision(pid, toolRound: false);
       final dOk = d.stateful && !d.needRecover;
-      if (dOk) pass++;
-      results.add('④stateful连续轻量${dOk ? '✓' : '✗'}');
-      note('📋 验收 ④：连续使用 stateful=${d.stateful} 轻量=${!d.needRecover}'
-          '${dOk ? ' → ✓ 不带历史省 token' : ' → ✗ 还全量带，浪费 token'}');
+      record('④ stateful连续轻量', dOk,
+          dOk ? null : '连续使用还全量带——浪费 token（stateful=${d.stateful}）');
+      note('📋 ④ ${dOk ? '✓' : '✗'} 连续轻量=${!d.needRecover}');
 
-      // ── ⑤ 灌消息触发男主总结（token 满）──
-      await sw('builtin-mock-c', '⑤/⑥ 灌消息让上下文快满 → 男主应主动总结');
-      note('📋 验收 ⑤/⑥：连续灌消息 → 原文攒够 → 男主主动总结（日志 ✂️ 原文攒够了）');
-      final big = List.filled(90,
-              '我们聊了很多很多内容，包括蓝色、美式咖啡、散步、看书、听音乐、'
-              '做饭、旅行、工作、朋友、家人，这些都是我们讨论过的话题，'
-              '你作为男主应该都记得住，这些内容会占满上下文窗口。')
-          .join();
-      for (var i = 0; i < 4; i++) {
-        await say(big);
-      }
+      // ── ⑤ 切回 AI A（stateless）+ 调小窗口：token 满 → 男主总结 ──
+      // 8-04 21:2x 用户："别塞那么多上下文，token 调小就好了"
+      // 注意：stateful AI 不本地总结（服务端自己记），总结是 stateless 的行为
+      await sw('builtin-mock', '⑤/⑥ 调小token窗口 → 男主主动总结');
+      note('📋 ⑤ 切回 AI A：调小窗口，灌少量消息触发总结');
+      ContextTracker.instance.setWindow(pid, 2000); // 预算≈200字，短消息即触发
+      await say('我们今天还聊了散步、读书、做饭、旅行、听音乐，'
+          '这些话题你都记得住吧，我慢慢说给你听。');
+      await say('对了，我最近在学做菜，喜欢研究新菜谱，'
+          '周末还想去爬山，你觉得怎么样？');
       final summaries = ctx.summariesFor(pid);
       final sumOk = summaries.isNotEmpty;
-      if (sumOk) pass++;
-      results.add('⑤token满总结${sumOk ? '✓' : '✗'}');
-      note('📋 验收 ⑤：摘要区 ${summaries.length} 条'
-          '${sumOk ? ' → ✓ 男主总结完成，历史进摘要区' : ' → ✗ 没触发总结，历史会被截断'}');
+      record('⑤ token满触发男主总结', sumOk,
+          sumOk ? null : '摘要区 0 条——没触发总结。日志看「上下文管理」'
+              '有没有"✂️ 原文攒够了"；没有=窗口预算没到或 AI 绑定不对');
+      note('📋 ⑤ ${sumOk ? '✓' : '✗'} 摘要区 ${summaries.length} 条');
 
-      // ── ⑥ 切 AI E（无记忆·工具关）：验证总结后切换上下文不丢 ──
-      await sw('builtin-mock-e', '⑥/⑥ 切到 AI E 无记忆·工具关 — 验证总结后不失忆');
-      note('📋 验收 ⑥/⑥：切到 AI E（无记忆·工具关）→ 应带摘要（总结不丢）');
-      await say('刚才我们聊了好多，你能总结一下我们都聊了什么吗？');
+      // ── ⑥ 切 AI E（无记忆·工具关）：验证总结后上下文不丢 ──
+      await sw('builtin-mock-e', '⑥/⑥ AI E 无记忆·工具关 — 验证总结后不失忆');
+      note('📋 ⑥ 切 AI E：验证总结后上下文不丢');
+      await say('刚才我们聊了好多，你能总结一下都聊了什么吗？');
       final histE = ctx.buildHistoryMessages(pid, modelHint: 'mock-1');
       final hasSummary = histE.any((m) =>
           m.role == 'system' && m.content.contains('男主摘要'));
       final eOk = hasSummary;
-      if (eOk) pass++;
-      results.add('⑥总结后切换带摘要${eOk ? '✓' : '✗'}');
-      note('📋 验收 ⑥：切 E 后组装 ${histE.length} 条历史，含摘要=${hasSummary}'
-          '${eOk ? ' → ✓ 总结没丢，男主接得上' : ' → ✗ 摘要丢了，男主失忆'}');
+      record('⑥ 总结后切换带摘要', eOk,
+          eOk ? null : '切 E 后历史里没有【男主摘要】——总结丢了，男主失忆');
+      note('📋 ⑥ ${eOk ? '✓' : '✗'} 含摘要=${hasSummary}');
 
+      final pass = results.where((r) => r.ok).length;
+      final total = results.length;
       if (mounted) {
-        setState(() => _acceptanceNote =
-            '✅ 验收完成：$pass/$total 通过（详见 📋 消息）');
+        setState(() => _acceptanceNote = '✅ 验收完成：$pass/$total 通过');
       }
-      note('📋 验收完成：$pass/$total 通过 — ${results.join('；')}');
-      DebugLogger.log('AI验收', '■ 验收完成 $pass/$total：${results.join('；')}');
+      DebugLogger.log('AI验收',
+          '■ 验收完成 $pass/$total：${results.map((r) => '${r.label}=${r.ok ? "✓" : "✗"}').join('；')}');
+      // 结束弹窗：哪里错了一目了然，可一键复制发给龙虾（8-04 21:2x 用户）
+      if (mounted) {
+        await _showAcceptanceResult(results);
+      }
     } finally {
-      // 还原 AI 绑定（用户原来的配置）
+      // 还原 AI 绑定 + 窗口
       if (before == null) {
         await manager.clearPersonaBinding(pid);
       } else {
         await manager.setPersonaBinding(pid, before);
       }
+      ContextTracker.instance.setWindow(pid, beforeWindow);
       if (mounted) {
         setState(() {
           _accepting = false;
@@ -1583,6 +1586,51 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         });
       }
     }
+  }
+
+  /// 验收结果弹窗：每步 ✓/✗ + 失败原因 + 一键复制（发给龙虾排查）
+  Future<void> _showAcceptanceResult(
+      List<({String label, bool ok, String? reason})> results) async {
+    final pass = results.where((r) => r.ok).length;
+    final total = results.length;
+    final sb = StringBuffer('🚀 一键验收：$pass/$total 通过\n\n');
+    for (final r in results) {
+      sb.write('${r.ok ? '✅' : '❌'} ${r.label}\n');
+      if (!r.ok && r.reason != null) sb.write('   原因：${r.reason}\n');
+    }
+    sb.write('\n（失败步骤的日志关键词：AI路由 / 上下文管理 / AI验收）');
+    final text = sb.toString();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(pass == total ? '✅ 验收全部通过' : '❌ 验收有失败项'),
+        content: SingleChildScrollView(
+          child: Text(text, style: const TextStyle(fontSize: 13, height: 1.6)),
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: text));
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('已复制，粘贴发给龙虾即可'),
+                duration: Duration(seconds: 2),
+              ));
+              Navigator.pop(ctx);
+            },
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text('复制结果'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFC896B4)),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 8-03 18:2x：本轮男主第一句话气泡 id——工具气泡都挂在它头上

@@ -604,7 +604,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
     final sw = Stopwatch()..start();
     const pid = '__ai_logic_test__';
     const idA = AIProviderManager.builtinMockId; // 无记忆·思考开·工具开
-    const idC = 'builtin-mock-c'; // 有记忆(24h)·思考开·工具开
+    const idC = 'builtin-mock-c'; // 有记忆(1h)·思考开·工具开
     final manager = AIProviderManager.instance;
     final svc = AiChatService();
     final ctx = ContextManager.instance;
@@ -650,7 +650,7 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
       d = svc.assembleDecision(pid, toolRound: false);
       items.add(ButlerSelfTestItem(
         message: 'T4 stateful 判定',
-        expected: '有后台记忆(24h) → stateful=true（prompt 轻量）',
+        expected: '有后台记忆(1h) → stateful=true（prompt 轻量）',
         actual: 'stateful=${d.stateful}',
         passed: d.stateful,
         failedReason: d.stateful ? null : 'stateful AI 没被识别，会一直全量带',

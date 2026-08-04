@@ -82,8 +82,8 @@ class AIProviderManager {
   final Map<String, MockAIProvider> _mockInstances = {
     builtinMockId: MockAIProvider(), // 无记忆·思考链·工具 都跟随配置页开关
     'builtin-mock-b': MockAIProvider(defaultReasoning: false, defaultTools: true), // 无记忆·思考关·工具开
-    'builtin-mock-c': MockAIProvider(defaultReasoning: true, defaultTools: true), // 有记忆(24h)·思考开·工具开
-    'builtin-mock-d': MockAIProvider(defaultReasoning: false, defaultTools: true), // 有记忆(24h)·思考关·工具开
+    'builtin-mock-c': MockAIProvider(defaultReasoning: true, defaultTools: true), // 有记忆(1h)·思考开·工具开
+    'builtin-mock-d': MockAIProvider(defaultReasoning: false, defaultTools: true), // 有记忆(1h)·思考关·工具开
     'builtin-mock-e': MockAIProvider(defaultReasoning: true, defaultTools: false), // 无记忆·思考开·工具关（纯聊天模型）
   };
 
@@ -113,10 +113,10 @@ class AIProviderManager {
       type: ProviderType.local,
       baseUrl: 'mock://builtin',
       model: 'mock-1',
-      note: '内置模拟器：后台有记忆 AI（stateful 24h，prompt 轻量+超时恢复）',
+      note: '内置模拟器：后台有记忆 AI（stateful 1h，prompt 轻量+超时恢复）',
       priority: 99999,
       memoryMode: 'stateful',
-      refreshHours: 24,
+      refreshHours: 1,
     ),
     AIProviderConfig(
       id: 'builtin-mock-d',
@@ -124,10 +124,10 @@ class AIProviderManager {
       type: ProviderType.local,
       baseUrl: 'mock://builtin',
       model: 'mock-1',
-      note: '内置模拟器：后台有记忆+无思考链（stateful 24h，reasoning=null）',
+      note: '内置模拟器：后台有记忆+无思考链（stateful 1h，reasoning=null）',
       priority: 99999,
       memoryMode: 'stateful',
-      refreshHours: 24,
+      refreshHours: 1,
     ),
     AIProviderConfig(
       id: 'builtin-mock-e',
