@@ -389,24 +389,23 @@ class AiChatService {
           content: '【上下文参考】（已聊过的内容，无需回复，仅作参考保持连贯）\n'
               '${historyMsgs.map((m) => '[${m.role}] ${m.content}').join('\n')}',
         ),
-      // 工具轮也拼用户消息（8-04 18:1x 用户：男主前言不搭后语——
-      // 根因：工具轮 messages 里没有用户消息，模型不知道用户在问什么）。
-      // 用户消息放最前（工具调用之前），标注清楚是"用户刚说的"。
-      if (toolRound) {
-        final userMsg =
-            ContextManager.instance.lastUserMessageFor(personaId);
-        if (userMsg != null && userMsg.isNotEmpty) {
-          messages.add(AIChatMessage(
-            role: 'user',
-            content: '【用户当前消息】（这是用户刚发的消息，'
-                '你调用工具就是为了回复它——回复时针对这条）\n$userMsg',
-          ));
-        }
-      } else {
-        messages.add(AIChatMessage(role: 'user', content: message));
-      }
-      if (toolMessages != null) ...toolMessages,
     ];
+    // 工具轮也拼用户消息（8-04 18:1x 用户：男主前言不搭后语——
+    // 根因：工具轮 messages 里没有用户消息，模型不知道用户在问什么）。
+    // 用户消息放最前（工具调用之前），标注清楚是"用户刚说的"。
+    if (toolRound) {
+      final userMsg = ContextManager.instance.lastUserMessageFor(personaId);
+      if (userMsg != null && userMsg.isNotEmpty) {
+        messages.add(AIChatMessage(
+          role: 'user',
+          content: '【用户当前消息】（这是用户刚发的消息，'
+              '你调用工具就是为了回复它——回复时针对这条）\n$userMsg',
+        ));
+      }
+    } else {
+      messages.add(AIChatMessage(role: 'user', content: message));
+    }
+    if (toolMessages != null) messages.addAll(toolMessages);
     late final AIProviderResult result;
     try {
       result = await _chat(
