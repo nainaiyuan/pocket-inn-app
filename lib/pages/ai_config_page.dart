@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../ai_provider/ai_provider_manager.dart';
@@ -23,6 +25,9 @@ class AiConfigPage extends StatefulWidget {
 class _AiConfigPageState extends State<AiConfigPage> {
   final manager = AIProviderManager.instance;
   String? _testingId;
+
+  /// 正在重测能力的 provider（信号台按钮的转圈状态）
+  String? _probingId;
 
   @override
   Widget build(BuildContext context) {
@@ -308,6 +313,19 @@ class _AiConfigPageState extends State<AiConfigPage> {
               tooltip: '测试连接',
               onPressed: _testingId != null ? null : () => _test(config),
             ),
+            // 信号台：重测能力（8-04 15:0x 用户要求：添加后自动测 + 保底手动重测）
+            IconButton(
+              icon: _probingId == config.id
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.sensors, size: 20),
+              tooltip: '重测能力（工具/思考链/流式）',
+              onPressed:
+                  _probingId != null ? null : () => _reprobe(config),
+            ),
           ],
         ),
       ),
@@ -335,6 +353,24 @@ class _AiConfigPageState extends State<AiConfigPage> {
           result.success ? '✅ ${config.name} 连接正常' : '❌ ${config.name}：${result.message}',
         ),
         duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  /// 信号台：强制重测能力（作废缓存 → 实测 → 回写）。
+  Future<void> _reprobe(AIProviderConfig config) async {
+    setState(() => _probingId = config.id);
+    final caps = await manager.reprobeProvider(config.id);
+    if (!mounted) return;
+    setState(() => _probingId = null);
+    final summary = caps.isProbed
+        ? '实测：${caps.systemLabel}（${caps.capabilitySummary}）'
+        : '按地址猜测：${caps.systemLabel}（${caps.capabilitySummary}）';
+    DebugLogger.log('AI管理', '重测 ${config.name} 能力: $summary');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('🔍 ${config.name} 能力检测完成\n$summary'),
+        duration: const Duration(seconds: 4),
       ),
     );
   }
@@ -458,13 +494,18 @@ class _AiConfigPageState extends State<AiConfigPage> {
       );
       DebugLogger.log(
           'AI管理', '编辑 AI: $name（memoryMode=$memoryMode, refreshHours=$refreshHours, toolFormat=$toolFormat）');
+      _probeAfterSave(existing.id, name.isEmpty ? existing.name : name);
     } else if (preset != null) {
-      await manager.addProviderFromPreset(preset, name: name, apiKey: apiKey);
+      final newId =
+          await manager.addProviderFromPreset(preset, name: name, apiKey: apiKey);
+      // 8-04 15:0x（用户要求）：添加完立刻自动检测能力，不等第一次对话
+      _probeAfterSave(newId, name.isEmpty ? preset.name : name);
     } else {
       // 自定义添加
+      final newId = 'custom_${DateTime.now().millisecondsSinceEpoch}';
       await manager.saveProvider(
         AIProviderConfig(
-          id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
+          id: newId,
           name: name.isEmpty ? '自定义' : name,
           type: ProviderType.cloud,
           baseUrl: baseUrl,
@@ -478,12 +519,40 @@ class _AiConfigPageState extends State<AiConfigPage> {
           toolFormat: toolFormat ?? 'auto',
         ),
       );
+      _probeAfterSave(newId, name.isEmpty ? '自定义' : name);
     }
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已保存')),
+        const SnackBar(content: Text('已保存，正在检测能力…')),
       );
     }
+  }
+
+  /// 添加/编辑保存后立即后台探测能力（不 await，不阻塞 UI）；
+  /// 探测完弹结果，能力灯在聊天页 AI 弹层里实时可见。
+  void _probeAfterSave(String id, String name) {
+    unawaited(
+      manager.capabilitiesFor(id).then((caps) {
+        if (!mounted) return;
+        final summary = caps.isProbed
+            ? '实测：${caps.systemLabel}（${caps.capabilitySummary}）'
+            : '按地址猜测：${caps.systemLabel}（${caps.capabilitySummary}）';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('🔍 $name 能力检测完成\n$summary'),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }).catchError((Object error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('⚠️ $name 能力检测失败：$error\n（已按地址猜测，可点 🔍 重测）'),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }),
+    );
   }
 }
 

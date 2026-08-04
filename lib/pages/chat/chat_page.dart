@@ -1419,6 +1419,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 用户拒绝 → 返回 false → 工具结果里带"用户拒绝"，男主自然应对，不卡流程。
   Future<bool> _approveToolCall(String toolName, String description) async {
     if (!mounted) return true; // 页面已关闭不阻塞工具
+    // 8-04 15:0x（用户报：点确认后"立刻唤醒下面的输入框"）：
+    // 弹窗前先收焦点收键盘，弹窗关闭后输入框不会自动弹键盘
+    FocusManager.instance.primaryFocus?.unfocus();
     final approved = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1443,12 +1446,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         ],
       ),
     );
+    // 弹窗关闭后再收一次，防止焦点残留弹键盘
+    FocusManager.instance.primaryFocus?.unfocus();
     return approved == true;
   }
 
   Future<void> _approveRecord(String content) async {
     if (content.isEmpty) return;
     if (!mounted) return;
+    // 8-04 15:0x：弹窗前收焦点收键盘（同 _approveToolCall）
+    FocusManager.instance.primaryFocus?.unfocus();
     // 类别解析：男主带"类别：内容" → 用男主的；否则管家自动归类
     final split = ButlerCommandParser.instance.splitCategory(content);
     final category = split.category;
@@ -1476,6 +1483,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         ],
       ),
     );
+    FocusManager.instance.primaryFocus?.unfocus();
     if (approved == true) {
       // 写入记忆库（[类别] 前缀存储，男主 #查记忆 可按类别筛）
       if (_chatSessionId != null) {

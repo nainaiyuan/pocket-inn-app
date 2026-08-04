@@ -342,7 +342,8 @@ class AIProviderManager {
   /// 从预设模板添加一个 AI（地址 / 模型由模板填好，用户只命名 + 填 Key）。
   /// 同一模板可以添加多次（比如两个 DeepSeek：一个官方、一个中转站），
   /// id 自动加后缀保证唯一。
-  Future<void> addProviderFromPreset(
+  /// 返回新添加的 provider id（调用方拿去做"添加后立即能力探测"）。
+  Future<String> addProviderFromPreset(
     AIProviderPreset preset, {
     required String name,
     String apiKey = '',
@@ -369,12 +370,22 @@ class AIProviderManager {
     _syncRouter();
     await _persist();
     AiModuleLog.log('AI管理', '已添加 AI: ${config.name} (${config.id})');
+    return config.id;
   }
 
   /// 通用保存：新增或整体更新一个 AI（编辑表单用，全字段可改）。
   Future<void> saveProvider(AIProviderConfig config) async {
+    // 编辑时 baseUrl/model 可能变了 → 旧能力缓存作废（新 key 探测后自动写入）
     final index = _configs.indexWhere((item) => item.id == config.id);
     if (index >= 0) {
+      final old = _configs[index];
+      if (old.baseUrl.trim() != config.baseUrl.trim() ||
+          old.model.trim() != config.model.trim()) {
+        CapabilityCache.instance.invalidate(
+          CapabilityCache.keyFor(_resolve(old)),
+        );
+        AiModuleLog.log('AI探测', '${config.name} 地址/模型变了，旧能力缓存已作废');
+      }
       _configs = [..._configs]..[index] = config;
     } else {
       _configs = [..._configs, config];
@@ -732,6 +743,23 @@ class AIProviderManager {
     }
     final resolved = _resolve(config);
     return CapabilityCache.instance.get(CapabilityCache.keyFor(resolved));
+  }
+
+  /// 强制重新探测（"信号台"重测按钮用）：作废缓存 → 实测 → 回写缓存。
+  /// 用户觉得能力灯不对（比如厂商升级了接口）就点一下重测。
+  Future<AIProviderCapabilities> reprobeProvider(String id) async {
+    final config = _configById(id);
+    if (config == null) {
+      return const AIProviderCapabilities(
+        toolFormat: 'openai',
+        supportsReasoning: false,
+        supportsStreaming: true,
+      );
+    }
+    final resolved = _resolve(config);
+    CapabilityCache.instance.invalidate(CapabilityCache.keyFor(resolved));
+    AiModuleLog.log('AI探测', '🔄 ${config.name} 手动重测…');
+    return capabilitiesFor(id);
   }
 
   AIProviderConfig? _configById(String id) {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -67,23 +69,70 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
   /// providerId → 能力画像（只读缓存，打开弹层时加载，不触发探测）
   Map<String, AIProviderCapabilities> _capsCache = {};
 
+  /// 正在自动探测的 provider（8-04 15:0x：打开弹层对未检测的自动测，
+  /// 能力灯不等第一次对话）
+  final Set<String> _autoProbing = {};
+
   @override
   void initState() {
     super.initState();
     _loadCapabilities();
   }
 
+  /// 打开弹层：缓存命中的直接用；缓存 miss 的自动实测（用户要求
+  /// "自动测还是要测的"，信号台按钮只是保底）。
   Future<void> _loadCapabilities() async {
     final map = <String, AIProviderCapabilities>{};
+    final probing = <String>{};
     for (final provider in manager.providers) {
       final caps = await manager.cachedCapabilitiesFor(provider.id);
       if (caps != null) {
         map[provider.id] = caps;
+      } else {
+        probing.add(provider.id);
+        // 未检测 → 自动探测（miss 才发请求，结果自动回写缓存）
+        unawaited(
+          manager.capabilitiesFor(provider.id).then((c) {
+            if (!mounted) return;
+            setState(() {
+              _capsCache[provider.id] = c;
+              _autoProbing.remove(provider.id);
+            });
+          }).catchError((Object _) {
+            if (!mounted) return;
+            setState(() => _autoProbing.remove(provider.id));
+          }),
+        );
       }
     }
     if (mounted) {
-      setState(() => _capsCache = map);
+      setState(() {
+        _capsCache = map;
+        _autoProbing
+          ..clear()
+          ..addAll(probing);
+      });
     }
+  }
+
+  /// 信号台：手动重测单个 AI 的能力（保底，用户觉得不对再点）。
+  Future<void> _reprobe(String id) async {
+    setState(() => _autoProbing.add(id));
+    final caps = await manager.reprobeProvider(id);
+    if (!mounted) return;
+    setState(() {
+      _capsCache[id] = caps;
+      _autoProbing.remove(id);
+    });
+    final config = _configById(id);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '🔍 ${config?.name ?? id} 能力检测完成：${caps.capabilitySummary}',
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
   AIProviderConfig? _configById(String id) {
@@ -530,7 +579,11 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
             style: TextStyle(fontSize: 12, color: enabled ? null : Colors.grey),
           ),
           const SizedBox(height: 3),
-          _CapabilityLights(caps: _capsCache[config.id]),
+          _CapabilityLights(
+            caps: _capsCache[config.id],
+            probing: _autoProbing.contains(config.id),
+            onRetest: () => _reprobe(config.id),
+          ),
         ],
       ),
       trailing: Row(
@@ -572,19 +625,46 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
 /// 能力灯（2026-08-04 通用适配层）：系别标签 + 能用哪个亮哪个。
 /// - 原生工具 / 思考链 / 流式：支持的亮绿色圆点 + 文字，不支持的**不显示**
 /// - 一个都不支持 → 显示"⚠️ 仅文本协议（AI 可能不配合）"
-/// - 还没探测过 → 显示"未检测，点 📡 测试连接自动检测"
+/// - 还没探测过 → 显示"未检测" + 自动探测中/重测按钮
+/// - 信号台按钮（🛰 重测）：保底，用户觉得能力灯不对就再点一次
 class _CapabilityLights extends StatelessWidget {
-  const _CapabilityLights({this.caps});
+  const _CapabilityLights({this.caps, this.probing = false, this.onRetest});
 
   final AIProviderCapabilities? caps;
+
+  /// 正在探测中（添加后自动测 / 手动重测）
+  final bool probing;
+
+  /// 信号台重测回调
+  final VoidCallback? onRetest;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     if (caps == null) {
-      return Text(
-        '未检测（点 📡 自动检测）',
-        style: TextStyle(fontSize: 11, color: colorScheme.outline),
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (probing) ...[
+            const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '检测中…',
+              style: TextStyle(fontSize: 11, color: colorScheme.outline),
+            ),
+          ] else ...[
+            Text(
+              '未检测',
+              style: TextStyle(fontSize: 11, color: colorScheme.outline),
+            ),
+            const SizedBox(width: 4),
+            _RetestButton(onPressed: onRetest),
+          ],
+        ],
       );
     }
 
@@ -631,6 +711,14 @@ class _CapabilityLights extends StatelessWidget {
               color: Colors.orange.shade800,
             ),
           ),
+        if (probing) ...[
+          const SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ] else
+          _RetestButton(onPressed: onRetest),
       ],
     );
   }
@@ -662,6 +750,41 @@ class _CapabilityLights extends StatelessWidget {
           style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
         ),
       ],
+    );
+  }
+}
+
+/// 信号台小按钮：🛰 重测能力（保底，觉得不对再点一次）。
+class _RetestButton extends StatelessWidget {
+  const _RetestButton({this.onPressed});
+
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(999),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.sensors, size: 13, color: colorScheme.outline),
+            const SizedBox(width: 2),
+            Text(
+              '重测',
+              style: TextStyle(
+                fontSize: 10,
+                color: colorScheme.outline,
+                decoration: TextDecoration.underline,
+                decorationColor: colorScheme.outline.withValues(alpha: 0.5),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
