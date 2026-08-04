@@ -27,12 +27,14 @@ class ToolIntentParser {
   };
 
   /// ⟨工具:name⟩{json}⟨/工具⟩ 文本协议块（37批 TextProtocolAdapter 同款格式）
-  /// 8-03 06:12：再加宽松变体 —— [工具:name] / 【工具:name】 / 工具:name（无括号）
+  /// 8-04 18:2x（用户明确要求）：格式必须**罕见**，日常对话不会出现——
+  /// 只认严格块 ⟨工具:name⟩{json}⟨/工具⟩（⟨⟩ 全角尖括号聊天里几乎不出现）。
+  /// ⚠️ 8-03 06:12 加的宽松变体（[工具:name] / 【工具:name】 / 工具:name
+  /// 无括号）已删除——"工具:xxx"、"【工具】"这类字样日常对话会出现，
+  /// 就是误触发源（用户 18:28："你认为 #A# 不常见不会误触发吗？
+  /// 文本格式也要找一个少见的格式"）。
   static final RegExp _toolBlock =
       RegExp(r'⟨工具:([a-zA-Z_]+)⟩(.*?)⟨/工具⟩', dotAll: true);
-  static final RegExp _toolBlockLoose = RegExp(
-      r'[⟨\[【]?\s*工具\s*[:：]\s*([a-zA-Z_]+)\s*[⟩\]】]?',
-      dotAll: true);
 
   /// 统一入口：⟨工具:⟩块 → JSON，都识别不到返回 null
   /// （8-04 18:2x：不再走中文意图词表——自然语言会误触发）
@@ -43,7 +45,7 @@ class ToolIntentParser {
     return extractJsonToolCalls(text);
   }
 
-  /// 解析 ⟨工具:name⟩{json}⟨/工具⟩ 文本协议块（含宽松变体）
+  /// 解析 ⟨工具:name⟩{json}⟨/工具⟩ 文本协议块（仅严格块）
   static List<Map<String, dynamic>>? extractToolBlocks(String text) {
     final results = <Map<String, dynamic>>[];
     // 严格块：⟨工具:name⟩…⟨/工具⟩（name 任意，参数 JSON 解析失败给空）
@@ -58,17 +60,6 @@ class ToolIntentParser {
       if (name.isNotEmpty) {
         results.add({'name': name, 'arguments': args});
       }
-    }
-    // 宽松块：[工具:name] / 【工具:name】 / 工具:name（无括号）
-    // 只认已知工具名；跳过已被严格块覆盖的位置（用 lastIndex 简单去重）
-    for (final m in _toolBlockLoose.allMatches(text)) {
-      final raw = m.group(1) ?? '';
-      if (raw.isEmpty) continue;
-      // 8-03 19:2x：拼错工具名 → 模糊纠正
-      final name = _fuzzyMatchToolName(raw);
-      if (name == null) continue;
-      if (results.any((r) => r['name'] == name)) continue;
-      results.add({'name': name, 'arguments': <String, dynamic>{}});
     }
     return results.isEmpty ? null : results;
   }

@@ -265,8 +265,9 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
     ('残缺JSON(用户原话)', '{"name": "list_tools", "arguments": !}'),
     ('无arguments', '{"name": "list_tools"}'),
     ('字符串参数', '{"name": "query_diary", "arguments": "{\\"keyword\\":\\"咖啡\\"}"}'),
-    ('无尖括号', '工具:list_tools'),
-    ('方括号', '[工具:list_tools]'),
+    ('无尖括号(应无工具)', '工具:list_tools'),
+    ('方括号(应无工具)', '[工具:list_tools]'),
+    ('说'工具'二字(应无工具)', '这个工具真好用，推荐给你'),
     ('纯聊天(应无工具)', '今天天气真好，我们去散步吧'),
   ];
 
