@@ -285,6 +285,18 @@ class AiChatService {
     }
     final needsWindow = !ContextTracker.instance.windowConfirmed(personaId);
     final stateful = _statefulInfoFor(personaId).$1;
+    // 8-04 16:4x（用户："切换AI第一次必须全量带，否则AI不知道发生了什么"）：
+    // 记录上次给这个 persona 组装上下文的 provider；切换/首次 → 本次恢复全量
+    // （stateful 也带：服务端还没记住这个 persona 的对话）；
+    // 连续使用 → stateful 轻量（服务端记得）、stateless 照旧全量。
+    final switchedProvider = !toolRound &&
+        ContextManager.instance.noteProviderUsed(
+            personaId, AIProviderManager.instance.lastProviderFor(personaId));
+    final needRecover = statefulRecover || switchedProvider;
+    if (switchedProvider) {
+      DebugLogger.log('上下文管理',
+          '🔄 检测到 AI 切换/首次使用 → 本次全量带上下文（stateful 也带）');
+    }
     final systemPrompt = SystemTemplate.build(
       personaName: personaName,
       personaPrompt: personaPrompt,
@@ -295,7 +307,8 @@ class AiChatService {
       taskState: taskState,
       // stateful：AI 服务端记得对话 → 不重复带固定模板（只带人设+当前技能注入）
       // stateless：前缀稳定 → 缓存命中 → 每次带全量反而便宜
-      light: stateful && !statefulRecover,
+      // 切换/首次/空闲超时恢复时 → 全量（AI 还没记住）
+      light: stateful && !needRecover,
     );
     // 历史（摘要区 + 当前话题原文）——插在 system 后、当前消息前。
     // stateful：AI 自己记得 → 不重复带历史（避免浪费 + 服务端已有）；
@@ -305,7 +318,7 @@ class AiChatService {
     // 用户 8-03 00:55：男主分不清上下文和当前用户的话，以为上下文也要回复。
     // 修复：上下文参考打包成【一条】system 消息（不混进 user/assistant 对话流），
     // 明确"无需回复，只回复最新一条用户消息"→ 男主不会逐条回历史。
-    final historyMsgs = (stateful && !statefulRecover) || toolRound
+    final historyMsgs = (stateful && !needRecover) || toolRound
         ? <AIChatMessage>[]
         : ContextManager.instance.buildHistoryMessages(personaId);
     // 8-03 19:4x（用户反馈"没写当前消息、聊天全混在一起"）：

@@ -14,6 +14,12 @@ import '../state/chat_presence.dart';
 ///              8-04 16:4x（用户反馈"完整内容没收录、没按时间存"）：
 ///              发送的完整 prompt 落库，左上角 📄 弹窗重启后也能看，
 ///              且按时间可查——不再只是内存里的临时变量。
+/// context_raw_logs:对话原文镜像（persona_id / role / text / created_at）
+///              8-04 16:4x（用户"男主切换AI后失忆"）：ContextManager 的
+///              话题原文是内存态，重启即丢。这里存【假面层替换后的干净
+///              文本】（feed 时同步写），restore 时重建原文 → 重启/切换
+///              AI 后男主还记得聊过什么；不存原始文本（避免泄露真实称呼，
+///              用户 8-03 20:04 指示）。
 class ChatStorageService {
   static final ChatStorageService _instance = ChatStorageService._();
   factory ChatStorageService() => _instance;
@@ -25,7 +31,7 @@ class ChatStorageService {
     if (_db != null) return _db!;
     _db = await openDatabase(
       p.join(await getDatabasesPath(), 'pocket_inn_chat.db'),
-      version: 5,
+      version: 6,
       onCreate: (db, version) async {
         // ⚠️ 8-04 16:2x 血泪教训：8-03 加 thinking_chain 列时只改了
         // onUpgrade 分支，忘了 onCreate —— 全新安装的库 messages 表
@@ -64,6 +70,17 @@ class ChatStorageService {
           )
         ''');
         await db.execute('CREATE INDEX idx_prompt_logs_persona_time ON prompt_logs(persona_id, created_at DESC)');
+        // 8-04 16:4x：对话原文镜像（干净文本，restore 重建用）
+        await db.execute('''
+          CREATE TABLE context_raw_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            persona_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            text TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+          )
+        ''');
+        await db.execute('CREATE INDEX idx_context_raw_persona_time ON context_raw_logs(persona_id, created_at)');
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -104,6 +121,19 @@ class ChatStorageService {
             await db.execute(
                 "ALTER TABLE messages ADD COLUMN thinking_chain TEXT");
           }
+        }
+        // 8-04 16:4x：对话原文镜像表（v6）
+        if (oldVersion < 6) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS context_raw_logs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              persona_id TEXT NOT NULL,
+              role TEXT NOT NULL,
+              text TEXT NOT NULL,
+              created_at INTEGER NOT NULL
+            )
+          ''');
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_context_raw_persona_time ON context_raw_logs(persona_id, created_at)');
         }
       },
     );
@@ -369,6 +399,61 @@ class ChatStorageService {
         orderBy: 'created_at DESC',
         limit: limit,
       );
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ═══════════════════════════════════
+  // 对话原文镜像（8-04 16:4x：ContextManager 原文内存态 → 落库重建）
+  // 只存【假面层替换后的干净文本】（feed 时同步写），不存原始文本
+  // ═══════════════════════════════════
+
+  /// 追加一条原文镜像（role: '用户' / '男主'）
+  Future<void> appendContextRaw(
+      String personaId, String role, String text) async {
+    if (text.trim().isEmpty) return;
+    try {
+      final d = await db;
+      await d.insert('context_raw_logs', {
+        'persona_id': personaId,
+        'role': role,
+        'text': text,
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+      });
+      // 只保留最近 600 条（防无限膨胀；600 条足够重建上下文）
+      final rows = await d.rawQuery(
+          'SELECT COUNT(*) AS c FROM context_raw_logs WHERE persona_id = ?',
+          [personaId]);
+      final count = (rows.first['c'] as int?) ?? 0;
+      if (count > 600) {
+        await d.rawDelete(
+          'DELETE FROM context_raw_logs WHERE id IN '
+          '(SELECT id FROM context_raw_logs WHERE persona_id = ? '
+          'ORDER BY created_at ASC LIMIT ?)',
+          [personaId, count - 600],
+        );
+      }
+    } catch (_) {}
+  }
+
+  /// 加载最近的原文镜像（按时间正序返回，restore 重建 raw 用）
+  Future<List<({String role, String text})>> loadContextRaw(
+    String personaId, {
+    int limit = 200,
+  }) async {
+    try {
+      final d = await db;
+      final rows = await d.query('context_raw_logs',
+        where: 'persona_id = ?',
+        whereArgs: [personaId],
+        orderBy: 'created_at DESC',
+        limit: limit,
+      );
+      return rows.reversed.map((r) => (
+        role: (r['role'] as String? ?? '用户'),
+        text: (r['text'] as String? ?? ''),
+      )).toList();
     } catch (_) {
       return [];
     }

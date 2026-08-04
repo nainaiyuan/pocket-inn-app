@@ -5,6 +5,7 @@ import '../../../butler/context/context_tracker.dart';
 import '../../../services/chat_database_service.dart';
 import '../../../services/storage_service.dart';
 import '../../../utils/debug_logger.dart';
+import 'chat_storage_service.dart';
 
 /// 上下文管理器 —— DeepSeek 无后端记忆，靠它让男主"记得"聊天。
 ///
@@ -138,6 +139,8 @@ class ContextManager {
     }
     t.keywords.addAll(words);
     t.raw.add('用户：$text');
+    // 8-04 16:4x：原文镜像落库（干净文本）——重启后 restore 重建用
+    unawaited(ChatStorageService().appendContextRaw(personaId, '用户', text));
   }
 
   /// 记录男主回复（进当前话题原文）
@@ -145,6 +148,8 @@ class ContextManager {
     if (text.trim().isEmpty) return;
     final t = _topics.putIfAbsent(personaId, TopicState.new);
     t.raw.add('男主：$text');
+    // 8-04 16:4x：原文镜像落库（干净文本）——重启后 restore 重建用
+    unawaited(ChatStorageService().appendContextRaw(personaId, '男主', text));
   }
 
   // ---- 读取 / 组装 ----
@@ -225,11 +230,11 @@ class ContextManager {
     return t.raw.join('\n');
   }
 
-  /// 重启后恢复：只恢复摘要区（男主总结的要点）。
-  /// [sessionId] 不再重建当前话题原文——历史 = 本次对话实时记录的上下文
-  /// （feedUserMessage/feedAssistantMessage，均为假面层替换后的干净文本）。
-  /// DB 里用户消息是原始文本、男主消息是还原后文本，硬拉会泄露真实称呼
-  /// （用户 20:04 反馈"三个用户/漏了妈妈"）；没历史就不加历史。
+  /// 重启后恢复：恢复摘要区 + 原文重建。
+  /// 8-04 16:4x（用户"切换AI后男主失忆"）：原来只恢复摘要、不重建原文
+  /// （DB 里用户消息是原始文本，硬拉会泄露真实称呼——用户 20:04 反馈）。
+  /// 现在 feed 时同步落库【假面层替换后的干净文本】镜像（context_raw_logs），
+  /// 重启后从这里重建原文 → 男主记得聊过什么，且不泄露称呼。
   Future<void> restore(String personaId, String? sessionId) async {
     try {
       _loadLastChat(personaId);
@@ -242,6 +247,24 @@ class ContextManager {
       if (recovery != null && recovery.isNotEmpty) {
         _recovery[personaId] = recovery;
         DebugLogger.log('上下文管理', '📦 恢复包已加载（persona $personaId）');
+      }
+      // 原文重建：只有内存里没有时才拉（restore 只跑一次，正常为空）
+      final t = _topics[personaId];
+      if (t == null || t.raw.isEmpty) {
+        final mirror = await ChatStorageService().loadContextRaw(personaId);
+        if (mirror.isNotEmpty) {
+          final fresh = TopicState();
+          var total = 0;
+          for (final m in mirror) {
+            final line = '${m.role}：${m.text}';
+            total += line.length;
+            if (total > topicBudgetChars(personaId)) break;
+            fresh.raw.add(line);
+          }
+          _topics[personaId] = fresh;
+          DebugLogger.log('上下文管理',
+              '♻️ 原文重建 ${fresh.raw.length} 条（干净文本镜像，${total} 字）');
+        }
       }
     } on Object catch (e) {
       DebugLogger.log('上下文管理', '⚠️ 上下文恢复失败: $e');
@@ -314,6 +337,26 @@ class ContextManager {
   }
 
   // ---- 关键词 / 相似度（本地，免费） ----
+
+  // ── AI 切换检测（8-04 16:4x 用户："切换AI第一次必须全量带"）──
+  // 记录"上次给这个 persona 组装上下文的 provider id"（持久化）。
+  // 变了 = 切换/首次 → 本次全量带（stateful 也带，否则 AI 不知道发生了什么）；
+  // 没变 = 连续对话 → stateful 轻量、stateless 照旧全量。
+  static const String _providerKeyPrefix = 'ctx_last_provider_';
+
+  /// 标记本次使用的 provider，返回是否"切换/首次"。
+  /// [providerId] 为 null（无可用 provider）时只返回当前状态不更新。
+  bool noteProviderUsed(String personaId, String? providerId) {
+    final last = StorageService.instance.getString('$_providerKeyPrefix$personaId');
+    if (providerId == null || providerId.isEmpty) {
+      return last == null || last.isEmpty;
+    }
+    final switched = last == null || last.isEmpty || last != providerId;
+    if (switched) {
+      StorageService.instance.setString('$_providerKeyPrefix$personaId', providerId);
+    }
+    return switched;
+  }
 
   static const _stopWords = {
     '的', '了', '吗', '呢', '啊', '吧', '我', '你', '他', '她', '它',
