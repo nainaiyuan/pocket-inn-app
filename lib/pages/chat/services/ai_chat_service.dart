@@ -190,6 +190,39 @@ class AiChatService {
         },
       },
     },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'notify_user',
+        'description':
+            '给她弹消息提醒（APP内顶部横幅，像小情侣消息轰炸一样一条条出现，'
+            '她不管在APP哪个页面都能看到，点一下就会回到聊天页）。'
+            '适合：她离开很久没回来、你想叫她回来聊天；'
+            '或她让你提醒你的事（喝水/休息/记得的约定）。'
+            '⚠️ 只在她不在聊天页/分开一段时间、或她说过让你提醒时用；'
+            '她正在和你聊天时不需要。'
+            '消息要像你平时说话一样自然，2-4条为宜，别太密。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'messages': {
+              'type': 'array',
+              'items': {'type': 'string'},
+              'description': '要弹的消息列表，逐条指定（第一条发什么、第二条发什么…），2-4条',
+            },
+            'interval_seconds': {
+              'type': 'integer',
+              'description': '两条消息之间的间隔秒数，默认 15（正常速度，别太快）',
+            },
+            'wait_minutes': {
+              'type': 'integer',
+              'description': '如果她 wait_minutes 分钟内没回来聊天，管家会再唤醒你，让你再主动找她一次（默认 5）',
+            },
+          },
+          'required': ['messages'],
+        },
+      },
+    },
   ];
   /// 总结专用工具（8-05 19:19 用户：男主只需要调用工具写摘要，不输出文本）。
   /// 窗口满 → 管家发【当前管家】指令 → 男主调 save_summary 写入摘要（含范围）。

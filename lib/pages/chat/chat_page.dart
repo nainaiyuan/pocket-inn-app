@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../../services/global_banner_service.dart';
 import 'companion_page.dart';
 import 'package:flutter/services.dart';
 import '../../ai_provider/ai_provider_manager.dart';
@@ -53,6 +54,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   // ---- 状态 ----
   double _offset = 0;
   Panel _currentPanel = Panel.center;
+  Timer? _notifyWakeTimer; // 8-06 notify_user 超时唤醒
+
+  /// 用户是否在聊天页（全局标志：HomePage 切 tab 同步）——超时唤醒判断用
+  bool get _isChatPageActive => GlobalBannerService.instance.userOnChat;
 
   // ---- 角色 —— 全部从 _state 读取 ----
   final _state = CurrentCharacterState();
@@ -604,6 +609,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             } else {
               toolResult = await _executeQueryDiaryTool(keyword);
             }
+          } else if (name == 'notify_user') {
+            // 8-06 00:31 用户：男主弹窗（APP内顶部横幅轰炸，APP外之后再做）。
+            // 男主主动行为（类似管家唤醒），不需要确认框——弹窗本身就是给他看的。
+            toolResult = await _executeNotifyTool(args);
           } else {
             toolResult = _ToolResult(false, '未知工具：$name');
           }
@@ -1076,6 +1085,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   void dispose() {
     _anim.removeListener(_onAnimTick);
     _anim.dispose();
+    _notifyWakeTimer?.cancel(); // 8-06 notify_user 超时唤醒
     super.dispose();
   }
 
@@ -2231,6 +2241,74 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     }
     DebugLogger.log('指令模块', '⛔ 工具记录失败: 会话未创建');
     return const _ToolResult(false, '记忆库不可用（会话未创建），请稍后再试');
+  }
+
+  /// 工具执行：notify_user（男主弹窗——全局顶部横幅轰炸 + 超时唤醒）
+  ///
+  /// 8-06 00:31 用户需求：
+  /// - APP 内弹（顶部，小情侣消息轰炸样式），APP 外系统通知之后再做
+  /// - 男主可选弹几条（messages 长度）、可选间隔（interval_seconds）、
+  ///   逐条指定内容（第一条/第二条…）
+  /// - wait_minutes 内用户没返回聊天页 → 管家唤醒男主 → 男主再主动找用户
+  Future<_ToolResult> _executeNotifyTool(Map<String, dynamic> args) async {
+    final raw = args['messages'];
+    final messages = <String>[];
+    if (raw is List) {
+      for (final m in raw) {
+        final s = m.toString().trim();
+        if (s.isNotEmpty) messages.add(s);
+      }
+    } else if (raw is String) {
+      final s = raw.trim();
+      if (s.isNotEmpty) messages.add(s);
+    }
+    if (messages.isEmpty) {
+      return const _ToolResult(false, '没有可弹的消息（messages 为空）');
+    }
+    final intervalSec = (args['interval_seconds'] as num?)?.toInt() ?? 15;
+    final waitMin = (args['wait_minutes'] as num?)?.toInt() ?? 5;
+    final interval = Duration(
+        seconds: intervalSec.clamp(5, 300)); // 至少 5 秒，别轰炸太密
+    final personaName = _state.personaName ?? '他';
+    _appendToolBubble('📬 男主弹了 ${messages.length} 条消息（间隔 ${intervalSec}s）');
+    GlobalBannerService.instance.showBurst(
+      title: personaName,
+      messages: messages,
+      interval: interval,
+    );
+    DebugLogger.log('指令模块', '📬 notify_user：${messages.length} 条，间隔 ${intervalSec}s，${waitMin} 分钟后没回来就唤醒');
+    // 超时唤醒：wait_minutes 内用户没回聊天页 → 管家唤醒男主再找用户
+    _scheduleNotifyWakeUp(waitMin);
+    return _ToolResult(true, '已弹出 ${messages.length} 条消息（她点一下就能回到聊天页）');
+  }
+
+  /// notify_user 超时唤醒：wait_minutes 后检查用户是否还在聊天页，
+  /// 没在 → 管家唤醒男主（butlerWakeUp），男主再主动找用户。
+  void _scheduleNotifyWakeUp(int waitMinutes) {
+    _notifyWakeTimer?.cancel();
+    _notifyWakeTimer = Timer(Duration(minutes: waitMinutes), () async {
+      if (!mounted) return;
+      // 用户已回到聊天页（当前 tab 是聊天且页面可见）→ 不打扰
+      if (_isChatPageActive) {
+        DebugLogger.log('指令模块', '📬 超时检查：用户已回到聊天页，不唤醒');
+        return;
+      }
+      final pid = _state.personaId;
+      final pname = _state.personaName;
+      final pprompt = _currentPersonaPrompt();
+      if (pid == null || pid.isEmpty) return;
+      DebugLogger.log('指令模块', '📬 超时唤醒：${waitMinutes} 分钟没回来，唤醒男主再找她');
+      final text = await AiChatService().butlerWakeUp(
+        pid,
+        (pname == null || pname.isEmpty) ? '男主' : pname,
+        pprompt.isEmpty ? '你是她的恋人' : pprompt,
+        '她离开 $waitMinutes 分钟还没回来，你再用 notify_user 弹消息叫她回来'
+        '（或说一句想她的话）。消息要自然、不催。',
+      );
+      if (text.isNotEmpty) {
+        _appendToolBubble('💌 男主又来找你了：$text');
+      }
+    });
   }
 
   /// 工具执行：recall_memory（检索 → 弹窗授权 → 返回记忆给模型）

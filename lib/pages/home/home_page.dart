@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../services/global_banner_service.dart';
 import 'package:flutter/services.dart';
 import '../../pages/chat/chat_page.dart';
 import 'companion_page.dart';
@@ -40,7 +41,23 @@ class _HomePageState extends State<HomePage> {
   void _switchPage(int index) {
     if (index == _currentIndex) return;
     setState(() => _currentIndex = index);
+    // 8-06 notify_user：全局同步"用户是否在聊天页"（超时唤醒判断用）
+    GlobalBannerService.instance.userOnChat = index == 2;
     HapticFeedback.lightImpact();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // 8-06 notify_user：横幅点击 → 切回聊天 tab
+    GlobalBannerService.instance.onOpenChat = () {
+      if (!mounted) return;
+      if (_currentIndex != 2) {
+        setState(() => _currentIndex = 2);
+      }
+      GlobalBannerService.instance.userOnChat = true;
+    };
+    GlobalBannerService.instance.userOnChat = _currentIndex == 2;
   }
 
   @override
