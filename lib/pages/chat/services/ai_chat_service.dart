@@ -191,6 +191,37 @@ class AiChatService {
       },
     },
   ];
+  /// 总结专用工具（8-05 19:19 用户：男主只需要调用工具写摘要，不输出文本）。
+  /// 窗口满 → 管家发【当前管家】指令 → 男主调 save_summary 写入摘要（含范围）。
+  static const List<Map<String, dynamic>> summarizeTools = [
+    {
+      'type': 'function',
+      'function': {
+        'name': 'save_summary',
+        'description':
+            '保存长期摘要。窗口快满时管家会叫你总结最近的对话，'
+            '调用这个工具把提炼的提醒写进去。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'content': {
+              'type': 'string',
+              'description':
+                  '摘要内容：影响后续对话的提醒（约定/承诺/正在做的事/'
+                  '她希望你记住的），每条一行 20 字内，细节不写——'
+                  '能当场查的（记忆/日记）不写',
+            },
+            'range': {
+              'type': 'string',
+              'description': '这次总结覆盖的上下文编号范围，如 "#1-#42"',
+            },
+          },
+          'required': ['content', 'range'],
+        },
+      },
+    },
+  ];
+
 
   /// 生成当天日记（男主视角的一天总结，不存库，纯生成）。
   /// 用户 02:08/21:13：日记 = 男主自己拼（男主视角整理，不是管家总结），
@@ -334,7 +365,10 @@ class AiChatService {
         // → 下一轮带 C + D1 刷新会话（服务器窗口腾出来）
         if (ContextManager.instance.needsSummarize(ctxPid, modelHint: _modelHintFor(personaId))) {
           DebugLogger.log('AI验收', '③A形态3: stateful 窗口满 → 触发总结刷新');
-          await _summarize(ctxPid, personaName);
+          await _summarize(ctxPid, personaName,
+              personaPrompt: personaPrompt,
+              userProfile: userProfile,
+              taskState: taskState);
           _forceRecover[ctxPid] = true;
         }
       } else {
@@ -352,7 +386,10 @@ class AiChatService {
             ' 预算=${ContextManager.instance.topicBudgetChars(ctxPid, modelHint: _modelHintFor(personaId))}字'
             ' → $_needSum');
         if (_needSum) {
-          await _summarize(ctxPid, personaName);
+          await _summarize(ctxPid, personaName,
+              personaPrompt: personaPrompt,
+              userProfile: userProfile,
+              taskState: taskState);
         }
       }
     }
@@ -1108,9 +1145,21 @@ class AiChatService {
   /// 每天要查的/影响连续性的才写进摘要；不重要的遗忘，需要时现查。
   /// 用户 21:13：上下文要没了（token 快满）→ 先写日记存档（细节不丢），
   /// 再提炼摘要提醒（日记=细节存档，摘要=提醒，各司其职）。
-  Future<void> _summarize(String personaId, String personaName) async {
-    final raw = ContextManager.instance.takePendingRaw(personaId);
+  /// 8-05 19:19 用户定稿（窗口满总结 v2）：
+  /// 窗口满 → C 自动拼（男主不用复述）→ 男主只调 save_summary 写摘要
+  /// （不输出文本）→ 摘要保存"几到几"编号（#a-#b，不是复述上下文）
+  /// → 原文被摘要替换（清空）→ 工具/管家历史不重要就扔掉。
+  Future<void> _summarize(
+    String personaId,
+    String personaName, {
+    String personaPrompt = '',
+    String? userProfile,
+    String? taskState,
+  }) async {
+    final (start, end, raw) =
+        ContextManager.instance.takePendingRawWithRange(personaId);
     if (raw.trim().isEmpty) return;
+    final rangeLabel = end > 0 ? '#$start-#$end' : '';
     DebugLogger.log('上下文管理', '✂️ 原文攒够了（${raw.length} 字，上下文要没了）…');
     // ① 先写日记存档（原文要没了，细节进日记，男主可查）
     final diary = await generateDailyDiary(personaId, personaName, raw);
@@ -1120,37 +1169,75 @@ class AiChatService {
       ContextManager.instance
           .logButlerAction(personaId, '总结·写日记存档', '✅完成');
     }
-    // ② 再提炼摘要提醒（能查的现查，只留影响连续性的提醒）
-    final system = '【管家指令】你是「$personaName」。下面是你们最近的聊天记录。'
-        '请从中提炼"你需要记住的提醒"，写进你的长期摘要。要求：'
-        '① 只写影响后续对话的：她的约定/承诺/正在做的事/你答应过的事/'
-        '她明确希望你记住的、每天都要记得的事'
-        '② 细节不用写——能当场查的（记忆、日记）不写，需要时你用工具查'
-        '③ 不重要的直接遗忘，不要写'
-        '④ 每条一行，20 字内，只输出提醒列表，不要客套话不要评价。';
+    // ② C 自动拼（用户 19:19：窗口满 C 自动拼，男主不需要复述）
+    final needsWindow = !ContextTracker.instance.windowConfirmed(personaId);
+    final c = SystemTemplate.build(
+      personaName: personaName,
+      personaPrompt: personaPrompt,
+      needsWindow: needsWindow,
+      userProfile: userProfile,
+      taskState: taskState,
+    );
+    // 【当前管家】唤醒指令（19:16 用户：当前管家段 = 管家唤醒 AI 的通道）
+    final instruction = '【当前管家】窗口快满了，把刚给你的对话总结成摘要。'
+        '调用 save_summary 工具写入（不要复述对话内容）：'
+        '① content：影响后续对话的提醒，每条一行 20 字内，细节不写——'
+        '能当场查的（记忆、日记）不写，需要时你用工具查'
+        '② range：这次总结覆盖的编号范围'
+        '${rangeLabel.isEmpty ? '' : '（就是 $rangeLabel）'}。'
+        '不重要的直接遗忘，不要客套话。';
     try {
       final res = await AIProviderManager.instance.chat(
         personaId,
         [
-          AIChatMessage(role: 'system', content: system),
-          AIChatMessage(role: 'user', content: raw),
+          AIChatMessage(role: 'system', content: c),
+          AIChatMessage(
+              role: 'user',
+              content: '【本次要总结的对话】（带时间戳，按顺序）\n$raw'),
+          AIChatMessage(role: 'user', content: instruction),
         ],
-        tools: null,
+        // 只带 save_summary：男主必须调工具写摘要（用户 19:19）
+        tools: summarizeTools,
       );
-      final summary = res.text.trim();
-      if (summary.isNotEmpty) {
-        await ContextManager.instance.appendSummary(personaId, summary);
-        DebugLogger.log('上下文管理', '✅ 摘要提醒已更新（${summary.length} 字），原文已遗忘');
-        ContextManager.instance
-            .logButlerAction(personaId, '总结·提炼摘要', '✅完成');
-      } else {
-        ContextManager.instance
-            .logButlerAction(personaId, '总结·提炼摘要', 'ℹ️ 没提炼出提醒（原文已遗忘）');
-        // 总结为空：没有值得长期记的 → 原文直接遗忘（能查的靠工具现查）
-        DebugLogger.log('上下文管理', 'ℹ️ 男主没提炼出提醒，原文已遗忘（细节在日记）');
+      var saved = false;
+      final calls = res.toolCalls ?? const [];
+      for (final tc in calls) {
+        final name = tc['name'] as String? ?? '';
+        final args = tc['arguments'];
+        if (name == 'save_summary' && args is Map) {
+          final content = (args['content'] as String?)?.trim() ?? '';
+          final range = (args['range'] as String?)?.trim() ?? rangeLabel;
+          if (content.isNotEmpty) {
+            await ContextManager.instance
+                .appendSummary(personaId, '（$range）$content');
+            saved = true;
+            DebugLogger.log('上下文管理',
+                '✅ 男主调 save_summary 写入摘要（$range，${content.length} 字）');
+          }
+        }
       }
+      if (!saved) {
+        // 男主没调工具 → 文本兜底（保底不丢，但下次应引导调工具）
+        final text = res.text.trim();
+        if (text.isNotEmpty) {
+          await ContextManager.instance
+              .appendSummary(personaId, '（$rangeLabel）$text');
+          DebugLogger.log('上下文管理',
+              'ℹ️ 男主没调工具，文本摘要兜底（${text.length} 字）');
+        } else {
+          DebugLogger.log('上下文管理',
+              'ℹ️ 男主没提炼出提醒，原文已遗忘（细节在日记）');
+        }
+      }
+      // 原文已取走（被摘要替换）；工具/管家历史不重要 → 扔掉（用户 19:19）
+      ContextManager.instance.clearButlerLog(personaId);
+      ContextManager.instance
+          .logButlerAction(personaId, '总结', '✅完成（$rangeLabel）');
     } on Object catch (e) {
-      DebugLogger.log('上下文管理', '⚠️ 男主总结失败: $e（原文保留待下次）');
+      ContextManager.instance
+          .logButlerAction(personaId, '总结', '❌失败：$e');
+      DebugLogger.log('上下文管理', '⚠️ 男主总结失败: $e（对话行已恢复待下次）');
+      // 失败恢复对话行（工具行不重要不恢复），编号已递增可接受
       ContextManager.instance.restoreRaw(personaId, raw);
     }
   }
