@@ -1624,6 +1624,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     ctx.debugSetLastChatAt(testPid, DateTime.now());
     await ctx.clearRecovery(testPid);
     await ctx.clearSummaries(testPid);
+    svc.resetForceRecover(testPid);
+    // 8-05 21:30（④ 根因）：上次验收 ⑤ 的 setWindow(800) 持久残留 →
+    // 下次验收 ①-③ 提前触发总结 → forceRecover → ④ 误判全量带。
+    // 验收开头清窗口回"未确认"（①-④ 用默认大窗口，⑤ 再自己调小）
+    ContextTracker.instance.clearWindow(testPid);
     setState(() {
       _accepting = true;
       _acceptanceNote = '🚀 一键验收开始…';

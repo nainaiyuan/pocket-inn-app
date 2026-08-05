@@ -70,6 +70,13 @@ class ContextTracker {
   /// 窗口长度（0 = 未确认，需要问 AI）
   int windowOf(String personaId) => _state(personaId).windowSize;
 
+  /// 清空窗口设置回"未确认"（验收重置测试空间用，8-05 21:30：
+  /// 上次验收 ⑤ 的 setWindow(800) 持久残留 → 下次验收 ①-③ 提前触发
+  /// 总结 → forceRecover → ④ 误判全量带）
+  void clearWindow(String personaId) {
+    _states.remove(personaId);
+  }
+
   /// 是否已确认窗口
   bool windowConfirmed(String personaId) =>
       _state(personaId).windowSize > 0;

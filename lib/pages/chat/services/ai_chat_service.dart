@@ -758,6 +758,12 @@ class AiChatService {
   /// 下一轮强制全量（C + D1 刷新会话），发完清除。
   final Map<String, bool> _forceRecover = {};
 
+  /// 清掉强制刷新标记（验收重置测试空间用，8-05 21:30 ④根因：
+  /// 上次验收的 forceRecover 残留/误置 → 连续使用也被强制全量带）
+  void resetForceRecover(String personaId) {
+    _forceRecover.remove(personaId);
+  }
+
   ({bool stateful, bool idleExpired, bool switched, bool forceRecover,
           bool needRecover})
       assembleDecision(String personaId, {required bool toolRound}) {
