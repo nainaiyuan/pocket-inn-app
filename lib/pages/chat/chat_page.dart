@@ -1204,15 +1204,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         // ===== 🔁 让男主重新认识按钮（8-04 23:4x 用户）=====
         // 只带【已总结摘要+恢复包+当次未总结原文】（总结过的旧原文不重复扔），
         // 全量发给男主重新熟悉——不赌 AI 记没记住，错了手动救
-        Positioned(
-          right: 106, top: MediaQuery.of(context).padding.top + 4,
-          child: GestureDetector(
-            onTap: _resyncContext,
-            child: Container(
-              width: 28, height: 28,
-              decoration: BoxDecoration(
-                color: Colors.black26, shape: BoxShape.circle,
-              ),
+        if (AIProviderManager.testModeEnabled)
+          Positioned(
+            right: 106, top: MediaQuery.of(context).padding.top + 4,
+            child: GestureDetector(
+              onTap: _resyncContext,
+              child: Container(
+                width: 28, height: 28,
+                decoration: BoxDecoration(
+                  color: Colors.black26, shape: BoxShape.circle,
+            ),
               child: const Icon(Icons.sync, size: 15, color: Colors.white70),
             ),
           ),
@@ -1221,45 +1222,48 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         // ===== 🧪 模拟测试按钮（找bug工具，8-03 20:1x 用户要求）=====
         // 预设对话 + 手动写男主回复，走真实 feed/build/解析流程，
         // 看"发给模型的历史"里男主消息到底在不在
-        Positioned(
-          right: 72, top: MediaQuery.of(context).padding.top + 4,
-          child: GestureDetector(
-            onTap: _showSimulation,
-            child: Container(
-              width: 28, height: 28,
-              decoration: BoxDecoration(
-                color: Colors.black26, shape: BoxShape.circle,
-              ),
+        if (AIProviderManager.testModeEnabled)
+          Positioned(
+            right: 72, top: MediaQuery.of(context).padding.top + 4,
+            child: GestureDetector(
+              onTap: _showSimulation,
+              child: Container(
+                width: 28, height: 28,
+                decoration: BoxDecoration(
+                  color: Colors.black26, shape: BoxShape.circle,
+            ),
               child: const Icon(Icons.science_outlined, size: 15, color: Colors.white70),
             ),
           ),
         ),
 
         // ===== 📄 prompt 查看按钮（透明化：男主"知道什么"一目了然）=====
-        Positioned(
-          right: 38, top: MediaQuery.of(context).padding.top + 4,
-          child: GestureDetector(
-            onTap: _showPromptDialog,
-            child: Container(
-              width: 28, height: 28,
-              decoration: BoxDecoration(
-                color: Colors.black26, shape: BoxShape.circle,
-              ),
+        if (AIProviderManager.testModeEnabled)
+          Positioned(
+            right: 38, top: MediaQuery.of(context).padding.top + 4,
+            child: GestureDetector(
+              onTap: _showPromptDialog,
+              child: Container(
+                width: 28, height: 28,
+                decoration: BoxDecoration(
+                  color: Colors.black26, shape: BoxShape.circle,
+            ),
               child: const Icon(Icons.description_outlined, size: 15, color: Colors.white70),
             ),
           ),
         ),
 
         // ===== 调试日志按钮（右上角） =====
-        Positioned(
-          right: 4, top: MediaQuery.of(context).padding.top + 4,
-          child: GestureDetector(
-            onTap: _showDebugLog,
-            child: Container(
-              width: 28, height: 28,
-              decoration: BoxDecoration(
-                color: Colors.black26, shape: BoxShape.circle,
-              ),
+        if (AIProviderManager.testModeEnabled)
+          Positioned(
+            right: 4, top: MediaQuery.of(context).padding.top + 4,
+            child: GestureDetector(
+              onTap: _showDebugLog,
+              child: Container(
+                width: 28, height: 28,
+                decoration: BoxDecoration(
+                  color: Colors.black26, shape: BoxShape.circle,
+            ),
               child: const Icon(Icons.bug_report, size: 16, color: Colors.white70),
             ),
           ),
@@ -1546,6 +1550,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       return;
     }
     final pid = _state.personaId ?? '${lid}_default';
+    // 8-05 15:5x（验收 2/7 根因）：14:52 起测试对话的数据全落测试空间
+    // （${pid}__mock__test），但验收的检查还在读真实 pid → 读不到。
+    // 验收的决策/上下文检查全部改用测试空间 key；provider 绑定仍用真实 pid
+    final testPid = '${pid}${AIProviderManager.mockTestSuffix}';
     final manager = AIProviderManager.instance;
     final ctx = ContextManager.instance;
     final svc = AiChatService();
@@ -1588,7 +1596,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // （上次用的）——切换绑定后必须重置，否则上次是 stateful（模拟C）
       // 时决策误走 stateful 分支 → 总结/沉淀永不触发
       manager.resetLastProvider(pid);
-      ctx.clearProviderUsed(pid);
+      ctx.clearProviderUsed(testPid);
       if (mounted) setState(() => _acceptanceNote = hint);
     }
 
@@ -1602,7 +1610,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       await sw('builtin-mock-b', '②/⑧ AI B 无记忆·思考关 — 验证切换不失忆');
       note('📋 ② 切 AI B：验证切换后不失忆');
       await say('我刚才说我喜欢的颜色是什么？');
-      final histB = ctx.buildHistoryMessages(pid, modelHint: 'mock-1');
+      final histB = ctx.buildHistoryMessages(testPid, modelHint: 'mock-1');
       final bOk = histB.isNotEmpty;
       record('② 切换AI B后全量带历史', bOk,
           bOk ? null : '历史为空——stateless 切换后没带上下文，男主会失忆');
@@ -1612,11 +1620,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       await sw('builtin-mock-c', '③/⑧ AI C 有记忆1h — 验证 stateful 切换');
       note('📋 ③ 切 AI C：验证 stateful 切换全量带');
       await say('我们刚才聊了哪两件事？');
-      var d = svc.assembleDecision(pid, toolRound: false);
+      var d = svc.assembleDecision(testPid, toolRound: false);
       // 8-04 22:5x（③ 判定修复）：say 后重算 decision 时 switched 已被
       // ③ 自己的 noteProviderUsed 消耗（永远 false）——判定改看组装结果：
       // stateful 判定看决策（C 是 stateful ✓），全量带看组装历史非空
-      final histC = ctx.buildHistoryMessages(pid, modelHint: 'mock-1');
+      final histC = ctx.buildHistoryMessages(testPid, modelHint: 'mock-1');
       final cOk = d.stateful && histC.isNotEmpty;
       record('③ stateful切换全量带', cOk,
           cOk ? null : 'stateful=${d.stateful} 组装历史=${histC.length}条——'
@@ -1627,7 +1635,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       await sw('builtin-mock-c', '④/⑧ AI C 连续使用 — 验证轻量');
       note('📋 ④ AI C 连续使用：验证轻量');
       await say('那你觉得蓝色和美式咖啡配吗？');
-      d = svc.assembleDecision(pid, toolRound: false);
+      d = svc.assembleDecision(testPid, toolRound: false);
       final dOk = d.stateful && !d.needRecover;
       record('④ stateful连续轻量', dOk,
           dOk ? null : '连续使用还全量带——浪费 token（stateful=${d.stateful}）');
@@ -1643,23 +1651,23 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       await sw('builtin-mock', '⑤/⑧ 调小token窗口 → 男主主动总结');
       note('📋 ⑤ 切回 AI A：调小窗口，少量消息触发总结');
       manager.updateBuiltinMock(memoryMode: 'stateless'); // 防残留 stateful
-      ContextTracker.instance.setWindow(pid, 800); // 预算≈85字，短消息即触发
+      ContextTracker.instance.setWindow(testPid, 800); // 预算≈85字，短消息即触发
       await say('我们今天还聊了散步、读书、做饭、旅行、听音乐，'
           '这些话题我慢慢说给你听。');
       await say('对了，我最近在学做菜，喜欢研究新菜谱，'
           '周末还想去爬山，你觉得怎么样？');
-      final summaries = ctx.summariesFor(pid);
+      final summaries = ctx.summariesFor(testPid);
       final sumOk = summaries.isNotEmpty;
       if (!sumOk) {
         // 自诊断：失败原因直接带数据，弹窗复制发龙虾即可定位
-        final budget = ctx.topicBudgetChars(pid, modelHint: 'mock-1');
-        final rawLen = ctx.debugRawLength(pid);
-        final st = svc.assembleDecision(pid, toolRound: false).stateful;
+        final budget = ctx.topicBudgetChars(testPid, modelHint: 'mock-1');
+        final rawLen = ctx.debugRawLength(testPid);
+        final st = svc.assembleDecision(testPid, toolRound: false).stateful;
         DebugLogger.log('AI验收', '⑤自诊断: 预算=$budget 原文=$rawLen stateful=$st');
       }
       record('⑤ token满触发男主总结', sumOk,
-          sumOk ? null : '摘要区 0 条。诊断:预算=${ctx.topicBudgetChars(pid, modelHint: 'mock-1')}'
-              '字 原文=${ctx.debugRawLength(pid)}字 stateful=${svc.assembleDecision(pid, toolRound: false).stateful}'
+          sumOk ? null : '摘要区 0 条。诊断:预算=${ctx.topicBudgetChars(testPid, modelHint: 'mock-1')}'
+              '字 原文=${ctx.debugRawLength(testPid)}字 stateful=${svc.assembleDecision(testPid, toolRound: false).stateful}'
               '——日志看「上下文管理」有无"✂️ 原文攒够了"');
       note('📋 ⑤ ${sumOk ? '✓' : '✗'} 摘要区 ${summaries.length} 条');
 
@@ -1667,7 +1675,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       await sw('builtin-mock-e', '⑥/⑧ AI E 无记忆·工具关 — 验证总结后不失忆');
       note('📋 ⑥ 切 AI E：验证总结后上下文不丢');
       await say('刚才我们聊了好多，你能总结一下都聊了什么吗？');
-      final histE = ctx.buildHistoryMessages(pid, modelHint: 'mock-1');
+      final histE = ctx.buildHistoryMessages(testPid, modelHint: 'mock-1');
       final hasSummary = histE.any((m) =>
           m.role == 'system' && m.content.contains('男主摘要'));
       final eOk = hasSummary;
@@ -1682,10 +1690,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       await sw('builtin-mock-c', '⑦/⑧ AI C 有记忆1h — 模拟空闲40分钟→沉淀');
       note('📋 ⑦ 切 AI C：模拟 40 分钟没聊 → 男主应写三类存档（摘要+恢复包）');
       await say('我们约好了周末去爬山，别忘啦。');
-      ctx.debugSetLastChatAt(pid, DateTime.now().subtract(const Duration(minutes: 40)));
+      ctx.debugSetLastChatAt(testPid, DateTime.now().subtract(const Duration(minutes: 40)));
       await say('在吗？刚想到爬山的事，周末天气怎么样都去对吧？');
-      final recovery7 = ctx.recoveryFor(pid);
-      final sum7 = ctx.summariesFor(pid);
+      final recovery7 = ctx.recoveryFor(testPid);
+      final sum7 = ctx.summariesFor(testPid);
       final gOk = recovery7 != null && recovery7.isNotEmpty && sum7.isNotEmpty;
       record('⑦ 空闲过半触发沉淀（恢复包+摘要）', gOk,
           gOk ? null : '恢复包=${recovery7 == null ? '无' : '有'} 摘要=${sum7.length}条——'
@@ -1698,10 +1706,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 看 say 前，组装结果看 say 后（恢复包在内存，与 lastChat 无关）
       await sw('builtin-mock-c', '⑧/⑧ 模拟超时1h → 带恢复包接上');
       note('📋 ⑧ 模拟超过 1 小时没聊 → 应判空闲超时，全量带恢复包');
-      ctx.debugSetLastChatAt(pid, DateTime.now().subtract(const Duration(hours: 2)));
-      final dPre = svc.assembleDecision(pid, toolRound: false);
+      ctx.debugSetLastChatAt(testPid, DateTime.now().subtract(const Duration(hours: 2)));
+      final dPre = svc.assembleDecision(testPid, toolRound: false);
       await say('我回来了，我们继续聊吧。');
-      final histRec = ctx.buildHistoryMessages(pid, modelHint: 'mock-1');
+      final histRec = ctx.buildHistoryMessages(testPid, modelHint: 'mock-1');
       final hasRec = histRec.any((m) =>
           m.role == 'system' && m.content.contains('恢复包'));
       final hOk = dPre.idleExpired && dPre.needRecover && hasRec;
