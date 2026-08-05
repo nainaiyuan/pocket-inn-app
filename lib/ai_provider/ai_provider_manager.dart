@@ -413,6 +413,17 @@ class AIProviderManager {
   /// 某男主（或全局）最近一次成功使用的 Provider id。
   /// 没有记录时返回第一个候选（按优先级）的 id。
   String? lastProviderFor(String? personaId) {
+    // 8-05 16:52 用户（严重）：测试模式开着时普通聊天偷偷走真实 DeepSeek——
+    // lastProvider 是真实 AI 时 isMockChat=false → 对话落真实空间+花真实额度。
+    // 修：测试模式开 → 强制指向 mock（互斥：测试 AI 开 = 真实 AI 关）。
+    // 用户/验收切了具体 mock 变体则返回该变体，否则默认主实例。
+    if (_testModeEnabled) {
+      final own = _personaSettings[_settingsKey(personaId)]?.lastProviderId;
+      if (own != null && own.isNotEmpty && _mockChoiceUsable(own)) {
+        return own;
+      }
+      return builtinMockVariants.first.id;
+    }
     final key = _settingsKey(personaId);
     final own = _personaSettings[key]?.lastProviderId;
     if (own != null && own.isNotEmpty && _mockChoiceUsable(own)) {
