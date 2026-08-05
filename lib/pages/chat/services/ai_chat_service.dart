@@ -216,8 +216,18 @@ class AiChatService {
         ],
         tools: null,
       );
-      return res.text.trim();
+      final diary = res.text.trim();
+      if (diary.isNotEmpty) {
+        ContextManager.instance
+            .logButlerAction(personaId, '写日记', '✅完成');
+      } else {
+        ContextManager.instance
+            .logButlerAction(personaId, '写日记', '❌失败：男主没写');
+      }
+      return diary;
     } on Object catch (e) {
+      ContextManager.instance
+          .logButlerAction(personaId, '写日记', '❌失败：$e');
       DebugLogger.log('指令模块', '⚠️ 生成日记失败: $e');
       return '';
     }
@@ -266,6 +276,9 @@ class AiChatService {
     bool toolRound = false,
     List<AIChatMessage>? toolMessages,
     String? sessionId,
+    // 8-05 19:13 用户：当前管家说的具体指令/参考信息（如心率/天气），
+    // 放当前工具调用下面，男主也要回复的（调工具或回应）
+    String? butlerInstruction,
     // 8-05 14:36：测试空间隔离——上下文管理（摘要/压缩/恢复包）落到的 key；
     // null = 用 personaId（正常聊天）；mock 测试传 ${personaId}__mock__test
     String? storagePersonaId,
@@ -480,6 +493,15 @@ class AiChatService {
     // 【用户当前消息】保持在最后一条（AI 基于工具结果回复用户）。
     if (toolRound) {
       if (toolMessages != null) messages.addAll(toolMessages);
+      // 【当前管家】在工具调用下面（8-05 19:13 用户：管家查到的参考信息
+      // 如心率/天气放这里，男主也要回复的）
+      if (butlerInstruction != null && butlerInstruction.trim().isNotEmpty) {
+        messages.add(AIChatMessage(
+          role: 'user',
+          content: '【当前管家】（管家刚查到的参考/指令，'
+              '针对它回应或调用工具处理）\n$butlerInstruction',
+        ));
+      }
       final userMsg = ContextManager.instance.lastUserMessageFor(ctxPid);
       if (userMsg != null && userMsg.isNotEmpty) {
         messages.add(AIChatMessage(
@@ -489,6 +511,13 @@ class AiChatService {
         ));
       }
     } else {
+      if (butlerInstruction != null && butlerInstruction.trim().isNotEmpty) {
+        messages.add(AIChatMessage(
+          role: 'user',
+          content: '【当前管家】（管家刚查到的参考/指令，'
+              '针对它回应或调用工具处理）\n$butlerInstruction',
+        ));
+      }
       messages.add(AIChatMessage(role: 'user', content: message));
     }
     late final AIProviderResult result;
@@ -893,6 +922,9 @@ class AiChatService {
       // 男主一次写三类：日记 / 摘要 / 恢复包（下次要带的上下文）
       final written = await _generateAndStoreThree(
         personaId, personaName, raw);
+      ContextManager.instance.logButlerAction(
+          personaId, '沉淀（日记/摘要/恢复包）',
+          written ? '✅完成' : '❌失败：男主没写全');
       if (written) {
         _settledAtHalf[personaId] = true;
         DebugLogger.log('上下文管理', '✅ 三类存档完成（日记/摘要/恢复包），管家已分类存好');
@@ -1085,6 +1117,8 @@ class AiChatService {
     if (diary.isNotEmpty) {
       await ChatDatabaseService.instance.saveDiaryEntry(personaId, diary);
       DebugLogger.log('上下文管理', '📔 日记已存档（${diary.length} 字），细节没丢');
+      ContextManager.instance
+          .logButlerAction(personaId, '总结·写日记存档', '✅完成');
     }
     // ② 再提炼摘要提醒（能查的现查，只留影响连续性的提醒）
     final system = '【管家指令】你是「$personaName」。下面是你们最近的聊天记录。'
@@ -1107,7 +1141,11 @@ class AiChatService {
       if (summary.isNotEmpty) {
         await ContextManager.instance.appendSummary(personaId, summary);
         DebugLogger.log('上下文管理', '✅ 摘要提醒已更新（${summary.length} 字），原文已遗忘');
+        ContextManager.instance
+            .logButlerAction(personaId, '总结·提炼摘要', '✅完成');
       } else {
+        ContextManager.instance
+            .logButlerAction(personaId, '总结·提炼摘要', 'ℹ️ 没提炼出提醒（原文已遗忘）');
         // 总结为空：没有值得长期记的 → 原文直接遗忘（能查的靠工具现查）
         DebugLogger.log('上下文管理', 'ℹ️ 男主没提炼出提醒，原文已遗忘（细节在日记）');
       }

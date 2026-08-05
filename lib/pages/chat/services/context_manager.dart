@@ -34,6 +34,9 @@ class ContextManager {
   /// 当前话题原文预算：模型窗口的 8%（token）
   static const double topicWindowRatio = 0.08;
 
+  /// 管家指令日志（8-05 19:13 用户）：管家自动动作记录（时间+动作+结果）
+  final Map<String, List<String>> _butlerLog = {};
+
   /// 摘要区预算：模型窗口的 15%（token）
   static const double summaryWindowRatio = 0.15;
 
@@ -282,37 +285,52 @@ class ContextManager {
         }
         out.add(AIChatMessage(role: 'system', content: sb.toString()));
       }
-      // 历史分区（8-05 19:06 用户：不同标签分开，命中率才高）——
-      // 男主发言 → 【管家历史】；用户发言 → 【聊天历史】；各带时间戳+日期分组。
-      // 分开后模型一眼定位"谁说的"，不用在混合序列里猜角色。
-      final butlerLines = <AIChatMessage>[];
-      final chatLines = <AIChatMessage>[];
-      for (final m in lines) {
-        if (m.role == 'assistant') {
-          butlerLines.add(m);
-        } else {
-          chatLines.add(m);
-        }
-      }
-      void appendPartitioned(String tag, List<AIChatMessage> part) {
-        if (part.isEmpty) return;
+      // 历史分区（8-05 19:13 用户定稿定义）：
+      // 【管家历史】= 管家（系统）过去发的精简指令记录（几点/动作/完成或失败+原因），
+      //   如 '[19:00] 写日记 → ✅完成'——不是男主发言！
+      // 【聊天历史】= 用户和男主（AI）的对话，user/assistant 按时间线交替，
+      //   各带时间戳+日期分组。
+      final butlerLog = _butlerLog[personaId];
+      if (butlerLog != null && butlerLog.isNotEmpty) {
+        final sb = StringBuffer(
+            '【管家历史】（管家自动执行过的指令记录：时间+动作+结果。'
+            '男主可参考，如写日记/总结是否成功）');
         DateTime? lastDay;
-        for (final m in part.reversed) {
-          final day = _tsDate(m.content);
+        for (final l in butlerLog) {
+          final day = _tsDate(l);
           if (day != null && (lastDay == null || !_sameDay(day, lastDay))) {
-            out.add(AIChatMessage(
-                role: 'system',
-                content: '$tag · ${_dateLabel(day)}】（该日期：几点谁说了什么）'));
+            sb.write('\n【管家历史 · ${_dateLabel(day)}】');
             lastDay = day;
           }
-          out.add(m);
+          sb.write('\n$l');
         }
+        out.add(AIChatMessage(role: 'system', content: sb.toString()));
       }
-      // 管家历史（男主说的）在前，聊天历史（用户说的）在后
-      appendPartitioned('【管家历史', butlerLines);
-      appendPartitioned('【聊天历史', chatLines);
+      DateTime? lastDay;
+      for (final m in lines.reversed) {
+        final day = _tsDate(m.content);
+        if (day != null && (lastDay == null || !_sameDay(day, lastDay))) {
+          out.add(AIChatMessage(
+              role: 'system',
+              content: '【聊天历史 · ${_dateLabel(day)}】（该日期：几点谁说了什么）'));
+          lastDay = day;
+        }
+        out.add(m);
+      }
     }
     return out;
+  }
+
+  /// 记录管家自动指令日志（8-05 19:13 用户：管家历史 = 管家发的精简指令，
+  /// 时间+动作+结果，男主参考用）。动作如：写日记/总结/沉淀。
+  void logButlerAction(String personaId, String action, String result) {
+    final now = DateTime.now();
+    final ts = _ts(now);
+    // 带方括号时间戳（_tsDate 按 [HH:mm] 解析 → 日期分组才能生效）
+    (_butlerLog[personaId] ??= []).add('[$ts] $action → $result');
+    // 只留最近 20 条（精简，不占窗口）
+    final list = _butlerLog[personaId]!;
+    if (list.length > 20) list.removeRange(0, list.length - 20);
   }
 
   /// 工具行提取时间戳：'工具 [06-28 17:01]：query_diary …' → '[06-28 17:01]'
