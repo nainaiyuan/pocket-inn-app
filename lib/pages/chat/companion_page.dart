@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'widgets/companion_toggle_button.dart';
 
 /// 陪伴三页 —— 左「他」/ 中「我们」/ 右「你」
 ///
@@ -304,38 +305,14 @@ class _CompanionPageState extends State<CompanionPage>
               ),
             ),
 
-            // 中页右上角：设计感按钮（✦ 渐变圆钮）→ 回聊天页；
-            // 旁边小齿轮 → 回聊天页并打开设定右页（原三个点的功能）
+            // 中页右上角：✦ 设计感按钮（共享组件，和聊天页入口完全一致）
+            // → 回聊天页；旁边小齿轮 → 回聊天页并打开设定右页
             if (isCenter) ...[
               Positioned(
                 top: MediaQuery.of(context).padding.top + 8,
                 right: 16,
-                child: GestureDetector(
+                child: CompanionToggleButton(
                   onTap: () => Navigator.of(context).maybePop(),
-                  child: Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFFD9A0C0), Color(0xFFC896B4)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFFC896B4).withValues(alpha: 0.35),
-                          blurRadius: 10,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.auto_awesome,
-                      size: 20,
-                      color: Colors.white,
-                    ),
-                  ),
                 ),
               ),
               if (widget.onOpenSettings != null)

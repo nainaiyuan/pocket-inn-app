@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'companion_toggle_button.dart';
 import 'package:flutter/services.dart';
 
 import '../../../ai_provider/ai_provider_manager.dart';
@@ -118,36 +119,11 @@ class _ChatTopBarState extends State<ChatTopBar> {
               ),
             ),
           ),
-          // 8-05 23:45：设计感按钮（✦ 粉紫渐变圆钮）→ 陪伴三页
-          GestureDetector(
-            onTap: widget.onCompanionTap,
-            child: Padding(
-              padding: const EdgeInsets.all(6),
-              child: Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFFD9A0C0), Color(0xFFC896B4)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFFC896B4).withValues(alpha: 0.30),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.auto_awesome,
-                  size: 18,
-                  color: Colors.white,
-                ),
-              ),
-            ),
+          // 8-05 23:45：✦ 设计感按钮 → 陪伴三页（共享组件，和陪伴页
+          // 切回按钮完全一致——23:48 用户：切回来的也要一样好看）
+          Padding(
+            padding: const EdgeInsets.all(4),
+            child: CompanionToggleButton(onTap: widget.onCompanionTap),
           ),
         ],
       ),
