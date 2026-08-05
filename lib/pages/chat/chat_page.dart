@@ -1120,12 +1120,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                     onCompanionTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => CompanionPage(
-                          onOpenSettings: () {
-                            _currentPanel = Panel.right;
-                            _animateTo(-sideW);
-                          },
-                        ),
+                        builder: (_) => const CompanionPage(),
                       ),
                     ),
                     onAiTap: _openAiSheet,
