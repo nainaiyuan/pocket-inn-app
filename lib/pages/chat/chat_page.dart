@@ -4,6 +4,8 @@ import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../../services/global_banner_service.dart';
+import '../../services/tool_approval_store.dart';
+import '../../data/bug_knowledge_base.dart';
 import 'companion_page.dart';
 import 'package:flutter/services.dart';
 import '../../ai_provider/ai_provider_manager.dart';
@@ -538,6 +540,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               '「$content」\n\n类别：$category\n'
               '关键词：${words.isEmpty ? '（无）' : words.join('、')}\n\n'
               '要让他记住吗？',
+              personaId: personaId, toolKey: 'record_memory',
             );
             if (!ok) {
               _appendToolBubble('❌ 你拒绝了记录「$content」');
@@ -555,7 +558,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             _appendToolBubble('正在查记忆：$query…');
             // 8-03 19:1x（用户要求：调工具要确认）：查记忆是读用户隐私，
             // 必须先问用户（和文本协议 #查记忆# 的 _approveRecall 一致）
-            final ok = await _approveToolCall('查记忆', '他想查关于「$query」的记忆，允许吗？');
+            final ok = await _approveToolCall('查记忆', '他想查关于「$query」的记忆，允许吗？',
+                personaId: personaId, toolKey: 'recall_memory');
             if (!ok) {
               _appendToolBubble('❌ 你拒绝了查「$query」');
               toolResult = _ToolResult(false, '用户拒绝：暂不查「$query」');
@@ -568,7 +572,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             final content = args['content']?.toString() ?? '';
             _appendToolBubble('男主想记住关于「$code」的事…');
             // 8-03 19:1x：写代号记忆也确认
-            final ok = await _approveToolCall('记住代号', '「$code」：$content\n\n要让他记住吗？');
+            final ok = await _approveToolCall('记住代号', '「$code」：$content\n\n要让他记住吗？',
+                personaId: personaId, toolKey: 'save_identity_memory');
             if (!ok) {
               _appendToolBubble('❌ 你拒绝了记住「$code」');
               toolResult = _ToolResult(false, '用户拒绝：暂不记住「$code」');
@@ -582,7 +587,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             // 8-03 19:35（用户实测反馈）：list_tools 也要确认——
             // 用户要求所有工具调用都先问他允不允许
             final ok = await _approveToolCall(
-                '查看工具清单', '他想看看自己现在有哪些能力可用，允许吗？');
+                '查看工具清单', '他想看看自己现在有哪些能力可用，允许吗？',
+                personaId: personaId, toolKey: 'list_tools');
             if (!ok) {
               _appendToolBubble('❌ 你拒绝了查看工具清单');
               toolResult = _ToolResult(false, '用户拒绝：暂不查看工具清单');
@@ -592,7 +598,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           } else if (name == 'write_diary') {
             final content = args['content']?.toString() ?? '';
             _appendToolBubble('男主在写日记…');
-            final ok = await _approveToolCall('写日记', '「$content」\n\n要让他记下来吗？');
+            final ok = await _approveToolCall('写日记', '「$content」\n\n要让他记下来吗？',
+                personaId: personaId, toolKey: 'write_diary');
             if (!ok) {
               _appendToolBubble('❌ 你拒绝了写日记');
               toolResult = _ToolResult(false, '用户拒绝：暂不写日记');
@@ -602,7 +609,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           } else if (name == 'query_diary') {
             final keyword = args['keyword']?.toString() ?? '';
             _appendToolBubble('男主在翻日记：$keyword…');
-            final ok = await _approveToolCall('翻日记', '他想查日记里关于「$keyword」的内容，允许吗？');
+            final ok = await _approveToolCall('翻日记', '他想查日记里关于「$keyword」的内容，允许吗？',
+                personaId: personaId, toolKey: 'query_diary');
             if (!ok) {
               _appendToolBubble('❌ 你拒绝了翻日记');
               toolResult = _ToolResult(false, '用户拒绝：暂不翻日记');
@@ -611,8 +619,34 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             }
           } else if (name == 'notify_user') {
             // 8-06 00:31 用户：男主弹窗（APP内顶部横幅轰炸，APP外之后再做）。
-            // 男主主动行为（类似管家唤醒），不需要确认框——弹窗本身就是给他看的。
-            toolResult = await _executeNotifyTool(args);
+            // 8-06 00:58 修正：弹窗打扰用户 → 默认要审批；
+            // 用户批准免审批后（request_permission 申请）男主可直接弹
+            final msgCount = (args['messages'] is List)
+                ? (args['messages'] as List).length
+                : 1;
+            final ok = await _approveToolCall(
+              '弹消息提醒',
+              '他想给你弹 $msgCount 条消息（APP内顶部横幅，像发消息一样）。\n'
+              '允许吗？（批准后他可以在对话里申请这个能力免审批）',
+              personaId: personaId,
+              toolKey: 'notify_user',
+            );
+            if (!ok) {
+              _appendToolBubble('❌ 你拒绝了弹消息提醒');
+              toolResult = _ToolResult(false, '用户拒绝：暂不弹消息');
+            } else {
+              toolResult = await _executeNotifyTool(args);
+            }
+          } else if (name == 'request_permission') {
+            // 8-06 00:58 用户：男主申请某能力免审批 → 弹窗（同意/拒绝 + 可选原因）
+            // 免审批工具本身，不需要再审批
+            toolResult = await _executeRequestPermission(args);
+          } else if (name == 'query_logs') {
+            // 8-06 01:03 用户：男主查日志排错（只读，不需要审批）
+            toolResult = await _executeQueryLogs(args);
+          } else if (name == 'report_bug') {
+            // 8-06 01:06 用户：bug 报告弹窗（定位信息+解法+一键复制，只读不需要审批）
+            toolResult = await _executeReportBug(args);
           } else {
             toolResult = _ToolResult(false, '未知工具：$name');
           }
@@ -2022,8 +2056,18 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 8-03 19:1x（用户要求：调工具要确认）：原生工具轮通用确认弹窗。
   /// 有副作用/涉及用户隐私的工具执行前让用户点头（list_tools 无副作用不弹）。
   /// 用户拒绝 → 返回 false → 工具结果里带"用户拒绝"，男主自然应对，不卡流程。
-  Future<bool> _approveToolCall(String toolName, String description) async {
+  Future<bool> _approveToolCall(String toolName, String description,
+      {String? personaId, String? toolKey}) async {
     if (!mounted) return true; // 页面已关闭不阻塞工具
+    // 8-06 00:58 用户：工具免审批——用户批准过的工具直接执行（男主申请→用户同意）
+    // toolKey = 工具英文名（与 schema/配置 key 对齐）；toolName = 弹窗显示名
+    final key = toolKey ?? toolName;
+    if (personaId != null && personaId.isNotEmpty) {
+      if (await ToolApprovalStore.isExempt(personaId, key)) {
+        DebugLogger.log('指令模块', '🔓 $toolName（$key）已免审批，直接执行');
+        return true;
+      }
+    }
     // 8-04 15:0x（用户报：点确认后"立刻唤醒下面的输入框"）：
     // 弹窗前先收焦点收键盘，弹窗关闭后输入框不会自动弹键盘
     FocusManager.instance.primaryFocus?.unfocus();
@@ -2465,6 +2509,284 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     }
   }
 
+  /// 工具执行：request_permission（男主申请某能力免审批）
+  ///
+  /// 8-06 00:58-01:00 用户：男主调申请工具 → 弹窗给用户「某某能力不需要审批」
+  /// + 申请理由 → 用户同意/拒绝；男主可要求用户写原因 → 原因回复给男主。
+  Future<_ToolResult> _executeRequestPermission(Map<String, dynamic> args) async {
+    final personaId = _state.personaId ?? '';
+    final toolName = args['tool_name']?.toString().trim() ?? '';
+    if (toolName.isEmpty) {
+      return const _ToolResult(false, '申请失败：没说要申请哪个工具');
+    }
+    final reason = args['reason']?.toString().trim() ?? '';
+    final askReason = args['ask_reason'] == true;
+    final result = await _showPermissionRequestDialog(
+      toolName: toolName,
+      reason: reason,
+      askReason: askReason,
+    );
+    if (result == null) {
+      return _ToolResult(false, '她没回应申请「$toolName」免审批（先别急着再申请）');
+    }
+    if (result.approved) {
+      await ToolApprovalStore.setExempt(personaId, toolName, true);
+      final reasonTxt = result.reason.trim();
+      return _ToolResult(
+        true,
+        '她批准了「$toolName」免审批！以后调它不用再问她。'
+        '${reasonTxt.isNotEmpty ? '她还写了原因：$reasonTxt' : ''}',
+      );
+    }
+    final reasonTxt = result.reason.trim();
+    return _ToolResult(
+      false,
+      '她拒绝了「$toolName」免审批。'
+      '${reasonTxt.isNotEmpty ? '原因：$reasonTxt' : '她没说原因'}'
+      '——尊重她的决定，别再反复申请。',
+    );
+  }
+
+  /// 申请免审批弹窗：同意/拒绝 + 可选原因输入（男主 ask_reason 时提示填写）
+  Future<({bool approved, String reason})?> _showPermissionRequestDialog({
+    required String toolName,
+    required String reason,
+    required bool askReason,
+  }) async {
+    if (!mounted) return null;
+    FocusManager.instance.primaryFocus?.unfocus();
+    final reasonCtrl = TextEditingController();
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('🙋 男主申请免审批'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '他想让「$toolName」以后不用每次问你。',
+              style: const TextStyle(fontSize: 14, height: 1.5),
+            ),
+            if (reason.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF7EAF1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '💬 他的理由：$reason',
+                  style: const TextStyle(fontSize: 13, height: 1.4),
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonCtrl,
+              maxLines: 2,
+              decoration: InputDecoration(
+                hintText: askReason
+                    ? '他想听你的原因，写两句吧…（同意或拒绝都可以写）'
+                    : '想跟他说两句？可不填…',
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('拒绝', style: TextStyle(color: Color(0xFF8A7A80))),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('同意'),
+          ),
+        ],
+      ),
+    );
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (approved == null) return null;
+    return (approved: approved, reason: reasonCtrl.text.trim());
+  }
+
+  /// 工具执行：query_logs（男主查运行日志排错，只读免审批）
+  ///
+  /// 8-06 01:03 用户：不能整串日志扔给男主——按关键词/级别/条数/日期
+  /// 筛选，只返回匹配的几条 + 统计。
+  Future<_ToolResult> _executeQueryLogs(Map<String, dynamic> args) async {
+    final keyword = args['keyword']?.toString().trim();
+    final level = args['level']?.toString().trim();
+    final limit = (args['limit'] as num?)?.toInt() ?? 15;
+    final date = args['date']?.toString().trim();
+    final result = DebugLogger.query(
+      keyword: (keyword == null || keyword.isEmpty) ? null : keyword,
+      level: (level == null || level.isEmpty) ? null : level,
+      limit: limit.clamp(1, 50),
+      date: (date == null || date.isEmpty) ? null : date,
+    );
+    if (result.lines.isEmpty) {
+      return _ToolResult(
+        true,
+        '日志里没找到匹配的记录'
+        '${keyword != null ? '（关键词：$keyword' : ''}'
+        '${level != null ? '，级别：$level' : ''}'
+        '${date != null ? '，日期：$date' : ''}'
+        '${keyword != null || level != null || date != null ? '）' : ''}。一切正常。',
+      );
+    }
+    return _ToolResult(
+      true,
+      '日志匹配 ${result.total} 条，给你最近 ${result.lines.length} 条：\n'
+      '${result.lines.join('\n')}',
+    );
+  }
+
+  /// 工具执行：report_bug（bug 报告弹窗：定位信息 + 知识库解法 + 一键复制）
+  ///
+  /// 8-06 01:06 用户：有 bug 男主创立弹窗，上面可直接复制，
+  /// 处理办法是定位各种东西，用户直接复制给开发者（龙虾）修。
+  Future<_ToolResult> _executeReportBug(Map<String, dynamic> args) async {
+    final desc = args['description']?.toString().trim() ?? '（男主发现的问题）';
+    final logKw = args['log_keyword']?.toString().trim();
+    // 相关日志片段（最近 10 条匹配）
+    final logs = DebugLogger.query(
+      keyword: (logKw == null || logKw.isEmpty) ? null : logKw,
+      limit: 10,
+    );
+    // 知识库匹配：描述 + 日志一起喂
+    final solution = BugKnowledgeBase.match('$desc ${logs.lines.join(' ')}');
+    final now = DateTime.now();
+    final report = StringBuffer()
+      ..writeln('🐛 Bug 报告')
+      ..writeln('时间：${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
+          '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}')
+      ..writeln('问题：$desc');
+    if (logs.lines.isNotEmpty) {
+      report
+        ..writeln()
+        ..writeln('相关日志（${logs.total} 条匹配，显示 ${logs.lines.length} 条）：');
+      for (final l in logs.lines) {
+        report.writeln(l);
+      }
+    } else {
+      report.writeln('相关日志：（无匹配）');
+    }
+    if (solution != null) {
+      report
+        ..writeln()
+        ..writeln('知识库解法：$solution');
+    } else {
+      report
+        ..writeln()
+        ..writeln('知识库解法：（未匹配到，等开发者看日志定位）');
+    }
+    await _showBugReportDialog(report.toString(), solution);
+    return _ToolResult(true, '已生成 bug 报告弹窗（她可以一键复制发给开发者）');
+  }
+
+  /// bug 报告弹窗：可选中文本 + 一键复制按钮
+  Future<void> _showBugReportDialog(String report, String? solution) async {
+    if (!mounted) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Text('🐛 '),
+            Text('男主发现了一个问题', style: TextStyle(fontSize: 17)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (solution != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF7EAF1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '💡 $solution',
+                    style: const TextStyle(fontSize: 13, height: 1.4),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              // 报告全文（可选中复制）
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFFC896B4).withValues(alpha: 0.2),
+                  ),
+                ),
+                child: SelectableText(
+                  report,
+                  style: const TextStyle(fontSize: 12, height: 1.5),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '👆 报告可长按选中复制；也可以直接点下面按钮一键复制，'
+                '粘贴发给开发者（龙虾）修。',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: const Color(0xFF8A7A80),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了', style: TextStyle(color: Color(0xFF8A7A80))),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: report));
+              if (ctx.mounted) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content: Text('✅ 报告已复制，粘贴发给龙虾就能修'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text('复制报告'),
+          ),
+        ],
+      ),
+    );
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
   /// 男主获准调取记忆 → 异步检索记忆库生成注入文本（按类别/条数）
   /// 21:02：记忆库存的是用户原文（可能含真实称呼）→ 注入前过假面层替换成代号
   /// 用户 8-03 01:52：用户指名道姓让男主调用工具（"调用recall_memory"等），
@@ -2478,6 +2800,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       'list_tools': '查看工具',
       'write_diary': '写日记',
       'query_diary': '查日记',
+      'notify_user': '弹消息',
+      'request_permission': '申请免审批',
+      'query_logs': '查日志',
+      'report_bug': '报bug',
     };
     final matched = known.keys.where(userText.contains).toList();
     if (matched.isEmpty) return null;

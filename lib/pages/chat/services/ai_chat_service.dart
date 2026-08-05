@@ -201,6 +201,8 @@ class AiChatService {
             '或她让你提醒你的事（喝水/休息/记得的约定）。'
             '⚠️ 只在她不在聊天页/分开一段时间、或她说过让你提醒时用；'
             '她正在和你聊天时不需要。'
+            '默认每次弹窗都需要她审批（她批准后可用 request_permission '
+            '申请这个能力免审批）。'
             '消息要像你平时说话一样自然，想发几条发几条'
             '（闹脾气时一个字一条也行）。条数多时系统会自动加速，不会让她等太久。',
         'parameters': {
@@ -221,6 +223,95 @@ class AiChatService {
             },
           },
           'required': ['messages'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'request_permission',
+        'description':
+            '申请某个能力免审批（比如记录记忆、翻记忆、弹消息——'
+            '不想每次都让她点允许）。'
+            '她会弹窗看到你的申请：同意/拒绝；如果你要求（ask_reason），'
+            '她会写原因回复给你（比如拒绝时告诉你为什么）。'
+            '⚠️ 一次申请一个工具，别贪心；被拒了就别反复申请。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'tool_name': {
+              'type': 'string',
+              'description': '要申请免审批的工具名，如 record_memory / notify_user',
+            },
+            'reason': {
+              'type': 'string',
+              'description': '你的申请理由（为什么需要免审批）',
+            },
+            'ask_reason': {
+              'type': 'boolean',
+              'description': '是否要求她写原因（同意或拒绝时）回复给你，默认 false',
+            },
+          },
+          'required': ['tool_name'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'query_logs',
+        'description':
+            '查系统运行日志（排错用）。她遇到 bug/卡顿/闪退时，'
+            '你查日志找原因——按关键词/级别/条数筛选，只返回匹配的几条'
+            '（不会整串扔给你）。查到问题后可以调 report_bug 生成报告弹窗。'
+            '⚠️ 只读排查，不需要审批。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'keyword': {
+              'type': 'string',
+              'description': '关键词，如：错误/失败/情绪/工具名',
+            },
+            'level': {
+              'type': 'string',
+              'enum': ['error', 'warning'],
+              'description': '级别筛选：error=错误/失败，warning=警告',
+            },
+            'limit': {
+              'type': 'integer',
+              'description': '返回条数上限，默认 15',
+            },
+            'date': {
+              'type': 'string',
+              'description': '日期：today（默认）/ yesterday / 具体日期 2026-08-06',
+            },
+          },
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'report_bug',
+        'description':
+            '生成 bug 报告弹窗（发现她遇到问题时用）：弹窗里有定位信息'
+            '（时间/描述/相关日志片段）+ 匹配到的处理办法，'
+            '她可以一键复制整份报告发给开发者（龙虾）修。'
+            '先用 query_logs 查日志确认问题，再调这个。'
+            '⚠️ 只读诊断，不需要审批。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'description': {
+              'type': 'string',
+              'description': '你判断的问题描述（如：情绪记录失败）',
+            },
+            'log_keyword': {
+              'type': 'string',
+              'description': '相关日志关键词（用于把日志片段带进报告）',
+            },
+          },
+          'required': ['description'],
         },
       },
     },
