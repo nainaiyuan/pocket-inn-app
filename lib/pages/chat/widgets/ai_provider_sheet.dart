@@ -610,9 +610,12 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
                   ),
                 // 8-05 21:36 用户：假窗口满·手动触发总结（验证后拆）——
                 // 假装上下文满了，走一遍总结流程（C + 对话 + 当前管家指令
-                // + save_summary），不用真的聊到窗口满
-                if (widget.onForceSummarize != null &&
-                    AIProviderManager.testModeEnabled)
+                // + save_summary），不用真的聊到窗口满。
+                // 8-05 22:07 用户：按钮不能只限测试模式——要拿**真实 AI**
+                // 测总结（注入消息到真实对话）。平时测试/真实隔离的设计
+                // 保留，但用户主动要求真实测 → 按钮两种模式都显示，
+                // 真实模式由聊天页确认框把关（会真动当前对话）。
+                if (widget.onForceSummarize != null)
                   FilledButton.tonalIcon(
                     onPressed: () {
                       final navigator = Navigator.of(context);
@@ -621,7 +624,9 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
                       unawaited(cb());
                     },
                     icon: const Icon(Icons.compress, size: 18),
-                    label: const Text('🧪 假窗口满·手动总结'),
+                    label: Text(AIProviderManager.testModeEnabled
+                        ? '🧪 假窗口满·手动总结'
+                        : '假窗口满·手动总结'),
                   ),
                 FilledButton.tonalIcon(
                   onPressed: () {

@@ -936,16 +936,45 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   /// 8-05 21:36 用户：假窗口满·手动触发总结（验证后拆）——
-  /// 对当前测试对话直接跑一遍总结流程，假装上下文满了。
+  /// 对当前对话直接跑一遍总结流程，假装上下文满了。
   /// 对话显示在聊天框（走真实 generateReply 路径，可看 📄 结构）。
+  /// 8-05 22:07 用户：要拿真实 AI 测总结 → 按钮两种模式都显示，
+  /// 这里用确认框把关：真实模式会真动当前对话（原文→摘要）。
   Future<void> _forceSummarizeNow() async {
     final lid = _state.leadId;
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
     if (lid == null) return;
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
-    final chatPid = _isCurrentMockChat()
+    final isMock = _isCurrentMockChat();
+    final chatPid = isMock
         ? '${personaId}${AIProviderManager.mockTestSuffix}'
         : personaId;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('假窗口满·手动总结'),
+        content: Text(isMock
+            ? '将对【测试 AI】的当前对话执行总结：
+原文压缩成摘要、摘要区新增条目、管家历史清空。
+继续？'
+            : '将对【真实 AI】的当前对话执行总结：
+原文压缩成摘要、摘要区新增条目、管家历史清空。
+'
+                '这是真实数据，总结后原文不可恢复。
+继续？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            child: const Text('执行总结'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
     if (mounted) {
       setState(() => _acceptanceNote = '🧪 假窗口满·手动总结进行中…');
     }
