@@ -143,14 +143,53 @@ class AIProviderManager {
   /// 全部 provider（含内置测试AI），按优先级排序
   List<AIProviderConfig> _allProviders() {
     final list = _sorted();
-    // 8-04 20:39（用户：多内置几个）：5 个固定形态变体全部在列
-    // （聊天页切换器可见可切换；配置页渲染时排除、走专属卡片）
-    for (final v in builtinMockVariants) {
-      if (!list.any((c) => c.id == v.id)) {
-        list.add(v.id == builtinMockId ? _builtinMockConfig : v);
+    // 8-05 14:28（用户："平时就关掉，页面上不要把测试的放到哪里都是"）：
+    // 模拟 AI 平时隐藏，测试模式开才进列表（聊天页可选）
+    if (_testModeEnabled) {
+      // 8-04 20:39（用户：多内置几个）：5 个固定形态变体全部在列
+      // （聊天页切换器可见可切换；配置页渲染时排除、走专属卡片）
+      for (final v in builtinMockVariants) {
+        if (!list.any((c) => c.id == v.id)) {
+          list.add(v.id == builtinMockId ? _builtinMockConfig : v);
+        }
       }
     }
     return list;
+  }
+
+  /// 测试模式（8-05 14:28 用户："各种测 bug 的放到测 bug 的那里…
+  /// 平时就关掉，页面上不要把测试的放到哪里都是"）。
+  /// 默认关：mock 不注册路由、不进任何列表、聊天页不可见；
+  /// 开：mock 恢复注册（聊天页可选 + 一键验收可用）。
+  static bool _testModeEnabled = false;
+  static bool get testModeEnabled => _testModeEnabled;
+
+  static void setTestModeEnabled(bool value) {
+    if (_testModeEnabled == value) return;
+    _testModeEnabled = value;
+    final manager = instance;
+    manager._syncRouter();
+    // 关掉测试模式时，清掉指向 mock 的"上次使用"记录：
+    // 否则聊天顶栏显示"没有可用 AI"、发送时路由也找不到 mock
+    if (!value) {
+      manager._clearMockLastProviders();
+    }
+    manager.changeNotifier.value++;
+    AiModuleLog.log(
+      'AI探测',
+      value ? '🧪 测试模式：开（模拟 AI 可选）' : '🧪 测试模式：关（模拟 AI 隐藏）',
+    );
+  }
+
+  /// 清掉所有指向 mock 的 lastProvider 记录（测试模式关闭时调用）
+  void _clearMockLastProviders() {
+    for (final entry in _personaSettings.entries) {
+      final id = entry.value.lastProviderId;
+      if (id != null && _mockInstances.containsKey(id)) {
+        _personaSettings[entry.key] =
+            entry.value.copyWith(clearLastProvider: true);
+      }
+    }
   }
 
   static final AIProviderManager instance = AIProviderManager._();
@@ -243,11 +282,18 @@ class AIProviderManager {
     // 选中"🧪 测试AI（内置）"后发消息会被"没有可用 Provider"拦截
     // （用户 8-03 21:12 反馈：测试AI被检测API拦住了，就是这个原因）
     // 8-04 20:39（用户：多内置几个）：5 个固定形态变体全部注册
-    for (final v in builtinMockVariants) {
-      _router.register(v);
+    // 8-05 14:28（用户：平时关掉）：测试模式开才注册，关则不注册
+    if (_testModeEnabled) {
+      for (final v in builtinMockVariants) {
+        _router.register(v);
+      }
+      // 主实例配置（配置页手动改的 memoryMode/refreshHours）覆盖内置形态
+      _router.stateOf(builtinMockId)?.config = _builtinMockConfig;
+    } else {
+      for (final v in builtinMockVariants) {
+        _router.unregister(v.id);
+      }
     }
-    // 主实例配置（配置页手动改的 memoryMode/refreshHours）覆盖内置形态
-    _router.stateOf(builtinMockId)?.config = _builtinMockConfig;
   }
 
   /// 一次性迁移：把旧版「API 设置」（api_configs）里选中的配置

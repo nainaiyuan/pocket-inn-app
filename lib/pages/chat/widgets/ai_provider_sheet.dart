@@ -484,7 +484,10 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
               children: [
                 // 8-04 21:1x 用户：一键验收——自动切 5 个模拟 AI 跑真实对话，
                 // 对话显示在聊天框，工具弹窗正常弹（点允许写/允许查即可）。
-                if (widget.onAcceptance != null)
+                // 8-05 14:28 用户：测试模式关 → 不显示验收按钮
+                // （模拟 AI 平时隐藏，一键验收是测 bug 工具）
+                if (widget.onAcceptance != null &&
+                    AIProviderManager.testModeEnabled)
                   FilledButton.icon(
                     onPressed: () {
                       final navigator = Navigator.of(context);

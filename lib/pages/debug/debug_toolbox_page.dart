@@ -7,6 +7,7 @@ import '../butler/butler_skill_library_page.dart';
 import '../chat/gesture_test_page.dart';
 import '../chat/widgets/debug_log_sheet.dart';
 import 'chat_storage_self_test_page.dart';
+import 'mock_ai_test_page.dart';
 
 /// 🧰 调试工具箱 —— 所有"测 bug 工具"的集中入口（2026-08-04 用户要求）。
 ///
@@ -32,6 +33,13 @@ class DebugToolboxPage extends StatelessWidget {
               title: 'AI 管理',
               subtitle: '配置 / 测试连接 / 能力探测（工具·思考链·流式）',
               page: const AiConfigPage(),
+            ),
+            _Entry(
+              icon: Icons.science,
+              iconColor: const Color(0xFF7C9FD8),
+              title: '模拟 AI 测试',
+              subtitle: '测试模式开关 + 5 个固定形态模拟 AI（平时隐藏，测试时打开）',
+              page: const MockAiTestPage(),
             ),
             _Entry(
               icon: Icons.dns,
