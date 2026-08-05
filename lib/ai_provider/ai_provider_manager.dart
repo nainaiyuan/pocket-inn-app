@@ -10,6 +10,7 @@
 /// 持久化用 shared_preferences（JSON），重启不丢配置。
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -174,6 +175,14 @@ class AIProviderManager {
     if (!value) {
       manager._clearMockLastProviders();
     }
+    // 8-05 17:04 用户（彻底隔离）：测试模式开 = 真实 AI 功能全部关掉
+    // （自动，不用用户手动）；测试模式关 = 自动恢复用户之前配置。
+    // 任何入口（弹层开关/横幅退出）都走这里 → 天然自动。
+    if (value) {
+      manager._isolateRealProviders();
+    } else {
+      manager._restoreRealProviders();
+    }
     manager.changeNotifier.value++;
     AiModuleLog.log(
       'AI探测',
@@ -280,6 +289,8 @@ class AIProviderManager {
         ..clear()
         ..addAll(_decodePersonaSettings(prefs.getString(_storageKeyPersonaSettings)));
       _syncRouter();
+      // 8-05 17:04：上次异常退出可能留下"真实 AI 已禁用"残留 → 自动恢复
+      unawaited(_recoverRealSnapshotIfAny());
       _initialized = true;
       AiModuleLog.log(
         'AI管理',
@@ -419,7 +430,10 @@ class AIProviderManager {
     // 用户/验收切了具体 mock 变体则返回该变体，否则默认主实例。
     if (_testModeEnabled) {
       final own = _personaSettings[_settingsKey(personaId)]?.lastProviderId;
-      if (own != null && own.isNotEmpty && _mockChoiceUsable(own)) {
+      // 8-05 17:04 修正：16:52 用 _mockChoiceUsable 判断（非 mock id 恒 true）
+      // → own=deepseek 直接返回，修复根本没生效（用户实测第一句就露馅）。
+      // own 必须是 mock 变体才返回，否则强制 mock 主实例。
+      if (own != null && own.isNotEmpty && isMockId(own)) {
         return own;
       }
       return builtinMockVariants.first.id;
@@ -442,6 +456,66 @@ class AIProviderManager {
   /// 顶栏 badge 显示"未配置"。这里把它视为无效选择 → 回退到真实候选。
   bool _mockChoiceUsable(String id) =>
       !_mockInstances.containsKey(id) || _testModeEnabled;
+
+  // ---------------------------------------------------------------------------
+  // 测试模式 = 真实 AI 彻底隔离（8-05 17:04 用户）
+  // ---------------------------------------------------------------------------
+  static const _storageKeyRealSnapshot = 'ai_provider_real_enabled_snapshot';
+  final Map<String, bool> _realEnabledSnapshot = {};
+
+  /// 测试模式开：把真实 AI 全部临时禁用（功能关掉），快照持久化——
+  /// app 被杀/重启后 initialize 检测残留快照自动恢复，真实 AI 不会永久禁用。
+  void _isolateRealProviders() {
+    _realEnabledSnapshot.clear();
+    for (final config in _allProviders()) {
+      if (!_isMockId(config.id) && config.enabled) {
+        _realEnabledSnapshot[config.id] = true;
+        unawaited(_update(config.id, (c) => c.copyWith(enabled: false)));
+      }
+    }
+    unawaited(_persistRealSnapshot());
+    AiModuleLog.log('AI隔离', '🧪 测试模式开：真实 AI 已全部临时禁用');
+  }
+
+  /// 测试模式关：按快照恢复真实 AI（用户之前的选择，绝不改动没勾的）。
+  void _restoreRealProviders() {
+    if (_realEnabledSnapshot.isEmpty) return;
+    final snapshot = Map.of(_realEnabledSnapshot);
+    _realEnabledSnapshot.clear();
+    for (final entry in snapshot.entries) {
+      unawaited(_update(entry.key, (c) => c.copyWith(enabled: entry.value)));
+    }
+    unawaited(_clearRealSnapshot());
+    AiModuleLog.log('AI隔离', '🧪 测试模式关：真实 AI 已恢复用户之前配置');
+  }
+
+  Future<void> _persistRealSnapshot() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        _storageKeyRealSnapshot, jsonEncode(_realEnabledSnapshot));
+  }
+
+  Future<void> _clearRealSnapshot() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_storageKeyRealSnapshot);
+  }
+
+  /// app 启动：上次异常退出可能留下"真实 AI 已禁用"的残留 → 自动恢复。
+  Future<void> _recoverRealSnapshotIfAny() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_storageKeyRealSnapshot);
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      for (final e in map.entries) {
+        if (e.value == true) {
+          unawaited(_update(e.key, (c) => c.copyWith(enabled: true)));
+        }
+      }
+    } catch (_) {}
+    await prefs.remove(_storageKeyRealSnapshot);
+    AiModuleLog.log('AI隔离', '♻️ 检测到测试模式残留快照，真实 AI 已自动恢复');
+  }
 
   /// 测试对话专用绑定：mock 强制最前，真实 AI 排后。
   /// 兜底：即使真实组没清空（用户漏关），测试对话也永不花真实额度。
