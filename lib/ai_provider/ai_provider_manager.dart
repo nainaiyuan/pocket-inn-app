@@ -192,6 +192,11 @@ class AIProviderManager {
     }
   }
 
+  /// 内置模拟 AI 判定（8-05 14:32 用户：测试对话必须与真实数据隔离）。
+  /// 聊天/落库/管家分析处用它判断"当前是不是测试对话"。
+  static bool isMockId(String id) =>
+      id == builtinMockId || id.startsWith('builtin-mock');
+
   static final AIProviderManager instance = AIProviderManager._();
 
   static const String _storageKey = 'ai_provider_config_v1';

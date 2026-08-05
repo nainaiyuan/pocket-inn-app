@@ -275,6 +275,11 @@ class AiChatService {
       );
       throw const AIAllProvidersFailedException();
     }
+    // 8-05 14:32 用户：测试对话与真实数据隔离——模拟 AI 聊天时
+    // 跳过所有"会落盘"的上下文管理（总结/压缩/恢复包/沉淀），
+    // 只保留内存态 feed（测试上下文连续，重启自动清空，不碰真实数据）
+    final isMockChat =
+        AIProviderManager.isMockId(manager.lastProviderFor(personaId) ?? '');
     // 上下文管理：非工具轮先处理"该总结了/该缩减了"（男主总结 → 摘要区）
     // 用户 21:19：两种 AI 分开——
     //   stateless（后台无记忆，DeepSeek 等）：缓存友好 + 攒够摘要提炼（现有逻辑）
@@ -291,7 +296,9 @@ class AiChatService {
     // 新角色没写人设（prompt 空）→ 整个上下文管理块跳过 → 总结/沉淀
     // 永不触发。总结/沉淀是管家职责，不该被人设是否为空卡死
     // （人设空只影响 system 组装，不影响 needsSummarize/沉淀判断）
-    if (!toolRound) {
+    // 8-05 14:32：mock 测试对话跳过整个决策块（定时沉淀/补沉淀/压缩/总结
+    // 全会写盘——测试数据不碰真实摘要和恢复包）
+    if (!toolRound && !isMockChat) {
       if (decision.stateful) {
         // 用户发消息 → 重置定时沉淀（新一轮空闲期）
         scheduleStatefulSettle(personaId, personaName, personaPrompt);
@@ -327,7 +334,8 @@ class AiChatService {
     // 会把当前消息混进【上下文参考】，模型看到两条相同消息分不清哪条要回复）
     // 首次请求：恢复摘要区（不重建历史原文——历史=本次对话实时记录，
     // DB 里是原始/还原后文本，硬拉会泄露真实称呼，用户 20:08 指示）
-    if (!_contextRestored.contains(personaId)) {
+    // 8-05 14:32：mock 测试对话跳过（不读真实摘要，从空上下文开始）
+    if (!_contextRestored.contains(personaId) && !isMockChat) {
       _contextRestored.add(personaId);
       await ContextManager.instance.restore(personaId, sessionId, modelHint: _modelHintFor(personaId));
     }

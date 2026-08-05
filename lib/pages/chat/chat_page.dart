@@ -255,6 +255,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     HapticFeedback.lightImpact();
   }
 
+  /// 8-05 14:32：当前聊天用的 AI 是不是内置模拟 AI（测试对话判定）
+  bool _isCurrentMockChat() {
+    final pid = _state.personaId;
+    if (pid == null || pid.isEmpty) return false;
+    return AIProviderManager.isMockId(
+        AIProviderManager.instance.lastProviderFor(pid) ?? '');
+  }
+
   Future<void> _sendMsg(String t) async {
     // 8-03 18:2x（用户反馈"男主说完话再说话他不理人"）：生成锁——
     // 男主生成中（含工具轮）新消息直接忽略并提示，防并发上下文混乱
@@ -276,6 +284,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final lid = _state.leadId;
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
+    // 8-05 14:32 用户：测试对话与真实数据隔离——模拟 AI 聊天：
+    // 不建会话、不落库、不走管家管线（情绪/记忆/技能）、不写日记；
+    // 只显示在界面上，退出聊天页即消失（= 自动删）
+    final isMockChat = AIProviderManager.isMockId(
+        AIProviderManager.instance.lastProviderFor(personaId) ?? '');
     // 男主正在被调用（同一男主连续对话 → 上下文延续）
     if (personaId.isNotEmpty) {
       ContextTracker.instance.touch(personaId);
@@ -284,17 +297,21 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     ChatPresence.instance.markUnread(userMsgId);
     ChatPresence.instance.setTyping(true);
     // 管家对话记录：隐式会话 + 消息落库（记忆提取的数据源）
-    await _ensureChatSession(personaId, personaName);
-    if (_chatSessionId != null) {
-      try {
-        final userNode = await ChatDatabaseService.instance.appendUserMessage(
-          sessionId: _chatSessionId!,
-          parentMessageId: _chatLeafId,
-          text: t,
-        );
-        _chatLeafId = userNode.id;
-      } catch (e) {
-        DebugLogger.log('管家流程', '✖ 对话落库失败（用户消息）: $e');
+    // mock 测试对话不建会话（_chatSessionId 保持 null →
+    // 后续所有记忆写入/落库自动跳过）
+    if (!isMockChat) {
+      await _ensureChatSession(personaId, personaName);
+      if (_chatSessionId != null) {
+        try {
+          final userNode = await ChatDatabaseService.instance.appendUserMessage(
+            sessionId: _chatSessionId!,
+            parentMessageId: _chatLeafId,
+            text: t,
+          );
+          _chatLeafId = userNode.id;
+        } catch (e) {
+          DebugLogger.log('管家流程', '✖ 对话落库失败（用户消息）: $e');
+        }
       }
     }
     try {
@@ -302,20 +319,25 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       String sendText = t;
       String? skillInjection;
       String? keywordAsk;
-      try {
-        final pipeline = await ChatService.instance.runButlerPipeline(
-          userText: t,
-          characterId: personaId,
-          characterName: personaName,
-          // 37批：传真实会话 id → 每次新对话重新轮换代号（男主无法把代号绑定到人）
-          sessionId: _chatSessionId ?? 'chat_page',
-        );
-        sendText = pipeline.maskedText;
-        skillInjection = pipeline.skillInjection;
-        keywordAsk = pipeline.keywordAsk;
-      } catch (e) {
-        // 管家失败不阻断聊天，只记日志
-        DebugLogger.log('管家流程', '✖ 管家管线异常（不阻断聊天）: $e');
+      if (isMockChat) {
+        // 测试对话不跑管家管线（情绪/记忆/技能不记录，不污染用户画像）
+        DebugLogger.log('管家流程', '🧪 测试对话：跳过管家管线（技能/假面/情绪）');
+      } else {
+        try {
+          final pipeline = await ChatService.instance.runButlerPipeline(
+            userText: t,
+            characterId: personaId,
+            characterName: personaName,
+            // 37批：传真实会话 id → 每次新对话重新轮换代号（男主无法把代号绑定到人）
+            sessionId: _chatSessionId ?? 'chat_page',
+          );
+          sendText = pipeline.maskedText;
+          skillInjection = pipeline.skillInjection;
+          keywordAsk = pipeline.keywordAsk;
+        } catch (e) {
+          // 管家失败不阻断聊天，只记日志
+          DebugLogger.log('管家流程', '✖ 管家管线异常（不阻断聊天）: $e');
+        }
       }
       // 获准记忆注入（异步检索记忆库，按类别/条数）
       final recallInjection = _pendingRecall != null
@@ -754,7 +776,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 用户消息含结束信号（睡了/晚安/睡觉/拜拜…）→ 男主写完回复后，
       // 管家把当天对话原文交给男主写当天日记（异步，不打断用户）。
       // 21:13：同时记录"平均结束聊时间"（用户一般聊到几点睡）。
-      if (personaId.isNotEmpty && _isEndOfDaySignal(t)) {
+      // 8-05 14:32：mock 测试对话不写日记
+      if (personaId.isNotEmpty && !isMockChat && _isEndOfDaySignal(t)) {
         unawaited(_recordChatEnd());
         unawaited(_writeDailyDiary(personaId, personaName));
       }
@@ -1095,9 +1118,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                             ),
                           ),
                         // 消息列表在背景之上
+                        // 8-05 14:32：mock 测试对话只显示不落库（persist=false）
                         ChatMessageArea(key: _msgKey, currentPersona: _state.persona,
                           characterAvatarPath: _state.effectiveAvatarPath,
                           onAvatarTap: _openWorld,
+                          persist: !_isCurrentMockChat(),
                           ),
                       ],
                     ),
@@ -1462,7 +1487,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       area.appendMessage(msg, insertBeforeId: _firstAiMsgId);
     } else {
       // 聊天页没挂载（切走/后台）→ 只落库，回来从 DB 加载能看到
-      ChatStorageService().appendMessage(personaId, msg);
+      // 8-05 14:32：mock 测试对话不落库（测试数据自动消失）
+      final isMock = AIProviderManager.isMockId(
+          AIProviderManager.instance.lastProviderFor(personaId) ?? '');
+      if (!isMock) {
+        ChatStorageService().appendMessage(personaId, msg);
+      }
     }
   }
 
@@ -1995,7 +2025,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     // 8-03 22:0x（用户实测：点"让他记住"弹两个确认窗）：
     // 工具轮 485 行 _approveToolCall 已确认过 → 这里 #记# 时代遗留的
     // 老弹窗（💌 男主想记住这个）造成双重确认 → 移除，直接执行
-    if (_chatSessionId == null) {
+    // 8-05 14:32：mock 测试对话不建会话（测试数据不写记忆库）
+    if (_chatSessionId == null && !_isCurrentMockChat()) {
       await _ensureChatSession(_state.personaId ?? '', '');
     }
     if (_chatSessionId != null) {
@@ -2024,7 +2055,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   Future<_ToolResult> _executeRecallTool(String query, String category) async {
     try {
       // 用户 8-03 05:53：会话未建时直接说"暂无记忆"容易误判 → 先补建会话再查
-      if (_chatSessionId == null) {
+      // 8-05 14:32：mock 测试对话不建会话（测试环境查不到真实记忆）
+      if (_chatSessionId == null && !_isCurrentMockChat()) {
         await _ensureChatSession(_state.personaId ?? '', '');
       }
       final sessionId = _chatSessionId;

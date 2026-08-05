@@ -11,11 +11,16 @@ class ChatMessageArea extends StatefulWidget {
   final String? characterAvatarPath;
   final VoidCallback? onAvatarTap;
 
+  /// 8-05 14:32（用户：测试数据与真实数据隔离）：false = 只显示不落库
+  /// （mock 测试对话用——退出聊天页自动消失）
+  final bool persist;
+
   const ChatMessageArea({
     super.key,
     required this.currentPersona,
     this.characterAvatarPath,
     this.onAvatarTap,
+    this.persist = true,
   });
 
   @override
@@ -98,6 +103,11 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
         _messages.add(msg);
       }
     });
+    // 8-05 14:32：mock 测试对话只显示不落库（widget.persist = false）
+    if (!widget.persist) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+      return;
+    }
     if (insertBeforeId != null) {
       _storage.insertMessageBefore(
         widget.currentPersona!.id,
