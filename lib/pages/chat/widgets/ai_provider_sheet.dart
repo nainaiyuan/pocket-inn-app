@@ -23,6 +23,9 @@ Future<void> showAiProviderSheet({
   /// 8-04 21:1x 用户：一键验收 → 自动切换各模拟 AI 跑真实对话。
   /// 点「🚀 一键验收」→ 关弹层 → 回调聊天页跑验收流程（对话显示在聊天框）。
   Future<void> Function()? onAcceptance,
+  /// 8-05 21:36 用户：假窗口满·手动触发总结（验证后拆）。
+  /// 点「🧪 假窗口满」→ 关弹层 → 回调聊天页直接跑一遍总结流程。
+  Future<void> Function()? onForceSummarize,
 }) {
   final manager = AIProviderManager.instance;
   return showModalBottomSheet<void>(
@@ -42,6 +45,7 @@ Future<void> showAiProviderSheet({
               colorScheme: colorScheme,
               maxHeight: screenHeight * 0.72,
               onAcceptance: onAcceptance,
+              onForceSummarize: onForceSummarize,
             );
           },
         ),
@@ -57,6 +61,7 @@ class _AiProviderSheetBody extends StatefulWidget {
     required this.colorScheme,
     required this.maxHeight,
     this.onAcceptance,
+    this.onForceSummarize,
   });
 
   final String personaId;
@@ -64,6 +69,7 @@ class _AiProviderSheetBody extends StatefulWidget {
   final ColorScheme colorScheme;
   final double maxHeight;
   final Future<void> Function()? onAcceptance;
+  final Future<void> Function()? onForceSummarize;
 
   @override
   State<_AiProviderSheetBody> createState() => _AiProviderSheetBodyState();
@@ -601,6 +607,21 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
                     ),
                     icon: const Icon(Icons.rocket_launch, size: 18),
                     label: const Text('🚀 一键验收'),
+                  ),
+                // 8-05 21:36 用户：假窗口满·手动触发总结（验证后拆）——
+                // 假装上下文满了，走一遍总结流程（C + 对话 + 当前管家指令
+                // + save_summary），不用真的聊到窗口满
+                if (widget.onForceSummarize != null &&
+                    AIProviderManager.testModeEnabled)
+                  FilledButton.tonalIcon(
+                    onPressed: () {
+                      final navigator = Navigator.of(context);
+                      final cb = widget.onForceSummarize!;
+                      navigator.pop();
+                      unawaited(cb());
+                    },
+                    icon: const Icon(Icons.compress, size: 18),
+                    label: const Text('🧪 假窗口满·手动总结'),
                   ),
                 FilledButton.tonalIcon(
                   onPressed: () {

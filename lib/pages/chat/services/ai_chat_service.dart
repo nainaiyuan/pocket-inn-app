@@ -764,6 +764,22 @@ class AiChatService {
     _forceRecover.remove(personaId);
   }
 
+  /// 8-05 21:36 用户：假窗口满·手动触发总结（验证后拆）——
+  /// 假装上下文满了，直接走一遍总结流程（C 自动拼 + 本次要总结的对话
+  /// + 【当前管家】指令 + save_summary）。不用真的聊到窗口满。
+  Future<void> forceSummarizeNow(
+    String ctxPid,
+    String personaName, {
+    String personaPrompt = '',
+    String? userProfile,
+    String? taskState,
+  }) {
+    return _summarize(ctxPid, personaName,
+        personaPrompt: personaPrompt,
+        userProfile: userProfile,
+        taskState: taskState);
+  }
+
   ({bool stateful, bool idleExpired, bool switched, bool forceRecover,
           bool needRecover})
       assembleDecision(String personaId, {required bool toolRound}) {

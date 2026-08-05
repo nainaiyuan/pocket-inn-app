@@ -931,7 +931,34 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       personaId: personaId,
       personaName: personaName,
       onAcceptance: _runAcceptance,
+      onForceSummarize: _forceSummarizeNow,
     );
+  }
+
+  /// 8-05 21:36 用户：假窗口满·手动触发总结（验证后拆）——
+  /// 对当前测试对话直接跑一遍总结流程，假装上下文满了。
+  /// 对话显示在聊天框（走真实 generateReply 路径，可看 📄 结构）。
+  Future<void> _forceSummarizeNow() async {
+    final lid = _state.leadId;
+    final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
+    if (lid == null) return;
+    final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
+    final chatPid = _isCurrentMockChat()
+        ? '${personaId}${AIProviderManager.mockTestSuffix}'
+        : personaId;
+    if (mounted) {
+      setState(() => _acceptanceNote = '🧪 假窗口满·手动总结进行中…');
+    }
+    // 总结是管家主动行为：C（带人设）+ 原文 + 【当前管家】指令。
+    // userProfile/taskState 是"当前用户消息"的注入，总结不需要。
+    await _aiSvc.forceSummarizeNow(
+      chatPid,
+      personaName,
+      personaPrompt: _currentPersonaPrompt(),
+    );
+    if (mounted) {
+      setState(() => _acceptanceNote = '✅ 手动总结完成（摘要区+原文已更新）');
+    }
   }
 
 
