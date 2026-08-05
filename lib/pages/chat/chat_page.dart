@@ -290,7 +290,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     // 聊天页 UI 仍显示真实 persona（头像/名字/人设不变）
     final isMockChat = AIProviderManager.isMockId(
         AIProviderManager.instance.lastProviderFor(personaId) ?? '');
-    final chatPid = isMockChat ? '${personaId}__mock__test' : personaId;
+    final chatPid = isMockChat ? '${personaId}${AIProviderManager.mockTestSuffix}' : personaId;
     // 会话空间切换（真实 ↔ 测试）：旧会话作废，重新建对应空间的
     if (_chatSessionId != null && _chatSessionIsMock != isMockChat) {
       DebugLogger.log('管家流程', '🧪 会话空间切换（测试↔真实），旧会话作废');
@@ -1132,7 +1132,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                           characterAvatarPath: _state.effectiveAvatarPath,
                           onAvatarTap: _openWorld,
                           storagePersonaId: _isCurrentMockChat()
-                              ? '${_state.personaId}__mock__test'
+                              ? '${_state.personaId}${AIProviderManager.mockTestSuffix}'
                               : null,
                           ),
                       ],
@@ -1506,7 +1506,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       final isMock = AIProviderManager.isMockId(
           AIProviderManager.instance.lastProviderFor(personaId) ?? '');
       ChatStorageService()
-          .appendMessage(isMock ? '${personaId}__mock__test' : personaId, msg);
+          .appendMessage(isMock ? '${personaId}${AIProviderManager.mockTestSuffix}' : personaId, msg);
     }
   }
 

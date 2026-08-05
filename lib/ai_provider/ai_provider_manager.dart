@@ -206,6 +206,20 @@ class AIProviderManager {
   /// 全局默认的 key（'' 表示全局）。
   static const String globalPersonaId = '';
 
+  /// 8-05 14:5x（用户：测试 AI 和真实 AI 走一个通道但必须隔离）：
+  /// 测试空间 key = ${真实personaId}__mock__test。provider 解析时剥掉后缀
+  /// → 继承真实 persona 的绑定/选择（测试模式下真实 persona 选的是 mock），
+  /// 沉淀/总结等主动调 AI 也走 mock，绝不落到真实 API 花额度；
+  /// 数据写入层（ContextManager/DB）仍用完整测试 key → 数据隔离。
+  static const String mockTestSuffix = '__mock__test';
+
+  String _stripMockTestSuffix(String? personaId) {
+    if (personaId != null && personaId.endsWith(mockTestSuffix)) {
+      return personaId.substring(0, personaId.length - mockTestSuffix.length);
+    }
+    return personaId ?? '';
+  }
+
   /// 自定义槽位的固定 id，全项目只允许一个。
   static const String customProviderId = 'custom';
 
@@ -645,6 +659,9 @@ class AIProviderManager {
     ChatCompletionCancelToken? cancellationToken,
   }) async {
     try {
+      // 8-05 14:5x：测试空间 key → 继承真实 persona 的 provider（测试时=mock），
+      // 沉淀/总结等主动调 AI 不落到真实 API
+      personaId = _stripMockTestSuffix(personaId);
       final result = await _router.executeWithFailover(
         personaId: personaId,
         bindings: _bindings,
@@ -791,6 +808,8 @@ class AIProviderManager {
     String? personaId, {
     AICapability capability = AICapability.chat,
   }) {
+    // 8-05 14:5x：测试空间 key 继承真实 persona 的 provider
+    personaId = _stripMockTestSuffix(personaId);
     return _router
         .resolve(personaId: personaId, capability: capability, bindings: _bindings)
         .isNotEmpty;
@@ -1231,8 +1250,12 @@ class AIProviderManager {
     changeNotifier.value++;
   }
 
-  String _settingsKey(String? personaId) =>
-      (personaId == null || personaId.isEmpty) ? globalPersonaId : personaId;
+  String _settingsKey(String? personaId) {
+    // 8-05 14:5x：测试空间 key 剥掉 __mock__test 后缀 →
+    // 继承真实 persona 的设置（provider 选择/自动切换/绑定）
+    final pid = _stripMockTestSuffix(personaId);
+    return (pid.isEmpty) ? globalPersonaId : pid;
+  }
 
   /// 清掉"上次用的 Provider"（8-04 22:3x 验收⑤⑦⑧修复）：
   /// assembleDecision 的 stateful 判定读 lastProviderFor（上次用的），

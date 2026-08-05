@@ -281,13 +281,11 @@ class AiChatService {
     // 8-05 14:36 用户修正：测试对话 ≠ 关功能，而是用独立"测试空间"——
     // [storagePersonaId] 让上下文管理（摘要/压缩/恢复包/沉淀）全部落到
     // 测试 key（${真实persona}__mock__test），功能照常跑、数据不混。
-    // provider 绑定仍用真实 personaId（mock 全局注册，测试 key 也能解析到）。
+    // provider 解析：manager 层把测试 key 剥后缀 → 继承真实 persona 的
+    // provider 选择（测试模式下真实 persona 选的是 mock）→ 沉淀/总结等
+    // 主动调 AI 也走 mock，绝不落到真实 API 花额度（8-05 14:5x 用户：
+    // "走一个通道，但是这些都是隔离的呀"——通道按 key 隔离，数据也按 key 隔离）
     final ctxPid = storagePersonaId ?? personaId;
-    // mock 测试对话跳过 stateful 沉淀（沉淀会主动调 AI 写存档，
-    // 测试时可能解析到真实 DeepSeek，白费 key 额度）；stateless 链路
-    // 总结/压缩照常跑（写测试空间，链路完整可测）
-    final isMockChat = AIProviderManager.isMockId(
-        manager.lastProviderFor(personaId) ?? '');
     // 上下文管理：非工具轮先处理"该总结了/该缩减了"（男主总结 → 摘要区）
     // 用户 21:19：两种 AI 分开——
     //   stateless（后台无记忆，DeepSeek 等）：缓存友好 + 攒够摘要提炼（现有逻辑）
@@ -298,16 +296,16 @@ class AiChatService {
     // 用户 21:52：要在记忆消失之前（超时一半）写，等超时到了 AI 全忘了
     // 8-04 20:39（用户：一键测试）：决策计算抽到 assembleDecision
     // （自检页直接调同一实现验证 stateless/stateful/切换/超时逻辑）
-    final decision = assembleDecision(personaId, toolRound: toolRound);
+    // 8-05 14:5x：测试对话也跑完整决策块（测的就是 stateless/stateful
+    // 全链路），但全部按 ctxPid（测试空间）读写
+    final decision = assembleDecision(ctxPid, toolRound: toolRound);
     var statefulRecover = decision.idleExpired;
     // 8-04 23:0x（验收⑤⑦根因）：原来条件带 personaPrompt.isNotEmpty——
     // 新角色没写人设（prompt 空）→ 整个上下文管理块跳过 → 总结/沉淀
     // 永不触发。总结/沉淀是管家职责，不该被人设是否为空卡死
     // （人设空只影响 system 组装，不影响 needsSummarize/沉淀判断）
-    // 8-05 14:32：mock 测试对话跳过整个决策块（定时沉淀/补沉淀/压缩/总结
-    // 全会写盘——测试数据不碰真实摘要和恢复包）
-    if (!toolRound && !isMockChat) {
-      if (decision.stateful && !isMockChat) {
+    if (!toolRound) {
+      if (decision.stateful) {
         // 用户发消息 → 重置定时沉淀（新一轮空闲期）
         scheduleStatefulSettle(ctxPid, personaName, personaPrompt);
         if (statefulRecover) {
@@ -320,12 +318,12 @@ class AiChatService {
         await _maybeSettleStateful(ctxPid, personaName);
       } else {
         if (ContextManager.instance.needsCompact(ctxPid, modelHint: _modelHintFor(personaId))) {
-          await _compactSummaries(personaId, personaName);
+          await _compactSummaries(ctxPid, personaName);
         }
         // 8-04 22:5x（验收⑤排查）：needsSummarize 输入输出打日志——
         // 决策 stateful=false 但"✂️"没出现时，直接看这里为什么 false
         final _needSum = ContextManager.instance
-            .needsSummarize(personaId, modelHint: _modelHintFor(personaId));
+            .needsSummarize(ctxPid, modelHint: _modelHintFor(personaId));
         DebugLogger.log(
             'AI验收',
             '⑤needsSummarize: 话题=${ContextManager.instance.debugTopicExists(ctxPid)}'
@@ -333,7 +331,7 @@ class AiChatService {
             ' 预算=${ContextManager.instance.topicBudgetChars(ctxPid, modelHint: _modelHintFor(personaId))}字'
             ' → $_needSum');
         if (_needSum) {
-          await _summarize(personaId, personaName);
+          await _summarize(ctxPid, personaName);
         }
       }
     }
@@ -342,7 +340,7 @@ class AiChatService {
     // 会把当前消息混进【上下文参考】，模型看到两条相同消息分不清哪条要回复）
     // 首次请求：恢复摘要区（不重建历史原文——历史=本次对话实时记录，
     // DB 里是原始/还原后文本，硬拉会泄露真实称呼，用户 20:08 指示）
-    // 8-05 14:32：mock 测试对话跳过（不读真实摘要，从空上下文开始）
+    // 8-05 14:5x：测试对话也恢复（读测试空间的摘要，链路完整可测）
     if (!_contextRestored.contains(ctxPid)) {
       _contextRestored.add(ctxPid);
       await ContextManager.instance.restore(ctxPid, sessionId, modelHint: _modelHintFor(personaId));
@@ -815,6 +813,19 @@ class AiChatService {
   /// 沉淀成功后返回 true。
   Future<bool> _maybeSettleStateful(String personaId, String personaName) async {
     try {
+      // 8-05 14:5x（用户：测试 AI 也要能测沉淀）：测试空间照常沉淀，
+      // 但定时器触发时若用户已切回真实 AI（不再测试）→ 跳过——
+      // 测试数据不值得花真实 key 额度
+      if (personaId.endsWith(AIProviderManager.mockTestSuffix)) {
+        final realPid = personaId.substring(
+            0, personaId.length - AIProviderManager.mockTestSuffix.length);
+        final pid = AIProviderManager.instance.lastProviderFor(realPid);
+        if (!AIProviderManager.isMockId(pid ?? '')) {
+          DebugLogger.log(
+              '上下文管理', '🕵️ 测试沉淀跳过: 已切回真实 AI（$pid），不再测试');
+          return false;
+        }
+      }
       final info = _statefulInfoFor(personaId);
       if (!info.$1) {
         DebugLogger.log('上下文管理', '🕵️ 沉淀跳过: 非 stateful（info=$info）');
