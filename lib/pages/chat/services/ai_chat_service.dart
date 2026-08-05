@@ -758,13 +758,15 @@ class AiChatService {
   /// 下一轮强制全量（C + D1 刷新会话），发完清除。
   final Map<String, bool> _forceRecover = {};
 
-  ({bool stateful, bool idleExpired, bool switched, bool needRecover})
+  ({bool stateful, bool idleExpired, bool switched, bool forceRecover,
+          bool needRecover})
       assembleDecision(String personaId, {required bool toolRound}) {
     if (toolRound) {
       return (
         stateful: false,
         idleExpired: false,
         switched: false,
+        forceRecover: false,
         needRecover: false,
       );
     }
@@ -790,6 +792,7 @@ class AiChatService {
       stateful: stateful,
       idleExpired: idleExpired,
       switched: switched,
+      forceRecover: forceRecover,
       needRecover: idleExpired || switched || forceRecover,
     );
   }

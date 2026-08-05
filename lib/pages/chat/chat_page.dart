@@ -1714,8 +1714,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       await say('那你觉得蓝色和美式咖啡配吗？');
       d = svc.assembleDecision(testPid, toolRound: false);
       final dOk = d.stateful && !d.needRecover;
+      // 8-05 20:0x（④ 反复失败）：失败原因带完整决策值——
+      // switched/idleExpired/forceRecover 哪个 true 一目了然，直接定位
       record('④ stateful连续轻量', dOk,
-          dOk ? null : '连续使用还全量带——浪费 token（stateful=${d.stateful}）');
+          dOk ? null : '连续使用还全量带——浪费 token'
+              '(stateful=${d.stateful} switched=${d.switched} '
+              'idleExpired=${d.idleExpired} forceRecover=${d.forceRecover})');
       note('📋 ④ ${dOk ? '✓' : '✗'} 连续轻量=${!d.needRecover}');
 
       // ── ⑤ 切回 AI A（stateless）+ 调小窗口：token 满 → 男主总结 ──
