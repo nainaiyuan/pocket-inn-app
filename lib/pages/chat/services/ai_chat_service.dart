@@ -564,6 +564,17 @@ class AiChatService {
     // 【用户当前消息】保持在最后一条（AI 基于工具结果回复用户）。
     if (toolRound) {
       if (toolMessages != null) messages.addAll(toolMessages);
+      // 8-06 00:48 用户：工具轮男主"申请说一段话+执行后又说一段"很突兀，
+      // 分不清用户说的话/用户行为/管家的话 →
+      // 明确三类：工具结果=管家执行（非她发言）、确认框=她的行为（非发言）、
+      // 【当前用户消息】才是她说的；申请时说过的话不要重复
+      messages.add(AIChatMessage(
+        role: 'user',
+        content: '【系统提示】上面的工具结果和她的允许/拒绝都是"她的行为"'
+            '或"工具执行结果"，她没打字说话。你申请时说过的话不要重复，'
+            '现在简短自然地收尾或回应（一两句话）。'
+            '她真正说的话在最后的【用户当前消息】里。',
+      ));
       // 【当前管家】在工具调用下面（8-05 19:13 用户：管家查到的参考信息
       // 如心率/天气放这里，男主也要回复的）
       if (butlerInstruction != null && butlerInstruction.trim().isNotEmpty) {

@@ -201,7 +201,8 @@ class ContextManager {
     final t = _topics.putIfAbsent(personaId, TopicState.new);
     final mark = ok ? '✅成功' : '❌失败';
     t.raw.add(
-        '工具 [${_ts(DateTime.now())}]：$toolName $mark：$resultText');
+        // 8-06 00:48 用户：男主分不清三类输入 → 工具记录标注"非她发言"
+        '工具 [${_ts(DateTime.now())}]：$toolName $mark（非她发言）：$resultText');
     // 原文镜像落库（role='工具'，restore 重建时从 created_at 补时间戳）
     unawaited(ChatStorageService()
         .appendContextRaw(personaId, '工具', '$toolName $mark：$resultText'));
