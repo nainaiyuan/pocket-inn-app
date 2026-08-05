@@ -452,13 +452,15 @@ class AIProviderManager {
     ];
   }
 
-  /// 8-05 16:0x（用户：真实/测试 AI 分组一键开关）：开测试模式前，
-  /// 真实组勾选快照（per persona），关测试模式时恢复。
-  static final Map<String, List<String>> _realSnapshot = {};
-  static void saveRealSnapshot(String personaId, List<String> realIds) =>
-      _realSnapshot[personaId] = List.of(realIds);
-  static List<String>? takeRealSnapshot(String personaId) =>
-      _realSnapshot.remove(personaId);
+  /// 8-05 16:0x（用户：真实/测试 AI 分组一键开关）：开测试模式前的
+  /// 原绑定快照（per persona，null = 跟随全局）。关测试模式时原样恢复——
+  /// 用户可能故意不勾某些 AI，绝不能恢复成全选（16:19 用户强调）。
+  static final Map<String, List<String>?> _bindingSnapshot = {};
+  static void saveBindingSnapshot(String personaId, List<String>? binding) =>
+      _bindingSnapshot[personaId] =
+          binding == null ? null : List.of(binding);
+  static List<String>? takeBindingSnapshot(String personaId) =>
+      _bindingSnapshot.remove(personaId);
 
 
   /// 某男主的候选 Provider（勾选列表用）。

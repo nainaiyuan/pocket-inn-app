@@ -218,22 +218,13 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
   }
 
   /// 测试组总开关（= 测试模式）：
-  /// 开 → 记住真实组勾选、清空真实组、勾上全部 mock（测试只走模拟 AI）；
-  /// 关 → 恢复真实组勾选、模拟 AI 隐藏（测试模式关，页面干净）。
+  /// 开 → 记住该男主【原绑定】、临时改成只勾 mock（测试只走模拟 AI）；
+  /// 关 → 原样恢复原绑定（含"跟随全局"状态）——绝不恢复成全选
+  /// （16:19 用户：有的男主故意不勾某些 AI）。
   void _toggleTestGroup(bool v) {
     final pid = widget.personaId;
-    final candidates = [
-      for (final c in manager.candidatesFor(pid)) c.id,
-    ];
-    final realIds = [
-      for (final p in manager.providers)
-        if (p.enabled && !_isMockId(p.id)) p.id,
-    ];
     if (v) {
-      AIProviderManager.saveRealSnapshot(
-        pid,
-        [for (final id in candidates) if (realIds.contains(id)) id],
-      );
+      AIProviderManager.saveBindingSnapshot(pid, manager.bindingFor(pid));
       AIProviderManager.setTestModeEnabled(true);
       final mockIds = [
         for (final p in manager.providers)
@@ -244,10 +235,21 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
       }
     } else {
       AIProviderManager.setTestModeEnabled(false);
-      final snap = AIProviderManager.takeRealSnapshot(pid);
-      if (snap != null && snap.isNotEmpty) {
-        manager.setPersonaBinding(pid, snap);
-      } else if (snap != null) {
+      final snap = AIProviderManager.takeBindingSnapshot(pid);
+      if (snap != null) {
+        // 原绑定里可能有 mock（测试模式已关、mock 已注销）→ 过滤掉，
+        // 避免持久化脏数据；过滤后为空 → 原绑定本来就只有 mock → 跟随全局
+        final realSnap = [
+          for (final id in snap)
+            if (!_isMockId(id)) id,
+        ];
+        if (realSnap.isEmpty) {
+          manager.clearPersonaBinding(pid);
+        } else {
+          manager.setPersonaBinding(pid, realSnap);
+        }
+      } else {
+        // 原状态 = 跟随全局 → 恢复跟随全局
         manager.clearPersonaBinding(pid);
       }
     }
