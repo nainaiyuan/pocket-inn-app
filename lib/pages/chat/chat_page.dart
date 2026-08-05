@@ -1672,9 +1672,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
     try {
       // ── ① AI A（无记忆）：建立话题（短消息，不灌长文本）──
+      // 8-05 20:00（用户：编号 8 个检查只有 7 个，① 没检查点）：
+      // ① 补成检查点——话题建立 = 消息进了上下文原文
       await sw('builtin-mock', '①/⑧ AI A 无记忆·思考开 — 建立话题');
       note('📋 ① AI A：建立话题');
       await say('你好呀，我来验收啦。先记住：我喜欢蓝色，爱喝美式咖啡。');
+      final rawA = ctx.peekRaw(testPid);
+      final aOk = rawA.trim().isNotEmpty;
+      record('① AI A建立话题', aOk,
+          aOk ? null : '原文为空——用户消息没进上下文，后面全白搭');
+      note('📋 ① ${aOk ? '✓' : '✗'} 原文 ${rawA.length} 字');
 
       // ── ② 切 AI B（无记忆·思考关）：验证切换后上下文不丢 ──
       await sw('builtin-mock-b', '②/⑧ AI B 无记忆·思考关 — 验证切换不失忆');
