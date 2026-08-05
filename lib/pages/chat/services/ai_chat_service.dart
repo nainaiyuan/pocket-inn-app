@@ -1306,7 +1306,7 @@ class AiChatService {
     final old = await ContextManager.instance.takeSummariesForCompact(personaId);
     if (old.trim().isEmpty) return;
     DebugLogger.log('上下文管理', '🗜️ 摘要区太大，缩减中…');
-    final system = '【管家指令】你是「$personaName」。以下是你们之前的对话摘要列表，'
+    final system = '【系统指令】你是「$personaName」。以下是你们之前的对话摘要列表，'
         '请压缩合并成更紧凑的要点：① 合并同类话题 ② 每条一行、20 字内 '
         '③ 只保留最重要的信息 ④ 不要客套话。只输出压缩后的要点列表。';
     try {
