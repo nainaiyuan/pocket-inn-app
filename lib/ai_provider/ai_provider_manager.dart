@@ -436,6 +436,17 @@ class AIProviderManager {
       if (own != null && own.isNotEmpty && isMockId(own)) {
         return own;
       }
+      // 8-05 17:2x（验收④⑧根因）：sw() 会 resetLastProvider 清 own →
+      // 之前一律返回主实例 builtin-mock → 决策读主实例配置（stateless），
+      // 绑定里的 mock-c（stateful 1h）被无视 → 连续使用误判 needRecover、
+      // 超时误判 idleExpired=false。修：own 为空时读当前绑定里的 mock
+      // 变体（验收/用户切了哪个变体就用哪个变体的形态配置）。
+      final binding = bindingFor(_settingsKey(personaId));
+      if (binding != null) {
+        for (final id in binding) {
+          if (isMockId(id)) return id;
+        }
+      }
       return builtinMockVariants.first.id;
     }
     final key = _settingsKey(personaId);

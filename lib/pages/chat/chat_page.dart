@@ -1644,12 +1644,19 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
     /// 切 AI + 更新横幅
     Future<void> sw(String id, String hint) async {
+      final before = manager.lastProviderFor(pid);
       await manager.setPersonaBinding(pid, [id]);
       // 8-04 22:3x（验收⑤⑦⑧修复）：决策的 stateful 读 lastProviderFor
       // （上次用的）——切换绑定后必须重置，否则上次是 stateful（模拟C）
       // 时决策误走 stateful 分支 → 总结/沉淀永不触发
       manager.resetLastProvider(pid);
-      ctx.clearProviderUsed(testPid);
+      final after = manager.lastProviderFor(pid);
+      // 8-05 17:2x（验收④根因）：同一 AI 连续使用不算切换——
+      // 无条件 clearProviderUsed 会让 ④ 误判 switched=true → needRecover=true
+      // → 连续对话也全量带（浪费 token）。只有真正切换了才清。
+      if (before != after) {
+        ctx.clearProviderUsed(testPid);
+      }
       if (mounted) setState(() => _acceptanceNote = hint);
     }
 
