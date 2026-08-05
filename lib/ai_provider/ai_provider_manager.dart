@@ -432,6 +432,34 @@ class AIProviderManager {
   bool _mockChoiceUsable(String id) =>
       !_mockInstances.containsKey(id) || _testModeEnabled;
 
+  /// 测试对话专用绑定：mock 强制最前，真实 AI 排后。
+  /// 兜底：即使真实组没清空（用户漏关），测试对话也永不花真实额度。
+  List<PersonaAIBinding> _testBindingsFor(String pid) {
+    final mockIds = [for (final v in builtinMockVariants) v.id];
+    final existing = bindingFor(_settingsKey(pid));
+    final base = (existing != null && existing.isNotEmpty)
+        ? existing
+        : [for (final c in _allProviders()) if (c.enabled) c.id];
+    return [
+      PersonaAIBinding(
+        personaId: pid,
+        providerIds: [
+          ...mockIds,
+          for (final id in base)
+            if (!mockIds.contains(id)) id,
+        ],
+      ),
+    ];
+  }
+
+  /// 8-05 16:0x（用户：真实/测试 AI 分组一键开关）：开测试模式前，
+  /// 真实组勾选快照（per persona），关测试模式时恢复。
+  static final Map<String, List<String>> _realSnapshot = {};
+  static void saveRealSnapshot(String personaId, List<String> realIds) =>
+      _realSnapshot[personaId] = List.of(realIds);
+  static List<String>? takeRealSnapshot(String personaId) =>
+      _realSnapshot.remove(personaId);
+
 
   /// 某男主的候选 Provider（勾选列表用）。
   /// 有绑定 = 绑定顺序；无绑定 = 全局优先级顺序。只含启用的。
@@ -668,10 +696,15 @@ class AIProviderManager {
     try {
       // 8-05 14:5x：测试空间 key → 继承真实 persona 的 provider（测试时=mock），
       // 沉淀/总结等主动调 AI 不落到真实 API
+      // 8-05 16:0x（用户发现：测试时真实 AI 勾着 → 路由优先走真实 DeepSeek 花额度）：
+      // 测试对话用专用绑定（mock 强制最前）→ 兜底保证测试永不花真实额度
+      final isTestChat = personaId != null && personaId.endsWith(mockTestSuffix);
       personaId = _stripMockTestSuffix(personaId);
+      final bindings =
+          isTestChat && _testModeEnabled ? _testBindingsFor(personaId) : _bindings;
       final result = await _router.executeWithFailover(
         personaId: personaId,
-        bindings: _bindings,
+        bindings: bindings,
         allowFailover: autoSwitchFor(personaId),
         isAbort: (error) => error is ChatCompletionCancelledException,
         action: (config) async {
@@ -816,9 +849,13 @@ class AIProviderManager {
     AICapability capability = AICapability.chat,
   }) {
     // 8-05 14:5x：测试空间 key 继承真实 persona 的 provider
+    // 8-05 16:0x：测试对话用专用绑定（mock 强制最前），测试不花真实额度
+    final isTestChat = personaId != null && personaId.endsWith(mockTestSuffix);
     personaId = _stripMockTestSuffix(personaId);
+    final bindings =
+        isTestChat && _testModeEnabled ? _testBindingsFor(personaId) : _bindings;
     return _router
-        .resolve(personaId: personaId, capability: capability, bindings: _bindings)
+        .resolve(personaId: personaId, capability: capability, bindings: bindings)
         .isNotEmpty;
   }
 

@@ -177,6 +177,83 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
     }
   }
 
+  bool _isMockId(String id) =>
+      id == AIProviderManager.builtinMockId ||
+      id.startsWith('builtin-mock');
+
+  /// 真实组总开关：一键全选 / 全不选真实 AI（测试 AI 勾选不受影响）。
+  void _toggleRealGroup(bool v, List<AIProviderConfig> real) {
+    final candidates = [
+      for (final c in manager.candidatesFor(widget.personaId)) c.id,
+    ];
+    final realIds = [for (final c in real) if (c.enabled) c.id];
+    final allEnabled = [
+      for (final p in manager.providers)
+        if (p.enabled) p.id,
+    ];
+    List<String> next;
+    if (v) {
+      next = [...candidates];
+      for (final id in realIds) {
+        if (!next.contains(id)) next.add(id);
+      }
+    } else {
+      next = [for (final x in candidates) if (!realIds.contains(x)) x];
+    }
+    if (next.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('至少保留一个候选 AI'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    if (listEquals(next, allEnabled)) {
+      manager.clearPersonaBinding(widget.personaId);
+    } else {
+      manager.setPersonaBinding(widget.personaId, next);
+    }
+    setState(() {});
+  }
+
+  /// 测试组总开关（= 测试模式）：
+  /// 开 → 记住真实组勾选、清空真实组、勾上全部 mock（测试只走模拟 AI）；
+  /// 关 → 恢复真实组勾选、模拟 AI 隐藏（测试模式关，页面干净）。
+  void _toggleTestGroup(bool v) {
+    final pid = widget.personaId;
+    final candidates = [
+      for (final c in manager.candidatesFor(pid)) c.id,
+    ];
+    final realIds = [
+      for (final p in manager.providers)
+        if (p.enabled && !_isMockId(p.id)) p.id,
+    ];
+    if (v) {
+      AIProviderManager.saveRealSnapshot(
+        pid,
+        [for (final id in candidates) if (realIds.contains(id)) id],
+      );
+      AIProviderManager.setTestModeEnabled(true);
+      final mockIds = [
+        for (final p in manager.providers)
+          if (p.enabled && _isMockId(p.id)) p.id,
+      ];
+      if (mockIds.isNotEmpty) {
+        manager.setPersonaBinding(pid, mockIds);
+      }
+    } else {
+      AIProviderManager.setTestModeEnabled(false);
+      final snap = AIProviderManager.takeRealSnapshot(pid);
+      if (snap != null && snap.isNotEmpty) {
+        manager.setPersonaBinding(pid, snap);
+      } else if (snap != null) {
+        manager.clearPersonaBinding(pid);
+      }
+    }
+    setState(() {});
+  }
+
   Future<void> _test(String id) async {
     setState(() => _testing = true);
     final result = await manager.testProvider(id);
@@ -467,12 +544,50 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
                   // 监听能力状态广播：任何一处检测完，能力灯自动联动
                   : ValueListenableBuilder<int>(
                       valueListenable: manager.capabilityNotifier,
-                      builder: (context, _, __) => ListView(
-                        children: [
-                          for (final config in manager.providers)
-                            _buildRow(config, candidates),
-                        ],
-                      ),
+                      builder: (context, _, __) {
+                        // 8-05 16:0x 用户：真实 AI / 测试 AI 分组 + 各一组总开关。
+                        // 测试组总开关 = 测试模式：开 → 记住真实组勾选并清空
+                        // （测试对话只走模拟 AI，不花真实额度）；关 → 恢复真实组。
+                        final real = [
+                          for (final c in manager.providers)
+                            if (!_isMockId(c.id)) c,
+                        ];
+                        final mocks = [
+                          for (final c in manager.providers)
+                            if (_isMockId(c.id)) c,
+                        ];
+                        return ListView(
+                          children: [
+                            if (real.isNotEmpty) ...[
+                              _GroupHeader(
+                                title: '真实 AI',
+                                subtitle: '勾选 = 聊天候选，按顺序尝试',
+                                value: real
+                                    .where((c) => c.enabled)
+                                    .every((c) => candidates
+                                        .any((x) => x.id == c.id)),
+                                onChanged: (v) => _toggleRealGroup(v, real),
+                              ),
+                              for (final config in real)
+                                _buildRow(config, candidates),
+                            ],
+                            if (mocks.isNotEmpty) ...[
+                              const SizedBox(height: 10),
+                              _GroupHeader(
+                                title: '🧪 测试 AI（不联网）',
+                                subtitle:
+                                    AIProviderManager.testModeEnabled
+                                        ? '开 = 测试对话只走模拟 AI，真实 AI 已暂关'
+                                        : '关 = 模拟 AI 隐藏；开 = 真实 AI 自动暂关',
+                                value: AIProviderManager.testModeEnabled,
+                                onChanged: _toggleTestGroup,
+                              ),
+                              for (final config in mocks)
+                                _buildRow(config, candidates),
+                            ],
+                          ],
+                        );
+                      },
                     ),
             ),
             const SizedBox(height: 8),
@@ -637,6 +752,61 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
         ],
       ),
       onTap: enabled ? () => _toggle(config.id, !checked) : null,
+    );
+  }
+}
+
+
+/// 分组标题 + 一键总开关（8-05 16:0x 用户：真实/测试 AI 分组）
+class _GroupHeader extends StatelessWidget {
+  const _GroupHeader({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 8, 0),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF6A4A5A),
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: Colors.grey.shade500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch.adaptive(
+            value: value,
+            onChanged: onChanged,
+            activeTrackColor: const Color(0xFF7B6A8F),
+          ),
+        ],
+      ),
     );
   }
 }
