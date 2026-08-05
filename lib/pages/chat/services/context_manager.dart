@@ -282,20 +282,35 @@ class ContextManager {
         }
         out.add(AIChatMessage(role: 'system', content: sb.toString()));
       }
-      // 互动历史（倒序收集后正序追加，摘要区之后、当前消息之前）
-      // 8-04 17:3x（用户：跨天聊天按日期分区）：
-      // 日期变化时插入 system 标题行【互动历史 · 2026/6/28】
-      DateTime? lastDay;
-      for (final m in lines.reversed) {
-        final day = _tsDate(m.content);
-        if (day != null && (lastDay == null || !_sameDay(day, lastDay))) {
-          out.add(AIChatMessage(
-              role: 'system',
-              content: '【互动历史 · ${_dateLabel(day)}】（该日期：几点谁说了什么）'));
-          lastDay = day;
+      // 历史分区（8-05 19:06 用户：不同标签分开，命中率才高）——
+      // 男主发言 → 【管家历史】；用户发言 → 【聊天历史】；各带时间戳+日期分组。
+      // 分开后模型一眼定位"谁说的"，不用在混合序列里猜角色。
+      final butlerLines = <AIChatMessage>[];
+      final chatLines = <AIChatMessage>[];
+      for (final m in lines) {
+        if (m.role == 'assistant') {
+          butlerLines.add(m);
+        } else {
+          chatLines.add(m);
         }
-        out.add(m);
       }
+      void appendPartitioned(String tag, List<AIChatMessage> part) {
+        if (part.isEmpty) return;
+        DateTime? lastDay;
+        for (final m in part.reversed) {
+          final day = _tsDate(m.content);
+          if (day != null && (lastDay == null || !_sameDay(day, lastDay))) {
+            out.add(AIChatMessage(
+                role: 'system',
+                content: '$tag · ${_dateLabel(day)}】（该日期：几点谁说了什么）'));
+            lastDay = day;
+          }
+          out.add(m);
+        }
+      }
+      // 管家历史（男主说的）在前，聊天历史（用户说的）在后
+      appendPartitioned('【管家历史', butlerLines);
+      appendPartitioned('【聊天历史', chatLines);
     }
     return out;
   }

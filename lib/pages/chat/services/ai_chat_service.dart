@@ -457,16 +457,21 @@ class AiChatService {
     DebugLogger.log('Prompt', '本次组装完成（${lastPromptText!.length} 字，可点 📄 查看）');
     // 完整内容落库（按时间存，重启后仍可查）
     unawaited(ChatStorageService().savePromptLog(personaId, lastPromptText!));
-    // 上下文参考作为一条 system 消息（role: system 明确是"参考"不是"待回复"），
-    // 与当前 user 消息彻底分开 → 男主不会把历史当待回复内容
+    // 历史分区独立成块（8-05 19:06 用户：不同标签分开，命中率才高）——
+    // 不再 join 成一条【上下文参考】：男主摘要/工具使用历史/管家历史/聊天历史
+    // 各自是独立 system 消息，模型按 role+标签原生定位，不用在文本里猜。
+    // 总引导说明放最前，明确"最后一条用户消息才要回复"。
     final messages = <AIChatMessage>[
       if (!isLight) AIChatMessage(role: 'system', content: systemPrompt),
-      if (historyMsgs.isNotEmpty)
+      if (historyMsgs.isNotEmpty) ...[
         AIChatMessage(
           role: 'system',
-          content: '【上下文参考】（已聊过的内容，无需回复，仅作参考保持连贯）\n'
-              '${historyMsgs.map((m) => '[${m.role}] ${m.content}').join('\n')}',
+          content: '【上下文说明】以下是历史分区（男主摘要 / 工具使用历史 / '
+              '管家历史 / 聊天历史），都是已聊过的内容。'
+              '最后一条【当前用户消息】才是你要回复的。',
         ),
+        ...historyMsgs,
+      ],
     ];
     // 工具轮消息顺序（8-05 18:56 用户定稿）：工具相关在前，用户消息最后——
     // AI 按数组顺序读，最后一条 user 才是"要回复的"。
