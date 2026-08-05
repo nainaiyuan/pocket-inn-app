@@ -278,6 +278,15 @@ class ChatDatabaseService {
     );
   }
 
+  /// 清空恢复包（验收重置测试空间用）
+  Future<void> clearRecovery(String personaId) async {
+    await _db.delete(
+      'context_recovery',
+      where: 'persona_id = ?',
+      whereArgs: [personaId],
+    );
+  }
+
   /// 读恢复包；没有返回 null。
   Future<String?> loadRecovery(String personaId) async {
     final rows = await _db.query(

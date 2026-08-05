@@ -1614,6 +1614,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final before = manager.bindingFor(pid);
     final beforeWindow = ContextTracker.instance.windowOf(pid);
     final savedMockMode = manager.builtinMockConfig.memoryMode;
+    // 8-05 19:56（用户第二次跑 5/7 根因）：测试空间状态残留——
+    // 上次验收 ⑦⑧ 写的【恢复包】→ ⑥ buildHistoryMessages 直接 return
+    // 恢复包、看不到【男主摘要】；lastChatAt 被设成 2h 前 → ④ 误判
+    // idleExpired → 连续使用也全量带。验收前重置测试空间内存状态，
+    // 保证每次从零开始、结果可复现（测试空间是隔离的，不影响真实数据）。
+    manager.resetLastProvider(pid);
+    await ctx.clearProviderUsed(testPid);
+    ctx.debugSetLastChatAt(testPid, DateTime.now());
+    await ctx.clearRecovery(testPid);
+    await ctx.clearSummaries(testPid);
     setState(() {
       _accepting = true;
       _acceptanceNote = '🚀 一键验收开始…';

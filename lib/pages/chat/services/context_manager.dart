@@ -588,6 +588,19 @@ class ContextManager {
     t.raw.addAll(raw.split('\n').where((l) => l.trim().isNotEmpty));
   }
 
+  /// 清空恢复包（验收重置测试空间用，8-05 19:56 用户第二次跑 5/7 根因：
+  /// 恢复包残留会让 buildHistoryMessages 直接 return 恢复包、看不到摘要）
+  Future<void> clearRecovery(String personaId) async {
+    _recovery.remove(personaId);
+    await ChatDatabaseService.instance.clearRecovery(personaId);
+  }
+
+  /// 清空摘要区（验收重置测试空间用）——同步清 DB
+  Future<void> clearSummaries(String personaId) async {
+    _summaries.remove(personaId);
+    await ChatDatabaseService.instance.clearSummaries(personaId);
+  }
+
   /// 缩减失败回滚：摘要区放回——同步写 DB
   Future<void> restoreSummaries(String personaId, String old) async {
     if (old.trim().isEmpty) return;
