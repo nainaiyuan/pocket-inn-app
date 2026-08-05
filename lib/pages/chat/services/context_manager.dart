@@ -37,8 +37,7 @@ class ContextManager {
   /// 管家指令日志（8-05 19:13 用户）：管家自动动作记录（时间+动作+结果）
   final Map<String, List<String>> _butlerLog = {};
 
-  /// 已总结过的对话条数（8-05 19:19 用户：摘要保存"几到几"上下文编号）
-  final Map<String, int> _summarizedCount = {};
+
 
   /// 摘要区预算：模型窗口的 15%（token）
   static const double summaryWindowRatio = 0.15;
@@ -420,20 +419,18 @@ class ContextManager {
     return t.raw.join('\n');
   }
 
-  /// 取走待总结原文（8-05 19:19 用户定稿）：
+  /// 取走待总结原文（8-05 19:19 用户定稿，19:25 修正编号）：
   /// - 只返回【对话行】（用户/男主），工具行不发——工具/管家历史不重要就扔掉；
-  /// - 返回编号范围 (start, end)：按对话条数递增（#1-#42 → #43-#…），
-  ///   摘要里保存"几到几"，不是让男主复述上下文；
+  /// - 编号 = 当前原文的【相对编号】，每次从 1 开始（#1-#N，N=当次对话条数）。
+  ///   19:25 用户：绝不能全局递增（#1-#50 → #51-#100 无限长，编号占满窗口）；
+  ///   总结完原文清空 → 下次新对话重新从 #1 编号。
   /// - 原文取走即清空（被摘要替换）。
   (int, int, String) takePendingRawWithRange(String personaId) {
     final t = _topics.remove(personaId);
     if (t == null) return (0, 0, '');
     final chatLines =
         t.raw.where((l) => !l.startsWith('工具')).toList();
-    final start = (_summarizedCount[personaId] ?? 0) + 1;
-    final end = start + chatLines.length - 1;
-    _summarizedCount[personaId] = end;
-    return (start, end, chatLines.join('\n'));
+    return (1, chatLines.length, chatLines.join('\n'));
   }
 
   /// 清空管家指令日志（8-05 19:19 用户：总结后不重要的扔掉）
