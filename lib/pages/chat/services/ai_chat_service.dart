@@ -1238,7 +1238,7 @@ class AiChatService {
       taskState: taskState,
     );
     // 【当前管家】唤醒指令（19:16 用户：当前管家段 = 管家唤醒 AI 的通道）
-    final instruction = '【当前管家】窗口快满了，把刚给你的对话总结成摘要。'
+    final instruction = '【当前系统】窗口快满了，把刚给你的对话总结成摘要。'
         '调用 save_summary 工具写入（不要复述对话内容）：'
         '① content：影响后续对话的提醒，每条一行 20 字内，细节不写——'
         '能当场查的（记忆、日记）不写，需要时你用工具查'
