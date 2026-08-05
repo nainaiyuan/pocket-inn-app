@@ -5,6 +5,8 @@ import '../ai_provider/capability_probe.dart';
 /// 能力灯（通用组件，2026-08-04）：AI 配置页 / 聊天弹层共用。
 /// 展示：系别标签（OpenAI 系/Claude 系/…）+ 能用哪个亮哪个。
 /// - 原生工具 / 思考链 / 流式：支持的亮绿色圆点 + 文字，不支持的**不显示**
+/// - 后台记忆（8-05 实测）：有 → 绿色"后台记忆"灯；实测无 → 灰色"无记忆"
+///   （结果可见，不是能力缺失）；未实测（猜测）→ 不显示
 /// - 一个都不支持 → 显示"⚠️ 仅文本协议（AI 可能不配合）"
 /// - 还没探测过 → 显示"未检测" + 重测按钮
 /// - 信号台（🛰 重测）按钮：保底，用户觉得能力灯不对就再点一次
@@ -67,6 +69,14 @@ class CapabilityLights extends StatelessWidget {
       _light(context, colorScheme, '工具', caps!.toolFormat == 'openai', fontSize),
       _light(context, colorScheme, '思考链', caps!.supportsReasoning, fontSize),
       _light(context, colorScheme, '流式', caps!.supportsStreaming, fontSize),
+      // 🧠 后台记忆（8-05）：有 → 绿灯；实测无 → 灰色"无记忆"；未实测 → 不显示
+      if (caps!.supportsBackendMemory)
+        _light(context, colorScheme, '后台记忆', true, fontSize)
+      else if (caps!.isProbed)
+        Text(
+          '无记忆',
+          style: TextStyle(fontSize: fontSize, color: colorScheme.outline),
+        ),
     ];
     final anySupported = caps!.toolFormat == 'openai' ||
         caps!.supportsReasoning ||

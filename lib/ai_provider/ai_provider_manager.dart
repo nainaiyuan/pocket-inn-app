@@ -828,12 +828,7 @@ class AIProviderManager {
       );
     }
     if (_mockInstances.containsKey(config.id)) {
-      return const AIProviderCapabilities(
-        toolFormat: 'openai',
-        supportsReasoning: true,
-        supportsStreaming: true,
-        probeSource: 'guess',
-      );
+      return _mockCapsFor(config.id);
     }
     final resolved = _resolve(config);
     final key = CapabilityCache.keyFor(resolved);
@@ -846,6 +841,8 @@ class AIProviderManager {
     AIProviderCapabilities caps;
     try {
       caps = await _probe.probe(resolved);
+      // 🧠 后台记忆实测 → 自动对齐 memoryMode（8-05 用户：不查表，实测为准）
+      await _applyMemoryModeFromProbe(config, caps);
       AiModuleLog.log(
         'AI探测',
         '${config.name}(${config.model}) 实测: ${caps.systemLabel} · '
@@ -862,6 +859,80 @@ class AIProviderManager {
     await CapabilityCache.instance.put(key, caps);
     _setCapState(config.id, caps); // 广播给所有 UI 能力灯
     return caps;
+  }
+
+  /// 🧠 后台记忆实测 → 自动对齐 memoryMode（8-05 用户："你直接拿一个表，
+  /// 万一未来 deepseek 不做了呢？用户用不认识的 API，说它没后台记忆不就不准吗？"
+  /// → 不查表，第一次配 API 就实测，实测结果自动落到配置）。
+  /// - 实测有记忆 且 当前不是 stateful → 自动设为 stateful（用户可改回）。
+  ///   没填空闲超时时 stateful 也按 stateless 用（安全，不会坏）。
+  /// - 实测无记忆 但配置是 stateful → 不动配置，只日志提醒
+  ///   （用户手动配的可能是真记忆但探测没测出来，不擅自改）。
+  Future<void> _applyMemoryModeFromProbe(
+      AIProviderConfig config, AIProviderCapabilities caps) async {
+    if (!caps.isProbed) {
+      return;
+    }
+    if (caps.supportsBackendMemory && config.memoryMode != 'stateful') {
+      final idx = _configs.indexWhere((c) => c.id == config.id);
+      if (idx >= 0) {
+        _configs[idx] = config.copyWith(memoryMode: 'stateful');
+        _syncRouter();
+        await _persist();
+        changeNotifier.value++;
+        AiModuleLog.log(
+          'AI探测',
+          '🧠 ${config.name} 实测有后台记忆 → 已自动设为"有后台记忆"'
+          '（可填空闲超时；不填则仍按每次全量带，安全）',
+        );
+      }
+    } else if (!caps.supportsBackendMemory && config.memoryMode == 'stateful') {
+      AiModuleLog.log(
+        'AI探测',
+        '🧠 ${config.name} 实测无后台记忆，但配置是"有后台记忆"'
+        '——若 AI 答不上来，请到配置页改回"无后台记忆"',
+      );
+    }
+  }
+
+  /// 内置模拟 AI 的能力画像（8-04 硬编码已知能力；8-05 按形态区分：
+  /// C/D 有后台记忆 → 🧠 灯亮；E 工具关 → 纯聊天。skip 探测）
+  AIProviderCapabilities _mockCapsFor(String id) {
+    switch (id) {
+      case 'builtin-mock-c':
+        return const AIProviderCapabilities(
+          toolFormat: 'openai',
+          supportsReasoning: true,
+          supportsStreaming: true,
+          supportsBackendMemory: true,
+          probeSource: 'guess',
+        );
+      case 'builtin-mock-d':
+        return const AIProviderCapabilities(
+          toolFormat: 'openai',
+          supportsReasoning: false,
+          supportsStreaming: true,
+          supportsBackendMemory: true,
+          probeSource: 'guess',
+        );
+      case 'builtin-mock-e':
+        return const AIProviderCapabilities(
+          toolFormat: 'none',
+          supportsReasoning: true,
+          supportsStreaming: true,
+          probeSource: 'guess',
+        );
+      default: // 主实例 A（跟随配置页开关）/ B（思考关）
+        return AIProviderCapabilities(
+          toolFormat: 'openai',
+          supportsReasoning: id != 'builtin-mock-b',
+          supportsStreaming: true,
+          // 主实例：配置页把 memoryMode 改成 stateful → 🧠 灯跟着亮
+          supportsBackendMemory:
+              id == builtinMockId && _builtinMockConfig.isStateful,
+          probeSource: 'guess',
+        );
+    }
   }
 
   /// 只读能力状态（UI 能力灯统一入口）：内存态优先，miss 返回 null

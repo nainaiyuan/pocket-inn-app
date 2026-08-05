@@ -5,6 +5,8 @@
 ///    - 工具调用格式（openai 原生 / 文本协议 / 纯聊天）
 ///    - 思考链（reasoning）字段
 ///    - 流式输出
+///    - 后台记忆（8-05 用户：不查表，实测为准——管家发两条裸消息问暗号，
+///      答得出 = 服务端真有记忆；答不出 = 无记忆，按 stateless 全量带）
 /// 2. 结果按 `baseUrl|model` 缓存（内存 + shared_preferences），不重复测；
 ///    同 API 不同模型各存各的（如 DeepSeek 有的版本要思考链、有的不要）。
 /// 3. 探测失败静默降级为 URL 猜测，绝不阻塞聊天、绝不让设置页卡住。
@@ -18,6 +20,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import '../models/api_config.dart';
 import '../services/i_openai_api_service.dart';
@@ -32,6 +35,7 @@ class AIProviderCapabilities {
     required this.toolFormat,
     required this.supportsReasoning,
     required this.supportsStreaming,
+    this.supportsBackendMemory = false,
     this.probedAt,
     this.probeSource = 'guess',
   });
@@ -45,6 +49,10 @@ class AIProviderCapabilities {
 
   /// 是否支持流式输出（仅展示用；实际请求仍会尝试流式）
   final bool supportsStreaming;
+
+  /// 后台是否有记忆（8-05 实测）：服务端跨请求记得内容 → stateful 轻量带；
+  /// 无 → stateless 每次全量带。安全默认 false（全量带永远不会错）。
+  final bool supportsBackendMemory;
 
   /// 探测时间；null = 从未实测（纯猜测）
   final DateTime? probedAt;
@@ -78,6 +86,7 @@ class AIProviderCapabilities {
       '原生工具 ${toolFormat == 'openai' ? '✓' : '✗'}',
       '思考链 ${supportsReasoning ? '✓' : '✗'}',
       '流式 ${supportsStreaming ? '✓' : '✗'}',
+      '后台记忆 ${supportsBackendMemory ? '✓' : '✗'}',
     ];
     return parts.join(' · ');
   }
@@ -86,6 +95,7 @@ class AIProviderCapabilities {
         'toolFormat': toolFormat,
         'supportsReasoning': supportsReasoning,
         'supportsStreaming': supportsStreaming,
+        'supportsBackendMemory': supportsBackendMemory,
         'probedAt': probedAt?.toIso8601String(),
         'probeSource': probeSource,
       };
@@ -96,6 +106,7 @@ class AIProviderCapabilities {
       toolFormat: json['toolFormat'] as String? ?? 'openai',
       supportsReasoning: json['supportsReasoning'] as bool? ?? false,
       supportsStreaming: json['supportsStreaming'] as bool? ?? false,
+      supportsBackendMemory: json['supportsBackendMemory'] as bool? ?? false,
       probedAt: rawProbedAt == null ? null : DateTime.tryParse(rawProbedAt),
       probeSource: json['probeSource'] as String? ?? 'guess',
     );
@@ -109,7 +120,8 @@ class CapabilityCache {
 
   static final CapabilityCache instance = CapabilityCache._();
 
-  static const String storageKey = 'ai_provider_capabilities_v1';
+  /// 8-05 升 v2：新增后台记忆实测字段，旧缓存没有该结果 → 作废重测
+  static const String storageKey = 'ai_provider_capabilities_v2';
 
   AiKeyValueStore _store = const SharedPrefsAiStore();
 
@@ -263,13 +275,72 @@ class CapabilityProbe {
       }
     }
 
+    // ③ 后台记忆实测（8-05 用户：不要查表，管家第一次配 API 就亲自问 AI）：
+    // 两条裸消息（不带任何历史、没有 system）——第一条让 AI 记住随机暗号，
+    // 第二条问暗号是什么。答得出 = 服务端真有跨请求记忆（stateful）；
+    // 答不出 = 无记忆（stateless 每次全量带）。随机暗号防日常回复误判。
+    var supportsBackendMemory = false;
+    if (probed) {
+      supportsBackendMemory = await _probeBackendMemory(config);
+    }
+
     return AIProviderCapabilities(
       toolFormat: toolFormat,
       supportsReasoning: supportsReasoning,
       supportsStreaming: supportsStreaming,
+      supportsBackendMemory: supportsBackendMemory,
       probedAt: DateTime.now(),
       probeSource: probed ? 'probe' : 'guess',
     );
+  }
+
+  final Random _random = Random();
+
+  /// 🧠 后台记忆实测（8-05 用户要求，不查表）：
+  /// 1) "记住这句话：{暗号}。只回复'好'。"  2)（不带任何历史）
+  /// "我刚才让你记住的那句话是什么？只回答内容本身。"
+  /// 第二条回复里含暗号 → 有后台记忆；否则 → 无。
+  /// 任何失败按"无记忆"处理——无记忆是安全默认（stateless 全量带
+  /// 永远不会错，只是不省 token；反向误判才致命：AI 会失忆）。
+  Future<bool> _probeBackendMemory(ResolvedApiConfig config) async {
+    final marker = '翡翠西瓜${1000 + _random.nextInt(9000)}';
+    try {
+      // 第一条：让 AI 记住暗号（只回"好"，max_tokens 压到最小省 token）
+      await _api.createChatCompletion(
+        config,
+        messages: [
+          {'role': 'user', 'content': '记住这句话：$marker。只回复"好"一个字。'},
+        ],
+        defaults: const {'max_tokens': 10, 'temperature': 0},
+      );
+      // 第二条：不带任何历史，问暗号是什么（如果服务端记得，能答出来）
+      final res = await _api.createChatCompletion(
+        config,
+        messages: [
+          {
+            'role': 'user',
+            'content': '我刚才让你记住的那句话是什么？只回答那句话的内容本身，不要解释。',
+          },
+        ],
+        defaults: const {'max_tokens': 30, 'temperature': 0},
+      );
+      final text = res.text.replaceAll(RegExp(r'\s'), '');
+      final hit = text.contains(marker);
+      AiModuleLog.log(
+        'AI探测',
+        hit
+            ? '🧠 后台记忆实测：有（第二条答出暗号）→ 可配"有后台记忆"轻量带'
+            : '🧠 后台记忆实测：无（第二条未答出暗号）→ 按 stateless 每次全量带',
+      );
+      return hit;
+    } on Object catch (error) {
+      AiModuleLog.log(
+        'AI探测',
+        '🧠 后台记忆实测失败(按无记忆处理，安全默认): '
+        '${error.toString().length > 120 ? error.toString().substring(0, 120) : error}',
+      );
+      return false;
+    }
   }
 
   /// URL 规则猜测（探测失败/未探测时的兜底，与 ToolFormatRegistry 一致）。
@@ -285,6 +356,7 @@ class CapabilityProbe {
       toolFormat: toolFormat,
       supportsReasoning: _hintsReasoning(config),
       supportsStreaming: true, // 未知时乐观假设，实际失败不影响使用
+      supportsBackendMemory: false, // 未知时按无记忆（全量带永远安全）
       probeSource: 'guess',
     );
   }
