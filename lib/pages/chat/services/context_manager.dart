@@ -211,12 +211,17 @@ class ContextManager {
 
     // 恢复包（stateful 空闲超时后 AI 忘了 → 本次带"下次要带的上下文"接上；
     // 用户 21:52：男主提前写好的分类存档，管家恢复时带上）
+    // 8-05 17:50 用户：恢复包 = 男主已总结过的上下文（精简版）→ 有它就
+    // 【替换】整个上下文（摘要+工具历史+历史对话），不重复带。
+    // 安全前提：恢复包只在空闲过半时写，写完用户继续聊会重置计时并重新
+    // 沉淀 → 超时恢复时恢复包一定是最新的、后面没有新对话 → 替换不丢内容。
     final recovery = _recovery[personaId];
     if (recovery != null && recovery.isNotEmpty) {
       out.add(AIChatMessage(
         role: 'system',
         content: '【MEMORY_SUMMARY·恢复包】（你提前写好的上下文存档）\n$recovery',
       ));
+      return out;
     }
 
     // 摘要区（一条 system 消息，前缀稳定 → 缓存命中）

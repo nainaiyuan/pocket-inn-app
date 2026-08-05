@@ -118,6 +118,9 @@ class AIProviderManager {
       priority: 99999,
       memoryMode: 'stateful',
       refreshHours: 1,
+      // 8-05 18:2x：模拟"真会话"（A）——服务器记 C + 聊天记录 → 形态1
+      // 只发当前句（验收③④⑤⑥测的就是这个）
+      sessionBased: true,
     ),
     AIProviderConfig(
       id: 'builtin-mock-d',
@@ -129,6 +132,7 @@ class AIProviderManager {
       priority: 99999,
       memoryMode: 'stateful',
       refreshHours: 1,
+      sessionBased: true,
     ),
     AIProviderConfig(
       id: 'builtin-mock-e',

@@ -316,6 +316,14 @@ class AiChatService {
         }
         // 防 APP 被杀/定时器丢：下次聊天时若已过半且没沉淀过 → 补沉淀
         await _maybeSettleStateful(ctxPid, personaName);
+        // 8-05 18:2x（用户形态3）：A（真会话）窗口满也要总结——
+        // 本地攒的原文太多 → 男主总结进摘要区（D1）→ 置 forceRecover
+        // → 下一轮带 C + D1 刷新会话（服务器窗口腾出来）
+        if (ContextManager.instance.needsSummarize(ctxPid, modelHint: _modelHintFor(personaId))) {
+          DebugLogger.log('AI验收', '③A形态3: stateful 窗口满 → 触发总结刷新');
+          await _summarize(ctxPid, personaName);
+          _forceRecover[ctxPid] = true;
+        }
       } else {
         if (ContextManager.instance.needsCompact(ctxPid, modelHint: _modelHintFor(personaId))) {
           await _compactSummaries(ctxPid, personaName);
@@ -357,18 +365,26 @@ class AiChatService {
       DebugLogger.log('上下文管理',
           '🔄 检测到 AI 切换/首次使用 → 本次全量带上下文（stateful 也带）');
     }
-    final systemPrompt = SystemTemplate.build(
-      personaName: personaName,
-      personaPrompt: personaPrompt,
-      needsWindow: needsWindow,
-      // 用户 8-03 02:41 模块化重构：skillContext 拆成 userProfile（用户状态）
-      // 和 taskState（任务状态），各归各位，不再混成一个字符串
-      userProfile: userProfile,
-      taskState: taskState,
-      // 8-05 17:41 用户：固定部分（系统规则+人设）每轮必带，不管怎么切换；
-      // stateful 连续使用省的是【历史】（服务端记得），不是 system。
-      // stateless：前缀稳定 → 缓存命中 → 每次带全量反而便宜。
-    );
+    // 8-05 18:2x（用户定稿模型）：A = 真会话（服务器记 C + 聊天记录）→
+    // 形态1 只发当前句；B（DeepSeek 等无会话）= 全量带 + 前缀缓存。
+    // isSessionA = stateful && sessionBased && 会话热（没切换/没超时/没强制刷新）
+    final sessInfo = _statefulInfoFor(ctxPid);
+    final isSessionA = stateful &&
+        (sessInfo.$3?.isSessionBased ?? false) &&
+        !needRecover;
+    final systemPrompt = isSessionA
+        ? ''
+        : SystemTemplate.build(
+            personaName: personaName,
+            personaPrompt: personaPrompt,
+            needsWindow: needsWindow,
+            // 用户 8-03 02:41 模块化重构：skillContext 拆成 userProfile
+            // （用户状态）和 taskState（任务状态），各归各位
+            userProfile: userProfile,
+            taskState: taskState,
+            // 8-05 17:41 用户：固定部分（系统规则+人设）每轮必带；
+            // stateless：前缀稳定 → 缓存命中 → 每次带全量反而便宜。
+          );
     // 历史（摘要区 + 当前话题原文）——插在 system 后、当前消息前。
     // stateful：AI 自己记得 → 不重复带历史（避免浪费 + 服务端已有）；
     // 但空闲超时后 AI 已不记得（服务器释放了缓存）→ 本次带摘要区恢复
@@ -377,7 +393,7 @@ class AiChatService {
     // 用户 8-03 00:55：男主分不清上下文和当前用户的话，以为上下文也要回复。
     // 修复：上下文参考打包成【一条】system 消息（不混进 user/assistant 对话流），
     // 明确"无需回复，只回复最新一条用户消息"→ 男主不会逐条回历史。
-    final historyMsgs = (stateful && !needRecover) || toolRound
+    final historyMsgs = isSessionA || toolRound
         ? <AIChatMessage>[]
         : ContextManager.instance.buildHistoryMessages(ctxPid, modelHint: _modelHintFor(personaId));
     // 8-03 19:4x（用户反馈"没写当前消息、聊天全混在一起"）：
@@ -433,15 +449,18 @@ class AiChatService {
             ? _toolRoundInteraction(personaId, toolMessages)
             : '（空）')
         : message;
-    lastPromptText = '【System】\n$systemPrompt$historyText\n\n'
-        '【User·当前消息】（这是用户刚刚发的消息，只需要回复这一条）\n$userText';
+    lastPromptText = isSessionA
+        ? '【形态1·真会话】system 与历史都在服务器会话里，本次只发当前消息：\n\n'
+            '【User·当前消息】\n$userText'
+        : '【System】\n$systemPrompt$historyText\n\n'
+            '【User·当前消息】（这是用户刚刚发的消息，只需要回复这一条）\n$userText';
     DebugLogger.log('Prompt', '本次组装完成（${lastPromptText!.length} 字，可点 📄 查看）');
     // 完整内容落库（按时间存，重启后仍可查）
     unawaited(ChatStorageService().savePromptLog(personaId, lastPromptText!));
     // 上下文参考作为一条 system 消息（role: system 明确是"参考"不是"待回复"），
     // 与当前 user 消息彻底分开 → 男主不会把历史当待回复内容
     final messages = <AIChatMessage>[
-      AIChatMessage(role: 'system', content: systemPrompt),
+      if (!isSessionA) AIChatMessage(role: 'system', content: systemPrompt),
       if (historyMsgs.isNotEmpty)
         AIChatMessage(
           role: 'system',
@@ -662,6 +681,10 @@ class AiChatService {
   /// - switched：AI 切换/首次使用（noteProviderUsed 记录副作用在此发生）
   /// - needRecover：idleExpired || switched → 本次全量带
   /// 工具轮不决策（结果 feed 下一轮带，组装走 toolRound 分支）。
+  /// 8-05 18:2x（用户形态3）：真会话 A 窗口满 → 总结成 D1 → 置标记，
+  /// 下一轮强制全量（C + D1 刷新会话），发完清除。
+  final Map<String, bool> _forceRecover = {};
+
   ({bool stateful, bool idleExpired, bool switched, bool needRecover})
       assembleDecision(String personaId, {required bool toolRound}) {
     if (toolRound) {
@@ -684,15 +707,17 @@ class AiChatService {
         personaId, AIProviderManager.instance.lastProviderFor(personaId));
     // 8-04 22:3x（验收⑤⑦⑧）：决策值打日志——下次失败直接可见
     // stateful 读的是 lastProviderFor（上次用的），不是当前绑定！
+    // 8-05 18:2x（用户形态3）：窗口满总结后强制刷新一次（带 C + D1）
+    final forceRecover = _forceRecover.remove(personaId) ?? false;
     DebugLogger.log('AI验收',
         '决策: lastProvider=${AIProviderManager.instance.lastProviderFor(personaId)}'
         ' stateful=$stateful idle=$idle since=${ContextManager.instance.hoursSinceLastChat(personaId)}'
-        ' idleExpired=$idleExpired switched=$switched');
+        ' idleExpired=$idleExpired switched=$switched forceRecover=$forceRecover');
     return (
       stateful: stateful,
       idleExpired: idleExpired,
       switched: switched,
-      needRecover: idleExpired || switched,
+      needRecover: idleExpired || switched || forceRecover,
     );
   }
 
