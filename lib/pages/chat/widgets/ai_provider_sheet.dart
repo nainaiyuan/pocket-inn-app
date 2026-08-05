@@ -234,24 +234,8 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
         manager.setPersonaBinding(pid, mockIds);
       }
     } else {
-      AIProviderManager.setTestModeEnabled(false);
-      final snap = AIProviderManager.takeBindingSnapshot(pid);
-      if (snap != null) {
-        // 原绑定里可能有 mock（测试模式已关、mock 已注销）→ 过滤掉，
-        // 避免持久化脏数据；过滤后为空 → 原绑定本来就只有 mock → 跟随全局
-        final realSnap = [
-          for (final id in snap)
-            if (!_isMockId(id)) id,
-        ];
-        if (realSnap.isEmpty) {
-          manager.clearPersonaBinding(pid);
-        } else {
-          manager.setPersonaBinding(pid, realSnap);
-        }
-      } else {
-        // 原状态 = 跟随全局 → 恢复跟随全局
-        manager.clearPersonaBinding(pid);
-      }
+      // 统一走 manager.exitTestMode（聊天页横幅退出按钮同款逻辑）
+      AIProviderManager.exitTestMode(pid);
     }
     setState(() {});
   }

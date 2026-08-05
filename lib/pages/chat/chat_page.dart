@@ -1143,6 +1143,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                   // 8-05 15:0x（用户：测试的东西要全部收进测试箱）：
                   // 话术栏是模拟AI测试工具 → 测试模式关时不显示
                   if (AIProviderManager.testModeEnabled) _buildScriptBar(),
+                  // 8-05 16:36 用户：测试模式开着必须一眼看出 + 一键退出
+                  if (AIProviderManager.testModeEnabled)
+                    _buildTestModeBanner(),
                   ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
                     onPlusTap: _togglePlus, onSendTap: _sendMsg),
                 ],
@@ -1288,6 +1291,56 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     '你有什么工具',
     '帮我写日记',
   ];
+
+  /// 测试模式横幅：明确提示"真实 AI 已隔离、对话走模拟 AI"+ 一键退出
+  /// （8-05 16:36 用户：UI 看不出测试起效、退出要一键恢复）
+  Widget _buildTestModeBanner() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF7B6A8F).withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: const Color(0xFF7B6A8F).withValues(alpha: 0.35),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.science_outlined, size: 15, color: Color(0xFF7B6A8F)),
+          const SizedBox(width: 6),
+          const Expanded(
+            child: Text(
+              '🧪 测试模式：真实 AI 已隔离，对话走模拟 AI',
+              style: TextStyle(fontSize: 11.5, color: Color(0xFF6A4A5A)),
+            ),
+          ),
+          GestureDetector(
+            onTap: () {
+              final pid = _state.personaId ?? '${_state.leadId}_default';
+              AIProviderManager.exitTestMode(pid);
+              setState(() {});
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFF7B6A8F),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: const Text(
+                '退出测试',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildScriptBar() {
     return Container(

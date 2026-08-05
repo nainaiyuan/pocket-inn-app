@@ -462,6 +462,33 @@ class AIProviderManager {
   static List<String>? takeBindingSnapshot(String personaId) =>
       _bindingSnapshot.remove(personaId);
 
+  bool _isMockId(String id) =>
+      id == builtinMockId || id.startsWith('builtin-mock');
+
+  /// 8-05 16:36 用户：一键退出测试模式——恢复该男主原绑定（原样还原，
+  /// 绝不全选）。聊天页横幅「退出测试」/ AI 弹层测试组开关共用。
+  static void exitTestMode(String personaId) {
+    final manager = instance;
+    AIProviderManager.setTestModeEnabled(false);
+    final snap = takeBindingSnapshot(personaId);
+    if (snap != null) {
+      // 原绑定里可能有 mock（测试模式已关、mock 已注销）→ 过滤掉，
+      // 避免持久化脏数据；过滤后为空 → 原绑定本来就只有 mock → 跟随全局
+      final realSnap = [
+        for (final id in snap)
+          if (!manager._isMockId(id)) id,
+      ];
+      if (realSnap.isEmpty) {
+        manager.clearPersonaBinding(personaId);
+      } else {
+        manager.setPersonaBinding(personaId, realSnap);
+      }
+    } else {
+      // 原状态 = 跟随全局 → 恢复跟随全局
+      manager.clearPersonaBinding(personaId);
+    }
+  }
+
 
   /// 某男主的候选 Provider（勾选列表用）。
   /// 有绑定 = 绑定顺序；无绑定 = 全局优先级顺序。只含启用的。

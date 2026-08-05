@@ -92,10 +92,12 @@ class FailoverRouter {
     AICapability capability = AICapability.chat,
     List<PersonaAIBinding> bindings = const [],
   }) {
-    List<AIProviderState> ordered;
     final binding = _findBinding(bindings, personaId);
-    if (binding != null && !binding.followsGlobal) {
-      // 男主绑定：白名单 + 用户自定义顺序
+    final hasBinding = binding != null && !binding.followsGlobal;
+    List<AIProviderState> ordered = const [];
+    if (hasBinding) {
+      // 男主绑定：优先列表 + 用户自定义顺序（8-05 16:36 用户改：
+      // 不再是死白名单——全挂时回退全局，绑定 AI 坏了自动换没绑定的，省 token）
       ordered = [];
       for (final id in binding.providerIds) {
         final state = _states[id];
@@ -103,18 +105,25 @@ class FailoverRouter {
           ordered.add(state);
         }
       }
-    } else {
-      // 全局：按 priority 升序，同优先级按名字稳定排序
-      ordered = _states.values.toList()
-        ..sort((a, b) {
-          final byPriority = a.config.priority.compareTo(b.config.priority);
-          return byPriority != 0
-              ? byPriority
-              : a.config.name.compareTo(b.config.name);
-        });
     }
-    return [
+    final usable = [
       for (final state in ordered)
+        if (state.isUsable && state.config.capabilities.contains(capability))
+          state,
+    ];
+    if (hasBinding && usable.isNotEmpty) return usable;
+    // 无绑定，或绑定内的全挂/不可用 → 全局：按 priority 升序，
+    // 同优先级按名字稳定排序。绑定里失败的已在冷却中自动排除，
+    // 绑定里仍可用的按 priority 自然排前（优先绑定语义保留）。
+    final global = _states.values.toList()
+      ..sort((a, b) {
+        final byPriority = a.config.priority.compareTo(b.config.priority);
+        return byPriority != 0
+            ? byPriority
+            : a.config.name.compareTo(b.config.name);
+      });
+    return [
+      for (final state in global)
         if (state.isUsable && state.config.capabilities.contains(capability))
           state,
     ];

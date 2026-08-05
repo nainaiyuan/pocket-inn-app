@@ -212,7 +212,11 @@ class _AiBadge extends StatelessWidget {
                 current.apiKey.trim().isNotEmpty);
         final Color color;
         final String label;
-        if (current == null || !anyUsable) {
+        // 8-05 16:36 用户：测试模式开着时，顶栏一眼看出在测试
+        if (AIProviderManager.testModeEnabled) {
+          color = const Color(0xFF7B6A8F);
+          label = '🧪 测试中';
+        } else if (current == null || !anyUsable) {
           color = const Color(0xFFE07A7A);
           label = '未配置';
         } else if (!currentReady) {
