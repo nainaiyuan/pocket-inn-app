@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../chat/companion_page.dart';
 
 import '../ai_config_page.dart';
 import '../api_request_log_page.dart';
@@ -88,6 +89,13 @@ class DebugToolboxPage extends StatelessWidget {
               title: '手势测试',
               subtitle: '三页手势滑动调试（孤儿页面，收编于此）',
               page: const GestureTestPage(),
+            ),
+            _Entry(
+              icon: Icons.auto_awesome,
+              iconColor: const Color(0xFFC896B4),
+              title: '陪伴三页预览',
+              subtitle: '左「他」中「我们」右「你」（8-05 搭的骨架，内容占位）',
+              page: const CompanionPage(),
             ),
           ]),
           const SizedBox(height: 8),
