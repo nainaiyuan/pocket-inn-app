@@ -365,14 +365,14 @@ class AiChatService {
       DebugLogger.log('上下文管理',
           '🔄 检测到 AI 切换/首次使用 → 本次全量带上下文（stateful 也带）');
     }
-    // 8-05 18:2x（用户定稿模型）：A = 真会话（服务器记 C + 聊天记录）→
-    // 形态1 只发当前句；B（DeepSeek 等无会话）= 全量带 + 前缀缓存。
-    // isSessionA = stateful && sessionBased && 会话热（没切换/没超时/没强制刷新）
-    final sessInfo = _statefulInfoFor(ctxPid);
-    final isSessionA = stateful &&
-        (sessInfo.$3?.isSessionBased ?? false) &&
-        !needRecover;
-    final systemPrompt = isSessionA
+    // 8-05 18:2x（用户定稿）：会话记忆 = 我们自己管 token——满了就压缩
+    // 重扔一次让他记住（快忘前刷新），不是服务器持久会话。
+    // stateful（A，有后台记忆）：轻量期只发当前句（刚全量带过/重扔过，
+    // 服务端上下文还热）；token 满/超时/切换 → 全量带 C + D1 重扔刷新。
+    // stateless（B，无记忆）：每次全量带 C + 历史（前缀缓存命中省钱）。
+    // 男主不要的旧上下文他自己会丢，我们只负责在快忘前压缩重扔。
+    final isLight = stateful && !needRecover;
+    final systemPrompt = isLight
         ? ''
         : SystemTemplate.build(
             personaName: personaName,
@@ -393,7 +393,7 @@ class AiChatService {
     // 用户 8-03 00:55：男主分不清上下文和当前用户的话，以为上下文也要回复。
     // 修复：上下文参考打包成【一条】system 消息（不混进 user/assistant 对话流），
     // 明确"无需回复，只回复最新一条用户消息"→ 男主不会逐条回历史。
-    final historyMsgs = isSessionA || toolRound
+    final historyMsgs = isLight || toolRound
         ? <AIChatMessage>[]
         : ContextManager.instance.buildHistoryMessages(ctxPid, modelHint: _modelHintFor(personaId));
     // 8-03 19:4x（用户反馈"没写当前消息、聊天全混在一起"）：
@@ -449,8 +449,8 @@ class AiChatService {
             ? _toolRoundInteraction(personaId, toolMessages)
             : '（空）')
         : message;
-    lastPromptText = isSessionA
-        ? '【形态1·真会话】system 与历史都在服务器会话里，本次只发当前消息：\n\n'
+    lastPromptText = isLight
+        ? '【轻量期】stateful 刚全量带过/重扔过，服务端上下文还热——本次只发当前消息：\n\n'
             '【User·当前消息】\n$userText'
         : '【System】\n$systemPrompt$historyText\n\n'
             '【User·当前消息】（这是用户刚刚发的消息，只需要回复这一条）\n$userText';
@@ -460,7 +460,7 @@ class AiChatService {
     // 上下文参考作为一条 system 消息（role: system 明确是"参考"不是"待回复"），
     // 与当前 user 消息彻底分开 → 男主不会把历史当待回复内容
     final messages = <AIChatMessage>[
-      if (!isSessionA) AIChatMessage(role: 'system', content: systemPrompt),
+      if (!isLight) AIChatMessage(role: 'system', content: systemPrompt),
       if (historyMsgs.isNotEmpty)
         AIChatMessage(
           role: 'system',

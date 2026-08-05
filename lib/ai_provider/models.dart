@@ -53,11 +53,6 @@ class AIProviderConfig {
     this.toolFormat = 'auto',
     this.memoryMode = 'stateless',
     this.refreshHours,
-    // 8-05 18:2x（用户定稿模型）：真会话型 AI（本地/云端部署）——
-    // 服务器持久记聊天记录【含 system 设定】，形态1 只发当前句。
-    // DeepSeek 等无会话 API 必须 false（false 时 stateful 也按全量带，
-    // 不会崩）。未来接真会话 provider 时置 true。
-    this.sessionBased = false,
   });
 
   /// 稳定唯一 id，如 'preset-deepseek' / 'custom'
@@ -102,15 +97,6 @@ class AIProviderConfig {
   /// - 'stateful'：后台有记忆（token 快满/有刷新时间）——AI 服务端自己记得，
   ///   不重复带已记忆内容；窗口满/刷新前把关键内容沉淀（日记/记忆）
   final String memoryMode;
-
-  /// 真会话标记：服务器持久保存 system 设定 + 聊天记录（用户 8-05 18:2x
-  /// 定稿：A = 有后台记忆 = 会话记忆；B = 无记忆 = 全量带 + 前缀缓存）。
-  /// true → stateful 形态1 只发当前句（C、D 都在会话里）；
-  /// false → 即使 stateful 也按全量带（安全兜底，DeepSeek 永远 false）。
-  final bool sessionBased;
-
-  /// 是否真会话型（A）。isStateful 但非会话 → 按 B 方式发送（不崩）。
-  bool get isSessionBased => sessionBased;
 
   /// stateful 模式：空闲超时（小时）——用户和 AI 多久没聊天，服务器
   /// 省空间释放上下文缓存（用户 21:47 澄清，不是"每N小时强制写"）。
@@ -200,7 +186,6 @@ class AIProviderConfig {
       toolFormat: json['toolFormat'] as String? ?? 'auto',
       memoryMode: json['memoryMode'] as String? ?? 'stateless',
       refreshHours: json['refreshHours'] as int?,
-      sessionBased: json['sessionBased'] as bool? ?? false,
     );
   }
 }
