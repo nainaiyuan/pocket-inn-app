@@ -954,14 +954,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       builder: (dialogCtx) => AlertDialog(
         title: const Text('假窗口满·手动总结'),
         content: Text(isMock
-            ? '将对【测试 AI】的当前对话执行总结：
-原文压缩成摘要、摘要区新增条目、管家历史清空。
-继续？'
-            : '将对【真实 AI】的当前对话执行总结：
-原文压缩成摘要、摘要区新增条目、管家历史清空。
-'
-                '这是真实数据，总结后原文不可恢复。
-继续？'),
+            ? '将对【测试 AI】的当前对话执行总结：\n原文压缩成摘要、摘要区新增条目、管家历史清空。\n继续？'
+            : '将对【真实 AI】的当前对话执行总结：\n原文压缩成摘要、摘要区新增条目、管家历史清空。\n这是真实数据，总结后原文不可恢复。\n继续？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogCtx, false),
