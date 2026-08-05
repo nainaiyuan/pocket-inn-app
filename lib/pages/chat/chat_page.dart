@@ -2280,6 +2280,25 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       messages: messages,
       interval: interval,
     );
+    // 8-06 00:44 用户：弹窗消息也要注入上下文 + 落库——
+    // 男主记得自己弹过什么（用户回来质问"你不是发消息叫我了吗"能答上），
+    // 用户回来在聊天页也能看到这些消息（像男主发的消息一样）。
+    // 和 butlerWakeUp 的落库机制一致：feed 进上下文 + 存为男主消息。
+    final pid = _state.personaId;
+    if (pid != null && pid.isNotEmpty) {
+      for (final m in messages) {
+        ContextManager.instance.feedAssistantMessage(pid, m);
+        await ChatStorageService().appendMessage(
+          pid,
+          ChatMessage(
+            id: '${DateTime.now().microsecondsSinceEpoch}_notify',
+            text: m,
+            isMe: false,
+          ),
+        );
+      }
+      DebugLogger.log('指令模块', '📬 notify_user：${messages.length} 条已注入上下文+落库（男主记得自己弹过什么）');
+    }
     DebugLogger.log('指令模块', '📬 notify_user：${messages.length} 条，间隔 ${intervalSec}s，${waitMin} 分钟后没回来就唤醒');
     // 超时唤醒：wait_minutes 内用户没回聊天页 → 管家唤醒男主再找用户
     _scheduleNotifyWakeUp(waitMin);
