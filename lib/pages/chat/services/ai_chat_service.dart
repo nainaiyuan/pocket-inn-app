@@ -1099,7 +1099,7 @@ class AiChatService {
     String personaName,
     String raw,
   ) async {
-    final system = '【管家指令】你是「$personaName」。下面是你们最近的聊天记录。'
+    final system = '【系统指令】你是「$personaName」。下面是你们最近的聊天记录。'
         '趁你还记得（之后上下文会被清空），把三样东西分类整理好：'
         '① 日记：把今天聊的、她的状态心情、你答应过的事、在意的小细节，'
         '整理成一段日记（像真正的日记有你的语气，300 字内），'
