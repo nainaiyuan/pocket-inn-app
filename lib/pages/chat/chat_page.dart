@@ -45,7 +45,7 @@ class ChatPage extends StatefulWidget {
 enum Panel { left, center, right }
 
 class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin {
-  static const double _sideFrac = 0.65;
+  static const double _sideFrac = 0.80; // 8-06 00:06 用户：手机展开后太挤，65%→80%（唯一比例来源，手势逻辑全走 _sideW getter 联动）
   static const double _snapThr = 0.30;
   static const double _lockThr = 8.0;
   static const double _closeFactor = 2.5;
