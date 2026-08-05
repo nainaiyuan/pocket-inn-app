@@ -29,6 +29,7 @@ enum TaskType {
   arcConfirm,         // 温控校准：情绪回归基线，确认完整弧线（回复格式 #arc_end）
   patternMerge,       // 温控校准：情感区间高度重叠的组合，问男主是否同一类（回复格式 #same yes）
   conversationSummary,// 对话总结：对话结束，问男主要关键词（回复格式 #summary 词1,词2）
+  aiMemoryConfig,     // AI记忆配置：实测发现 AI 有后台记忆但没配好 → 提醒用户处理（8-05 14:19 用户）
   other,              // 其他
 }
 

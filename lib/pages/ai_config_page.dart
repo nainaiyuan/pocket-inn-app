@@ -386,6 +386,15 @@ class _AiConfigPageState extends State<AiConfigPage> {
               : (config.enabled ? '待验证' : '已禁用');
         }
     }
+    // 8-05 14:19 用户："反正就是明显一点"——实测有后台记忆但没配
+    // 空闲超时 → 红点 + 警示文字（有记忆要真正轻量带必须填超时）
+    final memoryNeedsConfig = (caps?.supportsBackendMemory ?? false) &&
+        config.memoryMode == 'stateful' &&
+        config.refreshHours == null;
+    if (memoryNeedsConfig) {
+      dotColor = Colors.red;
+      statusText = '⚠️ 有记忆·未配超时';
+    }
 
     return Card(
       elevation: 0,

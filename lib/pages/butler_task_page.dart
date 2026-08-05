@@ -190,6 +190,7 @@ class _ButlerTaskPageState extends State<ButlerTaskPage> {
         case TaskType.arcConfirm: return Icons.show_chart;
         case TaskType.patternMerge: return Icons.merge;
         case TaskType.conversationSummary: return Icons.summarize;
+        case TaskType.aiMemoryConfig: return Icons.memory;
         case TaskType.other: return Icons.task;
       }
     }
@@ -212,6 +213,7 @@ class _ButlerTaskPageState extends State<ButlerTaskPage> {
         case TaskType.arcConfirm: return '弧线确认';
         case TaskType.patternMerge: return '规律合并';
         case TaskType.conversationSummary: return '对话总结';
+        case TaskType.aiMemoryConfig: return 'AI记忆配置';
         case TaskType.other: return '其他';
       }
     }

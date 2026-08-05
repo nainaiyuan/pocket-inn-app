@@ -864,36 +864,81 @@ class AIProviderManager {
   /// 🧠 后台记忆实测 → 自动对齐 memoryMode（8-05 用户："你直接拿一个表，
   /// 万一未来 deepseek 不做了呢？用户用不认识的 API，说它没后台记忆不就不准吗？"
   /// → 不查表，第一次配 API 就实测，实测结果自动落到配置）。
-  /// - 实测有记忆 且 当前不是 stateful → 自动设为 stateful（用户可改回）。
-  ///   没填空闲超时时 stateful 也按 stateless 用（安全，不会坏）。
-  /// - 实测无记忆 但配置是 stateful → 不动配置，只日志提醒
-  ///   （用户手动配的可能是真记忆但探测没测出来，不擅自改）。
+  /// 14:19 用户新规则（实测为准，冲突时默认关掉手动配置）：
+  /// - 实测有记忆 → 自动设为 stateful；若还没配"空闲超时"→ 回调通知
+  ///   （UI 弹窗 + 管家任务提醒用户去填，红点常驻配置页）
+  /// - 实测无记忆 但手动配了 stateful → 自动改回 stateless（默认覆盖手动）
+  ///   并回调通知（让用户知道手动配置被实测结果覆盖了）
   Future<void> _applyMemoryModeFromProbe(
       AIProviderConfig config, AIProviderCapabilities caps) async {
     if (!caps.isProbed) {
       return;
     }
-    if (caps.supportsBackendMemory && config.memoryMode != 'stateful') {
-      final idx = _configs.indexWhere((c) => c.id == config.id);
-      if (idx >= 0) {
-        _configs[idx] = config.copyWith(memoryMode: 'stateful');
+    final idx = _configs.indexWhere((c) => c.id == config.id);
+    if (idx < 0) {
+      return;
+    }
+    final current = _configs[idx];
+
+    if (caps.supportsBackendMemory) {
+      // ① 实测有记忆：确保 stateful（自动补设，用户可改回）
+      var changed = false;
+      if (current.memoryMode != 'stateful') {
+        _configs[idx] = current.copyWith(memoryMode: 'stateful');
+        changed = true;
+      }
+      if (changed) {
         _syncRouter();
         await _persist();
         changeNotifier.value++;
+      }
+      // ② 还没配空闲超时 → 提醒（有记忆要真正"轻量带"必须填超时；
+      //    不填则 stateful 按 stateless 用，安全但没省 token）
+      if (_configs[idx].refreshHours == null) {
         AiModuleLog.log(
           'AI探测',
           '🧠 ${config.name} 实测有后台记忆 → 已自动设为"有后台记忆"'
-          '（可填空闲超时；不填则仍按每次全量带，安全）',
+          '，但未配空闲超时，提醒用户去配置页填写',
+        );
+        _memoryConfigNotice?.call(
+          '🧠 ${config.name} 有后台记忆',
+          '管家实测发现这个 AI 服务端能记住对话（有后台记忆）。\n\n'
+          '已自动设为"有后台记忆"。请到 AI 配置页编辑它，填"空闲超时"'
+          '（小时）启用轻量携带；不填则仍按每次全量带（安全，不省 token）。',
+          _configs[idx],
         );
       }
-    } else if (!caps.supportsBackendMemory && config.memoryMode == 'stateful') {
+    } else if (current.memoryMode == 'stateful') {
+      // ③ 实测无记忆 + 手动配了 stateful → 默认以实测为准，关掉手动配置
+      _configs[idx] = current.copyWith(memoryMode: 'stateless', refreshHours: null);
+      _syncRouter();
+      await _persist();
+      changeNotifier.value++;
       AiModuleLog.log(
         'AI探测',
-        '🧠 ${config.name} 实测无后台记忆，但配置是"有后台记忆"'
-        '——若 AI 答不上来，请到配置页改回"无后台记忆"',
+        '🧠 ${config.name} 实测无后台记忆 → 已自动改回"无后台记忆"'
+        '（覆盖手动配置；每次全量带，AI 不会失忆）',
+      );
+      _memoryConfigNotice?.call(
+        '🧠 ${config.name} 实测无后台记忆',
+        '你手动把它设成了"有后台记忆"，但管家实测它服务端记不住'
+        '（无状态 API，如 DeepSeek）。\n\n'
+        '已自动改回"无后台记忆"（每次全量带）——这样不会因为 AI 失忆而出错。',
+        _configs[idx],
       );
     }
   }
+
+  /// 🧠 后台记忆实测通知回调（UI 注入，2026-08-05 14:19 用户：
+  /// "发现是有记忆的，就弹窗告诉用户…并且给管家的那个任务那里，去弄一个任务"）。
+  /// ai_provider 保持纯 Dart 自包含：弹窗/建任务由 UI 层在 main.dart 注入实现。
+  static void Function(String title, String message, AIProviderConfig config)?
+      _memoryConfigNotice;
+
+  static set memoryConfigNotice(
+          void Function(String title, String message, AIProviderConfig config)?
+              handler) =>
+      _memoryConfigNotice = handler;
 
   /// 内置模拟 AI 的能力画像（8-04 硬编码已知能力；8-05 按形态区分：
   /// C/D 有后台记忆 → 🧠 灯亮；E 工具关 → 纯聊天。skip 探测）

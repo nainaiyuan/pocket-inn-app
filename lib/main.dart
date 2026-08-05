@@ -3,6 +3,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'ai_provider/ai_module_log.dart';
 import 'ai_provider/ai_provider_manager.dart';
+import 'ai_provider/models.dart';
+import 'butler/task/task_manager.dart';
 import 'core/error_handler.dart';
 import 'core/service_locator.dart';
 import 'butler/modules/butler_module_hub.dart';
@@ -10,6 +12,9 @@ import 'butler/system_template.dart';
 import 'data/app_settings.dart';
 import 'pages/home/home_page.dart';
 import 'utils/debug_logger.dart';
+
+/// 全局导航 key（8-05 14:19：后台记忆实测弹窗用，任何页面触发探测都能弹）
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,6 +36,7 @@ class _BootstrapApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'PocketInn',
+      navigatorKey: appNavigatorKey,
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
@@ -69,6 +75,28 @@ class _BootstrapPageState extends State<_BootstrapPage> {
       setState(() => _status = '正在初始化 AI 路由…');
       // 装配 AI 模块的"插座"：日志接入项目 DebugLogger（2026-08-04 解耦）
       AiModuleLog.configure(DebugLogger.log);
+      // 8-05 14:19 用户："发现是有记忆的，就弹窗告诉用户…并且给管家的
+      // 那个任务那里，去弄一个任务，让用户处理"——注入实测通知：
+      // 弹窗（全局 key，任何页面触发探测都能弹）+ 管家任务（带去重）
+      AIProviderManager.memoryConfigNotice =
+          (title, message, config) {
+        _createMemoryConfigTask(title, config);
+        final ctx = appNavigatorKey.currentContext;
+        if (ctx == null) return;
+        showDialog<void>(
+          context: ctx,
+          builder: (dialogCtx) => AlertDialog(
+            title: Text(title),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: const Text('知道了'),
+              ),
+            ],
+          ),
+        );
+      };
       await AIProviderManager.instance.initialize();
 
       setState(() => _status = '正在加载管家数据…');
@@ -91,6 +119,25 @@ class _BootstrapPageState extends State<_BootstrapPage> {
         _error = '启动失败:\n$e\n\n$stack';
       });
     }
+  }
+
+  /// 8-05 14:19 用户："给管家的那个任务那里，去弄一个任务，让用户处理"。
+  /// 建管家任务提醒用户处理；同类型且同 AI 的任务已存在则不重复建。
+  void _createMemoryConfigTask(String title, AIProviderConfig config) {
+    final exists = TaskManager.instance.getActiveTasks().any(
+          (t) =>
+              t.type == TaskType.aiMemoryConfig &&
+              (t.description.contains(config.name) ||
+                  t.description.contains(config.model)),
+        );
+    if (exists) {
+      return;
+    }
+    TaskManager.instance.createTask(
+      type: TaskType.aiMemoryConfig,
+      description:
+          '$title（${config.model}）——到 AI 配置页编辑它处理',
+    );
   }
 
   @override
