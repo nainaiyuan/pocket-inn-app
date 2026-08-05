@@ -297,19 +297,27 @@ class CapabilityProbe {
   final Random _random = Random();
 
   /// 🧠 后台记忆实测（8-05 用户要求，不查表）：
-  /// 1) "记住这句话：{暗号}。只回复'好'。"  2)（不带任何历史）
-  /// "我刚才让你记住的那句话是什么？只回答内容本身。"
+  /// 1) 第一条明确告知这是【记忆测试·第一次对话】（共两次），让 AI 记住暗号
+  ///    ——不说明的话 AI 会自由发挥（拒绝/反问/第二次不知道在问什么）
+  /// 2) 第二条（不带任何历史）问暗号是什么
   /// 第二条回复里含暗号 → 有后台记忆；否则 → 无。
   /// 任何失败按"无记忆"处理——无记忆是安全默认（stateless 全量带
   /// 永远不会错，只是不省 token；反向误判才致命：AI 会失忆）。
   Future<bool> _probeBackendMemory(ResolvedApiConfig config) async {
     final marker = '翡翠西瓜${1000 + _random.nextInt(9000)}';
     try {
-      // 第一条：让 AI 记住暗号（只回"好"，max_tokens 压到最小省 token）
+      // 第一条：明说是记忆测试、一共两次、这是第一次、之后会问什么、
+      // 现在只需确认——AI 知道流程后才会好好配合（8-05 13:58 用户）
       await _api.createChatCompletion(
         config,
         messages: [
-          {'role': 'user', 'content': '记住这句话：$marker。只回复"好"一个字。'},
+          {
+            'role': 'user',
+            'content': '【记忆测试】这是第一次对话，一共两次。'
+                '请记住这句话：$marker。'
+                '等会儿我会发第二条消息问你这句话是什么，你到时只回答那句话的内容本身。'
+                '现在请只回复两个字：好的',
+          },
         ],
         defaults: const {'max_tokens': 10, 'temperature': 0},
       );
@@ -319,7 +327,8 @@ class CapabilityProbe {
         messages: [
           {
             'role': 'user',
-            'content': '我刚才让你记住的那句话是什么？只回答那句话的内容本身，不要解释。',
+            'content': '【记忆测试·第二次对话】我刚才让你记住的那句话是什么？'
+                '只回答那句话的内容本身，不要解释。',
           },
         ],
         defaults: const {'max_tokens': 30, 'temperature': 0},
@@ -329,8 +338,8 @@ class CapabilityProbe {
       AiModuleLog.log(
         'AI探测',
         hit
-            ? '🧠 后台记忆实测：有（第二条答出暗号）→ 可配"有后台记忆"轻量带'
-            : '🧠 后台记忆实测：无（第二条未答出暗号）→ 按 stateless 每次全量带',
+            ? '🧠 后台记忆实测：有（第二次答出暗号）→ 可配"有后台记忆"轻量带'
+            : '🧠 后台记忆实测：无（第二次未答出暗号）→ 按 stateless 每次全量带',
       );
       return hit;
     } on Object catch (error) {
