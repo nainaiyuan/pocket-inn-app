@@ -468,22 +468,24 @@ class AiChatService {
               '${historyMsgs.map((m) => '[${m.role}] ${m.content}').join('\n')}',
         ),
     ];
-    // 工具轮也拼用户消息（8-04 18:1x 用户：男主前言不搭后语——
-    // 根因：工具轮 messages 里没有用户消息，模型不知道用户在问什么）。
-    // 用户消息放最前（工具调用之前），标注清楚是"用户刚说的"。
+    // 工具轮消息顺序（8-05 18:56 用户定稿）：工具相关在前，用户消息最后——
+    // AI 按数组顺序读，最后一条 user 才是"要回复的"。
+    // 之前工具结果排在用户消息下面 → AI 把工具结果当待回复的最后一条 → 错乱。
+    // 现在：当前工具调用/结果在上（男主刚做了什么+结果），
+    // 【用户当前消息】保持在最后一条（AI 基于工具结果回复用户）。
     if (toolRound) {
+      if (toolMessages != null) messages.addAll(toolMessages);
       final userMsg = ContextManager.instance.lastUserMessageFor(ctxPid);
       if (userMsg != null && userMsg.isNotEmpty) {
         messages.add(AIChatMessage(
           role: 'user',
           content: '【用户当前消息】（这是用户刚发的消息，'
-              '你调用工具就是为了回复它——回复时针对这条）\n$userMsg',
+              '你刚调用的工具结果在上面——基于结果回复这条）\n$userMsg',
         ));
       }
     } else {
       messages.add(AIChatMessage(role: 'user', content: message));
     }
-    if (toolMessages != null) messages.addAll(toolMessages);
     late final AIProviderResult result;
     try {
       result = await _chat(
@@ -1162,11 +1164,11 @@ class AiChatService {
   String _toolRoundInteraction(
       String personaId, List<AIChatMessage>? toolMessages) {
     final sb = StringBuffer();
-    sb.writeln('【用户当前消息】'
-        '${ContextManager.instance.lastUserMessageFor(personaId) ?? '（无）'}');
     sb.writeln('【当前工具调用】');
     if (toolMessages == null || toolMessages.isEmpty) {
       sb.writeln('（无工具调用）');
+      sb.writeln('【用户当前消息】'
+          '${ContextManager.instance.lastUserMessageFor(personaId) ?? '（无）'}');
       return sb.toString().trim();
     }
     // 解析每行【工具 名】✅成功/❌失败：结果 —— 8-04 17:0x（用户反对截断：
@@ -1188,6 +1190,9 @@ class AiChatService {
       }
     }
     if (!found) sb.writeln('（无工具调用）');
+    // 用户当前消息保持在最后一条（8-05 18:56 用户：AI 读最后一条回复）
+    sb.writeln('【用户当前消息】'
+        '${ContextManager.instance.lastUserMessageFor(personaId) ?? '（无）'}');
     return sb.toString().trim();
   }
 }
