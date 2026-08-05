@@ -266,6 +266,9 @@ class AiChatService {
     bool toolRound = false,
     List<AIChatMessage>? toolMessages,
     String? sessionId,
+    // 8-05 14:36：测试空间隔离——上下文管理（摘要/压缩/恢复包）落到的 key；
+    // null = 用 personaId（正常聊天）；mock 测试传 ${personaId}__mock__test
+    String? storagePersonaId,
   }) async {
     final manager = AIProviderManager.instance;
     if (!manager.hasUsable(personaId)) {
@@ -275,11 +278,16 @@ class AiChatService {
       );
       throw const AIAllProvidersFailedException();
     }
-    // 8-05 14:32 用户：测试对话与真实数据隔离——模拟 AI 聊天时
-    // 跳过所有"会落盘"的上下文管理（总结/压缩/恢复包/沉淀），
-    // 只保留内存态 feed（测试上下文连续，重启自动清空，不碰真实数据）
-    final isMockChat =
-        AIProviderManager.isMockId(manager.lastProviderFor(personaId) ?? '');
+    // 8-05 14:36 用户修正：测试对话 ≠ 关功能，而是用独立"测试空间"——
+    // [storagePersonaId] 让上下文管理（摘要/压缩/恢复包/沉淀）全部落到
+    // 测试 key（${真实persona}__mock__test），功能照常跑、数据不混。
+    // provider 绑定仍用真实 personaId（mock 全局注册，测试 key 也能解析到）。
+    final ctxPid = storagePersonaId ?? personaId;
+    // mock 测试对话跳过 stateful 沉淀（沉淀会主动调 AI 写存档，
+    // 测试时可能解析到真实 DeepSeek，白费 key 额度）；stateless 链路
+    // 总结/压缩照常跑（写测试空间，链路完整可测）
+    final isMockChat = AIProviderManager.isMockId(
+        manager.lastProviderFor(personaId) ?? '');
     // 上下文管理：非工具轮先处理"该总结了/该缩减了"（男主总结 → 摘要区）
     // 用户 21:19：两种 AI 分开——
     //   stateless（后台无记忆，DeepSeek 等）：缓存友好 + 攒够摘要提炼（现有逻辑）
@@ -299,9 +307,9 @@ class AiChatService {
     // 8-05 14:32：mock 测试对话跳过整个决策块（定时沉淀/补沉淀/压缩/总结
     // 全会写盘——测试数据不碰真实摘要和恢复包）
     if (!toolRound && !isMockChat) {
-      if (decision.stateful) {
+      if (decision.stateful && !isMockChat) {
         // 用户发消息 → 重置定时沉淀（新一轮空闲期）
-        scheduleStatefulSettle(personaId, personaName, personaPrompt);
+        scheduleStatefulSettle(ctxPid, personaName, personaPrompt);
         if (statefulRecover) {
           DebugLogger.log(
             '上下文管理',
@@ -309,9 +317,9 @@ class AiChatService {
           );
         }
         // 防 APP 被杀/定时器丢：下次聊天时若已过半且没沉淀过 → 补沉淀
-        await _maybeSettleStateful(personaId, personaName);
+        await _maybeSettleStateful(ctxPid, personaName);
       } else {
-        if (ContextManager.instance.needsCompact(personaId, modelHint: _modelHintFor(personaId))) {
+        if (ContextManager.instance.needsCompact(ctxPid, modelHint: _modelHintFor(personaId))) {
           await _compactSummaries(personaId, personaName);
         }
         // 8-04 22:5x（验收⑤排查）：needsSummarize 输入输出打日志——
@@ -320,9 +328,9 @@ class AiChatService {
             .needsSummarize(personaId, modelHint: _modelHintFor(personaId));
         DebugLogger.log(
             'AI验收',
-            '⑤needsSummarize: 话题=${ContextManager.instance.debugTopicExists(personaId)}'
-            ' 原文=${ContextManager.instance.debugRawLength(personaId)}字'
-            ' 预算=${ContextManager.instance.topicBudgetChars(personaId, modelHint: _modelHintFor(personaId))}字'
+            '⑤needsSummarize: 话题=${ContextManager.instance.debugTopicExists(ctxPid)}'
+            ' 原文=${ContextManager.instance.debugRawLength(ctxPid)}字'
+            ' 预算=${ContextManager.instance.topicBudgetChars(ctxPid, modelHint: _modelHintFor(personaId))}字'
             ' → $_needSum');
         if (_needSum) {
           await _summarize(personaId, personaName);
@@ -335,11 +343,11 @@ class AiChatService {
     // 首次请求：恢复摘要区（不重建历史原文——历史=本次对话实时记录，
     // DB 里是原始/还原后文本，硬拉会泄露真实称呼，用户 20:08 指示）
     // 8-05 14:32：mock 测试对话跳过（不读真实摘要，从空上下文开始）
-    if (!_contextRestored.contains(personaId) && !isMockChat) {
-      _contextRestored.add(personaId);
-      await ContextManager.instance.restore(personaId, sessionId, modelHint: _modelHintFor(personaId));
+    if (!_contextRestored.contains(ctxPid)) {
+      _contextRestored.add(ctxPid);
+      await ContextManager.instance.restore(ctxPid, sessionId, modelHint: _modelHintFor(personaId));
     }
-    final needsWindow = !ContextTracker.instance.windowConfirmed(personaId);
+    final needsWindow = !ContextTracker.instance.windowConfirmed(ctxPid);
     final stateful = decision.stateful;
     // 8-04 16:4x（用户："切换AI第一次必须全量带，否则AI不知道发生了什么"）：
     // 记录上次给这个 persona 组装上下文的 provider；切换/首次 → 本次恢复全量
@@ -374,7 +382,7 @@ class AiChatService {
     // 明确"无需回复，只回复最新一条用户消息"→ 男主不会逐条回历史。
     final historyMsgs = (stateful && !needRecover) || toolRound
         ? <AIChatMessage>[]
-        : ContextManager.instance.buildHistoryMessages(personaId, modelHint: _modelHintFor(personaId));
+        : ContextManager.instance.buildHistoryMessages(ctxPid, modelHint: _modelHintFor(personaId));
     // 8-03 19:4x（用户反馈"没写当前消息、聊天全混在一起"）：
     // 当前消息在 history 组装【之后】再 feed——之前先 feed 再组装，
     // 当前消息混进【上下文参考】被标"无需回复"，又单独拼成 user，
@@ -383,7 +391,7 @@ class AiChatService {
     // 当前消息只在【User】出现一次，边界清楚。
     // （compact/summarize 仍在 feed 前跑：总结的是不含当前消息的旧原文）
     if (!toolRound && message.trim().isNotEmpty) {
-      ContextManager.instance.feedUserMessage(personaId, message);
+      ContextManager.instance.feedUserMessage(ctxPid, message);
       // 8-03 20:1x（调试：用户怀疑男主对话被抛弃）——feed 全链路日志
       DebugLogger.log(
           '上下文调试',
@@ -408,7 +416,7 @@ class AiChatService {
     // 无论 stateful 与否都完整呈现；并落库 prompt_logs 表
     // （重启后 📄 弹窗仍能看，且按时间可查）。
     final displayHistory =
-        ContextManager.instance.buildHistoryMessages(personaId, modelHint: _modelHintFor(personaId));
+        ContextManager.instance.buildHistoryMessages(ctxPid, modelHint: _modelHintFor(personaId));
     final historyText = displayHistory.isEmpty
         ? ''
         : '\n\n【上下文参考】（本次对话已聊过的内容，含你（男主）自己的回答。'
@@ -448,7 +456,7 @@ class AiChatService {
     // 根因：工具轮 messages 里没有用户消息，模型不知道用户在问什么）。
     // 用户消息放最前（工具调用之前），标注清楚是"用户刚说的"。
     if (toolRound) {
-      final userMsg = ContextManager.instance.lastUserMessageFor(personaId);
+      final userMsg = ContextManager.instance.lastUserMessageFor(ctxPid);
       if (userMsg != null && userMsg.isNotEmpty) {
         messages.add(AIChatMessage(
           role: 'user',
@@ -485,7 +493,7 @@ class AiChatService {
           final butler = ChatService.instance.butler;
           final used = butler?.totalPromptTokens ?? 0;
           final calibrated = used + 2000;
-          ContextTracker.instance.setWindow(personaId, calibrated);
+          ContextTracker.instance.setWindow(ctxPid, calibrated);
           DebugLogger.log('上下文', '⚠️ 上下文超限 → 窗口校准: → $calibrated'
               '（已用 $used + 余量2000）');
         } catch (_) {}
@@ -494,7 +502,7 @@ class AiChatService {
     }
     // 男主回复进上下文（当前话题原文）
     if (result.text.trim().isNotEmpty) {
-      ContextManager.instance.feedAssistantMessage(personaId, result.text.trim());
+      ContextManager.instance.feedAssistantMessage(ctxPid, result.text.trim());
       // 8-03 20:1x（调试：用户怀疑男主对话被抛弃）——feed 全链路日志
       DebugLogger.log(
           '上下文调试',
@@ -568,7 +576,7 @@ class AiChatService {
         final totalTokens = (usage['total_tokens'] as num?)?.toInt() ?? 0;
         if (promptTokens > 0) {
           butler.recordTokenUsage(promptTokens, totalTokens);
-          ContextTracker.instance.recordCall(personaId, promptTokens);
+          ContextTracker.instance.recordCall(ctxPid, promptTokens);
           DebugLogger.log('上下文', '📈 $personaName 本轮 ${promptTokens}token（累计 ${butler.totalPromptTokens}）');
           // 缓存命中统计 + 成本（DeepSeek usage 返回 hit/miss，管家精确算账）
           final hitTokens = (usage['prompt_cache_hit_tokens'] as num?)?.toInt() ?? 0;
@@ -592,13 +600,13 @@ class AiChatService {
       }
     } catch (_) {}
     // 男主回复里的 #model → 确认窗口长度
-    if (!ContextTracker.instance.windowConfirmed(personaId)) {
+    if (!ContextTracker.instance.windowConfirmed(ctxPid)) {
       final m = RegExp(r'#model\s+(\S+)\s+(\d+)', caseSensitive: false)
           .firstMatch(result.text);
       if (m != null) {
         final w = int.tryParse(m.group(2)!);
         if (w != null && w >= 4096 && w <= 1048576) {
-          ContextTracker.instance.setWindow(personaId, w);
+          ContextTracker.instance.setWindow(ctxPid, w);
           DebugLogger.log('上下文', '🎯 男主自报: ${m.group(1)} 窗口 $w token');
         } else {
           DebugLogger.log('上下文', '⚠️ 男主 #model 值不合理，忽略: ${m.group(0)}');
@@ -609,7 +617,7 @@ class AiChatService {
           _currentModelName(personaId),
         );
         if (w > 0) {
-          ContextTracker.instance.setWindow(personaId, w);
+          ContextTracker.instance.setWindow(ctxPid, w);
           DebugLogger.log('上下文', '🔎 男主未报 #model，查表兜底: '
               '${_currentModelName(personaId)} → $w token');
         }

@@ -331,6 +331,22 @@ class ChatDatabaseService {
     await _db.delete('context_summaries', where: 'persona_id = ?', whereArgs: [personaId]);
   }
 
+  /// 8-05 14:36（用户：测试数据单独一个测试的地方）：
+  /// 清空所有测试空间数据（persona_id/character_id 以 __mock__test 结尾）——
+  /// 测试会话树（级联删消息/记忆）+ 摘要 + 恢复包 + 测试日记
+  Future<void> clearMockTestData() async {
+    final db = await _db;
+    const pattern = '%__mock__test';
+    await db.delete('chat_sessions',
+        where: 'character_id LIKE ?', whereArgs: [pattern]);
+    await db.delete('context_summaries',
+        where: 'persona_id LIKE ?', whereArgs: [pattern]);
+    await db.delete('context_recovery',
+        where: 'persona_id LIKE ?', whereArgs: [pattern]);
+    await db.delete('butler_diary',
+        where: 'persona_id LIKE ?', whereArgs: [pattern]);
+  }
+
   /// 读会话最近对话行（供重启后重建"当前话题原文"）
   /// 返回 (role, text)，从旧到新；[maxChars] 限制总量（从最新往回取）。
   Future<List<(String, String)>> loadRecentChatLines(

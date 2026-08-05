@@ -11,6 +11,8 @@ import 'package:flutter/material.dart';
 
 import '../../ai_provider/ai_provider_manager.dart';
 import '../../ai_provider/mock_ai_provider.dart';
+import '../../services/chat_database_service.dart';
+import '../chat/services/chat_storage_service.dart';
 
 /// 🧪 模拟 AI 测试页 —— 调试工具箱入口
 class MockAiTestPage extends StatefulWidget {
@@ -65,6 +67,33 @@ class _MockAiTestPageState extends State<MockAiTestPage> {
                 '模拟 AI 不联网、不花 token。',
                 style: TextStyle(fontSize: 11, color: Colors.grey.shade500, height: 1.5),
               ),
+              const SizedBox(height: 8),
+              // 8-05 14:36（用户：测试数据单独一个测试的地方，别和真实数据混）：
+              // 测试对话有自己的空间（${persona}__mock__test），功能照常跑；
+              // 不需要了可一键清空（消息/会话/记忆/摘要/日记全清，真实数据不受影响）
+              Card(
+                elevation: 0,
+                margin: const EdgeInsets.only(bottom: 8),
+                color: const Color(0xFFFFF3E0).withValues(alpha: 0.6),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  leading: const Icon(Icons.cleaning_services,
+                      color: Color(0xFFE65100), size: 22),
+                  title: const Text('🗑️ 清空测试数据',
+                      style:
+                          TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                  subtitle: const Text(
+                    '删除所有测试空间的消息/会话/记忆/摘要/日记\n（测试数据独立存放，不影响真实对话）',
+                    style: TextStyle(fontSize: 11, height: 1.4),
+                  ),
+                  trailing: const Icon(Icons.chevron_right, size: 20),
+                  onTap: () => _confirmClearTestData(context),
+                ),
+              ),
               const SizedBox(height: 12),
               _buildMockCard(),
             ],
@@ -72,6 +101,56 @@ class _MockAiTestPageState extends State<MockAiTestPage> {
         },
       ),
     );
+  }
+
+  /// 8-05 14:36：清空测试空间数据（带确认）
+  Future<void> _confirmClearTestData(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清空测试数据？'),
+        content: const Text(
+          '这会删除所有"测试空间"里的数据：\n'
+          '· 测试对话记录（消息/会话）\n'
+          '· 测试记忆（男主在测试里记住的事）\n'
+          '· 测试上下文总结/存档\n'
+          '· 测试日记\n\n'
+          '你的真实对话、记忆、日记完全不受影响。',
+          style: TextStyle(fontSize: 13, height: 1.6),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE65100),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('清空'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    try {
+      await ChatStorageService().deleteMockTestData();
+      await ChatDatabaseService.instance.clearMockTestData();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('✅ 测试数据已清空（真实数据不受影响）'),
+          duration: Duration(seconds: 2),
+        ));
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('清空失败：$e'),
+          duration: const Duration(seconds: 2),
+        ));
+      }
+    }
   }
 
   /// 内置模拟 AI 卡片（8-04 20:35 用户：本地 AI 测各种配置组合；

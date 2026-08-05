@@ -340,6 +340,19 @@ class ChatStorageService {
     } catch (_) {}
   }
 
+  /// 8-05 14:36（用户：测试数据单独一个测试的地方）：
+  /// 清空所有测试空间的历史气泡/记忆（persona_id 以 __mock__test 结尾）
+  Future<void> deleteMockTestData() async {
+    try {
+      final d = await db;
+      const pattern = '%__mock__test';
+      await d.delete('messages',
+          where: 'persona_id LIKE ?', whereArgs: [pattern]);
+      await d.delete('memories',
+          where: 'persona_id LIKE ?', whereArgs: [pattern]);
+    } catch (_) {}
+  }
+
   // ═══════════════════════════════════
   // 完整 prompt 记录（8-04 16:4x：发给男主的完整内容，按时间持久化）
   // ═══════════════════════════════════

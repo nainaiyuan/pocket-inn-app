@@ -11,16 +11,17 @@ class ChatMessageArea extends StatefulWidget {
   final String? characterAvatarPath;
   final VoidCallback? onAvatarTap;
 
-  /// 8-05 14:32（用户：测试数据与真实数据隔离）：false = 只显示不落库
-  /// （mock 测试对话用——退出聊天页自动消失）
-  final bool persist;
+  /// 8-05 14:36（用户：测试数据隔离）：数据落库/历史加载用的 persona key；
+  /// null = 用 currentPersona.id（正常聊天）；mock 测试传测试 key
+  /// （${真实persona}__mock__test）→ 测试对话有自己的消息空间
+  final String? storagePersonaId;
 
   const ChatMessageArea({
     super.key,
     required this.currentPersona,
     this.characterAvatarPath,
     this.onAvatarTap,
-    this.persist = true,
+    this.storagePersonaId,
   });
 
   @override
@@ -50,9 +51,11 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
   @override
   void didUpdateWidget(ChatMessageArea old) {
     super.didUpdateWidget(old);
-    if (old.currentPersona?.id != widget.currentPersona?.id) {
+    if (old.currentPersona?.id != widget.currentPersona?.id ||
+        old.storagePersonaId != widget.storagePersonaId) {
       _exitSelectMode();
-      // 切换角色：清掉"正在输出"状态（引用计数一并清零）
+      // 切换角色（或 8-05 14:36 真实↔测试空间切换）：
+      // 清掉"正在输出"状态（引用计数一并清零），重载对应空间的历史
       ChatPresence.instance.resetTyping();
       _loadMessages();
     }
@@ -68,7 +71,9 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
       if (mounted) setState(() => _loading = false);
       return;
     }
-    final msgs = await _storage.loadMessages(widget.currentPersona!.id);
+    // 8-05 14:36：测试对话读测试空间的历史（storagePersonaId ?? 真实 persona）
+    final pid = widget.storagePersonaId ?? widget.currentPersona!.id;
+    final msgs = await _storage.loadMessages(pid);
     if (mounted) {
       setState(() {
         _messages = msgs;
@@ -103,20 +108,17 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
         _messages.add(msg);
       }
     });
-    // 8-05 14:32：mock 测试对话只显示不落库（widget.persist = false）
-    if (!widget.persist) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-      return;
-    }
+    // 8-05 14:36：测试对话落测试空间的库（storagePersonaId ?? 真实 persona）
+    final storePid = widget.storagePersonaId ?? widget.currentPersona!.id;
     if (insertBeforeId != null) {
       _storage.insertMessageBefore(
-        widget.currentPersona!.id,
+        storePid,
         msg,
         insertBeforeId,
         seq: _toolInsertSeq++,
       );
     } else {
-      _storage.appendMessage(widget.currentPersona!.id, msg);
+      _storage.appendMessage(storePid, msg);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }

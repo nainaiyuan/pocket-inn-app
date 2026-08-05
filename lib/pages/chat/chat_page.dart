@@ -284,50 +284,55 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final lid = _state.leadId;
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
-    // 8-05 14:32 用户：测试对话与真实数据隔离——模拟 AI 聊天：
-    // 不建会话、不落库、不走管家管线（情绪/记忆/技能）、不写日记；
-    // 只显示在界面上，退出聊天页即消失（= 自动删）
+    // 8-05 14:36 用户修正：测试对话 ≠ 关功能，而是独立"测试空间"——
+    // 模拟 AI 聊天时所有数据（会话/消息/记忆/情绪/上下文总结）落到
+    // ${真实persona}__mock__test 这个测试 key，功能照常跑、数据不混；
+    // 聊天页 UI 仍显示真实 persona（头像/名字/人设不变）
     final isMockChat = AIProviderManager.isMockId(
         AIProviderManager.instance.lastProviderFor(personaId) ?? '');
+    final chatPid = isMockChat ? '${personaId}__mock__test' : personaId;
+    // 会话空间切换（真实 ↔ 测试）：旧会话作废，重新建对应空间的
+    if (_chatSessionId != null && _chatSessionIsMock != isMockChat) {
+      DebugLogger.log('管家流程', '🧪 会话空间切换（测试↔真实），旧会话作废');
+      _chatSessionId = null;
+      _chatLeafId = null;
+    }
+    _chatSessionIsMock = isMockChat;
     // 男主正在被调用（同一男主连续对话 → 上下文延续）
     if (personaId.isNotEmpty) {
-      ContextTracker.instance.touch(personaId);
+      ContextTracker.instance.touch(chatPid);
     }
     // 拟人化：用户消息未读 → 男主开始"正在输入"
     ChatPresence.instance.markUnread(userMsgId);
     ChatPresence.instance.setTyping(true);
     // 管家对话记录：隐式会话 + 消息落库（记忆提取的数据源）
-    // mock 测试对话不建会话（_chatSessionId 保持 null →
-    // 后续所有记忆写入/落库自动跳过）
-    if (!isMockChat) {
-      await _ensureChatSession(personaId, personaName);
-      if (_chatSessionId != null) {
-        try {
-          final userNode = await ChatDatabaseService.instance.appendUserMessage(
-            sessionId: _chatSessionId!,
-            parentMessageId: _chatLeafId,
-            text: t,
-          );
-          _chatLeafId = userNode.id;
-        } catch (e) {
-          DebugLogger.log('管家流程', '✖ 对话落库失败（用户消息）: $e');
-        }
+    // 测试对话建测试会话（_chatSessionId = 测试会话 id →
+    // 消息/记忆全部落在测试空间）
+    await _ensureChatSession(chatPid, personaName);
+    if (_chatSessionId != null) {
+      try {
+        final userNode = await ChatDatabaseService.instance.appendUserMessage(
+          sessionId: _chatSessionId!,
+          parentMessageId: _chatLeafId,
+          text: t,
+        );
+        _chatLeafId = userNode.id;
+      } catch (e) {
+        DebugLogger.log('管家流程', '✖ 对话落库失败（用户消息）: $e');
       }
     }
     try {
       // ===== 管家管线：技能触发 → 假面替换 → 情绪记录（流程树可见）=====
+      // 测试对话也跑（链路完整可测），但 characterId 用测试 key →
+      // 技能执行/情绪记录全部落在测试空间
       String sendText = t;
       String? skillInjection;
       String? keywordAsk;
-      if (isMockChat) {
-        // 测试对话不跑管家管线（情绪/记忆/技能不记录，不污染用户画像）
-        DebugLogger.log('管家流程', '🧪 测试对话：跳过管家管线（技能/假面/情绪）');
-      } else {
-        try {
-          final pipeline = await ChatService.instance.runButlerPipeline(
-            userText: t,
-            characterId: personaId,
-            characterName: personaName,
+      try {
+        final pipeline = await ChatService.instance.runButlerPipeline(
+          userText: t,
+          characterId: chatPid,
+          characterName: personaName,
             // 37批：传真实会话 id → 每次新对话重新轮换代号（男主无法把代号绑定到人）
             sessionId: _chatSessionId ?? 'chat_page',
           );
@@ -338,7 +343,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           // 管家失败不阻断聊天，只记日志
           DebugLogger.log('管家流程', '✖ 管家管线异常（不阻断聊天）: $e');
         }
-      }
       // 获准记忆注入（异步检索记忆库，按类别/条数）
       final recallInjection = _pendingRecall != null
           ? await _buildRecallInjectionAsync(_pendingRecall!)
@@ -362,6 +366,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         personaName: personaName,
         personaPrompt: _currentPersonaPrompt(),
         sessionId: _chatSessionId,
+        // 8-05 14:36：测试对话的上下文管理（摘要/压缩/恢复包）落到测试 key
+        storagePersonaId: chatPid,
         // 用户 8-03 02:41 模块化重构：技能注入 + 温控询问 + 获准记忆 → USER_PROFILE
         //（用户状态）；审批反馈 + 工具强制提示 → TASK_STATE（任务状态）
         userProfile: [
@@ -653,6 +659,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           toolRound: true,
           toolMessages: toolMessages,
           sessionId: _chatSessionId,
+          storagePersonaId: chatPid,
         );
         if (result.text.trim().isNotEmpty) {
           replyTexts.add(result.text.trim());
@@ -769,17 +776,18 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 失败则保持未读，男主没读到）
       ChatPresence.instance.resetTyping();
       // 作息规律：当天首次聊天 → 记开始时间（用户一般几点来找男主）
-      if (personaId.isNotEmpty) {
+      // 8-05 14:36：测试对话不算用户行为（作息统计是用户维度，跳过）
+      if (personaId.isNotEmpty && !isMockChat) {
         unawaited(_recordChatStart());
       }
       // 用户 21:10：日记 = 男主每天结束（用户睡觉后）写的当天总结。
       // 用户消息含结束信号（睡了/晚安/睡觉/拜拜…）→ 男主写完回复后，
       // 管家把当天对话原文交给男主写当天日记（异步，不打断用户）。
       // 21:13：同时记录"平均结束聊时间"（用户一般聊到几点睡）。
-      // 8-05 14:32：mock 测试对话不写日记
-      if (personaId.isNotEmpty && !isMockChat && _isEndOfDaySignal(t)) {
-        unawaited(_recordChatEnd());
-        unawaited(_writeDailyDiary(personaId, personaName));
+      // 8-05 14:36：测试对话写测试空间的日记（chatPid），不碰真实日记
+      if (personaId.isNotEmpty && _isEndOfDaySignal(t)) {
+        if (!isMockChat) unawaited(_recordChatEnd());
+        unawaited(_writeDailyDiary(chatPid, personaName));
       }
     }
   }
@@ -1118,11 +1126,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                             ),
                           ),
                         // 消息列表在背景之上
-                        // 8-05 14:32：mock 测试对话只显示不落库（persist=false）
+                        // 8-05 14:36：测试对话落测试空间的库（storagePersonaId），
+                        // 历史加载也读测试空间（测试对话退出再进还在）
                         ChatMessageArea(key: _msgKey, currentPersona: _state.persona,
                           characterAvatarPath: _state.effectiveAvatarPath,
                           onAvatarTap: _openWorld,
-                          persist: !_isCurrentMockChat(),
+                          storagePersonaId: _isCurrentMockChat()
+                              ? '${_state.personaId}__mock__test'
+                              : null,
                           ),
                       ],
                     ),
@@ -1440,6 +1451,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   String? _chatSessionId;
   String? _chatLeafId;
 
+  /// 8-05 14:36：当前 _chatSessionId 属于哪个空间（true=测试会话）。
+  /// 真实 ↔ 测试切换时旧会话作废重建，防真实聊天落进测试会话
+  bool _chatSessionIsMock = false;
+
   /// 待反馈给男主的审批结果（下轮注入 prompt：确认/拒绝/帮助文本）
   String? _pendingFeedback;
   // 8-04 18:34：疑似工具调用格式不对 → 下轮注入男主正确格式提示（用完即清）
@@ -1487,12 +1502,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       area.appendMessage(msg, insertBeforeId: _firstAiMsgId);
     } else {
       // 聊天页没挂载（切走/后台）→ 只落库，回来从 DB 加载能看到
-      // 8-05 14:32：mock 测试对话不落库（测试数据自动消失）
+      // 8-05 14:36：测试对话落测试空间的库（${personaId}__mock__test）
       final isMock = AIProviderManager.isMockId(
           AIProviderManager.instance.lastProviderFor(personaId) ?? '');
-      if (!isMock) {
-        ChatStorageService().appendMessage(personaId, msg);
-      }
+      ChatStorageService()
+          .appendMessage(isMock ? '${personaId}__mock__test' : personaId, msg);
     }
   }
 
@@ -2025,8 +2039,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     // 8-03 22:0x（用户实测：点"让他记住"弹两个确认窗）：
     // 工具轮 485 行 _approveToolCall 已确认过 → 这里 #记# 时代遗留的
     // 老弹窗（💌 男主想记住这个）造成双重确认 → 移除，直接执行
-    // 8-05 14:32：mock 测试对话不建会话（测试数据不写记忆库）
-    if (_chatSessionId == null && !_isCurrentMockChat()) {
+    // 8-05 14:36：测试对话建的是测试会话 → 记忆写入测试空间，功能照常
+    if (_chatSessionId == null) {
       await _ensureChatSession(_state.personaId ?? '', '');
     }
     if (_chatSessionId != null) {
@@ -2055,8 +2069,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   Future<_ToolResult> _executeRecallTool(String query, String category) async {
     try {
       // 用户 8-03 05:53：会话未建时直接说"暂无记忆"容易误判 → 先补建会话再查
-      // 8-05 14:32：mock 测试对话不建会话（测试环境查不到真实记忆）
-      if (_chatSessionId == null && !_isCurrentMockChat()) {
+      // 8-05 14:36：测试对话查的是测试会话的记忆（测试空间，功能照常）
+      if (_chatSessionId == null) {
         await _ensureChatSession(_state.personaId ?? '', '');
       }
       final sessionId = _chatSessionId;
