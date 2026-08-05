@@ -94,6 +94,7 @@ class MockAIProvider {
         .where((m) => m.role == 'system')
         .map((m) => m.content)
         .join('\n');
+    final allText = messages.map((m) => m.content).join('\n');
     if (systemText.contains('分类整理好')) {
       // _generateAndStoreThree 三类存档指令：写日记 + 摘要 + 恢复包
       AiModuleLog.log('模拟AI', '📦 管家三类存档指令 → 模拟男主写日记+摘要+恢复包');
@@ -115,10 +116,27 @@ class MockAIProvider {
         providerName: '模拟AI',
       );
     }
-    if (systemText.contains('提炼')) {
-      // _summarize 总结指令 → 返回提醒列表（整段进摘要区）
-      AiModuleLog.log('模拟AI', '✂️ 管家总结指令 → 模拟男主提炼提醒');
-      return _textReply('周末约好一起爬山\n她在学做菜\n她喜欢蓝色、爱喝美式咖啡');
+    if (allText.contains('save_summary') ||
+        (allText.contains('当前管家') && allText.contains('总结成摘要'))) {
+      // 8-05 19:19 总结 v2：窗口满 → 【当前管家】指令（user 消息）+ save_summary
+      // 工具 → 模拟男主调 save_summary（content + range 编号，不输出文本）
+      AiModuleLog.log('模拟AI', '✂️ 窗口满总结指令 → 模拟男主调 save_summary');
+      final rangeMatch = RegExp(r'#\d+-#\d+').firstMatch(allText);
+      final range = rangeMatch?.group(0) ?? '#1-#5';
+      return AIProviderResult(
+        text: '',
+        toolCalls: [
+          {
+            'name': 'save_summary',
+            'id': 'mock_summary_${DateTime.now().millisecondsSinceEpoch}',
+            'arguments': {
+              'content': '周末约好一起爬山\n她在学做菜\n她喜欢蓝色、爱喝美式咖啡',
+              'range': range,
+            },
+          },
+        ],
+        providerName: '模拟AI',
+      );
     }
 
     // 工具调用开关关闭 → 纯文本回复（模拟不支持 function calling 的模型）

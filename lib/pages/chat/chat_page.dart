@@ -1717,19 +1717,31 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       await say('对了，我最近在学做菜，喜欢研究新菜谱，'
           '周末还想去爬山，你觉得怎么样？');
       final summaries = ctx.summariesFor(testPid);
-      final sumOk = summaries.isNotEmpty;
+      // 8-05 19:40（用户：本地AI测试走通，真实男主才稳）：
+      // v2 总结必须走 save_summary 工具路径——摘要条目带（#1-#N）范围标记；
+      // 只有内容没编号 = 走了文本兜底（男主没调工具），真实场景会不稳
+      final sumHasRange = summaries.any((x) =>
+          x.contains('（#') && x.contains('-#'));
+      final sumOk = summaries.isNotEmpty && sumHasRange;
       if (!sumOk) {
         // 自诊断：失败原因直接带数据，弹窗复制发龙虾即可定位
         final budget = ctx.topicBudgetChars(testPid, modelHint: 'mock-1');
         final rawLen = ctx.debugRawLength(testPid);
         final st = svc.assembleDecision(testPid, toolRound: false).stateful;
-        DebugLogger.log('AI验收', '⑤自诊断: 预算=$budget 原文=$rawLen stateful=$st');
+        DebugLogger.log('AI验收', '⑤自诊断: 预算=$budget 原文=$rawLen stateful=$st'
+            ' 摘要=${summaries.length}条 带编号=$sumHasRange');
       }
-      record('⑤ token满触发男主总结', sumOk,
-          sumOk ? null : '摘要区 0 条。诊断:预算=${ctx.topicBudgetChars(testPid, modelHint: 'mock-1')}'
-              '字 原文=${ctx.debugRawLength(testPid)}字 stateful=${svc.assembleDecision(testPid, toolRound: false).stateful}'
-              '——日志看「上下文管理」有无"✂️ 原文攒够了"');
-      note('📋 ⑤ ${sumOk ? '✓' : '✗'} 摘要区 ${summaries.length} 条');
+      record('⑤ token满男主调save_summary总结', sumOk,
+          sumOk
+              ? null
+              : '摘要${summaries.length}条，带编号=$sumHasRange'
+                  '（诊断:预算=${ctx.topicBudgetChars(testPid, modelHint: 'mock-1')}'
+                  '字 原文=${ctx.debugRawLength(testPid)}字 '
+                  'stateful=${svc.assembleDecision(testPid, toolRound: false).stateful}'
+                  '——摘要没编号=走了文本兜底，男主没调 save_summary；'
+                  '日志看「上下文管理」有无"✂️ 原文攒够了"');
+      note('📋 ⑤ ${sumOk ? '✓' : '✗'} 摘要 ${summaries.length} 条'
+          ' 带编号=$sumHasRange');
 
       // ── ⑥ 切 AI E（无记忆·工具关）：验证总结后上下文不丢 ──
       await sw('builtin-mock-e', '⑥/⑧ AI E 无记忆·工具关 — 验证总结后不失忆');
