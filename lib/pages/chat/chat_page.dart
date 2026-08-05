@@ -935,11 +935,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     );
   }
 
-  /// 8-05 21:36 用户：假窗口满·手动触发总结（验证后拆）——
-  /// 对当前对话直接跑一遍总结流程，假装上下文满了。
-  /// 对话显示在聊天框（走真实 generateReply 路径，可看 📄 结构）。
-  /// 8-05 22:07 用户：要拿真实 AI 测总结 → 按钮两种模式都显示，
-  /// 这里用确认框把关：真实模式会真动当前对话（原文→摘要）。
+  /// 8-05 22:40 用户：转正为日常功能「手动精简上下文·省 token」——
+  /// 随时把当前角色对话压缩成摘要（原文→【男主摘要】带 #编号），
+  /// 不用等窗口满。走真实 generateReply 路径（C 自动拼 + 本次对话 +
+  /// 【当前管家】指令 + save_summary）。
+  /// 确认框把关：真实模式会真动当前对话（原文→摘要，不可恢复）。
   Future<void> _forceSummarizeNow() async {
     final lid = _state.leadId;
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
@@ -952,10 +952,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        title: const Text('假窗口满·手动总结'),
+        title: const Text('精简上下文·省 token'),
         content: Text(isMock
-            ? '将对【测试 AI】的当前对话执行总结：\n原文压缩成摘要、摘要区新增条目、管家历史清空。\n继续？'
-            : '将对【真实 AI】的当前对话执行总结：\n原文压缩成摘要、摘要区新增条目、管家历史清空。\n这是真实数据，总结后原文不可恢复。\n继续？'),
+            ? '将当前对话压缩成摘要（原文→摘要区，带 #编号）。\n继续？'
+            : '将当前对话压缩成摘要（原文→摘要区，带 #编号）。\n'
+                '这是真实数据，压缩后原文不可恢复。\n继续？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogCtx, false),
@@ -963,14 +964,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogCtx, true),
-            child: const Text('执行总结'),
+            child: const Text('精简'),
           ),
         ],
       ),
     );
     if (confirmed != true || !mounted) return;
     if (mounted) {
-      setState(() => _acceptanceNote = '🧪 假窗口满·手动总结进行中…');
+      setState(() => _acceptanceNote = '🗜️ 精简上下文进行中…');
     }
     // 总结是管家主动行为：C（带人设）+ 原文 + 【当前管家】指令。
     // userProfile/taskState 是"当前用户消息"的注入，总结不需要。
@@ -980,7 +981,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       personaPrompt: _currentPersonaPrompt(),
     );
     if (mounted) {
-      setState(() => _acceptanceNote = '✅ 手动总结完成（摘要区+原文已更新）');
+      setState(() => _acceptanceNote = '✅ 精简完成（摘要区+原文已更新）');
     }
   }
 
