@@ -365,10 +365,9 @@ class AiChatService {
       // 和 taskState（任务状态），各归各位，不再混成一个字符串
       userProfile: userProfile,
       taskState: taskState,
-      // stateful：AI 服务端记得对话 → 不重复带固定模板（只带人设+当前技能注入）
-      // stateless：前缀稳定 → 缓存命中 → 每次带全量反而便宜
-      // 切换/首次/空闲超时恢复时 → 全量（AI 还没记住）
-      light: stateful && !needRecover,
+      // 8-05 17:41 用户：固定部分（系统规则+人设）每轮必带，不管怎么切换；
+      // stateful 连续使用省的是【历史】（服务端记得），不是 system。
+      // stateless：前缀稳定 → 缓存命中 → 每次带全量反而便宜。
     );
     // 历史（摘要区 + 当前话题原文）——插在 system 后、当前消息前。
     // stateful：AI 自己记得 → 不重复带历史（避免浪费 + 服务端已有）；
@@ -767,7 +766,6 @@ class AiChatService {
         taskState: '【管家指令】用户当前不在场。你主动说一句话或做一件事，'
             '像平时一样自然、简短（30 字以内），参考你的设定；'
             '不需要等她回复，说完就好。',
-        light: _statefulInfoFor(personaId).$1,
       );
       final historyMsgs = ContextManager.instance.buildHistoryMessages(personaId, modelHint: _modelHintFor(personaId));
       final res = await _chat(

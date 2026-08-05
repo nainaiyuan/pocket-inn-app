@@ -156,9 +156,13 @@ class SystemTemplate {
     required bool needsWindow,
     String? userProfile,
     String? taskState,
-    bool light = false,
+    // 8-05 17:41 用户：系统规则（工具说明/回复风格）+ 人设是固定部分，
+    // 同一个男主不管怎么切换 AI 都不变 → 每轮必带。
+    // 轻量（stateful 连续）只省【历史】（AI 服务端记得对话），不省 system。
+    // （原 light 参数已移除：之前 light 时把 SYSTEM_CORE 也省了，
+    //   男主可能忘工具用法/回复风格 → 行为漂移，用户指出这是错的）
   }) {
-    final core = light ? '' : effectiveSystemCore + '\n\n';
+    final core = effectiveSystemCore + '\n\n';
     final result = core +
         _characterProfile(
             personaName: personaName,
