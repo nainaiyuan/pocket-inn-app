@@ -41,20 +41,33 @@ class GlobalBannerService {
   Timer? _dismissTimer;
   Timer? _nextTimer;
 
-  /// 弹一组消息（消息轰炸）：messages 逐条弹，间隔 [interval]。
+  /// 弹一组消息（消息轰炸）：messages 逐条弹。
+  /// [interval]：男主显式填的间隔（null = 用默认并随条数自适应——
+  /// 8-06 00:40 用户：默认 4 秒；很多条时自动加速，别让人等太久）。
   /// [title] = 男主名字（横幅标题）；[onTap] = 点横幅（默认 openChat）。
   void showBurst({
     required String title,
     required List<String> messages,
-    Duration interval = const Duration(seconds: 15),
+    Duration? interval,
     VoidCallback? onTap,
   }) {
     final list = messages.where((m) => m.trim().isNotEmpty).toList();
     if (list.isEmpty) return;
+    final n = list.length;
+    // 自适应：默认间隔 4s；条数越多越快（N>5 后每多一条 -0.5s，下限 1s）
+    final effInterval = interval ??
+        Duration(
+          milliseconds: (n <= 5 ? 4000 : (4000 - (n - 5) * 500)).clamp(1000, 4000),
+        );
+    // 展示时长同理：默认 6s，条数多时缩到最短 2s（快进，别堵在后面）
+    final effDisplay = Duration(
+      milliseconds: (n <= 5 ? 6000 : (6000 - (n - 5) * 500)).clamp(2000, 6000),
+    );
     _queue.add(_BannerTask(
       title: title,
       messages: list,
-      interval: interval,
+      interval: effInterval,
+      display: effDisplay,
       onTap: onTap ?? openChat,
     ));
     _drain();
@@ -86,8 +99,8 @@ class GlobalBannerService {
     }
     final text = task.messages[index];
     _showOne(task.title, text, task.onTap);
-    // 停留展示时长（秒）后滑出 → 间隔 interval → 下一条
-    _dismissTimer = Timer(const Duration(seconds: 6), () {
+    // 停留展示时长后滑出 → 间隔 interval → 下一条（时长都按条数自适应过）
+    _dismissTimer = Timer(task.display, () {
       _removeCurrent();
       _nextTimer = Timer(task.interval, () => _playTask(task, index + 1));
     });
@@ -125,12 +138,14 @@ class _BannerTask {
   final String title;
   final List<String> messages;
   final Duration interval;
+  final Duration display;
   final VoidCallback onTap;
 
   _BannerTask({
     required this.title,
     required this.messages,
     required this.interval,
+    required this.display,
     required this.onTap,
   });
 }
@@ -235,6 +250,8 @@ class _BannerWidgetState extends State<_BannerWidget>
                         const SizedBox(height: 3),
                         Text(
                           widget.message,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 14,
                             height: 1.35,
@@ -242,6 +259,17 @@ class _BannerWidgetState extends State<_BannerWidget>
                           ),
                         ),
                       ],
+                    ),
+                  ),
+                  // 微信提醒式：右上角"现在"
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2, left: 6),
+                    child: Text(
+                      '现在',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: const Color(0xFF8A7A80).withValues(alpha: 0.7),
+                      ),
                     ),
                   ),
                 ],

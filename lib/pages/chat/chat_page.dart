@@ -2265,12 +2265,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     if (messages.isEmpty) {
       return const _ToolResult(false, '没有可弹的消息（messages 为空）');
     }
-    final intervalSec = (args['interval_seconds'] as num?)?.toInt() ?? 15;
+    final rawInterval = args['interval_seconds'];
+    final intervalSec = (rawInterval as num?)?.toInt();
     final waitMin = (args['wait_minutes'] as num?)?.toInt() ?? 5;
-    final interval = Duration(
-        seconds: intervalSec.clamp(5, 300)); // 至少 5 秒，别轰炸太密
+    // 男主没填间隔 → null → 服务端自适应（默认 4s，条数多自动加速）
+    final interval = intervalSec == null
+        ? null
+        : Duration(seconds: intervalSec.clamp(1, 300));
     final personaName = _state.personaName ?? '他';
-    _appendToolBubble('📬 男主弹了 ${messages.length} 条消息（间隔 ${intervalSec}s）');
+    _appendToolBubble('📬 男主弹了 ${messages.length} 条消息'
+        '${intervalSec == null ? '（自动间隔）' : '（间隔 ${intervalSec}s）'}');
     GlobalBannerService.instance.showBurst(
       title: personaName,
       messages: messages,

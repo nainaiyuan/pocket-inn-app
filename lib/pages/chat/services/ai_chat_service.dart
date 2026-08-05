@@ -201,18 +201,19 @@ class AiChatService {
             '或她让你提醒你的事（喝水/休息/记得的约定）。'
             '⚠️ 只在她不在聊天页/分开一段时间、或她说过让你提醒时用；'
             '她正在和你聊天时不需要。'
-            '消息要像你平时说话一样自然，2-4条为宜，别太密。',
+            '消息要像你平时说话一样自然，想发几条发几条'
+            '（闹脾气时一个字一条也行）。条数多时系统会自动加速，不会让她等太久。',
         'parameters': {
           'type': 'object',
           'properties': {
             'messages': {
               'type': 'array',
               'items': {'type': 'string'},
-              'description': '要弹的消息列表，逐条指定（第一条发什么、第二条发什么…），2-4条',
+              'description': '要弹的消息列表，逐条指定（第一条发什么、第二条发什么…），条数随意',
             },
             'interval_seconds': {
               'type': 'integer',
-              'description': '两条消息之间的间隔秒数，默认 15（正常速度，别太快）',
+              'description': '两条消息之间的间隔秒数，你自己定；默认 4（条数多时系统会自动加快）',
             },
             'wait_minutes': {
               'type': 'integer',
