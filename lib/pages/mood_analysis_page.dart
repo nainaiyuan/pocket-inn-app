@@ -54,7 +54,19 @@ class _MoodAnalysisPageState extends State<MoodAnalysisPage> {
 
   String _leadName(String? id) {
     if (id == null) return '未知男主';
-    return _leadNames[id] ?? id;
+    // 8-05 22:45（用户：情感基线页裸显示 1785940202583_default）：
+    // 情绪弧线存的是 persona id（${leadId}_default），名字表 key 是
+    // lead id（${leadId}）→ 直接查不到。剥掉 _default 等 persona 后缀
+    // 再查一次；还查不到才兜底显示原始 id
+    final direct = _leadNames[id];
+    if (direct != null) return direct;
+    final idx = id.indexOf('_');
+    if (idx > 0) {
+      final leadId = id.substring(0, idx);
+      final viaLead = _leadNames[leadId];
+      if (viaLead != null) return viaLead;
+    }
+    return id;
   }
 
   List<EmotionArc> get _filteredArcs => _filterCharacterId == null
