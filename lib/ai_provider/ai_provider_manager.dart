@@ -415,16 +415,23 @@ class AIProviderManager {
   String? lastProviderFor(String? personaId) {
     final key = _settingsKey(personaId);
     final own = _personaSettings[key]?.lastProviderId;
-    if (own != null && own.isNotEmpty) {
+    if (own != null && own.isNotEmpty && _mockChoiceUsable(own)) {
       return own;
     }
     final global = _personaSettings[globalPersonaId]?.lastProviderId;
-    if (global != null && global.isNotEmpty) {
+    if (global != null && global.isNotEmpty && _mockChoiceUsable(global)) {
       return global;
     }
     final candidates = candidatesFor(personaId);
     return candidates.isEmpty ? null : candidates.first.id;
   }
+
+  /// 8-05 15:0x（用户：聊天页左上角残留测试 AI）：测试模式关 = mock 不可用。
+  /// 上次测试留下的 lastProvider=mock（持久化）在重启后仍会命中 →
+  /// 顶栏 badge 显示"未配置"。这里把它视为无效选择 → 回退到真实候选。
+  bool _mockChoiceUsable(String id) =>
+      !_mockInstances.containsKey(id) || _testModeEnabled;
+
 
   /// 某男主的候选 Provider（勾选列表用）。
   /// 有绑定 = 绑定顺序；无绑定 = 全局优先级顺序。只含启用的。

@@ -1140,7 +1140,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                   ),
                   // 8-03 20:3x（用户要求）：话术栏——预设用户话术一键发送 +
                   // 🤖/☁️ 模拟AI切换（找bug工具：不连真实API也能走完整链路）
-                  _buildScriptBar(),
+                  // 8-05 15:0x（用户：测试的东西要全部收进测试箱）：
+                  // 话术栏是模拟AI测试工具 → 测试模式关时不显示
+                  if (AIProviderManager.testModeEnabled) _buildScriptBar(),
                   ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
                     onPlusTap: _togglePlus, onSendTap: _sendMsg),
                 ],

@@ -611,6 +611,11 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
     // 备份主实例配置（测完还原）
     final savedMode = manager.builtinMockConfig.memoryMode;
     final savedHours = manager.builtinMockConfig.refreshHours;
+    // 8-05 15:0x（用户：T3/T4/T6/T13 都有 bug）：自检依赖内置模拟 AI，
+    // 但测试模式关着时 mock 不注册 → 绑定/判定全空 → T3/T4/T6/T13 挂。
+    // 自检页自己开测试模式（测完还原），用户什么都不用点。
+    final savedTestMode = AIProviderManager.testModeEnabled;
+    if (!savedTestMode) AIProviderManager.setTestModeEnabled(true);
     try {
       // ── T1/T2：stateless 判定 + 首次/连续使用 ──
       // 清残留"最近使用 AI"记录：上次跑测试留下的 lastProvider 会让
@@ -805,6 +810,10 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
       await manager.clearPersonaBinding(pid);
       ctx.takePendingRaw(pid);
       await ctx.clearProviderUsed(pid); // 下次跑仍是"首次使用"（T2 稳定通过）
+      // 还原测试模式（8-05 15:0x：自检页自己开的，测完关掉）
+      if (!savedTestMode && AIProviderManager.testModeEnabled) {
+        AIProviderManager.setTestModeEnabled(false);
+      }
     }
     sw.stop();
     if (!mounted) return;
