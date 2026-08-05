@@ -631,11 +631,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             // 📄 展示层也能解析出工具名和结果好坏
             toolMessages.add(AIChatMessage(
               role: 'tool',
-              // 8-06 00:48 用户：男主分不清用户说的话/用户行为/管家的话 →
-              // 工具结果统一标注"她没打字说话"（确认框的允许/拒绝是行为，
-              // 不是她说了什么；工具结果是管家执行，也不是她说的）
-              content: '【工具 $name】${toolResult.ok ? '✅成功' : '❌失败'}：${toolResult.text}'
-                  '（这是工具执行结果，她没打字说话——别当成她的话回应）',
+              // 8-06 00:51 用户：调用工具=需要审批；成功调用=审批通过。
+              // 工具消息在系统分区，天然不是用户说的话——不用额外解释
+              content: '【工具 $name】${toolResult.ok ? '✅成功（审批通过）' : '❌失败（审批未过）'}：${toolResult.text}',
               toolCallId: call['id']?.toString() ?? 'call_${toolLoop}_$name',
             ));
           } else {
@@ -657,8 +655,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         if (textToolResults.isNotEmpty) {
           toolMessages.add(AIChatMessage(
             role: 'user',
-            content: '【工具执行结果】（以下是工具返回的数据，'
-                '不是用户说的话，她也没打字——用户消息在上面）\n'
+            content: '【系统·工具执行结果】\n'
                 '${textToolResults.join('\n')}\n\n'
                 '基于结果自然地回复用户，不要再调用工具。',
           ));

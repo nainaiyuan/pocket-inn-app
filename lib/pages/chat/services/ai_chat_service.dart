@@ -217,7 +217,7 @@ class AiChatService {
             },
             'wait_minutes': {
               'type': 'integer',
-              'description': '如果她 wait_minutes 分钟内没回来聊天，管家会再唤醒你，让你再主动找她一次（默认 5）',
+              'description': '如果她 wait_minutes 分钟内没回来聊天，系统会再唤醒你，让你再主动找她一次（默认 5）',
             },
           },
           'required': ['messages'],
@@ -233,7 +233,7 @@ class AiChatService {
       'function': {
         'name': 'save_summary',
         'description':
-            '保存长期摘要。窗口快满时管家会叫你总结最近的对话，'
+            '保存长期摘要。窗口快满时系统会叫你总结最近的对话，'
             '调用这个工具把提炼的提醒写进去。',
         'parameters': {
           'type': 'object',
@@ -267,7 +267,7 @@ class AiChatService {
     String raw,
   ) async {
     if (raw.trim().isEmpty) return '';
-    final system = '【管家指令】你是「$personaName」。下面是你们今天的聊天记录。'
+    final system = '【系统指令】你是「$personaName」。下面是你们今天的聊天记录。'
         '请以你的口吻写一篇今天的日记：'
         '① 回顾今天聊了什么、她今天的状态/心情、你答应过的事、'
         '让你在意的小细节 ② 像真正的日记，有你的语气和感受，'
@@ -308,7 +308,7 @@ class AiChatService {
     String contextText,
   ) async {
     if (contextText.trim().isEmpty) return '';
-    final system = '【管家指令】你是「$personaName」。下面是需要你重新熟悉的上下文：'
+    final system = '【系统指令】你是「$personaName」。下面是需要你重新熟悉的上下文：'
         '（① 你之前总结的摘要提醒 ② 你上次写的存档 ③ 总结之后新聊的原文——'
         '总结过的旧内容不重复给，只给这些）。'
         '仔细阅读，重新熟悉你们的关系和最近发生的事，'
@@ -551,7 +551,7 @@ class AiChatService {
         AIChatMessage(
           role: 'system',
           content: '【上下文说明】以下是历史分区（男主摘要 / 工具使用历史 / '
-              '管家历史 / 聊天历史），都是已聊过的内容。'
+              '系统历史 / 聊天历史），都是已聊过的内容。'
               '最后一条【当前用户消息】才是你要回复的。',
         ),
         ...historyMsgs,
@@ -564,23 +564,12 @@ class AiChatService {
     // 【用户当前消息】保持在最后一条（AI 基于工具结果回复用户）。
     if (toolRound) {
       if (toolMessages != null) messages.addAll(toolMessages);
-      // 8-06 00:48 用户：工具轮男主"申请说一段话+执行后又说一段"很突兀，
-      // 分不清用户说的话/用户行为/管家的话 →
-      // 明确三类：工具结果=管家执行（非她发言）、确认框=她的行为（非发言）、
-      // 【当前用户消息】才是她说的；申请时说过的话不要重复
-      messages.add(AIChatMessage(
-        role: 'user',
-        content: '【系统提示】上面的工具结果和她的允许/拒绝都是"她的行为"'
-            '或"工具执行结果"，她没打字说话。你申请时说过的话不要重复，'
-            '现在简短自然地收尾或回应（一两句话）。'
-            '她真正说的话在最后的【用户当前消息】里。',
-      ));
-      // 【当前管家】在工具调用下面（8-05 19:13 用户：管家查到的参考信息
+      // 【当前系统】在工具调用下面（8-05 19:13 用户：系统查到的参考信息
       // 如心率/天气放这里，男主也要回复的）
       if (butlerInstruction != null && butlerInstruction.trim().isNotEmpty) {
         messages.add(AIChatMessage(
           role: 'user',
-          content: '【当前管家】（管家刚查到的参考/指令，'
+          content: '【当前系统】（系统刚查到的参考/指令，'
               '针对它回应或调用工具处理）\n$butlerInstruction',
         ));
       }
@@ -596,7 +585,7 @@ class AiChatService {
       if (butlerInstruction != null && butlerInstruction.trim().isNotEmpty) {
         messages.add(AIChatMessage(
           role: 'user',
-          content: '【当前管家】（管家刚查到的参考/指令，'
+          content: '【当前系统】（系统刚查到的参考/指令，'
               '针对它回应或调用工具处理）\n$butlerInstruction',
         ));
       }
@@ -931,7 +920,7 @@ class AiChatService {
         // 用户 8-03 03:20：男主已知管家=系统本身（SYSTEM_CORE 已说明），
         // 指令统一带【管家指令】标记即可，不用再解释"这是管家唤醒"
         userProfile: null,
-        taskState: '【管家指令】用户当前不在场。你主动说一句话或做一件事，'
+        taskState: '【系统指令】用户当前不在场。你主动说一句话或做一件事，'
             '像平时一样自然、简短（30 字以内），参考你的设定；'
             '不需要等她回复，说完就好。',
       );
@@ -946,7 +935,7 @@ class AiChatService {
               content: '【上下文参考】（已聊过的内容，无需回复，仅作参考保持连贯）\n'
                   '${historyMsgs.map((m) => '[${m.role}] ${m.content}').join('\n')}',
             ),
-          AIChatMessage(role: 'user', content: '【管家指令】$instruction'),
+          AIChatMessage(role: 'user', content: '【系统指令】$instruction'),
         ],
         tools: butlerTools,
       );

@@ -289,20 +289,20 @@ class ContextManager {
         out.add(AIChatMessage(role: 'system', content: sb.toString()));
       }
       // 历史分区（8-05 19:13 用户定稿定义）：
-      // 【管家历史】= 管家（系统）过去发的精简指令记录（几点/动作/完成或失败+原因），
+      // 【系统历史】= 系统过去发的精简指令记录（几点/动作/完成或失败+原因），
       //   如 '[19:00] 写日记 → ✅完成'——不是男主发言！
       // 【聊天历史】= 用户和男主（AI）的对话，user/assistant 按时间线交替，
       //   各带时间戳+日期分组。
       final butlerLog = _butlerLog[personaId];
       if (butlerLog != null && butlerLog.isNotEmpty) {
         final sb = StringBuffer(
-            '【管家历史】（管家自动执行过的指令记录：时间+动作+结果。'
+            '【系统历史】（系统自动执行过的指令记录：时间+动作+结果。'
             '男主可参考，如写日记/总结是否成功）');
         DateTime? lastDay;
         for (final l in butlerLog) {
           final day = _tsDate(l);
           if (day != null && (lastDay == null || !_sameDay(day, lastDay))) {
-            sb.write('\n【管家历史 · ${_dateLabel(day)}】');
+            sb.write('\n【系统历史 · ${_dateLabel(day)}】');
             lastDay = day;
           }
           sb.write('\n$l');
