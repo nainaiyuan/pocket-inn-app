@@ -13,7 +13,9 @@ class ChatTopBar extends StatefulWidget {
   final MaleLead? currentLead;
   final Persona? currentPersona;
   final VoidCallback onTapAvatar;
-  final VoidCallback onMenuTap;
+  /// 8-05 23:45 用户：右上角三个点 → 设计感按钮 → 进陪伴三页。
+  /// （原 onMenuTap=开设定右页，设定入口挪到陪伴页的小齿轮）
+  final VoidCallback onCompanionTap;
   final VoidCallback onAiTap;
   final VoidCallback? onNameChanged; // 改名后通知上层刷新
 
@@ -22,7 +24,7 @@ class ChatTopBar extends StatefulWidget {
     required this.currentLead,
     required this.currentPersona,
     required this.onTapAvatar,
-    required this.onMenuTap,
+    required this.onCompanionTap,
     required this.onAiTap,
     this.onNameChanged,
   });
@@ -116,13 +118,34 @@ class _ChatTopBarState extends State<ChatTopBar> {
               ),
             ),
           ),
+          // 8-05 23:45：设计感按钮（✦ 粉紫渐变圆钮）→ 陪伴三页
           GestureDetector(
-            onTap: widget.onMenuTap,
+            onTap: widget.onCompanionTap,
             child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Icon(
-                Icons.more_horiz_rounded,
-                color: const Color(0xFF6A4A5A).withValues(alpha: 0.4),
+              padding: const EdgeInsets.all(6),
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFD9A0C0), Color(0xFFC896B4)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFC896B4).withValues(alpha: 0.30),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.auto_awesome,
+                  size: 18,
+                  color: Colors.white,
+                ),
               ),
             ),
           ),

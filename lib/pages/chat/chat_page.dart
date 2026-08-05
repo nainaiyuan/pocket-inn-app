@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'companion_page.dart';
 import 'package:flutter/services.dart';
 import '../../ai_provider/ai_provider_manager.dart';
 import '../../ai_provider/models.dart';
@@ -1113,7 +1114,20 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               child: Column(
                 children: [
                   ChatTopBar(currentLead: _state.lead, currentPersona: _state.persona,
-                    onTapAvatar: _openWorld, onMenuTap: () { _currentPanel = Panel.right; _animateTo(-sideW); },
+                    onTapAvatar: _openWorld,
+                    // 8-05 23:45：右上角设计感按钮 → 陪伴三页；
+                    // 设定右页入口移到陪伴页的小齿轮（onOpenSettings）
+                    onCompanionTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CompanionPage(
+                          onOpenSettings: () {
+                            _currentPanel = Panel.right;
+                            _animateTo(-sideW);
+                          },
+                        ),
+                      ),
+                    ),
                     onAiTap: _openAiSheet,
                     onNameChanged: () { if (mounted) setState(() {}); }),
                   // 一键验收横幅（8-04 21:1x：自动切 AI 跑对话时显示进度/结论）

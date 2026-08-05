@@ -6,7 +6,11 @@ import 'package:flutter/material.dart';
 /// 延续聊天页粉系风格，内容先占位，后续优化加东西。
 /// 手势逻辑完全沿用（拖拽 / 锁定 / 动画 / physics 实时推算）。
 class CompanionPage extends StatefulWidget {
-  const CompanionPage({super.key});
+  /// 8-05 23:45：设定右页入口（聊天页 onMenuTap 被设计感按钮顶替后，
+  /// 从这里的小齿轮回到聊天页并打开设定右页）。
+  final VoidCallback? onOpenSettings;
+
+  const CompanionPage({super.key, this.onOpenSettings});
   @override
   State<CompanionPage> createState() => _CompanionPageState();
 }
@@ -300,8 +304,9 @@ class _CompanionPageState extends State<CompanionPage>
               ),
             ),
 
-            // 中页右上角：设计感按钮（✦ 渐变圆钮）→ 回聊天页
-            if (isCenter)
+            // 中页右上角：设计感按钮（✦ 渐变圆钮）→ 回聊天页；
+            // 旁边小齿轮 → 回聊天页并打开设定右页（原三个点的功能）
+            if (isCenter) ...[
               Positioned(
                 top: MediaQuery.of(context).padding.top + 8,
                 right: 16,
@@ -333,6 +338,34 @@ class _CompanionPageState extends State<CompanionPage>
                   ),
                 ),
               ),
+              if (widget.onOpenSettings != null)
+                Positioned(
+                  top: MediaQuery.of(context).padding.top + 8,
+                  right: 68,
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.of(context).maybePop();
+                      widget.onOpenSettings!();
+                    },
+                    child: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.85),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: const Color(0xFFC896B4).withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.settings_outlined,
+                        size: 18,
+                        color: Color(0xFF8A7A80),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
 
             // 卡片列表
             Positioned(
