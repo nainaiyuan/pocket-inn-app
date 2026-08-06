@@ -2523,7 +2523,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       askReason: askReason,
     );
     if (result == null) {
-      return _ToolResult(false, '她没回应申请「$toolName」免审批（先别急着再申请）');
+      return _ToolResult(false, '她没回应申请「$toolName」免审批。你可以稍后再自然地问一次，或换种方式。');
     }
     if (result.approved) {
       await ToolApprovalStore.setExempt(personaId, toolName, true);
@@ -2538,8 +2538,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     return _ToolResult(
       false,
       '她拒绝了「$toolName」免审批。'
-      '${reasonTxt.isNotEmpty ? '原因：$reasonTxt' : '她没说原因'}'
-      '——尊重她的决定，别再反复申请。',
+      '${reasonTxt.isNotEmpty ? '她写的原因：$reasonTxt' : '她没说原因'}'
+      '——你自己判断：是接受、还是换个方式再沟通。',
     );
   }
 
