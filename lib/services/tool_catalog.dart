@@ -130,7 +130,7 @@ class FrequentToolsStore {
   /// 添加（不存在才加，满上限挤掉最旧的）；返回成功与否
   static Future<bool> add(String personaId, String name) async {
     if (!ToolCatalog.allNames.contains(name)) return false;
-    final list = [...(_memCache[personaId] ?? [])];
+    final list = List<String>.from(_memCache[personaId] ?? const <String>[]);
     list.remove(name);
     list.insert(0, name);
     if (list.length > _maxEntries) list.removeRange(_maxEntries, list.length);
@@ -139,7 +139,7 @@ class FrequentToolsStore {
   }
 
   static Future<bool> remove(String personaId, String name) async {
-    final list = [...(_memCache[personaId] ?? [])];
+    final list = List<String>.from(_memCache[personaId] ?? const <String>[]);
     final ok = list.remove(name);
     if (ok) await _save(personaId, list);
     return ok;

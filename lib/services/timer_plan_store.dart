@@ -67,8 +67,8 @@ class TimerPlanStore {
   static Future<void> markDone(String personaId, String desc) async {
     final entries = List<Map<String, dynamic>>.from(_memCache[personaId] ?? const <Map<String, dynamic>>[]);
     for (var i = 0; i < entries.length; i++) {
-      if (entries[i]['status'] == 'waiting' &&
-          (entries[i]['desc'] ?? '').contains(desc)) {
+      final d = entries[i]['desc']?.toString() ?? '';
+      if (entries[i]['status'] == 'waiting' && d.contains(desc)) {
         entries[i]['status'] = 'done';
         _memCache[personaId] = entries;
         final p = await SharedPreferences.getInstance();
