@@ -4,6 +4,7 @@ import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
 import '../services/chat_storage_service.dart';
 import '../state/current_character_state.dart';
+import 'task_list_page.dart';
 
 /// 角色设置侧栏（右页）
 class ChatSidebarRight extends StatefulWidget {
@@ -362,6 +363,44 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                           onChanged: (v) => setState(() => _shareMemory = v),
                         ),
                       ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // ─── 计时卡片与任务 ───
+                  _SectionCard(
+                    title: '计时卡片与任务',
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const TaskListPage()),
+                        ),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.35),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.list_alt, size: 18, color: Color(0xFFC896B4)),
+                              SizedBox(width: 8),
+                              Text(
+                                '📋 任务列表',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF6A4A52),
+                                ),
+                              ),
+                              Spacer(),
+                              Icon(Icons.chevron_right, size: 18, color: Color(0xFFB0A0A6)),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 8),

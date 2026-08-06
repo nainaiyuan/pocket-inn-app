@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import '../../services/global_banner_service.dart';
 import '../../services/tool_approval_store.dart';
 import '../../services/global_timer_card_service.dart';
+import '../../services/card_task_store.dart';
+import 'widgets/task_list_page.dart';
 import '../../data/bug_knowledge_base.dart';
 import 'companion_page.dart';
 import 'package:flutter/services.dart';
@@ -663,6 +665,19 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               toolResult = _ToolResult(false, '用户拒绝：暂不设计时卡片');
             } else {
               toolResult = await _executeCountdownCard(args);
+            }
+          } else if (name == 'manage_task') {
+            // 8-06 13:53 用户：男主管理任务（撤销/调整/回应申请）——默认要审批
+            final ok = await _approveToolCall(
+              '管理任务',
+              '他想${args['action'] == 'cancel' ? '撤销' : args['action'] == 'reject' ? '回应' : '调整'}一个任务卡片，允许吗？',
+              personaId: personaId,
+              toolKey: 'manage_task',
+            );
+            if (!ok) {
+              toolResult = _ToolResult(false, '用户拒绝：暂不管理任务');
+            } else {
+              toolResult = await _executeManageTask(args);
             }
           } else {
             toolResult = _ToolResult(false, '未知工具：$name');
@@ -2788,8 +2803,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 8-06 13:38 用户：屏幕固定悬浮卡片，可挪动可收起，卡面倒计时+自由编辑内容；
   /// 男主填选项（延长/结束/纯消息）；逾期后男主可选要不要弹窗问/多久弹窗/多久唤醒。
   Future<_ToolResult> _executeCountdownCard(Map<String, dynamic> args) async {
-    final minutes = (args['minutes'] as num?)?.toInt() ?? 5;
+    final minutes = (args['minutes'] as num?)?.toInt(); // null = 纯选择卡片
     final title = args['title']?.toString().trim() ?? '记得回来哦';
+    final category = args['category']?.toString().trim() ?? '';
+    final allowRequest = args['allow_request'] == true;
     final remindOnExpire = args['remind_on_expire'] != false;
     final remindDelay = (args['remind_delay_minutes'] as num?)?.toInt() ?? 0;
     final wakeMin = (args['wake_minutes'] as num?)?.toInt() ?? 5;
@@ -2805,16 +2822,20 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     }
     final pid = _state.personaId ?? '';
     final personaName = _state.personaName ?? '他';
-    _appendToolBubble('⏱ 男主设了计时卡片：$title（$minutes 分钟）');
+    _appendToolBubble(
+        '⏱ 男主发来互动卡片：$title${minutes != null ? '（$minutes 分钟）' : ''}');
     GlobalTimerCardService.instance.showCard(
       title: title,
       minutes: minutes,
+      initiator: personaName,
+      category: category,
+      allowRequest: allowRequest,
       options: options,
       onOption: (label, action, extendMinutes) async {
         // 用户点了选项 → 结果进上下文+落库（男主记得她选了啥）
         final actionTxt = switch (action) {
           'extend' => '她点了「$label」，自动延长了 $extendMinutes 分钟',
-          'finish' => '她点了「$label」，计时结束了',
+          'finish' => '她点了「$label」，卡片任务完成了',
           _ => '她点了「$label」',
         };
         if (pid.isNotEmpty) {
@@ -2828,10 +2849,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             ),
           );
         }
-        DebugLogger.log('指令模块', '⏱ 计时卡片选项：$actionTxt');
+        DebugLogger.log('指令模块', '⏱ 卡片选项：$actionTxt');
       },
       onExpire: () {
-        DebugLogger.log('指令模块', '⏱ 计时卡片到期（$remindDelay 分钟后弹窗，$wakeMin 分钟后唤醒）');
+        DebugLogger.log('指令模块', '⏱ 卡片到期（$remindDelay 分钟后弹窗，$wakeMin 分钟后唤醒）');
         // 到期 → 可选弹窗问她（横幅）
         if (remindOnExpire) {
           Timer(Duration(minutes: remindDelay), () {
@@ -2844,12 +2865,130 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           });
         }
         // 逾期 → 唤醒男主再找她
-        _scheduleWakeUp(wakeMin, '计时卡片时间到了她还没回应/没回来，'
+        _scheduleWakeUp(wakeMin, '卡片任务时间到了她还没回应/没回来，'
             '你用 notify_user 弹消息问她，或直接说一句想她的话。自然点，别催。');
       },
+      onRequest: (reason) async {
+        // 她提交了申请调整 → 进上下文+落库，男主自己判断（manage_task 回应）
+        final requestTxt = '她申请调整任务「$title」：$reason'
+            '——你判断：撤销（manage_task cancel）/ 调整（extend 或 edit_title）/ '
+            '拒绝（manage_task reject 并给她回复）。';
+        DebugLogger.log('指令模块', '💬 任务申请：$requestTxt');
+        if (pid.isNotEmpty) {
+          ContextManager.instance.feedAssistantMessage(pid, requestTxt);
+          await ChatStorageService().appendMessage(
+            pid,
+            ChatMessage(
+              id: '${DateTime.now().microsecondsSinceEpoch}_req',
+              text: '💬 她申请调整任务：「$title」\n理由：$reason',
+              isMe: false,
+            ),
+          );
+        }
+      },
+      onDone: () {
+        // 她点了完成 → 结果告诉男主
+        final doneTxt = '她把任务「$title」标记为完成了';
+        DebugLogger.log('指令模块', '✅ 任务完成：$doneTxt');
+        if (pid.isNotEmpty) {
+          ContextManager.instance.feedAssistantMessage(pid, doneTxt);
+        }
+      },
+      onOpenList: () {
+        if (!mounted) return;
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const TaskListPage()),
+        );
+      },
     );
-    return _ToolResult(true, '已设好 $minutes 分钟计时卡片：$title'
-        '（${options.isEmpty ? '没填选项' : '含 ${options.length} 个选项'}）');
+    return _ToolResult(true, '已发出互动卡片：$title'
+        '${minutes != null ? '（$minutes 分钟）' : '（无倒计时）'}'
+        '${category.isEmpty ? '' : '【分类：$category】'}'
+        '${allowRequest ? '（开放了申请调整入口）' : ''}'
+        '${options.isEmpty ? '（没填选项）' : '（含 ${options.length} 个选项）'}');
+  }
+
+  /// 工具执行：manage_task（男主撤销/调整/回应申请）
+  ///
+  /// 8-06 13:53 用户：男主判断后操作卡片任务，同步任务列表
+  Future<_ToolResult> _executeManageTask(Map<String, dynamic> args) async {
+    final taskId = args['task_id']?.toString().trim() ?? '';
+    final action = args['action']?.toString().trim() ?? '';
+    if (taskId.isEmpty) {
+      return const _ToolResult(false, '管理失败：缺任务 ID');
+    }
+    final svc = GlobalTimerCardService.instance;
+    final isCurrent = svc.isActive && svc.taskId == taskId;
+    final task = await CardTaskStore.instance.byId(taskId);
+    if (task == null) {
+      return _ToolResult(false, '没找到这个任务（可能已删除）');
+    }
+    switch (action) {
+      case 'cancel':
+        // 撤销：卡片销毁 + 任务标撤销
+        if (isCurrent) {
+          svc.cancelByButler();
+        } else {
+          await CardTaskStore.instance.update(taskId, (t) {
+            t.status = 'cancelled';
+            t.result = '男主撤销了任务';
+          });
+        }
+        _appendToolBubble('🗑️ 男主撤销了任务：「${task.title}」');
+        return _ToolResult(true, '已撤销任务「${task.title}」，卡片已销毁，任务列表已同步');
+      case 'extend':
+        final minutes = (args['minutes'] as num?)?.toInt() ?? 5;
+        if (isCurrent) {
+          svc.extend(minutes);
+        } else {
+          await CardTaskStore.instance.update(taskId, (t) {
+            t.endAt = DateTime.now().add(Duration(minutes: minutes));
+          });
+        }
+        _appendToolBubble('⏱ 男主延长了任务「${task.title}」$minutes 分钟');
+        return _ToolResult(true, '已延长任务「${task.title}」$minutes 分钟');
+      case 'edit_title':
+        final newTitle = args['title']?.toString().trim() ?? '';
+        if (newTitle.isEmpty) {
+          return const _ToolResult(false, '改卡面失败：没写新内容');
+        }
+        if (isCurrent) {
+          svc.setTitle(newTitle);
+        } else {
+          await CardTaskStore.instance.update(taskId, (t) {
+            t.title = newTitle;
+          });
+        }
+        _appendToolBubble('📝 男主改了卡面：「$newTitle」');
+        return _ToolResult(true, '已把卡面改为「$newTitle」');
+      case 'reject':
+        final reply = args['reply']?.toString().trim() ?? '这次先按说好的来，好不好？';
+        if (isCurrent) {
+          svc.clearRequest();
+        } else {
+          await CardTaskStore.instance.update(taskId, (t) {
+            t.requestReason = null;
+          });
+        }
+        // 回复落库 + 进上下文（她能看到男主的话）
+        final pid = _state.personaId ?? '';
+        if (pid.isNotEmpty) {
+          final replyTxt = '男主拒绝了她的任务申请调整，回复：「$reply」';
+          ContextManager.instance.feedAssistantMessage(pid, replyTxt);
+          await ChatStorageService().appendMessage(
+            pid,
+            ChatMessage(
+              id: '${DateTime.now().microsecondsSinceEpoch}_rej',
+              text: '「$reply」',
+              isMe: false,
+            ),
+          );
+        }
+        _appendToolBubble('💬 男主回复了她的申请：「$reply」');
+        return _ToolResult(true, '已拒绝申请并回复：「$reply」');
+      default:
+        return _ToolResult(false, '未知操作：$action');
+    }
   }
 
   /// 通用超时唤醒：waitMinutes 后用户没回聊天页 → butlerWakeUp 唤醒男主
@@ -2897,6 +3036,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       'query_logs': '查日志',
       'report_bug': '报bug',
       'countdown_card': '计时',
+      'manage_task': '管理任务',
     };
     final matched = known.keys.where(userText.contains).toList();
     if (matched.isEmpty) return null;

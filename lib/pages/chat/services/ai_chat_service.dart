@@ -320,12 +320,17 @@ class AiChatService {
       'function': {
         'name': 'countdown_card',
         'description':
-            '给她设一个计时卡片（屏幕上的悬浮倒计时卡片，可拖动可收起，'
-            '卡面显示你写的话 + 倒计时）。'
-            '适合：让她去洗澡/吃饭/休息，约定多久回来；或提醒她一件事。'
-            '卡面内容你自由编辑；你还可以填选项按钮'
-            '（如「再给我五分钟」= action extend 延长、「已经洗好了」= '
-            'action finish 结束、「问她一句」= action message 纯消息回给你）。'
+            '给她发一张互动卡片（屏幕上的悬浮卡片，可拖动可收起，角落标注'
+            '发起者+分类）。'
+            '这是你主动发起的：卡面写你的一句话（如"现在去洗澡，'
+            '40分钟后回来给他抱"）；可以带倒计时（minutes 不填 = 纯选择卡片，'
+            '没有倒计时也能用选项做问答/二选一/互相了解）。'
+            '选项你自己填：如「再给我五分钟」= action extend 延长、'
+            '「已经洗好了」= action finish 结束、「问她一句」= action message '
+            '纯消息回给你；也可以做任意 A/B 选择、问答选项。'
+            '卡片会存进她的任务列表（完成/撤销同步）。'
+            '可以开放「申请调整」入口（allow_request=true）：她可以写理由'
+            '申请撤销/调整任务，你收到后自己判断（用 manage_task 回应）。'
             '到时间后：可以选要不要弹窗问她、逾期多久弹窗、'
             '逾期多久唤醒你自己再找她。'
             '⚠️ 默认需要她审批（可申请免审批）。',
@@ -334,11 +339,19 @@ class AiChatService {
           'properties': {
             'minutes': {
               'type': 'integer',
-              'description': '时长（分钟），如 40',
+              'description': '倒计时时长（分钟），如 40。不填 = 纯选择卡片（无倒计时）',
+            },
+            'category': {
+              'type': 'string',
+              'description': '卡片分类（你写这个卡片是干嘛的），如：查岗/约定/提醒/问答/了解她',
+            },
+            'allow_request': {
+              'type': 'boolean',
+              'description': '是否开放「申请调整」入口（她可以写理由申请撤销/调整任务）。给不给这个位置由你判断，默认 false',
             },
             'title': {
               'type': 'string',
-              'description': '卡面内容（你写的一句话/提醒的事），如"现在去洗澡，40分钟后回来哦"',
+              'description': '卡面内容（你写的一句话/提醒的事），如"现在去洗澡，40分钟后回来给他抱"',
             },
             'options': {
               'type': 'array',
@@ -370,7 +383,47 @@ class AiChatService {
               'description': '逾期多久后唤醒你自己，让你再主动找她（默认 5）',
             },
           },
-          'required': ['minutes', 'title'],
+          'required': ['title'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'manage_task',
+        'description':
+            '管理她任务列表里的卡片任务（撤销/调整/回应她的申请）。'
+            '她点了卡片上的「申请调整」写了理由后，你判断：'
+            'cancel=撤销任务（卡片销毁，同步任务列表）、'
+            'extend=延长倒计时、edit_title=改卡面内容、'
+            'reject=拒绝她的申请并给她回复。'
+            '⚠️ 默认需要她审批（可申请免审批）。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'task_id': {
+              'type': 'string',
+              'description': '任务 ID（她申请调整时上下文里会有；或你发卡片后记住）',
+            },
+            'action': {
+              'type': 'string',
+              'enum': ['cancel', 'extend', 'edit_title', 'reject'],
+              'description': 'cancel=撤销任务 / extend=延长 / edit_title=改卡面 / reject=拒绝她的申请',
+            },
+            'minutes': {
+              'type': 'integer',
+              'description': 'action=extend 时的延长分钟数',
+            },
+            'title': {
+              'type': 'string',
+              'description': 'action=edit_title 时的新卡面内容',
+            },
+            'reply': {
+              'type': 'string',
+              'description': 'action=reject 时给她的回复（会以你的话告诉她）',
+            },
+          },
+          'required': ['task_id', 'action'],
         },
       },
     },
