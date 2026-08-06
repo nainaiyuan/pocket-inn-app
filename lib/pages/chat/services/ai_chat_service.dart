@@ -13,6 +13,7 @@ import '../../../services/chat_database_service.dart';
 import '../../../services/chat_service.dart';
 import '../../../utils/debug_logger.dart';
 import '../../../services/pending_queue_store.dart';
+import '../../../services/flow_store.dart';
 
 /// 聊天页的 AI 门面 —— 走 AIProviderManager（男主级路由 + 故障切换）。
 ///
@@ -612,6 +613,43 @@ class AiChatService {
     {
       'type': 'function',
       'function': {
+        'name': 'manage_flow',
+        'description':
+            '管理你的流程（8-06 23:55 你设计：长任务先立流程，一条条执行，'
+            '做完再结束）。action=create（立流程：goal 目标 + steps 步骤列表）'
+            '/next（当前步完成，推进下一步）/finish（全部完成）/'
+            'cancel（取消）/resume（被她打断后继续）/status（看当前流程）。'
+            '⚠️ 你自己的流程，不需要她审批。'
+            '流程执行中她发来的消息会被管家收集，你不用管，专注执行；'
+            '被她打断会收到系统事件，告诉你停在哪一步、她说了什么，'
+            '你再决定继续还是先回复她。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'action': {
+              'type': 'string',
+              'description':
+                  'create / next / finish / cancel / resume / status',
+            },
+            'goal': {
+              'type': 'string',
+              'description': 'create 时：流程目标，如"测所有工具"',
+            },
+            'steps': {
+              'type': 'array',
+              'items': {'type': 'string'},
+              'description':
+                  'create 时：步骤列表，如 ["查记忆类工具", "测 record_memory", '
+                  '"测 recall_memory"]',
+            },
+          },
+          'required': ['action'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
         'name': 'manage_frequent_tools',
         'description':
             '维护你的常用工具表（8-06 21:54 你设计：常用工具放概览里'
@@ -810,6 +848,10 @@ class AiChatService {
     // 8-05 14:36：测试空间隔离——上下文管理（摘要/压缩/恢复包）落到的 key；
     // null = 用 personaId（正常聊天）；mock 测试传 ${personaId}__mock__test
     String? storagePersonaId,
+    // 8-06 23:55 用户：三类输入分离——系统事件（流程被打断/任务被拒绝等）
+    // 走独立通道，不混进用户消息流（不进 feed、不进待回复队列）。
+    // 男主看到的是"系统状态变化"，不是"她发的话"。
+    String? systemEvent,
   }) async {
     final manager = AIProviderManager.instance;
     if (!manager.hasUsable(personaId)) {
@@ -950,7 +992,7 @@ class AiChatService {
     // 第一段紧贴用户消息。现在历史里只有【已聊过的】内容，
     // 当前消息只在【User】出现一次，边界清楚。
     // （compact/summarize 仍在 feed 前跑：总结的是不含当前消息的旧原文）
-    if (!toolRound && message.trim().isNotEmpty) {
+    if (!toolRound && systemEvent == null && message.trim().isNotEmpty) {
       ContextManager.instance.feedUserMessage(ctxPid, message);
       // 8-06 21:36 用户：待回复队列入队（男主带编号管理，管家只做机械活）
       PendingQueueStore.enqueue(ctxPid, message);
@@ -993,12 +1035,16 @@ class AiChatService {
     // 8-04 17:0x（用户反馈"看不到当前用户消息、工具轮太长"）：
     // 工具轮时【当前互动】= 用户刚发的消息（feed 已发生，从原文取）
     // + 男主执行的工具结果（简化成 ✅成功/❌失败 + 一句话，不占位置）
-    final userText = message.trim().isEmpty
-        ? (toolRound
-            ? _toolRoundInteraction(personaId, toolMessages,
-                userAlreadyReplied: userAlreadyReplied)
-            : '（空）')
-        : message;
+    final userText = systemEvent != null
+        ? '【系统事件】\n$systemEvent\n\n'
+            '（这是系统状态事件，不是她发的消息。'
+            '根据事件决定下一步，然后回复她或调用工具。）'
+        : (message.trim().isEmpty
+            ? (toolRound
+                ? _toolRoundInteraction(personaId, toolMessages,
+                    userAlreadyReplied: userAlreadyReplied)
+                : '（空）')
+            : message);
     lastPromptText = isLight
         ? '【轻量期】stateful 刚全量带过/重扔过，服务端上下文还热——本次只发当前消息：\n\n'
             '【User·当前消息】\n$userText'
@@ -1016,7 +1062,20 @@ class AiChatService {
     // 系统不猜他回了哪几条（自动算有漏洞：他决定不回的/只回一条的，系统分不清）。
     final prView = ContextManager.instance.pendingRepliedView(ctxPid);
     final pendingText = PendingQueueStore.pendingText(ctxPid);
+    // 8-06 23:55 用户：流程层——【当前流程】注入（男主自管，每轮可见）
+    // 执行中她发来的消息会被收集（PendingQueueStore），男主专注流程；
+    // 被打断（stopped）会看到停在哪、她说了什么 → 决定 resume 还是先回复
+    final flowText = FlowStore.text(ctxPid);
     final statusBlocks = <AIChatMessage>[
+      if (flowText != null && flowText.isNotEmpty)
+        AIChatMessage(
+          role: 'system',
+          content: '【当前流程】（你自己立的流程，管家只负责存和执行）\n$flowText'
+              '\n（执行中她发来的消息管家会收集，不用管，专注执行；'
+              '想结束调 manage_flow finish/cancel；'
+              '被她打断会收到【系统事件】，你决定继续还是先回复她）',
+        ),
+      if (pendingText != null && pendingText.isNotEmpty)
       if (pendingText != null && pendingText.isNotEmpty)
         AIChatMessage(
           role: 'system',

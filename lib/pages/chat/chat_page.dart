@@ -10,6 +10,7 @@ import '../../services/card_task_store.dart';
 import '../../services/setting_version_store.dart';
 import '../../services/record_tree_store.dart';
 import '../../services/working_pad_store.dart';
+import '../../services/flow_store.dart';
 import '../../services/timer_plan_store.dart';
 import '../../services/pending_queue_store.dart';
 import '../../services/tool_catalog.dart';
@@ -280,7 +281,103 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         AIProviderManager.instance.lastProviderFor(pid) ?? '');
   }
 
-  Future<void> _sendMsg(String t) async {
+  /// 8-06 23:55 用户：流程停止条——长任务时强行让男主停止
+  Widget _buildFlowStopBar() {
+    final pid = _state.personaId ??
+        (_state.leadId == null ? '' : '${_state.leadId}_default');
+    final summary = FlowStore.summary(pid) ?? '流程执行中';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      color: const Color(0xFF7B6A8F).withValues(alpha: 0.12),
+      child: Row(
+        children: [
+          const Icon(Icons.playlist_play, size: 14, color: Color(0xFF5A4A6A)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '男主正在执行流程：$summary',
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFF5A4A6A),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: _stopFlow,
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFB04A5A),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 32),
+            ),
+            child: const Text('⏹ 停止', style: TextStyle(fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 8-06 23:55 用户：停止按钮——流程 running → stopped，
+  /// 把"停在哪 + 用户说了什么"作为【系统事件】给男主，它决定继续还是先回复
+  Future<void> _stopFlow() async {
+    final pid = _state.personaId ??
+        (_state.leadId == null ? '' : '${_state.leadId}_default');
+    final flow = await FlowStore.get(pid);
+    if (flow == null || !mounted) return;
+    final pendingMsgs = PendingQueueStore.list(pid);
+    final userText = pendingMsgs
+        .map((e) => '[待#${e['id']}] ${e['text']}')
+        .join('；');
+    final steps = (flow['steps'] as List?)?.map((e) => e.toString()).toList() ??
+        <String>[];
+    final cur = (flow['currentStep'] as num?)?.toInt() ?? 0;
+    await FlowStore.stop(pid, userMessages: userText);
+    if (mounted) setState(() {});
+    final curStep = cur < steps.length ? steps[cur] : '';
+    final event = '你正在执行的流程被用户打断：目标「${flow['goal']}」，'
+        '停在 ${cur + 1}/${steps.length} 步（$curStep）。'
+        '她刚才发来的消息（管家收集的）：'
+        '${userText.isEmpty ? '（没有新消息，她只是按了停止）' : userText}。'
+        '请决定：① 调 manage_flow resume 继续执行流程；'
+        '② 先回复她（流程保持暂停，回完再 resume，或 finish/cancel 结束）。';
+    if (_generating) {
+      // 男主正在跑这轮（工具轮循环中）→ 排队，等它结束自动触发
+      _pendingStopEvent = event;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('已停止流程，等男主这轮结束就回应你'),
+          duration: Duration(seconds: 2),
+        ));
+      }
+      return;
+    }
+    await _sendMsg('', systemEvent: event);
+  }
+
+  Future<void> _sendMsg(String t, {String? systemEvent}) async {
+    // 8-06 23:55 用户：流程执行中用户消息只收集不传（不打扰男主执行）。
+    // 放 _generating 前：男主工具轮循环（_generating=true）时消息也不丢。
+    // 停止触发的生成（systemEvent 非空）不走收集。
+    if (systemEvent == null) {
+      final flowPid = _state.personaId ??
+          (_state.leadId == null ? '' : '${_state.leadId}_default');
+      FlowStore.warm(flowPid);
+      if (FlowStore.isRunning(flowPid)) {
+        PendingQueueStore.enqueue(flowPid, t);
+        if (mounted) {
+          _msgKey.currentState?.appendMessage(ChatMessage(
+              id: DateTime.now().millisecondsSinceEpoch.toString(),
+              text: t,
+              isMe: true));
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('男主正在执行流程，消息已收集（没打扰它）。想打断点 ⏹ 停止'),
+            duration: Duration(seconds: 2),
+          ));
+        }
+        return;
+      }
+    }
     // 8-03 18:2x（用户反馈"男主说完话再说话他不理人"）：生成锁——
     // 男主生成中（含工具轮）新消息直接忽略并提示，防并发上下文混乱
     if (_generating) {
@@ -297,7 +394,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final userMsgId = DateTime.now().millisecondsSinceEpoch.toString();
     // 本轮男主第一句话气泡 id 重置（工具气泡只挂本轮第一句话头上）
     _firstAiMsgId = null;
-    _msgKey.currentState?.appendMessage(ChatMessage(id: userMsgId, text: t, isMe: true));
+    // 8-06 23:55：停止触发的生成没有用户消息 → 显示系统提示气泡
+    _msgKey.currentState?.appendMessage(ChatMessage(
+        id: userMsgId,
+        text: systemEvent == null ? t : '⏸ 你按了停止，男主正在处理…',
+        isMe: true));
     final lid = _state.leadId;
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
@@ -308,6 +409,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     TimerPlanStore.warm(personaId);
     // 8-06 21:36：待回复队列预热
     PendingQueueStore.warm(personaId);
+    FlowStore.warm(personaId);
     // 8-06 21:54：常用工具表预热
     FrequentToolsStore.warm(personaId);
     // 8-05 14:36 用户修正：测试对话 ≠ 关功能，而是独立"测试空间"——
@@ -337,12 +439,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     await _ensureChatSession(chatPid, personaName);
     if (_chatSessionId != null) {
       try {
-        final userNode = await ChatDatabaseService.instance.appendUserMessage(
-          sessionId: _chatSessionId!,
-          parentMessageId: _chatLeafId,
-          text: t,
-        );
-        _chatLeafId = userNode.id;
+        // 8-06 23:55：系统事件触发的生成没有用户消息，不落库
+        if (systemEvent == null) {
+          final userNode = await ChatDatabaseService.instance.appendUserMessage(
+            sessionId: _chatSessionId!,
+            parentMessageId: _chatLeafId,
+            text: t,
+          );
+          _chatLeafId = userNode.id;
+        }
       } catch (e) {
         DebugLogger.log('管家流程', '✖ 对话落库失败（用户消息）: $e');
       }
@@ -351,10 +456,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // ===== 管家管线：技能触发 → 假面替换 → 情绪记录（流程树可见）=====
       // 测试对话也跑（链路完整可测），但 characterId 用测试 key →
       // 技能执行/情绪记录全部落在测试空间
-      String sendText = t;
+      String sendText = systemEvent == null ? t : '';
       String? skillInjection;
       String? keywordAsk;
       try {
+        // 8-06 23:55：系统事件不跑管家管线（没有用户文本可分析）
+        if (systemEvent == null) {
         final pipeline = await ChatService.instance.runButlerPipeline(
           userText: t,
           characterId: chatPid,
@@ -365,7 +472,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           sendText = pipeline.maskedText;
           skillInjection = pipeline.skillInjection;
           keywordAsk = pipeline.keywordAsk;
-        } catch (e) {
+        }
+      } catch (e) {
           // 管家失败不阻断聊天，只记日志
           DebugLogger.log('管家流程', '✖ 管家管线异常（不阻断聊天）: $e');
         }
@@ -407,6 +515,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           // 8-04 18:34：疑似工具调用格式不对 → 提示男主正确格式（下轮注入）
           if (_formatHint != null) _formatHint!,
         ].join('\n'),
+        systemEvent: systemEvent,
       );
       // 用完即清（反馈/记忆/格式提示只注入一次）
       _pendingFeedback = null;
@@ -716,6 +825,45 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             // 8-06 21:12 用户：男主自己的便签（当前任务模块），自己维护，免审批
             _appendToolBubble('📋 男主在整理自己的便签…');
             toolResult = await _executeManagePad(args);
+          } else if (name == 'manage_flow') {
+            // 8-06 23:55 用户：流程层——男主自管（免审批）
+            // 长任务先立流程（goal+steps），一条条执行，做完 finish
+            _appendToolBubble('📋 男主在整理流程…');
+            final action = args['action']?.toString() ?? '';
+            if (action == 'create') {
+              final goal = args['goal']?.toString() ?? '';
+              final stepsRaw = args['steps'];
+              final steps = <String>[];
+              if (stepsRaw is List) {
+                for (final st in stepsRaw) {
+                  final t = st.toString().trim();
+                  if (t.isNotEmpty) steps.add(t);
+                }
+              } else if (stepsRaw is String) {
+                steps.addAll(stepsRaw
+                    .split(RegExp(r'\n+'))
+                    .where((st) => st.trim().isNotEmpty));
+              }
+              toolResult =
+                  _ToolResult(true, await FlowStore.create(personaId, goal, steps));
+            } else if (action == 'next') {
+              toolResult = _ToolResult(true, await FlowStore.next(personaId));
+            } else if (action == 'finish') {
+              toolResult = _ToolResult(true, await FlowStore.finish(personaId));
+            } else if (action == 'cancel') {
+              toolResult = _ToolResult(true, await FlowStore.cancel(personaId));
+            } else if (action == 'resume') {
+              toolResult = _ToolResult(true, await FlowStore.resume(personaId));
+            } else if (action == 'status') {
+              toolResult = _ToolResult(true,
+                  FlowStore.text(personaId) ?? '没有流程（create 先立）');
+            } else {
+              toolResult = const _ToolResult(false,
+                  'manage_flow 参数：action=create/next/finish/cancel/resume/status，'
+                  'create 要 goal+steps');
+            }
+            // 流程状态变化 → 刷新停止条
+            if (mounted) setState(() {});
           } else if (name == 'manage_frequent_tools') {
             // 8-06 21:54 用户：常用工具表维护（男主自己的，免审批）
             final action = args['action']?.toString() ?? '';
@@ -973,6 +1121,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         unawaited(_writeDailyDiary(chatPid, personaName));
       }
     }
+    // 8-06 23:55：停止事件排队——这轮结束（无论成败）自动触发，不丢
+    final pendingStop = _pendingStopEvent;
+    if (pendingStop != null) {
+      _pendingStopEvent = null;
+      if (mounted) unawaited(_sendMsg('', systemEvent: pendingStop));
+    }
   }
 
   /// 记录当天首次聊天时间（作息规律：平均开始聊）
@@ -1116,6 +1270,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     TimerPlanStore.warm(personaId);
     // 8-06 21:36：待回复队列预热
     PendingQueueStore.warm(personaId);
+    FlowStore.warm(personaId);
     // 8-06 21:54：常用工具表预热
     FrequentToolsStore.warm(personaId);
     await showAiProviderSheet(
@@ -1398,6 +1553,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                   // 8-05 16:36 用户：测试模式开着必须一眼看出 + 一键退出
                   if (AIProviderManager.testModeEnabled)
                     _buildTestModeBanner(),
+                  // 8-06 23:55 用户：流程执行中显示"⏹ 停止"条——
+                  // 长任务时用户可强行让男主停止，返回结果给它判断
+                  if (FlowStore.isRunning(_state.personaId ??
+                      (_state.leadId == null ? '' : '${_state.leadId}_default')))
+                    _buildFlowStopBar(),
                   ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
                     onPlusTap: _togglePlus, onSendTap: _sendMsg),
                 ],
@@ -1826,6 +1986,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   /// 8-03 18:2x：男主生成锁（防并发——男主生成中再发消息会上下文混乱）
   bool _generating = false;
+  // 8-06 23:55：停止事件排队——男主生成中按停止，等这轮结束自动触发
+  String? _pendingStopEvent;
 
   /// 8-04 21:1x：一键验收进行中（自动切 AI 跑真实对话）
   bool _accepting = false;
@@ -3695,6 +3857,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       'add_record': '记记录',
       'manage_record_tree': '调分类',
       'manage_pad': '整理便签',
+      'manage_flow': '流程',
       'continue_speaking': '继续说',
       'resolve_pending': '标记回复',
       'manage_frequent_tools': '维护常用工具',

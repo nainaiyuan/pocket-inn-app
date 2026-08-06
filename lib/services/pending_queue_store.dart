@@ -57,6 +57,11 @@ class PendingQueueStore {
     await _save(personaId, es);
   }
 
+  /// 全部待回复列表（8-06 23:55 停止按钮用：取收集的用户消息）
+  static List<Map<String, dynamic>> list(String personaId) =>
+      List<Map<String, dynamic>>.from(
+          _memCache[personaId] ?? const <Map<String, dynamic>>[]);
+
   /// 待回复文本（注入用）：'待#1 [21:15] 内容'；空返回 null
   static String? pendingText(String personaId) {
     final es = _memCache[personaId];
