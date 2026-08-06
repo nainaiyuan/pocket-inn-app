@@ -567,6 +567,43 @@ class AiChatService {
     {
       'type': 'function',
       'function': {
+        'name': 'manage_pad',
+        'description':
+            '管理你自己的"当前任务模块"（便签，8-06 21:12 你设计）。'
+            '干活时把要用到的都写进去：工具查到的结果、查到的东西、干到一半的事、'
+            '还要用的记录——这样下一句对话你还知道有什么没干。'
+            '你自己判断留什么删什么：干完活的删、正文（对话上下文）里已经有的删'
+            '（上下文已有的优先，不重复记）、下次还要用的留着。不设限额，'
+            '删的时候自己说行号范围（如"删 3 到 5"）。写摘要时自己清理。'
+            '⚠️ 这是你自己的便签，不需要她审批。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'action': {
+              'type': 'string',
+              'enum': ['set', 'append', 'remove'],
+              'description': 'set=整体重写（自己整理好全部行） append=追加一行 remove=删行',
+            },
+            'content': {
+              'type': 'string',
+              'description': 'set 时=全部内容（每行一条，用\n分隔）；append 时=要加的一行',
+            },
+            'from': {
+              'type': 'integer',
+              'description': 'remove 的起始行号（从 1 开始）',
+            },
+            'to': {
+              'type': 'integer',
+              'description': 'remove 的结束行号（可省略，省略=只删 from 那一行）',
+            },
+          },
+          'required': ['action'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
         'name': 'query_setting_history',
         'description':
             '查设定变更历史（哪个版本改了什么、什么时候改的）。'
@@ -698,6 +735,9 @@ class AiChatService {
     String? userProfile, // USER_PROFILE：用户状态（技能注入/温控/获准记忆）
     String? taskState, // TASK_STATE：任务状态（审批反馈/工具强制提示）
     bool toolRound = false,
+    // 8-06 21:12 用户 bug：工具轮带上用户旧话 → 男主回复两句。
+    // true = 男主第一轮已经回过用户（工具轮不用再回旧话，只处理工具结果）
+    bool userAlreadyReplied = false,
     List<AIChatMessage>? toolMessages,
     String? sessionId,
     // 8-05 19:13 用户：当前管家说的具体指令/参考信息（如心率/天气），
@@ -889,7 +929,8 @@ class AiChatService {
     // + 男主执行的工具结果（简化成 ✅成功/❌失败 + 一句话，不占位置）
     final userText = message.trim().isEmpty
         ? (toolRound
-            ? _toolRoundInteraction(personaId, toolMessages)
+            ? _toolRoundInteraction(personaId, toolMessages,
+                userAlreadyReplied: userAlreadyReplied)
             : '（空）')
         : message;
     lastPromptText = isLight
@@ -1710,7 +1751,8 @@ class AiChatService {
   /// 不然把用户的话塞到工具前面，男主分不清要说什么"）→ 两个明确分区。
   /// 工具结果格式统一为 chat_page 拼的 【工具 名】✅成功/❌失败：结果。
   String _toolRoundInteraction(
-      String personaId, List<AIChatMessage>? toolMessages) {
+      String personaId, List<AIChatMessage>? toolMessages,
+      {bool userAlreadyReplied = false}) {
     final sb = StringBuffer();
     sb.writeln('【当前工具调用】');
     if (toolMessages == null || toolMessages.isEmpty) {
@@ -1738,9 +1780,18 @@ class AiChatService {
       }
     }
     if (!found) sb.writeln('（无工具调用）');
-    // 用户当前消息保持在最后一条（8-05 18:56 用户：AI 读最后一条回复）
-    sb.writeln('【用户当前消息】'
-        '${ContextManager.instance.lastUserMessageFor(personaId) ?? '（无）'}');
+    // 8-06 21:12 用户 bug 修复：工具轮不再重复带用户旧话！
+    // 男主第一轮已回过用户 → 工具轮只处理工具结果，不用再回旧话（否则回复两句）
+    // 男主第一轮没说话直接调工具 → 才带用户消息（基于工具结果回复用户）
+    if (userAlreadyReplied) {
+      sb.writeln('【说明】你上一轮已经回复过她了。'
+          '现在是工具执行轮：处理完工具结果后，'
+          '只汇报结果或继续下一步，不要再重复回复刚才的话。');
+    } else {
+      // 用户当前消息保持在最后一条（8-05 18:56 用户：AI 读最后一条回复）
+      sb.writeln('【用户当前消息】'
+          '${ContextManager.instance.lastUserMessageFor(personaId) ?? '（无）'}');
+    }
     return sb.toString().trim();
   }
 }

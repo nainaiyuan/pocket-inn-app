@@ -10,6 +10,7 @@ import '../../services/card_task_store.dart';
 import '../../services/setting_version_store.dart';
 import '../../services/record_tree_store.dart';
 import '../../services/tool_result_store.dart';
+import '../../services/working_pad_store.dart';
 import 'widgets/task_list_page.dart';
 import '../../data/bug_knowledge_base.dart';
 import 'companion_page.dart';
@@ -300,6 +301,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
     // 8-06 21:00：工具结果记忆预热（prompt 注入同步读，这里先刷新缓存）
     ToolResultStore.warm(personaId);
+    // 8-06 21:12：便签（当前任务模块）预热
+    WorkingPadStore.warm(personaId);
     // 8-05 14:36 用户修正：测试对话 ≠ 关功能，而是独立"测试空间"——
     // 模拟 AI 聊天时所有数据（会话/消息/记忆/情绪/上下文总结）落到
     // ${真实persona}__mock__test 这个测试 key，功能照常跑、数据不混；
@@ -700,6 +703,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           } else if (name == 'manage_record_tree') {
             // 改分类影响她 → 弹窗审批
             toolResult = await _executeManageRecordTree(args);
+          } else if (name == 'manage_pad') {
+            // 8-06 21:12 用户：男主自己的便签（当前任务模块），自己维护，免审批
+            _appendToolBubble('📋 男主在整理自己的便签…');
+            toolResult = await _executeManagePad(args);
           } else {
             toolResult = _ToolResult(false, '未知工具：$name');
           }
@@ -759,6 +766,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           personaName: personaName,
           personaPrompt: _currentPersonaPrompt(),
           toolRound: true,
+          // 8-06 21:12 用户 bug：第一轮男主已回过话 → 工具轮别再带旧话（防回复两句）
+          userAlreadyReplied: result.text.trim().isNotEmpty,
           toolMessages: toolMessages,
           sessionId: _chatSessionId,
           storagePersonaId: chatPid,
@@ -1030,6 +1039,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
     // 8-06 21:00：工具结果记忆预热（prompt 注入同步读，这里先刷新缓存）
     ToolResultStore.warm(personaId);
+    // 8-06 21:12：便签（当前任务模块）预热
+    WorkingPadStore.warm(personaId);
     await showAiProviderSheet(
       context: context,
       personaId: personaId,
@@ -3479,6 +3490,44 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     return (approved: approved, feedback: fbCtrl.text);
   }
 
+  /// 工具执行：manage_pad（男主自己的便签/当前任务模块，免审批）
+  Future<_ToolResult> _executeManagePad(Map<String, dynamic> args) async {
+    final personaId = _state.personaId ?? '';
+    final action = args['action']?.toString() ?? '';
+    switch (action) {
+      case 'set':
+        final content = args['content']?.toString() ?? '';
+        final lines = content
+            .split('\n')
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+        await WorkingPadStore.setAll(personaId, lines);
+        DebugLogger.log('指令模块', '📋 便签整体更新（${lines.length} 行）');
+        return _ToolResult(true, '便签已更新（${lines.length} 行）。'
+            '${lines.isEmpty ? '已清空。' : '下一句对话你会带着它。'}');
+      case 'append':
+        final content = args['content']?.toString().trim() ?? '';
+        if (content.isEmpty) return const _ToolResult(false, '便签没写内容');
+        await WorkingPadStore.append(personaId, content);
+        DebugLogger.log('指令模块', '📋 便签追加一行');
+        return _ToolResult(true, '已记到便签：$content');
+      case 'remove':
+        final from = (args['from'] as num?)?.toInt() ?? 0;
+        final to = (args['to'] as num?)?.toInt();
+        final n = await WorkingPadStore.remove(personaId, from, to);
+        if (n == 0) {
+          return _ToolResult(false, '删除失败：便签没有第 $from 行'
+              '（先查一下现在有哪几行）');
+        }
+        DebugLogger.log('指令模块', '📋 便签删了 $n 行');
+        return _ToolResult(true, '便签删了 $n 行（第 $from 行起）。');
+      default:
+        return _ToolResult(false, '便签操作失败：未知动作 $action'
+            '（set/append/remove）');
+    }
+  }
+
   /// 通用超时唤醒：waitMinutes 后用户没回聊天页 → butlerWakeUp 唤醒男主
   /// （8-06 13:38 从 _scheduleNotifyWakeUp 泛化，notify_user / countdown_card 共用）
   void _scheduleWakeUp(int waitMinutes, String instruction) {
@@ -3530,6 +3579,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       'query_record': '查记录',
       'add_record': '记记录',
       'manage_record_tree': '调分类',
+      'manage_pad': '整理便签',
     };
     final matched = known.keys.where(userText.contains).toList();
     if (matched.isEmpty) return null;
@@ -3707,6 +3757,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             prompt += '\n\n【你最近用过的工具·结果】\n$lines'
                 '\n（这些是你刚做过的，结果都在这；要用的功能如果结果里已经有了，'
                 '直接照着用，不用重新查）';
+          }
+          // 8-06 21:12 用户：男主便签/当前任务模块——他自己维护，每轮注入
+          final padText = WorkingPadStore.text(pid);
+          if (padText != null) {
+            prompt += '\n\n【当前任务模块·你的便签】\n$padText'
+                '\n（这是你自己维护的：查到的、干到一半的、还要用的都写在这。'
+                '自己判断留删——干完活的删、正文里已经有的删（上下文已有的优先），'
+                '不设限额，删的时候自己说行号范围。'
+                '写摘要时自己清理。下一句对话你还知道有什么没干。）';
           }
           // 8-06 18:41-19:21 用户：分类记录体系 —— 记录职责 + 现有分类概览
           final recordDuty = '\n\n【你的记录职责】'
