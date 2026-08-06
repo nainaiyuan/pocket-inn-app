@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../ai_provider/ai_provider_manager.dart';
 import '../../butler/modules/butler_module_hub.dart';
 import '../../butler/memory/emotion_arc.dart';
+import '../../butler/memory/relation_migration.dart';
 import '../../butler/memory/relation_record.dart';
 import '../../butler/patterns/pattern_engine.dart';
 import '../../butler/storage/storage_registry.dart';
@@ -61,6 +62,8 @@ class _ButlerPageState extends State<ButlerPage> {
   /// 关系图数据刷新（男主记了新关系后调用）
   Future<void> refreshRelations() async {
     try {
+      // 旧记忆一次性迁入关系网（幂等，失败静默，不影响使用）
+      await RelationMigration.migrateLegacyMemories();
       final records = await StorageRegistry.instance.relations.loadAll();
       if (!mounted) return;
       setState(() => _relationRecords = records);
@@ -124,7 +127,7 @@ class _ButlerPageState extends State<ButlerPage> {
               child: IndexedStack(
                 index: _tab,
                 children: [
-                  _MoodTab(arcs: _arcs),
+                  _MoodTab(arcs: _arcs, records: _relationRecords),
                   _UniverseTab(
                     records: _relationRecords,
                     memoryCount: _memoryCount,
@@ -153,10 +156,14 @@ class _ButlerPageState extends State<ButlerPage> {
 // 💗 情绪 Tab：四色情绪环图
 // =====================================================================
 class _MoodTab extends StatelessWidget {
-  const _MoodTab({required this.arcs});
+  const _MoodTab({required this.arcs, required this.records});
 
   final List<EmotionArc> arcs;
 
+  /// 关系记录（情绪类记录 → 动态情绪词环，8-07 01:23 用户"把所有的做好"）
+  final List<RelationRecord> records;
+
+  /// 旧四色兜底（没有情绪记录时用）
   static const _dims = [
     ('喜悦', Color(0xFFE896B8)),
     ('依恋', Color(0xFFB896E8)),
@@ -164,10 +171,58 @@ class _MoodTab extends StatelessWidget {
     ('愤怒', Color(0xFFE8A078)),
   ];
 
+  /// 情绪词色板（动态环循环取色）
+  static const _wordColors = [
+    Color(0xFFE896B8), // 粉
+    Color(0xFFB896E8), // 紫
+    Color(0xFF96B8E8), // 蓝
+    Color(0xFFE8A078), // 橙
+    Color(0xFF8FC8A0), // 绿
+    Color(0xFFE8D8A0), // 黄
+    Color(0xFF96C8C8), // 青
+    Color(0xFFC8A0E8), // 紫红
+  ];
+
+  /// 从情绪记录提取情绪词 → 按出现次数聚合
+  /// 男主记"她→感到→焦虑"：object=焦虑 就是情绪词
+  List<({String label, double value, Color color})> get _emotionWords {
+    final counts = <String, int>{};
+    for (final r in records) {
+      if (r.category != '情绪') continue;
+      final word = r.object.trim();
+      if (word.isEmpty || word.length > 6) continue;
+      counts[word] = (counts[word] ?? 0) + 1;
+    }
+    if (counts.isEmpty) return const [];
+    final sorted = counts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final max = sorted.first.value.toDouble();
+    final list = sorted.take(8).toList();
+    return [
+      for (var i = 0; i < list.length; i++)
+        (
+          label: list[i].key,
+          // 词频归一化：出现最多 = 100，最少也有 25（保证看得见）
+          value: 25 + (list[i].value / max) * 75,
+          color: _wordColors[i % _wordColors.length],
+        ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
+    final words = _emotionWords;
     final latest = arcs.isEmpty ? null : arcs.last;
     final mood = latest?.endMood ?? const <String, double>{};
+
+    // 有情绪词 → 动态环；没有但有旧数据 → 四色兜底环
+    final hasWords = words.isNotEmpty;
+    final ringDims = hasWords
+        ? words
+        : [
+            for (final (name, color) in _dims)
+              (label: name, value: mood[name] ?? 0, color: color),
+          ];
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
@@ -186,10 +241,14 @@ class _MoodTab extends StatelessWidget {
               color: const Color(0xFFC896B4).withValues(alpha: 0.2),
             ),
           ),
-          child: latest == null
-              ? Center(
+          child: (hasWords || latest != null)
+              ? CustomPaint(
+                  size: const Size(double.infinity, 260),
+                  painter: _MoodRingPainter(dims: ringDims),
+                )
+              : Center(
                   child: Text(
-                    '还没有情绪记录\n聊起来之后这里会亮起四色光环',
+                    '还没有情绪记录\n聊起来之后这里会亮起情绪光环',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 13,
@@ -197,54 +256,51 @@ class _MoodTab extends StatelessWidget {
                       color: const Color(0xFF5A4A52).withValues(alpha: 0.45),
                     ),
                   ),
-                )
-              : CustomPaint(
-                  size: const Size(double.infinity, 260),
-                  painter: _MoodRingPainter(mood: mood),
                 ),
         ),
         const SizedBox(height: 14),
-        // 四维说明卡
-        Row(
+        // 维度说明卡（动态词 / 四色）
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
           children: [
-            for (final (name, color) in _dims)
-              Expanded(
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.8),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Column(
-                    children: [
-                      Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          color: color,
-                          shape: BoxShape.circle,
-                        ),
+            for (final d in ringDims)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.8),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: d.color,
+                        shape: BoxShape.circle,
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        name,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF5A4A52),
-                        ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      d.label,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF5A4A52),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${(mood[name] ?? 0).round()}',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: color,
-                        ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${d.value.round()}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: d.color,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
           ],
@@ -267,8 +323,10 @@ class _MoodTab extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  '共 ${arcs.length} 次情绪弧线'
-                  '${latest == null ? '' : ' · 最近 ${_ago(latest.time)}'}',
+                  hasWords
+                      ? '情绪词 ${words.length} 种 · 来自关系记录'
+                      : '共 ${arcs.length} 次情绪弧线'
+                          '${latest == null ? '' : ' · 最近 ${_ago(latest.time)}'}',
                   style: const TextStyle(
                     fontSize: 13,
                     color: Color(0xFF5A4A52),
@@ -304,16 +362,19 @@ class _MoodTab extends StatelessWidget {
   }
 }
 
-/// 四色情绪环：每维 90°，半径 = 情绪强度
+/// 情绪环：每维一段弧，半径 = 强度（动态情绪词 / 四色兜底共用）
 class _MoodRingPainter extends CustomPainter {
-  _MoodRingPainter({required this.mood});
+  _MoodRingPainter({required this.dims});
 
-  final Map<String, double> mood;
+  /// (标签, 强度0-100, 颜色)
+  final List<({String label, double value, Color color})> dims;
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2 + 10);
     final baseR = math.min(size.width, size.height) * 0.16;
+    final n = dims.length;
+    if (n == 0) return;
 
     // 灰底环
     final bgRing = Paint()
@@ -322,20 +383,20 @@ class _MoodRingPainter extends CustomPainter {
       ..color = const Color(0xFFC896B4).withValues(alpha: 0.1);
     canvas.drawCircle(center, baseR + 45, bgRing);
 
-    // 四段弧（0° 起顺时针：喜悦/依恋/悲伤/愤怒）
-    const dims = _MoodTab._dims;
-    for (var i = 0; i < dims.length; i++) {
-      final (name, color) = dims[i];
-      final value = (mood[name] ?? 0).clamp(0.0, 100.0);
+    // 每维一段弧（均分 360°）
+    final arc = 2 * math.pi / n;
+    for (var i = 0; i < n; i++) {
+      final d = dims[i];
+      final value = d.value.clamp(0.0, 100.0);
       final r = baseR + (value / 100) * 45;
-      final start = i * math.pi / 2 - math.pi / 2;
-      final sweep = math.pi / 2 - 0.12; // 留缝
+      final start = i * arc - math.pi / 2;
+      final sweep = arc - 0.12; // 留缝
 
       final paint = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 14
         ..strokeCap = StrokeCap.round
-        ..color = color;
+        ..color = d.color;
       canvas.drawArc(
         Rect.fromCircle(center: center, radius: r),
         start + 0.06,
@@ -345,21 +406,16 @@ class _MoodRingPainter extends CustomPainter {
       );
     }
 
-    // 中心：主导情绪
-    final dominant = dims.reduce((a, b) {
-      final va = mood[a.$1] ?? 0;
-      final vb = mood[b.$1] ?? 0;
-      return va >= vb ? a : b;
-    });
-    final dv = (mood[dominant.$1] ?? 0).round();
+    // 中心：主导（强度最高）
+    final dominant = dims.reduce((a, b) => a.value >= b.value ? a : b);
 
     final tp1 = TextPainter(
       text: TextSpan(
-        text: dominant.$1,
+        text: dominant.label,
         style: TextStyle(
           fontSize: 18,
           fontWeight: FontWeight.w700,
-          color: dominant.$2,
+          color: dominant.color,
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -368,7 +424,7 @@ class _MoodRingPainter extends CustomPainter {
 
     final tp2 = TextPainter(
       text: TextSpan(
-        text: '$dv',
+        text: '${dominant.value.round()}',
         style: const TextStyle(
           fontSize: 30,
           fontWeight: FontWeight.w800,
@@ -384,7 +440,7 @@ class _MoodRingPainter extends CustomPainter {
 
     final tp3 = TextPainter(
       text: TextSpan(
-        text: '当前情绪',
+        text: n > 4 ? '最近情绪词' : '当前情绪',
         style: TextStyle(
           fontSize: 11,
           color: const Color(0xFF5A4A52).withValues(alpha: 0.5),
@@ -399,8 +455,16 @@ class _MoodRingPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _MoodRingPainter oldDelegate) =>
-      oldDelegate.mood != mood;
+  bool shouldRepaint(covariant _MoodRingPainter oldDelegate) {
+    if (oldDelegate.dims.length != dims.length) return true;
+    for (var i = 0; i < dims.length; i++) {
+      if (oldDelegate.dims[i].label != dims[i].label ||
+          oldDelegate.dims[i].value != dims[i].value) {
+        return true;
+      }
+    }
+    return false;
+  }
 }
 
 // =====================================================================
