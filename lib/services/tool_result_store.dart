@@ -18,12 +18,12 @@ class ToolResultStore {
   static final Map<String, List<Map<String, dynamic>>> _memCache = {};
 
   static List<Map<String, dynamic>> _parse(String? raw) {
-    if (raw == null || raw.isEmpty) return [];
+    if (raw == null || raw.isEmpty) return <Map<String, dynamic>>[];
     try {
-      final list = jsonDecode(raw) as List;
-      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list.map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (_) {
-      return [];
+      return <Map<String, dynamic>>[];
     }
   }
 
@@ -38,7 +38,7 @@ class ToolResultStore {
       'tool': tool,
       'result': result.length > 100 ? '${result.substring(0, 100)}…' : result,
     };
-    final entries = [...(_memCache[personaId] ?? [])];
+    final entries = List<Map<String, dynamic>>.from(_memCache[personaId] ?? const <Map<String, dynamic>>[]);
     entries.insert(0, entry);
     if (entries.length > _maxEntries) {
       entries.removeRange(_maxEntries, entries.length);

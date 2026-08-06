@@ -20,12 +20,12 @@ class TimerPlanStore {
   static final Map<String, List<Map<String, dynamic>>> _memCache = {};
 
   static List<Map<String, dynamic>> _parse(String? raw) {
-    if (raw == null || raw.isEmpty) return [];
+    if (raw == null || raw.isEmpty) return <Map<String, dynamic>>[];
     try {
-      final list = jsonDecode(raw) as List;
-      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list.map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (_) {
-      return [];
+      return <Map<String, dynamic>>[];
     }
   }
 
@@ -35,7 +35,7 @@ class TimerPlanStore {
     final now = DateTime.now();
     final hhmm = '${now.hour.toString().padLeft(2, '0')}:'
         '${now.minute.toString().padLeft(2, '0')}';
-    final entries = [...(_memCache[personaId] ?? [])];
+    final entries = List<Map<String, dynamic>>.from(_memCache[personaId] ?? const <Map<String, dynamic>>[]);
     entries.insert(0, {
       'time': hhmm,
       'desc': desc.length > 80 ? '${desc.substring(0, 80)}…' : desc,
@@ -65,7 +65,7 @@ class TimerPlanStore {
 
   /// 标记某条已触发（按 desc 匹配第一条 waiting）；没有匹配就静默
   static Future<void> markDone(String personaId, String desc) async {
-    final entries = [...(_memCache[personaId] ?? [])];
+    final entries = List<Map<String, dynamic>>.from(_memCache[personaId] ?? const <Map<String, dynamic>>[]);
     for (var i = 0; i < entries.length; i++) {
       if (entries[i]['status'] == 'waiting' &&
           (entries[i]['desc'] ?? '').contains(desc)) {

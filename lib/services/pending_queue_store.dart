@@ -20,12 +20,12 @@ class PendingQueueStore {
   static final Map<String, List<Map<String, dynamic>>> _memCache = {};
 
   static List<Map<String, dynamic>> _parse(String? raw) {
-    if (raw == null || raw.isEmpty) return [];
+    if (raw == null || raw.isEmpty) return <Map<String, dynamic>>[];
     try {
-      final list = jsonDecode(raw) as List;
-      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list.map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (_) {
-      return [];
+      return <Map<String, dynamic>>[];
     }
   }
 
@@ -41,7 +41,7 @@ class PendingQueueStore {
     final now = DateTime.now();
     final hhmm = '${now.hour.toString().padLeft(2, '0')}:'
         '${now.minute.toString().padLeft(2, '0')}';
-    final es = [...(_memCache[personaId] ?? [])];
+    final es = List<Map<String, dynamic>>.from(_memCache[personaId] ?? const <Map<String, dynamic>>[]);
     es.add({
       'id': es.length + 1, // 重新编号（消除后压缩）
       'ts': hhmm,
@@ -68,7 +68,7 @@ class PendingQueueStore {
 
   /// 按编号移除（男主 resolve_pending 工具 / 回复标注"回待#N" → 真回了，消除）
   static Future<void> removeByIds(String personaId, List<int> ids) async {
-    final es = [...(_memCache[personaId] ?? [])];
+    final es = List<Map<String, dynamic>>.from(_memCache[personaId] ?? const <Map<String, dynamic>>[]);
     if (es.isEmpty || ids.isEmpty) return;
     final remaining = es.where((e) => !ids.contains(e['id'])).toList();
     for (var i = 0; i < remaining.length; i++) {
@@ -85,7 +85,7 @@ class PendingQueueStore {
   /// - 没有任何编号标注且队列多条 → **不动**（系统不猜，没标=没回）
   /// 返回消除的编号列表
   static Future<List<int>> resolve(String personaId, String reply) async {
-    final es = [...(_memCache[personaId] ?? [])];
+    final es = List<Map<String, dynamic>>.from(_memCache[personaId] ?? const <Map<String, dynamic>>[]);
     if (es.isEmpty) return const <int>[];
     final removed = <int>[];
     final repliedIds = <int>{};

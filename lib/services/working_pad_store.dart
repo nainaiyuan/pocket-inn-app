@@ -24,12 +24,12 @@ class WorkingPadStore {
   static final Map<String, List<String>> _memCache = {};
 
   static List<String> _parse(String? raw) {
-    if (raw == null || raw.isEmpty) return [];
+    if (raw == null || raw.isEmpty) return <String>[];
     try {
-      final list = jsonDecode(raw) as List;
-      return list.map((e) => e.toString()).toList();
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list.map<String>((e) => e.toString()).toList();
     } catch (_) {
-      return [];
+      return <String>[];
     }
   }
 
@@ -68,7 +68,7 @@ class WorkingPadStore {
 
   /// 追加一行
   static Future<void> append(String personaId, String line) async {
-    final ls = [...(_memCache[personaId] ?? [])];
+    final ls = List<String>.from(_memCache[personaId] ?? const <String>[]);
     ls.add(line.trim());
     if (ls.length > _maxLines) ls.removeRange(_maxLines, ls.length);
     await _save(personaId, ls);
@@ -76,7 +76,7 @@ class WorkingPadStore {
 
   /// 删第 from 行到第 to 行（1 起；to 可省略=只删 from）
   static Future<int> remove(String personaId, int from, int? to) async {
-    final ls = [...(_memCache[personaId] ?? [])];
+    final ls = List<String>.from(_memCache[personaId] ?? const <String>[]);
     if (ls.isEmpty) return 0;
     final end = (to == null || to < from) ? from : to;
     if (from < 1 || from > ls.length) return 0;
