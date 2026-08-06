@@ -607,11 +607,10 @@ class AiChatService {
       'function': {
         'name': 'resolve_pending',
         'description':
-            '标记待回复处理结果（8-06 21:41 你设计——回复也走工具，'
+            '标记待回复处理结果（8-06 21:43 你定稿——回复也走工具，'
             '你原生就是调工具的，比文本标注可靠）。'
-            '你回复完她的话后调这个：回了的 → replied_ids；'
-            '决定不回的 → skip_ids（放下，保留痕迹——她问"为什么不回我"'
-            '你能诚实说"我看到了，觉得不用回"，而不是说"我回了"）。'
+            '你回复完她的话后调这个，replied_ids = 你已回复的编号。'
+            '**没有"不回"选项**：没回的就留在待回复区挂着。'
             '⚠️ 你自己的队列管理，不需要她审批。',
         'parameters': {
           'type': 'object',
@@ -620,11 +619,6 @@ class AiChatService {
               'type': 'array',
               'items': {'type': 'integer'},
               'description': '你已回复的待回复编号，如 [1, 2]',
-            },
-            'skip_ids': {
-              'type': 'array',
-              'items': {'type': 'integer'},
-              'description': '你决定不回的编号，如 [3]（放下，保留痕迹）',
             },
           },
         },
@@ -1000,24 +994,17 @@ class AiChatService {
       if (pendingText != null && pendingText.isNotEmpty)
         AIChatMessage(
           role: 'system',
-          content: '【待回复】（她说的、你还没回的。自己判断回哪些/回不回：'
-              '问句/要你干的就回；纯闲聊不需要的标"（不回待#N）"放下。'
-              '回复多条时**必须标注编号**，如"（回待#1、待#2）"，'
-              '管家按你的标注消除——你没标的会一直挂着）\n$pendingText',
+          content: '【待回复】（她说的、你还没回的。'
+              '**没有"不回"选项**——没回的就一直挂在这，你赖不掉。'
+              '回了几条就标几条：回复多条时**必须标注编号**'
+              '如"（回待#1、待#2）"或调 resolve_pending，管家按标注消除。'
+              '纯闲聊不想回的：不用标，让它挂着（她问起来你老实说没回））\n$pendingText',
         ),
       if (prView.replied.isNotEmpty)
         AIChatMessage(
           role: 'system',
           content: '【已回复·最近】（你回过她的，不要重复回）\n'
               '${prView.replied.join('\n')}',
-        ),
-      // 8-06 21:41 用户：放下≠回了——保留痕迹，她问"为什么不回我"能诚实答
-      if (PendingQueueStore.skippedText(ctxPid) != null)
-        AIChatMessage(
-          role: 'system',
-          content: '【已放下】（你选择没回她的——不是回了！'
-              '她问"为什么不回我"时诚实说"我看到了，觉得不用回/当时在忙"，'
-              '别说"我回了"）\n${PendingQueueStore.skippedText(ctxPid)}',
         ),
     ];
     final messages = <AIChatMessage>[

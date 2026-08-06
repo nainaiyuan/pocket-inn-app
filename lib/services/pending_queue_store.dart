@@ -46,7 +46,6 @@ class PendingQueueStore {
       'id': es.length + 1, // 重新编号（消除后压缩）
       'ts': hhmm,
       'text': text.length > 120 ? '${text.substring(0, 120)}…' : text,
-      'status': 'pending', // pending=待回 | skipped=男主选择没回（放下）
     });
     if (es.length > _maxEntries) {
       es.removeRange(0, es.length - _maxEntries);
@@ -62,25 +61,12 @@ class PendingQueueStore {
   static String? pendingText(String personaId) {
     final es = _memCache[personaId];
     if (es == null || es.isEmpty) return null;
-    final pend = es.where((e) => e['status'] != 'skipped').toList();
-    if (pend.isEmpty) return null;
-    return pend
+    return es
         .map((e) => '待#${e['id']} [${e['ts']}] ${e['text']}')
         .join('\n');
   }
 
-  /// 已放下文本（注入用）：'待#3（你选择没回）[21:15] 内容'；空返回 null
-  static String? skippedText(String personaId) {
-    final es = _memCache[personaId];
-    if (es == null || es.isEmpty) return null;
-    final skip = es.where((e) => e['status'] == 'skipped').take(3).toList();
-    if (skip.isEmpty) return null;
-    return skip
-        .map((e) => '待#${e['id']}（你选择没回）[${e['ts']}] ${e['text']}')
-        .join('\n');
-  }
-
-  /// 按编号移除（男主 resolve_pending 工具：replied_ids → 真回了，消除）
+  /// 按编号移除（男主 resolve_pending 工具 / 回复标注"回待#N" → 真回了，消除）
   static Future<void> removeByIds(String personaId, List<int> ids) async {
     final es = [...(_memCache[personaId] ?? [])];
     if (es.isEmpty || ids.isEmpty) return;
@@ -91,64 +77,39 @@ class PendingQueueStore {
     await _save(personaId, remaining);
   }
 
-  /// 标记放下（男主"不回待#N"→ 标 skipped，不消除——8-06 21:41 用户：
-  /// 消除=处理完了，但放下≠回了；她问"为什么不回我"男主要能诚实回答）
-  static Future<void> skip(String personaId, List<int> ids) async {
-    final es = [...(_memCache[personaId] ?? [])];
-    if (es.isEmpty) return;
-    var changed = false;
-    for (final e in es) {
-      if (ids.contains(e['id']) && e['status'] != 'skipped') {
-        e['status'] = 'skipped';
-        changed = true;
-      }
-    }
-    if (changed) await _save(personaId, es);
-  }
-
-  /// 男主回复后按标注处理（8-06 21:41 用户修正：不回的不消除）：
+  /// 男主回复后按标注消除（8-06 21:43 用户定稿：**没有"不回"选项**——
+  /// 没回的就留在待回复区挂着，男主赖不掉；给了"放下"他会当耳旁风
+  /// 把不想回的全标上）：
   /// - "回待#1、待#2" / "回复待#1" → 消除对应编号（真回了）
-  /// - "不回待#3" / "放下待#3" → 标 skipped（选择没回，保留痕迹）
-  /// - 没有任何编号标注 → 兜底：消最老一条（男主默认回最老的）
-  /// 返回 (消除的编号, 放下的编号)
-  static Future<(List<int>, List<int>)> resolve(
-      String personaId, String reply) async {
+  /// - 没有任何编号标注且队列只有 1 条 → 消除它（唯一候选，不算猜）
+  /// - 没有任何编号标注且队列多条 → **不动**（系统不猜，没标=没回）
+  /// 返回消除的编号列表
+  static Future<List<int>> resolve(String personaId, String reply) async {
     final es = [...(_memCache[personaId] ?? [])];
-    if (es.isEmpty) return (const <int>[], const <int>[]);
+    if (es.isEmpty) return const <int>[];
     final removed = <int>[];
-    final skipped = <int>[];
     final repliedIds = <int>{};
-    final skipIds = <int>{};
-    // "回待#N" / "回复待#N" → 回；"不回待#N" / "放下待#N" → 放下
+    // "回待#N" / "回复待#N" → 回
     for (final m in RegExp(r'回(?:复)?\s*待#(\d+)').allMatches(reply)) {
       final n = int.tryParse(m.group(1)!);
       if (n != null && n >= 1) repliedIds.add(n);
     }
-    for (final m in RegExp(r'(?:不回|放下|不用回)\s*待#(\d+)')
-        .allMatches(reply)) {
-      final n = int.tryParse(m.group(1)!);
-      if (n != null && n >= 1) skipIds.add(n);
-    }
-    if (repliedIds.isEmpty && skipIds.isEmpty) {
-      // 兜底：没标注 → 消最老一条（男主默认回最老的）
-      removed.add(es.first['id'] as int);
-    } else {
+    if (repliedIds.isNotEmpty) {
       for (final e in es) {
         if (repliedIds.contains(e['id'])) removed.add(e['id'] as int);
-        if (skipIds.contains(e['id'])) skipped.add(e['id'] as int);
       }
+    } else if (es.length == 1) {
+      // 队列只有一条，男主回了话 → 必然是回它（唯一候选）
+      removed.add(es.first['id'] as int);
     }
-    final remaining = es
-        .where((e) => !removed.contains(e['id']))
-        .toList();
-    for (final e in remaining) {
-      if (skipped.contains(e['id'])) e['status'] = 'skipped';
-    }
+    // 多条且没标注 → 不动（没标=没回，挂着）
+    if (removed.isEmpty) return const <int>[];
+    final remaining = es.where((e) => !removed.contains(e['id'])).toList();
     for (var i = 0; i < remaining.length; i++) {
       remaining[i]['id'] = i + 1;
     }
     await _save(personaId, remaining);
-    return (removed, skipped);
+    return removed;
   }
 
   /// 预热缓存

@@ -717,36 +717,23 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             toolResult = await _executeManagePad(args);
           } else if (name == 'resolve_pending') {
             // 8-06 21:41 用户：回复标记也走工具（原生就是调工具的）
+            // 8-06 21:43：没有"不回"选项——没回的留在待回复区挂着
             // 免审批、不弹气泡（男主的话本身就是回复）
             final rIds = <int>[];
-            final sIds = <int>[];
             final rRaw = args['replied_ids'];
-            final sRaw = args['skip_ids'];
             if (rRaw is List) {
               for (final v in rRaw) {
                 final n = (v as num?)?.toInt();
                 if (n != null && n >= 1) rIds.add(n);
               }
             }
-            if (sRaw is List) {
-              for (final v in sRaw) {
-                final n = (v as num?)?.toInt();
-                if (n != null && n >= 1) sIds.add(n);
-              }
-            }
-            if (rIds.isEmpty && sIds.isEmpty) {
+            if (rIds.isEmpty) {
               toolResult = const _ToolResult(false,
-                  'resolve_pending 参数不对：replied_ids/skip_ids 至少给一个');
+                  'resolve_pending 参数不对：replied_ids 至少要有一个编号');
             } else {
-              if (rIds.isNotEmpty) {
-                await PendingQueueStore.removeByIds(personaId, rIds);
-              }
-              if (sIds.isNotEmpty) {
-                await PendingQueueStore.skip(personaId, sIds);
-              }
-              toolResult = _ToolResult(true,
-                  '已标记：回 待#${rIds.join('、')}'
-                  '${sIds.isEmpty ? '' : '，放下 待#${sIds.join('、')}'}');
+              await PendingQueueStore.removeByIds(personaId, rIds);
+              toolResult =
+                  _ToolResult(true, '已标记回复：待#${rIds.join('、')}');
             }
           } else if (name == 'continue_speaking') {
             // 8-06 21:36 用户：男主不等她继续说话——调"继续"工具，
@@ -857,12 +844,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 8-06 21:36 用户：男主回复带编号 → 管家按标注消除待回复
       // （"回待#1、待#2"消除对应；"不回待#3"也消除=放下；没标注兜底消最老一条）
       if (result.text.trim().isNotEmpty) {
-        final (removed, skipped) =
-            await PendingQueueStore.resolve(personaId, result.text);
-        if (removed.isNotEmpty || skipped.isNotEmpty) {
+        final removed = await PendingQueueStore.resolve(personaId, result.text);
+        if (removed.isNotEmpty) {
           DebugLogger.log('指令模块',
-              '📥 待回复处理：消除 待#${removed.join('、')}'
-              '${skipped.isEmpty ? '' : '，放下 待#${skipped.join('、')}'}');
+              '📥 待回复已消除 待#${removed.join('、')}（男主回复带编号）');
         }
       }
       // 指令模块：解析男主输出（#记录/#查记忆/#定时/#帮助/#model）→ 审批弹窗
