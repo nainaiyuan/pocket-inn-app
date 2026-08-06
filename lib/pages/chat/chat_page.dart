@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../../services/global_banner_service.dart';
 import '../../services/tool_approval_store.dart';
+import '../../services/global_timer_card_service.dart';
 import '../../data/bug_knowledge_base.dart';
 import 'companion_page.dart';
 import 'package:flutter/services.dart';
@@ -647,6 +648,22 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           } else if (name == 'report_bug') {
             // 8-06 01:06 用户：bug 报告弹窗（定位信息+解法+一键复制，只读不需要审批）
             toolResult = await _executeReportBug(args);
+          } else if (name == 'countdown_card') {
+            // 8-06 13:38 用户：计时卡片（悬浮倒计时卡片，可拖动/收起/选项/逾期提醒）
+            // 默认要审批（和 notify_user 一致，可申请免审批）
+            final ok = await _approveToolCall(
+              '设计时卡片',
+              '他想给你设一个倒计时卡片（比如"去洗澡，40分钟后回来"）。\n'
+              '允许吗？（批准后他可以在对话里申请这个能力免审批）',
+              personaId: personaId,
+              toolKey: 'countdown_card',
+            );
+            if (!ok) {
+              _appendToolBubble('❌ 你拒绝了计时卡片');
+              toolResult = _ToolResult(false, '用户拒绝：暂不设计时卡片');
+            } else {
+              toolResult = await _executeCountdownCard(args);
+            }
           } else {
             toolResult = _ToolResult(false, '未知工具：$name');
           }
@@ -2353,30 +2370,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// notify_user 超时唤醒：wait_minutes 后检查用户是否还在聊天页，
   /// 没在 → 管家唤醒男主（butlerWakeUp），男主再主动找用户。
   void _scheduleNotifyWakeUp(int waitMinutes) {
-    _notifyWakeTimer?.cancel();
-    _notifyWakeTimer = Timer(Duration(minutes: waitMinutes), () async {
-      if (!mounted) return;
-      // 用户已回到聊天页（当前 tab 是聊天且页面可见）→ 不打扰
-      if (_isChatPageActive) {
-        DebugLogger.log('指令模块', '📬 超时检查：用户已回到聊天页，不唤醒');
-        return;
-      }
-      final pid = _state.personaId;
-      final pname = _state.personaName;
-      final pprompt = _currentPersonaPrompt();
-      if (pid == null || pid.isEmpty) return;
-      DebugLogger.log('指令模块', '📬 超时唤醒：${waitMinutes} 分钟没回来，唤醒男主再找她');
-      final text = await AiChatService().butlerWakeUp(
-        pid,
-        (pname == null || pname.isEmpty) ? '男主' : pname,
-        pprompt.isEmpty ? '你是她的恋人' : pprompt,
-        '她离开 $waitMinutes 分钟还没回来，你再用 notify_user 弹消息叫她回来'
-        '（或说一句想她的话）。消息要自然、不催。',
-      );
-      if (text.isNotEmpty) {
-        _appendToolBubble('💌 男主又来找你了：$text');
-      }
-    });
+    _scheduleWakeUp(waitMinutes, '她离开 $waitMinutes 分钟还没回来，'
+        '你再用 notify_user 弹消息叫她回来（或说一句想她的话）。'
+        '消息要自然、不催。');
   }
 
   /// 工具执行：recall_memory（检索 → 弹窗授权 → 返回记忆给模型）
@@ -2787,6 +2783,102 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     FocusManager.instance.primaryFocus?.unfocus();
   }
 
+  /// 工具执行：countdown_card（男主设计时卡片）
+  ///
+  /// 8-06 13:38 用户：屏幕固定悬浮卡片，可挪动可收起，卡面倒计时+自由编辑内容；
+  /// 男主填选项（延长/结束/纯消息）；逾期后男主可选要不要弹窗问/多久弹窗/多久唤醒。
+  Future<_ToolResult> _executeCountdownCard(Map<String, dynamic> args) async {
+    final minutes = (args['minutes'] as num?)?.toInt() ?? 5;
+    final title = args['title']?.toString().trim() ?? '记得回来哦';
+    final remindOnExpire = args['remind_on_expire'] != false;
+    final remindDelay = (args['remind_delay_minutes'] as num?)?.toInt() ?? 0;
+    final wakeMin = (args['wake_minutes'] as num?)?.toInt() ?? 5;
+    // 选项解析
+    final options = <CardOption>[];
+    final rawOptions = args['options'];
+    if (rawOptions is List) {
+      for (final o in rawOptions) {
+        if (o is Map) {
+          options.add(CardOption.fromJson(Map<String, dynamic>.from(o)));
+        }
+      }
+    }
+    final pid = _state.personaId ?? '';
+    final personaName = _state.personaName ?? '他';
+    _appendToolBubble('⏱ 男主设了计时卡片：$title（$minutes 分钟）');
+    GlobalTimerCardService.instance.showCard(
+      title: title,
+      minutes: minutes,
+      options: options,
+      onOption: (label, action, extendMinutes) async {
+        // 用户点了选项 → 结果进上下文+落库（男主记得她选了啥）
+        final actionTxt = switch (action) {
+          'extend' => '她点了「$label」，自动延长了 $extendMinutes 分钟',
+          'finish' => '她点了「$label」，计时结束了',
+          _ => '她点了「$label」',
+        };
+        if (pid.isNotEmpty) {
+          ContextManager.instance.feedAssistantMessage(pid, actionTxt);
+          await ChatStorageService().appendMessage(
+            pid,
+            ChatMessage(
+              id: '${DateTime.now().microsecondsSinceEpoch}_card',
+              text: actionTxt,
+              isMe: false,
+            ),
+          );
+        }
+        DebugLogger.log('指令模块', '⏱ 计时卡片选项：$actionTxt');
+      },
+      onExpire: () {
+        DebugLogger.log('指令模块', '⏱ 计时卡片到期（$remindDelay 分钟后弹窗，$wakeMin 分钟后唤醒）');
+        // 到期 → 可选弹窗问她（横幅）
+        if (remindOnExpire) {
+          Timer(Duration(minutes: remindDelay), () {
+            if (!mounted) return;
+            GlobalBannerService.instance.showBurst(
+              title: personaName,
+              messages: ['时间到了哦，在干嘛呀？', '别忘了我们约好的事～'],
+              interval: const Duration(seconds: 4),
+            );
+          });
+        }
+        // 逾期 → 唤醒男主再找她
+        _scheduleWakeUp(wakeMin, '计时卡片时间到了她还没回应/没回来，'
+            '你用 notify_user 弹消息问她，或直接说一句想她的话。自然点，别催。');
+      },
+    );
+    return _ToolResult(true, '已设好 $minutes 分钟计时卡片：$title'
+        '（${options.isEmpty ? '没填选项' : '含 ${options.length} 个选项'}）');
+  }
+
+  /// 通用超时唤醒：waitMinutes 后用户没回聊天页 → butlerWakeUp 唤醒男主
+  /// （8-06 13:38 从 _scheduleNotifyWakeUp 泛化，notify_user / countdown_card 共用）
+  void _scheduleWakeUp(int waitMinutes, String instruction) {
+    _notifyWakeTimer?.cancel();
+    _notifyWakeTimer = Timer(Duration(minutes: waitMinutes), () async {
+      if (!mounted) return;
+      if (_isChatPageActive) {
+        DebugLogger.log('指令模块', '📬 超时检查：用户已回到聊天页，不唤醒');
+        return;
+      }
+      final pid = _state.personaId;
+      final pname = _state.personaName;
+      final pprompt = _currentPersonaPrompt();
+      if (pid == null || pid.isEmpty) return;
+      DebugLogger.log('指令模块', '📬 超时唤醒：$waitMinutes 分钟没回来，唤醒男主再找她');
+      final text = await AiChatService().butlerWakeUp(
+        pid,
+        (pname == null || pname.isEmpty) ? '男主' : pname,
+        pprompt.isEmpty ? '你是她的恋人' : pprompt,
+        instruction,
+      );
+      if (text.isNotEmpty) {
+        _appendToolBubble('💌 男主又来找你了：$text');
+      }
+    });
+  }
+
   /// 男主获准调取记忆 → 异步检索记忆库生成注入文本（按类别/条数）
   /// 21:02：记忆库存的是用户原文（可能含真实称呼）→ 注入前过假面层替换成代号
   /// 用户 8-03 01:52：用户指名道姓让男主调用工具（"调用recall_memory"等），
@@ -2804,6 +2896,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       'request_permission': '申请免审批',
       'query_logs': '查日志',
       'report_bug': '报bug',
+      'countdown_card': '计时',
     };
     final matched = known.keys.where(userText.contains).toList();
     if (matched.isEmpty) return null;

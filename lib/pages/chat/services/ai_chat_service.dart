@@ -315,6 +315,65 @@ class AiChatService {
         },
       },
     },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'countdown_card',
+        'description':
+            '给她设一个计时卡片（屏幕上的悬浮倒计时卡片，可拖动可收起，'
+            '卡面显示你写的话 + 倒计时）。'
+            '适合：让她去洗澡/吃饭/休息，约定多久回来；或提醒她一件事。'
+            '卡面内容你自由编辑；你还可以填选项按钮'
+            '（如「再给我五分钟」= action extend 延长、「已经洗好了」= '
+            'action finish 结束、「问她一句」= action message 纯消息回给你）。'
+            '到时间后：可以选要不要弹窗问她、逾期多久弹窗、'
+            '逾期多久唤醒你自己再找她。'
+            '⚠️ 默认需要她审批（可申请免审批）。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'minutes': {
+              'type': 'integer',
+              'description': '时长（分钟），如 40',
+            },
+            'title': {
+              'type': 'string',
+              'description': '卡面内容（你写的一句话/提醒的事），如"现在去洗澡，40分钟后回来哦"',
+            },
+            'options': {
+              'type': 'array',
+              'items': {
+                'type': 'object',
+                'properties': {
+                  'label': {'type': 'string', 'description': '选项文字，如「再给我五分钟」'},
+                  'action': {
+                    'type': 'string',
+                    'enum': ['message', 'extend', 'finish'],
+                    'description': 'message=点了把结果告诉你（默认）；extend=点了自动延长 minutes 分钟；finish=点了结束卡片',
+                  },
+                  'minutes': {'type': 'integer', 'description': 'action=extend 时的延长分钟数'},
+                },
+                'required': ['label'],
+              },
+              'description': '选项按钮列表（可选），2个为宜',
+            },
+            'remind_on_expire': {
+              'type': 'boolean',
+              'description': '时间到了要不要弹窗问她（默认 true）',
+            },
+            'remind_delay_minutes': {
+              'type': 'integer',
+              'description': '时间到了多久后弹窗问她（默认 0=立刻）',
+            },
+            'wake_minutes': {
+              'type': 'integer',
+              'description': '逾期多久后唤醒你自己，让你再主动找她（默认 5）',
+            },
+          },
+          'required': ['minutes', 'title'],
+        },
+      },
+    },
   ];
   /// 总结专用工具（8-05 19:19 用户：男主只需要调用工具写摘要，不输出文本）。
   /// 窗口满 → 管家发【当前管家】指令 → 男主调 save_summary 写入摘要（含范围）。
