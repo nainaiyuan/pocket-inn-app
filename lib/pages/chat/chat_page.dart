@@ -7,6 +7,7 @@ import '../../services/global_banner_service.dart';
 import '../../services/tool_approval_store.dart';
 import '../../services/global_timer_card_service.dart';
 import '../../services/card_task_store.dart';
+import '../../services/setting_version_store.dart';
 import 'widgets/task_list_page.dart';
 import '../../data/bug_knowledge_base.dart';
 import 'companion_page.dart';
@@ -679,6 +680,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             } else {
               toolResult = await _executeManageTask(args);
             }
+          } else if (name == 'update_setting') {
+            // 8-06 17:46-18:24 用户：男主主动优化设定 → 弹窗审批（可手动修改）
+            // 弹窗本身就是审批动作，不再套确认框
+            toolResult = await _executeUpdateSetting(args);
+          } else if (name == 'query_setting_history') {
+            // 8-06 18:08 用户：男主查设定变更历史（只读，不需要审批）
+            toolResult = await _executeQuerySettingHistory(args);
           } else {
             toolResult = _ToolResult(false, '未知工具：$name');
           }
@@ -3007,6 +3015,170 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     }
   }
 
+  /// 工具执行：update_setting（男主主动优化设定，弹窗审批+可手动修改）
+  ///
+  /// 8-06 17:46-18:24 用户：弹窗显示新设定+理由 → 用户可编辑 → 确认 →
+  /// 覆盖当前版（旧版进历史）+ 变更日志 + 摘要注入 prompt。
+  Future<_ToolResult> _executeUpdateSetting(Map<String, dynamic> args) async {
+    final pid = _state.personaId ?? '';
+    if (pid.isEmpty) return const _ToolResult(false, '更新设定失败（缺少角色）');
+    final type = args['setting_type']?.toString() == 'user' ? 'user' : 'male';
+    final content = args['content']?.toString().trim() ?? '';
+    if (content.isEmpty) return const _ToolResult(false, '更新设定失败：没写新设定内容');
+    final reason = args['reason']?.toString().trim() ?? '';
+    final typeName = type == 'user' ? '用户设定' : '男主设定';
+
+    // 弹窗审批：显示新设定 + 理由 + 可编辑 + 拒绝时可写反馈
+    final result = await _showSettingApprovalDialog(
+      typeName: typeName,
+      content: content,
+      reason: reason,
+    );
+    if (result == null) {
+      return _ToolResult(false, '她没回应设定更新（先别催，她可能在忙）');
+    }
+    if (!result.approved) {
+      final fb = result.feedback.trim();
+      return _ToolResult(
+        false,
+        '她拒绝了「$typeName」更新。'
+        '${fb.isNotEmpty ? '她的反馈：$fb——按她的意见改完再提交。' : '她没说原因，你可以问问她哪里不满意。'}',
+      );
+    }
+
+    // 批准 → 存为新版本 + 变更日志
+    final finalContent = result.content.trim();
+    await SettingVersionStore.saveNewVersion(pid, type, finalContent,
+        note: reason.isEmpty ? null : reason);
+    final summary = '更新了$typeName'
+        '${reason.isEmpty ? '' : '：$reason'}';
+    await SettingVersionStore.addChangelog(pid, type, summary);
+    DebugLogger.log('指令模块', '📚 $typeName 已更新（新版本生效，旧版进历史）');
+    _appendToolBubble('📚 男主更新了$typeName（旧版已存进右页历史，可一键恢复）');
+    return _ToolResult(true, '$typeName 已更新生效。新版本已存好，旧版在右页历史里'
+        '（她可一键恢复）。你以后查 query_setting_history 能看到这次变更。');
+  }
+
+  /// 设定更新审批弹窗（8-06 18:12 用户：弹窗内迭代，不进聊天框）
+  Future<({bool approved, String content, String feedback})?>
+      _showSettingApprovalDialog({
+    required String typeName,
+    required String content,
+    required String reason,
+  }) async {
+    if (!mounted) return null;
+    FocusManager.instance.primaryFocus?.unfocus();
+    final ctrl = TextEditingController(text: content);
+    final fbCtrl = TextEditingController();
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('📚 男主想更新$typeName'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (reason.isNotEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF7EAF1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '💬 他的理由：$reason',
+                    style: const TextStyle(fontSize: 13, height: 1.4),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              const Text(
+                '新设定（你可以直接改）：',
+                style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
+              ),
+              const SizedBox(height: 6),
+              TextField(
+                controller: ctrl,
+                maxLines: 8,
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: fbCtrl,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  hintText: '不满意的话，写给他让他再改…（可不填）',
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('拒绝', style: TextStyle(color: Color(0xFF8A7A80))),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('同意并应用'),
+          ),
+        ],
+      ),
+    );
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (approved == null) return null;
+    return (
+      approved: approved,
+      content: ctrl.text,
+      feedback: fbCtrl.text,
+    );
+  }
+
+  /// 工具执行：query_setting_history（男主查设定变更历史）
+  Future<_ToolResult> _executeQuerySettingHistory(
+      Map<String, dynamic> args) async {
+    final pid = _state.personaId ?? '';
+    if (pid.isEmpty) return const _ToolResult(false, '查历史失败（缺少角色）');
+    final limit = (args['limit'] as num?)?.toInt() ?? 10;
+    final book = await SettingVersionStore.load(pid);
+    final log = book.changelog.take(limit).toList();
+    if (log.isEmpty) {
+      return const _ToolResult(true, '还没有设定变更记录——你还没主动优化过设定。');
+    }
+    final buf = StringBuffer('设定变更历史（共 ${book.changelog.length} 条）：\n');
+    for (final e in log) {
+      final t = e.time;
+      final ts = '${t.month.toString().padLeft(2, '0')}-'
+          '${t.day.toString().padLeft(2, '0')} '
+          '${t.hour.toString().padLeft(2, '0')}:'
+          '${t.minute.toString().padLeft(2, '0')}';
+      buf.writeln('- [$ts] ${e.type == 'user' ? '用户设定' : '男主设定'}：${e.summary}');
+    }
+    // 附带当前版本信息
+    buf.writeln();
+    buf.writeln('当前男主设定：${book.currentMale.isEmpty ? '（空）' : book.currentMale}');
+    buf.writeln('当前用户设定：${book.currentUser.isEmpty ? '（空）' : book.currentUser}');
+    return _ToolResult(true, buf.toString());
+  }
+
   /// 通用超时唤醒：waitMinutes 后用户没回聊天页 → butlerWakeUp 唤醒男主
   /// （8-06 13:38 从 _scheduleNotifyWakeUp 泛化，notify_user / countdown_card 共用）
   void _scheduleWakeUp(int waitMinutes, String instruction) {
@@ -3053,6 +3225,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       'report_bug': '报bug',
       'countdown_card': '计时',
       'manage_task': '管理任务',
+      'update_setting': '更新设定',
+      'query_setting_history': '查设定历史',
     };
     final matched = known.keys.where(userText.contains).toList();
     if (matched.isEmpty) return null;
@@ -3196,7 +3370,30 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 当前 persona 的初始设定（用户写的人设），随每轮请求进 system
   String _currentPersonaPrompt() {
     try {
-      return _state.persona?.prompt ?? '';
+      var prompt = _state.persona?.prompt ?? '';
+      // 8-06 18:24 用户：设定版本管理 —— prompt 附加男主设定/用户设定/变更摘要
+      // （男主知道自己的演变史，不会"性情大变"却不知所以然）
+      final pid = _state.personaId;
+      if (pid != null && pid.isNotEmpty) {
+        final book = SettingVersionStore.cached(pid);
+        if (book != null) {
+          final male = book.currentMale.trim();
+          final user = book.currentUser.trim();
+          if (male.isNotEmpty) {
+            prompt += '\n\n【男主设定·当前版】\n$male';
+          }
+          if (user.isNotEmpty) {
+            prompt += '\n\n【用户设定·当前版】\n$user';
+          }
+          final summary = SettingVersionStore.summaryTextSync(pid);
+          if (summary.isNotEmpty) {
+            prompt += '\n\n【设定变更摘要·你的演变史】\n$summary'
+                '（这些都是你经历过/主动做出的设定调整，顺着时间线你就能明白'
+                '自己为什么是现在这个样子。需要细节可以调 query_setting_history。）';
+          }
+        }
+      }
+      return prompt;
     } catch (_) {
       return '';
     }

@@ -427,6 +427,59 @@ class AiChatService {
         },
       },
     },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'update_setting',
+        'description':
+            '主动更新男主设定或用户设定（你觉得当前设定写得简陋/不适合她了，'
+            '想优化时用）。'
+            '会弹窗给她看你的新设定 + 理由，她可以手动修改后再确认'
+            '（必须她审批）。确认后新设定生效（覆盖当前版，旧版自动存进'
+            '右页版本历史，可一键恢复），并记一条变更日志——'
+            '以后每个"你"都能查到自己的设定演变史。'
+            '她拒绝/有意见时，按她的反馈改完再提交。'
+            '⚠️ 只改设定（prompt 里的角色设定/用户画像），不动聊天上下文和记忆。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'setting_type': {
+              'type': 'string',
+              'enum': ['male', 'user'],
+              'description': '改哪个：male=男主设定 / user=用户设定（她的画像）',
+            },
+            'content': {
+              'type': 'string',
+              'description': '新设定全文（你组织的分类，自由写：身份/性格/关系/习惯…）',
+            },
+            'reason': {
+              'type': 'string',
+              'description': '为什么改（弹窗里给她看）：如"初始设定太简陋，补充了她的生活习惯"',
+            },
+          },
+          'required': ['setting_type', 'content'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'query_setting_history',
+        'description':
+            '查设定变更历史（哪个版本改了什么、什么时候改的）。'
+            '你优化过设定后想回忆演变过程、或她问起"你怎么变成这样的"时用。'
+            '⚠️ 只读排查，不需要审批。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'limit': {
+              'type': 'integer',
+              'description': '返回条数上限，默认 10',
+            },
+          },
+        },
+      },
+    },
   ];
   /// 总结专用工具（8-05 19:19 用户：男主只需要调用工具写摘要，不输出文本）。
   /// 窗口满 → 管家发【当前管家】指令 → 男主调 save_summary 写入摘要（含范围）。

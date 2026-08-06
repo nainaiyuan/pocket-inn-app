@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
+import '../../../services/setting_version_store.dart';
 import '../services/chat_storage_service.dart';
 import '../state/current_character_state.dart';
 import 'task_list_page.dart';
@@ -283,21 +284,12 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                         _FieldBox(label: '首次问候', ctrl: _greetingCtrl, onChanged: _saveAll, maxLines: 2),
                         const SizedBox(height: 8),
 
-                        // 5个设定框
-                        // 1. 世界观/背景
-                        _FieldBox(label: '世界观 · 背景', hint: '世界是什么样子的？', ctrl: _fieldCtrls[0], onChanged: _saveAll),
-                        const SizedBox(height: 8),
-                        // 2. 与用户的关系
-                        _FieldBox(label: '与用户的关系', hint: 'ta叫你什么？你们是什么关系？', ctrl: _fieldCtrls[1], onChanged: _saveAll),
-                        const SizedBox(height: 8),
-                        // 3. 喜好·性格·习惯
-                        _FieldBox(label: '喜好 · 性格 · 习惯', hint: '喜欢什么？性格怎么样？', ctrl: _fieldCtrls[2], onChanged: _saveAll),
-                        const SizedBox(height: 8),
-                        // 4. 亲朋好友
-                        _FieldBox(label: '亲朋好友', hint: '身边有哪些重要的人？', ctrl: _fieldCtrls[3], onChanged: _saveAll),
-                        const SizedBox(height: 8),
-                        // 5. 经历
-                        _FieldBox(label: '经历', hint: '过去发生过什么重要的故事？', ctrl: _fieldCtrls[4], onChanged: _saveAll),
+                        // 8-06 18:04 用户：合并分类 → 男主框/用户框 + 版本堆叠管理
+                        // （男主自己分类；历史版本可修改/删除/一键选用；按键切换不占手势）
+                        _SettingVersionPanel(
+                          personaId: widget.currentPersona?.id ?? '',
+                          legacyPrompt: widget.currentPersona?.prompt ?? '',
+                        ),
                       ],
                     ),
                   ),
@@ -1002,6 +994,388 @@ class _QuoteZoneState extends State<_QuoteZone> {
 
 // ─── 小组件 ───
 
+/// 📚 设定版本管理面板（8-06 18:04/18:08/18:24 用户）
+///
+/// 男主设定 + 用户设定两个框；历史版本堆叠（chips + ◀▶ 按键切换，不占手势）；
+/// 可修改/删除/一键选用/一键回当前；变更日志只追加不删；
+/// 男主可查（query_setting_history）；旧版 prompt 自动迁移进来。
+class _SettingVersionPanel extends StatefulWidget {
+  final String personaId;
+  final String legacyPrompt; // 旧版 5 字段 prompt（迁移用）
+  const _SettingVersionPanel({
+    required this.personaId,
+    required this.legacyPrompt,
+  });
+
+  @override
+  State<_SettingVersionPanel> createState() => _SettingVersionPanelState();
+}
+
+class _SettingVersionPanelState extends State<_SettingVersionPanel> {
+  SettingBook? _book;
+  String _tab = SettingVersionStore.male; // male / user
+  String? _viewId; // null = 当前版
+  late final TextEditingController _ctrl;
+
+  String get _typeName => _tab == SettingVersionStore.user ? '用户设定' : '男主设定';
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController();
+    _load();
+  }
+
+  Future<void> _load() async {
+    var book = await SettingVersionStore.load(widget.personaId);
+    // 旧版 5 字段 prompt 迁移：男主设定为空且有旧数据 → 拼进男主设定
+    final legacy = widget.legacyPrompt.trim();
+    if (book.currentMale.trim().isEmpty && legacy.isNotEmpty) {
+      String migrated;
+      try {
+        final m = jsonDecode(legacy) as Map<String, dynamic>;
+        final parts = <String>[];
+        const labels = {
+          'world': '世界观·背景',
+          'relation': '与用户的关系',
+          'traits': '喜好·性格·习惯',
+          'connections': '亲朋好友',
+          'history': '经历',
+        };
+        for (final e in labels.entries) {
+          final v = m[e.key]?.toString().trim() ?? '';
+          if (v.isNotEmpty) parts.add('${e.value}：$v');
+        }
+        migrated = parts.join('\n');
+      } catch (_) {
+        migrated = legacy;
+      }
+      if (migrated.trim().isNotEmpty) {
+        book.setCurrent(SettingVersionStore.male, migrated.trim());
+        await SettingVersionStore.addChangelog(widget.personaId,
+            SettingVersionStore.male, '从旧版设定迁移合并（初始导入）');
+        book = await SettingVersionStore.load(widget.personaId);
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _book = book;
+      _viewId = null;
+      _ctrl.text = book.currentOf(_tab);
+    });
+  }
+
+  void _refresh() async {
+    final book = await SettingVersionStore.load(widget.personaId);
+    if (!mounted) return;
+    setState(() {
+      _book = book;
+      // 若查看的版本被删了 → 回当前
+      final stillExists = _viewId == null ||
+          book.versions.any((v) => v.id == _viewId);
+      if (!stillExists) _viewId = null;
+      _ctrl.text = _viewId == null
+          ? book.currentOf(_tab)
+          : (book.versions.firstWhere((v) => v.id == _viewId).content);
+    });
+  }
+
+  void _switchTab(String tab) {
+    if (_tab == tab) return;
+    setState(() {
+      _tab = tab;
+      _viewId = null;
+      _ctrl.text = _book?.currentOf(tab) ?? '';
+    });
+  }
+
+  Future<void> _saveCurrent() async {
+    await SettingVersionStore.saveCurrent(
+        widget.personaId, _tab, _ctrl.text);
+    _refresh();
+  }
+
+  Future<void> _saveNewVersion() async {
+    if (_ctrl.text.trim().isEmpty) return;
+    await SettingVersionStore.saveNewVersion(
+        widget.personaId, _tab, _ctrl.text,
+        note: '手动保存为新版本');
+    await SettingVersionStore.addChangelog(
+        widget.personaId, _tab, '手动更新了$_typeName');
+    _refresh();
+  }
+
+  Future<void> _applyVersion(String id) async {
+    await SettingVersionStore.applyVersion(widget.personaId, id);
+    await SettingVersionStore.addChangelog(
+        widget.personaId, _tab, '恢复使用了旧版$_typeName');
+    _refresh();
+  }
+
+  Future<void> _deleteVersion(String id) async {
+    await SettingVersionStore.deleteVersion(widget.personaId, id);
+    _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final book = _book;
+    if (book == null) {
+      return const Padding(
+        padding: EdgeInsets.all(8),
+        child: Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    final versions =
+        book.versions.where((v) => v.type == _tab).toList();
+    final isViewingCurrent = _viewId == null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Tab：男主 / 用户
+        Row(
+          children: [
+            _TabBtn(
+              label: '男主设定',
+              active: _tab == SettingVersionStore.male,
+              onTap: () => _switchTab(SettingVersionStore.male),
+            ),
+            const SizedBox(width: 8),
+            _TabBtn(
+              label: '用户设定',
+              active: _tab == SettingVersionStore.user,
+              onTap: () => _switchTab(SettingVersionStore.user),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        // 版本条：◀ 版本 chips ▶（按键切换，不占左右滑手势）
+        Row(
+          children: [
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.chevron_left, size: 18),
+              color: const Color(0xFF8A7A80),
+              onPressed: () {
+                final list = <String?>[null, ...versions.map((v) => v.id)];
+                final idx = list.indexOf(_viewId);
+                if (idx > 0) {
+                  final target = list[idx - 1];
+                  setState(() {
+                    _viewId = target;
+                    _ctrl.text = target == null
+                        ? book.currentOf(_tab)
+                        : versions.firstWhere((v) => v.id == target).content;
+                  });
+                }
+              },
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                reverse: true,
+                child: Row(
+                  children: [
+                    // 当前版 chip 在最右（中间位置，新版本叠上去）
+                    _VersionChip(
+                      label: '当前',
+                      active: isViewingCurrent,
+                      onTap: () => setState(() {
+                        _viewId = null;
+                        _ctrl.text = book.currentOf(_tab);
+                      }),
+                    ),
+                    for (final v in versions.reversed) ...[
+                      const SizedBox(width: 6),
+                      _VersionChip(
+                        label: _versionLabel(v),
+                        active: _viewId == v.id,
+                        onTap: () => setState(() {
+                          _viewId = v.id;
+                          _ctrl.text = v.content;
+                        }),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.chevron_right, size: 18),
+              color: const Color(0xFF8A7A80),
+              onPressed: () {
+                final list = <String?>[null, ...versions.map((v) => v.id)];
+                final idx = list.indexOf(_viewId);
+                if (idx >= 0 && idx < list.length - 1) {
+                  final target = list[idx + 1];
+                  setState(() {
+                    _viewId = target;
+                    _ctrl.text = target == null
+                        ? book.currentOf(_tab)
+                        : versions.firstWhere((v) => v.id == target).content;
+                  });
+                }
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        // 编辑框（当前版或历史版，都可编辑）
+        TextField(
+          controller: _ctrl,
+          maxLines: 8,
+          minLines: 4,
+          decoration: InputDecoration(
+            hintText: isViewingCurrent
+                ? '$_typeName（男主自己分类，自由写：身份/性格/关系/习惯…）'
+                : '正在查看历史版本，可修改后「选用此版本」',
+            filled: true,
+            fillColor: Colors.white.withValues(alpha: 0.6),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        // 操作行
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _PanelBtn(
+              label: '↩ 回当前',
+              color: const Color(0xFFC896B4),
+              onTap: () => setState(() {
+                _viewId = null;
+                _ctrl.text = book.currentOf(_tab);
+              }),
+            ),
+            if (isViewingCurrent) ...[
+              _PanelBtn(
+                label: '💾 覆盖当前',
+                color: const Color(0xFF8A6A96),
+                onTap: _saveCurrent,
+              ),
+              _PanelBtn(
+                label: '📦 存为新版本',
+                color: const Color(0xFF7FA88A),
+                onTap: _saveNewVersion,
+              ),
+            ] else ...[
+              _PanelBtn(
+                label: '✨ 选用此版本',
+                color: const Color(0xFF7FA88A),
+                onTap: () => _applyVersion(_viewId!),
+              ),
+              _PanelBtn(
+                label: '🗑 删除此版本',
+                color: const Color(0xFFD98A9E),
+                onTap: () => _deleteVersion(_viewId!),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+
+  String _versionLabel(SettingVersion v) {
+    final t = v.createdAt;
+    return '${t.month.toString().padLeft(2, '0')}-'
+        '${t.day.toString().padLeft(2, '0')} '
+        '${t.hour.toString().padLeft(2, '0')}:'
+        '${t.minute.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+}
+
+class _VersionChip extends StatelessWidget {
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+  const _VersionChip({
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: active
+              ? const Color(0xFFC896B4)
+              : Colors.white.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: active
+                ? const Color(0xFFC896B4)
+                : const Color(0xFFC896B4).withValues(alpha: 0.25),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: active ? Colors.white : const Color(0xFF6A4A52),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PanelBtn extends StatelessWidget {
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  const _PanelBtn({
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: color,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SectionCard extends StatelessWidget {
   final String title;
   final Widget child;
@@ -1029,14 +1403,12 @@ class _SectionCard extends StatelessWidget {
 
 class _FieldBox extends StatelessWidget {
   final String label;
-  final String hint;
   final TextEditingController ctrl;
   final VoidCallback onChanged;
   final int maxLines;
 
   const _FieldBox({
     required this.label,
-    this.hint = '',
     required this.ctrl,
     required this.onChanged,
     this.maxLines = 3,
@@ -1058,8 +1430,7 @@ class _FieldBox extends StatelessWidget {
           TextField(
             controller: ctrl,
             maxLines: maxLines,
-            decoration: InputDecoration(
-              hintText: hint,
+            decoration: const InputDecoration(
               border: InputBorder.none,
               isDense: true,
               contentPadding: EdgeInsets.zero,
