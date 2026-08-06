@@ -11,6 +11,7 @@ import '../../services/setting_version_store.dart';
 import '../../services/record_tree_store.dart';
 import '../../services/tool_result_store.dart';
 import '../../services/working_pad_store.dart';
+import '../../services/timer_plan_store.dart';
 import 'widgets/task_list_page.dart';
 import '../../data/bug_knowledge_base.dart';
 import 'companion_page.dart';
@@ -303,6 +304,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     ToolResultStore.warm(personaId);
     // 8-06 21:12：便签（当前任务模块）预热
     WorkingPadStore.warm(personaId);
+    // 8-06 21:26：定时任务计划预热
+    TimerPlanStore.warm(personaId);
     // 8-05 14:36 用户修正：测试对话 ≠ 关功能，而是独立"测试空间"——
     // 模拟 AI 聊天时所有数据（会话/消息/记忆/情绪/上下文总结）落到
     // ${真实persona}__mock__test 这个测试 key，功能照常跑、数据不混；
@@ -1041,6 +1044,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     ToolResultStore.warm(personaId);
     // 8-06 21:12：便签（当前任务模块）预热
     WorkingPadStore.warm(personaId);
+    // 8-06 21:26：定时任务计划预热
+    TimerPlanStore.warm(personaId);
     await showAiProviderSheet(
       context: context,
       personaId: personaId,
@@ -2415,6 +2420,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       DebugLogger.log('指令模块', '📬 notify_user：${messages.length} 条已注入上下文+落库（男主记得自己弹过什么）');
     }
     DebugLogger.log('指令模块', '📬 notify_user：${messages.length} 条，间隔 ${intervalSec}s，${waitMin} 分钟后没回来就唤醒');
+    // 8-06 21:26 用户：定时计划记进【定时任务】区（独立于便签，持久化）
+    if (pid != null && pid.isNotEmpty) {
+      TimerPlanStore.add(pid,
+          '唤醒男主找她（${messages.length} 条消息，${waitMin} 分钟内没回来）');
+    }
     // 超时唤醒：wait_minutes 内用户没回聊天页 → 管家唤醒男主再找用户
     _scheduleNotifyWakeUp(waitMin);
     return _ToolResult(true, '已弹出 ${messages.length} 条消息（她点一下就能回到聊天页）');
@@ -3536,12 +3546,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       if (!mounted) return;
       if (_isChatPageActive) {
         DebugLogger.log('指令模块', '📬 超时检查：用户已回到聊天页，不唤醒');
+        // 8-06 21:26：计划完成（她回来了，不用唤）→ 定时任务区移除
+        TimerPlanStore.markDone(_state.personaId ?? '', '唤醒');
         return;
       }
       final pid = _state.personaId;
       final pname = _state.personaName;
       final pprompt = _currentPersonaPrompt();
       if (pid == null || pid.isEmpty) return;
+      // 8-06 21:26：唤醒已执行 → 定时任务区移除
+      TimerPlanStore.markDone(pid, '唤醒');
       DebugLogger.log('指令模块', '📬 超时唤醒：$waitMinutes 分钟没回来，唤醒男主再找她');
       final text = await AiChatService().butlerWakeUp(
         pid,
@@ -3766,6 +3780,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                 '自己判断留删——干完活的删、正文里已经有的删（上下文已有的优先），'
                 '不设限额，删的时候自己说行号范围。'
                 '写摘要时自己清理。下一句对话你还知道有什么没干。）';
+          }
+          // 8-06 21:26 用户：定时任务独立区（跟便签分开——计划等触发，便签是正在干的活）
+          final timerText = TimerPlanStore.waitingText(pid);
+          if (timerText != null) {
+            prompt += '\n\n【定时任务】（你设的计划，到点会触发；'
+                '触发完/她明确不要了就从这里移除）\n$timerText';
           }
           // 8-06 18:41-19:21 用户：分类记录体系 —— 记录职责 + 现有分类概览
           final recordDuty = '\n\n【你的记录职责】'

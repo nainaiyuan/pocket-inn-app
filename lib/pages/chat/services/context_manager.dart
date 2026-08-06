@@ -210,6 +210,60 @@ class ContextManager {
 
   // ---- 读取 / 组装 ----
 
+  /// 待回复/已回复视图（8-06 21:26-21:30 用户设计）：
+  /// 从原文算"男主最后一句回复之后她的话" = 待回复（自动，男主回完自动沉）。
+  /// 已回复 = 最近 repliedN 对（她的话 → 你的回复）。
+  /// 返回 (pending: ['待#1 [21:15] 内容', ...], replied: ['[21:10] 她：… → 你：…', ...])
+  ({List<String> pending, List<String> replied}) pendingRepliedView(
+      String personaId,
+      {int repliedN = 3}) {
+    final t = _topics[personaId];
+    if (t == null || t.raw.isEmpty) return (pending: const [], replied: const []);
+    final raw = t.raw;
+    // 找最后一个男主行
+    var lastMaleIdx = -1;
+    for (var i = raw.length - 1; i >= 0; i--) {
+      if (raw[i].startsWith('男主')) {
+        lastMaleIdx = i;
+        break;
+      }
+    }
+    // 待回复 = 最后男主行之后的所有用户行（工具行跳过）
+    final pending = <String>[];
+    var n = 0;
+    for (var i = lastMaleIdx + 1; i < raw.length; i++) {
+      final line = raw[i];
+      if (!line.startsWith('用户')) continue;
+      n++;
+      pending.add('待#$n ${_stripPrefix(line, keepTs: true)}');
+    }
+    // 已回复 = 最后男主行往前配对的最近 repliedN 对
+    final replied = <String>[];
+    if (lastMaleIdx >= 0) {
+      // 从最后男主行往前找"她的话 → 你的回复"对（跳过工具行）
+      final pairs = <(String, String)>[];
+      String? pendingUser;
+      for (var i = lastMaleIdx; i >= 0; i--) {
+        final line = raw[i];
+        if (line.startsWith('用户')) {
+          if (pendingUser == null) {
+            pendingUser = _stripPrefix(line, keepTs: true);
+          }
+        } else if (line.startsWith('男主')) {
+          if (pendingUser != null) {
+            pairs.add((pendingUser, _stripPrefix(line, keepTs: true)));
+            pendingUser = null;
+            if (pairs.length >= repliedN) break;
+          }
+        }
+      }
+      for (final pr in pairs.reversed) {
+        replied.add('${pr.$1} → 你：${pr.$2}');
+      }
+    }
+    return (pending: pending, replied: replied);
+  }
+
   /// 组装历史消息（摘要区 + 当前话题原文），插在 system 之后。
   /// 当前话题原文超过预算时截断最旧部分（兜底；正常由总结触发清空）。
   List<AIChatMessage> buildHistoryMessages(String personaId, {String? modelHint}) {

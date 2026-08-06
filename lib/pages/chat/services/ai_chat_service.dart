@@ -945,8 +945,29 @@ class AiChatService {
     // 不再 join 成一条【上下文参考】：男主摘要/工具使用历史/管家历史/聊天历史
     // 各自是独立 system 消息，模型按 role+标签原生定位，不用在文本里猜。
     // 总引导说明放最前，明确"最后一条用户消息才要回复"。
+    // 8-06 21:30 用户：待回复/已回复视图——男主知道"什么话没回"，
+    // 回完自动沉到已回复（算法按"最后男主回复之后"自动算，男主不用手动搬）。
+    // 男主自己判断回哪些/回不回；可一次回多条并标注对应（回待#1、待#2）。
+    final prView = ContextManager.instance.pendingRepliedView(ctxPid);
+    final statusBlocks = <AIChatMessage>[
+      if (prView.pending.isNotEmpty)
+        AIChatMessage(
+          role: 'system',
+          content: '【待回复】（她说的、你还没回的。自己判断：'
+              '问句/要你干的就回；纯闲聊不需要的可以明确放下不回。'
+              '可以一次回多条，回复里标注对应，如"（回待#1、待#2）"。'
+              '你回完它们自动沉到【已回复】）\n${prView.pending.join('\n')}',
+        ),
+      if (prView.replied.isNotEmpty)
+        AIChatMessage(
+          role: 'system',
+          content: '【已回复·最近】（你回过她的，不要重复回）\n'
+              '${prView.replied.join('\n')}',
+        ),
+    ];
     final messages = <AIChatMessage>[
       if (!isLight) AIChatMessage(role: 'system', content: systemPrompt),
+      if (!isLight) ...statusBlocks,
       if (historyMsgs.isNotEmpty) ...[
         AIChatMessage(
           role: 'system',
