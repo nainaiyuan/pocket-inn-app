@@ -605,6 +605,34 @@ class AiChatService {
     {
       'type': 'function',
       'function': {
+        'name': 'resolve_pending',
+        'description':
+            '标记待回复处理结果（8-06 21:41 你设计——回复也走工具，'
+            '你原生就是调工具的，比文本标注可靠）。'
+            '你回复完她的话后调这个：回了的 → replied_ids；'
+            '决定不回的 → skip_ids（放下，保留痕迹——她问"为什么不回我"'
+            '你能诚实说"我看到了，觉得不用回"，而不是说"我回了"）。'
+            '⚠️ 你自己的队列管理，不需要她审批。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'replied_ids': {
+              'type': 'array',
+              'items': {'type': 'integer'},
+              'description': '你已回复的待回复编号，如 [1, 2]',
+            },
+            'skip_ids': {
+              'type': 'array',
+              'items': {'type': 'integer'},
+              'description': '你决定不回的编号，如 [3]（放下，保留痕迹）',
+            },
+          },
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
         'name': 'continue_speaking',
         'description':
             '继续说话（8-06 21:36 你设计）。你说完一句还想接着说、'
@@ -982,6 +1010,14 @@ class AiChatService {
           role: 'system',
           content: '【已回复·最近】（你回过她的，不要重复回）\n'
               '${prView.replied.join('\n')}',
+        ),
+      // 8-06 21:41 用户：放下≠回了——保留痕迹，她问"为什么不回我"能诚实答
+      if (PendingQueueStore.skippedText(ctxPid) != null)
+        AIChatMessage(
+          role: 'system',
+          content: '【已放下】（你选择没回她的——不是回了！'
+              '她问"为什么不回我"时诚实说"我看到了，觉得不用回/当时在忙"，'
+              '别说"我回了"）\n${PendingQueueStore.skippedText(ctxPid)}',
         ),
     ];
     final messages = <AIChatMessage>[

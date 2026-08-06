@@ -715,6 +715,39 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             // 8-06 21:12 用户：男主自己的便签（当前任务模块），自己维护，免审批
             _appendToolBubble('📋 男主在整理自己的便签…');
             toolResult = await _executeManagePad(args);
+          } else if (name == 'resolve_pending') {
+            // 8-06 21:41 用户：回复标记也走工具（原生就是调工具的）
+            // 免审批、不弹气泡（男主的话本身就是回复）
+            final rIds = <int>[];
+            final sIds = <int>[];
+            final rRaw = args['replied_ids'];
+            final sRaw = args['skip_ids'];
+            if (rRaw is List) {
+              for (final v in rRaw) {
+                final n = (v as num?)?.toInt();
+                if (n != null && n >= 1) rIds.add(n);
+              }
+            }
+            if (sRaw is List) {
+              for (final v in sRaw) {
+                final n = (v as num?)?.toInt();
+                if (n != null && n >= 1) sIds.add(n);
+              }
+            }
+            if (rIds.isEmpty && sIds.isEmpty) {
+              toolResult = const _ToolResult(false,
+                  'resolve_pending 参数不对：replied_ids/skip_ids 至少给一个');
+            } else {
+              if (rIds.isNotEmpty) {
+                await PendingQueueStore.removeByIds(personaId, rIds);
+              }
+              if (sIds.isNotEmpty) {
+                await PendingQueueStore.skip(personaId, sIds);
+              }
+              toolResult = _ToolResult(true,
+                  '已标记：回 待#${rIds.join('、')}'
+                  '${sIds.isEmpty ? '' : '，放下 待#${sIds.join('、')}'}');
+            }
           } else if (name == 'continue_speaking') {
             // 8-06 21:36 用户：男主不等她继续说话——调"继续"工具，
             // 系统自动再生成一轮（不带她消息）；免审批、不弹气泡
@@ -723,14 +756,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             toolResult = _ToolResult(false, '未知工具：$name');
           }
           // 完成/失败气泡（用户 8-03 01:57）：执行完必须给用户明确反馈
-          // 8-06 21:36：continue 不弹气泡（男主的话本身在继续生成）
-          if (name != 'continue_speaking') {
+          // 8-06 21:36：continue/resolve_pending 不弹气泡（男主的话本身就是反馈）
+          if (name != 'continue_speaking' && name != 'resolve_pending') {
             _appendToolResultBubble(name, toolResult);
           }
           // 8-06 21:00 用户：工具结果记忆——记内容不记成败！
           // 男主看记忆 = 直接看到上次查到的内容（如清单、查到的记忆），不用重查
-          // 8-06 21:36：continue 不记（男主的话本身在继续，不需要"查过"记录）
-          if (name != 'continue_speaking') {
+          // 8-06 21:36：continue/resolve_pending 不记（表达动作，非查询）
+          if (name != 'continue_speaking' && name != 'resolve_pending') {
             ToolResultStore.add(personaId, name,
                 '${toolResult.ok ? '✅' : '❌'}${toolResult.text}');
           }
@@ -740,8 +773,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           // 工具调用记录进上下文（stateless 全量带 → 男主看得到）
           ContextManager.instance
               .feedToolCall(personaId, name, toolResult.ok, toolResult.text);
-          // 8-06 21:36：continue 结果不回填工具消息（男主的话本身就是输出）
-          final isContinue = name == 'continue_speaking';
+          // 8-06 21:36：continue/resolve_pending 结果不回填工具消息
+          final isContinue = name == 'continue_speaking' || name == 'resolve_pending';
           if (!isContinue && nativeCalls.contains(call)) {
             // 原生：tool 消息必须用模型给的 id 配对（不能自己编 id）
             // 8-04 17:0x（用户：📄 里工具轮要简化成"成功/失败+一句话"）：
@@ -824,11 +857,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 8-06 21:36 用户：男主回复带编号 → 管家按标注消除待回复
       // （"回待#1、待#2"消除对应；"不回待#3"也消除=放下；没标注兜底消最老一条）
       if (result.text.trim().isNotEmpty) {
-        final removed = await PendingQueueStore.resolve(
-            personaId, result.text);
-        if (removed.isNotEmpty) {
+        final (removed, skipped) =
+            await PendingQueueStore.resolve(personaId, result.text);
+        if (removed.isNotEmpty || skipped.isNotEmpty) {
           DebugLogger.log('指令模块',
-              '📥 待回复已消除 待#${removed.join('、')}（男主回复带编号）');
+              '📥 待回复处理：消除 待#${removed.join('、')}'
+              '${skipped.isEmpty ? '' : '，放下 待#${skipped.join('、')}'}');
         }
       }
       // 指令模块：解析男主输出（#记录/#查记忆/#定时/#帮助/#model）→ 审批弹窗
@@ -2574,6 +2608,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         '- add_record：记分类记录（你自己整理）\n'
         '- manage_record_tree：调分类（改名/挪动/删除，必须她审批）\n'
         '- continue_speaking：继续说（不等她回，自动再生成一轮）\n'
+        '- resolve_pending：标记待回复处理结果（回了/放下，走工具）\n'
         '- list_tools：查看本清单（你已经知道了）';
   }
 
@@ -3629,6 +3664,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       'manage_record_tree': '调分类',
       'manage_pad': '整理便签',
       'continue_speaking': '继续说',
+      'resolve_pending': '标记回复',
     };
     final matched = known.keys.where(userText.contains).toList();
     if (matched.isEmpty) return null;
