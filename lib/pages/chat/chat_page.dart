@@ -9,6 +9,7 @@ import '../../services/global_timer_card_service.dart';
 import '../../services/card_task_store.dart';
 import '../../services/setting_version_store.dart';
 import '../../services/record_tree_store.dart';
+import '../../services/tool_result_store.dart';
 import 'widgets/task_list_page.dart';
 import '../../data/bug_knowledge_base.dart';
 import 'companion_page.dart';
@@ -297,6 +298,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final lid = _state.leadId;
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
+    // 8-06 21:00：工具结果记忆预热（prompt 注入同步读，这里先刷新缓存）
+    ToolResultStore.warm(personaId);
     // 8-05 14:36 用户修正：测试对话 ≠ 关功能，而是独立"测试空间"——
     // 模拟 AI 聊天时所有数据（会话/消息/记忆/情绪/上下文总结）落到
     // ${真实persona}__mock__test 这个测试 key，功能照常跑、数据不混；
@@ -702,6 +705,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           }
           // 完成/失败气泡（用户 8-03 01:57）：执行完必须给用户明确反馈
           _appendToolResultBubble(name, toolResult);
+          // 8-06 21:00 用户：工具结果记忆——记内容不记成败！
+          // 男主看记忆 = 直接看到上次查到的内容（如清单、查到的记忆），不用重查
+          ToolResultStore.add(personaId, name,
+              '${toolResult.ok ? '✅' : '❌'}${toolResult.text}');
           DebugLogger.log('AI路由', '🔧 工具 $name 结果：${toolResult.text.length > 80 ? toolResult.text.substring(0, 80) + '…' : toolResult.text}');
           // 8-04 17:0x（用户：上下文要留地方放工具，男主才知道做过什么；
           // 带时间戳+成败+原因，失败后才能继续调工具解决）：
@@ -1021,6 +1028,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final lid = _state.leadId;
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
+    // 8-06 21:00：工具结果记忆预热（prompt 注入同步读，这里先刷新缓存）
+    ToolResultStore.warm(personaId);
     await showAiProviderSheet(
       context: context,
       personaId: personaId,
@@ -3689,6 +3698,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           prompt += '\n\n【你的工具清单】\n${_toolListText()}'
               '\n（工具就这些，直接调用。测试工具时一个个来，'
               '调用完一个根据结果决定下一个，不要重复查清单。）';
+          // 8-06 21:00 用户：工具结果记忆——男主看最近结果 = 直接知道上次查到什么，
+          // 不用重查（根治"又查又查"）；没记录过就不注入
+          final recentTools = ToolResultStore.recent(pid);
+          if (recentTools.isNotEmpty) {
+            final lines = recentTools.map((e) =>
+                '${e['time']} ${e['tool']} → ${e['result']}').join('\n');
+            prompt += '\n\n【你最近用过的工具·结果】\n$lines'
+                '\n（这些是你刚做过的，结果都在这；要用的功能如果结果里已经有了，'
+                '直接照着用，不用重新查）';
+          }
           // 8-06 18:41-19:21 用户：分类记录体系 —— 记录职责 + 现有分类概览
           final recordDuty = '\n\n【你的记录职责】'
               '观察她的喜好/习惯/家人/宠物/说过的话，发现值得记的：'
