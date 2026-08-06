@@ -12,6 +12,7 @@ import '../../services/record_tree_store.dart';
 import '../../services/tool_result_store.dart';
 import '../../services/working_pad_store.dart';
 import '../../services/timer_plan_store.dart';
+import '../../services/pending_queue_store.dart';
 import 'widgets/task_list_page.dart';
 import '../../data/bug_knowledge_base.dart';
 import 'companion_page.dart';
@@ -306,6 +307,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     WorkingPadStore.warm(personaId);
     // 8-06 21:26：定时任务计划预热
     TimerPlanStore.warm(personaId);
+    // 8-06 21:36：待回复队列预热
+    PendingQueueStore.warm(personaId);
     // 8-05 14:36 用户修正：测试对话 ≠ 关功能，而是独立"测试空间"——
     // 模拟 AI 聊天时所有数据（会话/消息/记忆/情绪/上下文总结）落到
     // ${真实persona}__mock__test 这个测试 key，功能照常跑、数据不混；
@@ -479,6 +482,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       var toolExecuted = false;
       var toolLoop = 0;
       final consecutiveToolCounts = <String, int>{};
+      // 8-06 21:36：continue 累计计数（交错调用也能防无限"继续说"）
+      var continueCount = 0;
       while (result.toolCalls != null && result.toolCalls!.isNotEmpty) {
         toolLoop++;
         toolExecuted = true;
@@ -710,22 +715,34 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             // 8-06 21:12 用户：男主自己的便签（当前任务模块），自己维护，免审批
             _appendToolBubble('📋 男主在整理自己的便签…');
             toolResult = await _executeManagePad(args);
+          } else if (name == 'continue_speaking') {
+            // 8-06 21:36 用户：男主不等她继续说话——调"继续"工具，
+            // 系统自动再生成一轮（不带她消息）；免审批、不弹气泡
+            toolResult = _ToolResult(true, '继续');
           } else {
             toolResult = _ToolResult(false, '未知工具：$name');
           }
           // 完成/失败气泡（用户 8-03 01:57）：执行完必须给用户明确反馈
-          _appendToolResultBubble(name, toolResult);
+          // 8-06 21:36：continue 不弹气泡（男主的话本身在继续生成）
+          if (name != 'continue_speaking') {
+            _appendToolResultBubble(name, toolResult);
+          }
           // 8-06 21:00 用户：工具结果记忆——记内容不记成败！
           // 男主看记忆 = 直接看到上次查到的内容（如清单、查到的记忆），不用重查
-          ToolResultStore.add(personaId, name,
-              '${toolResult.ok ? '✅' : '❌'}${toolResult.text}');
+          // 8-06 21:36：continue 不记（男主的话本身在继续，不需要"查过"记录）
+          if (name != 'continue_speaking') {
+            ToolResultStore.add(personaId, name,
+                '${toolResult.ok ? '✅' : '❌'}${toolResult.text}');
+          }
           DebugLogger.log('AI路由', '🔧 工具 $name 结果：${toolResult.text.length > 80 ? toolResult.text.substring(0, 80) + '…' : toolResult.text}');
           // 8-04 17:0x（用户：上下文要留地方放工具，男主才知道做过什么；
           // 带时间戳+成败+原因，失败后才能继续调工具解决）：
           // 工具调用记录进上下文（stateless 全量带 → 男主看得到）
           ContextManager.instance
               .feedToolCall(personaId, name, toolResult.ok, toolResult.text);
-          if (nativeCalls.contains(call)) {
+          // 8-06 21:36：continue 结果不回填工具消息（男主的话本身就是输出）
+          final isContinue = name == 'continue_speaking';
+          if (!isContinue && nativeCalls.contains(call)) {
             // 原生：tool 消息必须用模型给的 id 配对（不能自己编 id）
             // 8-04 17:0x（用户：📄 里工具轮要简化成"成功/失败+一句话"）：
             // content 统一带【工具 名】+ ✅成功/❌失败 标记 —— 模型看得更清楚，
@@ -737,6 +754,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               content: '【工具 $name】${toolResult.ok ? '✅成功（审批通过）' : '❌失败（审批未过）'}：${toolResult.text}',
               toolCallId: call['id']?.toString() ?? 'call_${toolLoop}_$name',
             ));
+          } else if (isContinue) {
+            // continue（文本块格式）：不收集结果
           } else {
             // 文本块：结果收集，最后合并注入 user 消息
             textToolResults.add('【工具 $name】${toolResult.ok ? '✅成功' : '❌失败'}：${toolResult.text}');
@@ -744,9 +763,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           // 防死循环：同一工具连续调用 ≥3 次 → 停止本轮
           final n = (consecutiveToolCounts[name] ?? 0) + 1;
           consecutiveToolCounts[name] = n;
-          if (n >= 3) {
+          // 8-06 21:36：continue 本轮累计 ≥3 次也停（交错调用防不住"连续"计数）
+          if (name == 'continue_speaking') continueCount++;
+          if (n >= 3 || (name == 'continue_speaking' && continueCount >= 3)) {
             loopExceeded = true;
-            DebugLogger.log('AI路由', '⚠️ 工具 $name 连续调用 $n 次，强制停止（防死循环）');
+            DebugLogger.log('AI路由', '⚠️ 工具 $name 调用 $n 次（continue 累计 $continueCount），强制停止（防死循环）');
           }
         }
         if (loopExceeded) break;
@@ -800,6 +821,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       var displayText = ButlerPipelineResult.extractKeywordsFromReply(
         replyTexts.join('\n'),
       );
+      // 8-06 21:36 用户：男主回复带编号 → 管家按标注消除待回复
+      // （"回待#1、待#2"消除对应；"不回待#3"也消除=放下；没标注兜底消最老一条）
+      if (result.text.trim().isNotEmpty) {
+        final removed = await PendingQueueStore.resolve(
+            personaId, result.text);
+        if (removed.isNotEmpty) {
+          DebugLogger.log('指令模块',
+              '📥 待回复已消除 待#${removed.join('、')}（男主回复带编号）');
+        }
+      }
       // 指令模块：解析男主输出（#记录/#查记忆/#定时/#帮助/#model）→ 审批弹窗
       final commands =
           ButlerCommandParser.instance.parse(result.text.trim());
@@ -1046,6 +1077,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     WorkingPadStore.warm(personaId);
     // 8-06 21:26：定时任务计划预热
     TimerPlanStore.warm(personaId);
+    // 8-06 21:36：待回复队列预热
+    PendingQueueStore.warm(personaId);
     await showAiProviderSheet(
       context: context,
       personaId: personaId,
@@ -2540,6 +2573,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         '- query_record：查分类记录/候选分类路径\n'
         '- add_record：记分类记录（你自己整理）\n'
         '- manage_record_tree：调分类（改名/挪动/删除，必须她审批）\n'
+        '- continue_speaking：继续说（不等她回，自动再生成一轮）\n'
         '- list_tools：查看本清单（你已经知道了）';
   }
 
@@ -3594,6 +3628,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       'add_record': '记记录',
       'manage_record_tree': '调分类',
       'manage_pad': '整理便签',
+      'continue_speaking': '继续说',
     };
     final matched = known.keys.where(userText.contains).toList();
     if (matched.isEmpty) return null;

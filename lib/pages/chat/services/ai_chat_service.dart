@@ -12,6 +12,7 @@ import '../../../butler/system_template.dart' show SystemTemplate;
 import '../../../services/chat_database_service.dart';
 import '../../../services/chat_service.dart';
 import '../../../utils/debug_logger.dart';
+import '../../../services/pending_queue_store.dart';
 
 /// 聊天页的 AI 门面 —— 走 AIProviderManager（男主级路由 + 故障切换）。
 ///
@@ -604,6 +605,21 @@ class AiChatService {
     {
       'type': 'function',
       'function': {
+        'name': 'continue_speaking',
+        'description':
+            '继续说话（8-06 21:36 你设计）。你说完一句还想接着说、'
+            '不等她回复 → 调这个，系统会自动让你再生成一轮（她的话不会插进来）。'
+            '可以连续用（最多 3 次），说完了就不调。'
+            '⚠️ 你自己的表达动作，不需要她审批。',
+        'parameters': {
+          'type': 'object',
+          'properties': {},
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
         'name': 'query_setting_history',
         'description':
             '查设定变更历史（哪个版本改了什么、什么时候改的）。'
@@ -888,6 +904,8 @@ class AiChatService {
     // （compact/summarize 仍在 feed 前跑：总结的是不含当前消息的旧原文）
     if (!toolRound && message.trim().isNotEmpty) {
       ContextManager.instance.feedUserMessage(ctxPid, message);
+      // 8-06 21:36 用户：待回复队列入队（男主带编号管理，管家只做机械活）
+      PendingQueueStore.enqueue(ctxPid, message);
       // 8-03 20:1x（调试：用户怀疑男主对话被抛弃）——feed 全链路日志
       DebugLogger.log(
           '上下文调试',
@@ -945,18 +963,19 @@ class AiChatService {
     // 不再 join 成一条【上下文参考】：男主摘要/工具使用历史/管家历史/聊天历史
     // 各自是独立 system 消息，模型按 role+标签原生定位，不用在文本里猜。
     // 总引导说明放最前，明确"最后一条用户消息才要回复"。
-    // 8-06 21:30 用户：待回复/已回复视图——男主知道"什么话没回"，
-    // 回完自动沉到已回复（算法按"最后男主回复之后"自动算，男主不用手动搬）。
-    // 男主自己判断回哪些/回不回；可一次回多条并标注对应（回待#1、待#2）。
+    // 8-06 21:36 用户修正：待回复由【男主带编号主动管理】——
+    // 他回复时标注"（回待#1、待#2）"，管家按编号消除（男主聪明，管家听话）。
+    // 系统不猜他回了哪几条（自动算有漏洞：他决定不回的/只回一条的，系统分不清）。
     final prView = ContextManager.instance.pendingRepliedView(ctxPid);
+    final pendingText = PendingQueueStore.pendingText(ctxPid);
     final statusBlocks = <AIChatMessage>[
-      if (prView.pending.isNotEmpty)
+      if (pendingText != null && pendingText.isNotEmpty)
         AIChatMessage(
           role: 'system',
-          content: '【待回复】（她说的、你还没回的。自己判断：'
-              '问句/要你干的就回；纯闲聊不需要的可以明确放下不回。'
-              '可以一次回多条，回复里标注对应，如"（回待#1、待#2）"。'
-              '你回完它们自动沉到【已回复】）\n${prView.pending.join('\n')}',
+          content: '【待回复】（她说的、你还没回的。自己判断回哪些/回不回：'
+              '问句/要你干的就回；纯闲聊不需要的标"（不回待#N）"放下。'
+              '回复多条时**必须标注编号**，如"（回待#1、待#2）"，'
+              '管家按你的标注消除——你没标的会一直挂着）\n$pendingText',
         ),
       if (prView.replied.isNotEmpty)
         AIChatMessage(
