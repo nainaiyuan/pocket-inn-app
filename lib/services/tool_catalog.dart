@@ -13,6 +13,7 @@ class ToolCatalog {
   static const Map<String, Map<String, String>> categories = {
     '记忆': {
       'record_memory': '记她的事（喜好/约定/日常/事实，自动提取关键词）',
+      'record_relation': '记关系（谁→谁→什么+原话+时间+归属，织成关系网）',
       'recall_memory': '查以前记的关于她的事',
       'save_identity_memory': '记代号人物（家人A/朋友B）的事',
       'write_diary': '写日记存档',

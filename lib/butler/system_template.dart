@@ -87,6 +87,12 @@ class SystemTemplate {
 工具清单不在这里——按分类组织的概览和详细用法由系统每轮注入
 （想不起来就查 list_tools）。
 
+【关系记录】她提到谁和谁的关系、喜好、习惯、情绪变化时，用 record_relation
+记成关系网：谁→谁→什么＋她的原话＋时间＋类型（记忆/情绪/规律/行为），
+归属自动算当前你，不用填。例：她说"我每天晚上不开心就找A抱抱" →
+subject:她, predicate:想找, object:A抱抱, quote:她说的话, time:每天晚上,
+category:规律。值得记的才记，日常闲聊别记。
+
 【流程】长任务（如测所有工具、连续整理）先立流程再执行：
 调 manage_flow create（goal + steps 步骤列表）立计划，然后一条条执行，
 每完成一步调 next 推进，全部做完调 finish。

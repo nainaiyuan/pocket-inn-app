@@ -18,6 +18,7 @@ import 'memory_store.dart';
 import 'pattern_store.dart';
 import 'schedule_store.dart';
 import 'trigger_store.dart';
+import 'relation_store.dart';
 import 'user_memory_store.dart';
 import 'vault_store.dart';
 
@@ -37,6 +38,7 @@ class StorageRegistry {
       UserMemoryStore(),
       EmotionArcStore(),
       ScheduleStore(),
+      RelationStore(),
     ];
   }
 
@@ -73,6 +75,9 @@ class StorageRegistry {
 
   ScheduleStore get schedule =>
       _store<ScheduleStore>('schedule');
+
+  RelationStore get relations =>
+      _store<RelationStore>('relation');
 
   // ========== 通用 ==========
 

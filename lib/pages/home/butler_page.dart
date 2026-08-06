@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import '../../ai_provider/ai_provider_manager.dart';
 import '../../butler/modules/butler_module_hub.dart';
 import '../../butler/memory/emotion_arc.dart';
+import '../../butler/memory/relation_record.dart';
 import '../../butler/patterns/pattern_engine.dart';
 import '../../butler/storage/storage_registry.dart';
+import '../../services/relation_change_notifier.dart';
 import '../../butler/task/butler_task.dart';
 import '../../butler/task/task_manager.dart';
 import '../ai_config_page.dart';
@@ -15,6 +17,7 @@ import '../butler_task_page.dart';
 import '../debug/debug_toolbox_page.dart';
 import '../mood_analysis_page.dart';
 import '../pattern_memory_page.dart';
+import 'widgets/relation_map_view.dart';
 import 'widgets/star_map_view.dart';
 
 /// 管家中心 — 手机式底部导航版（8-07 00:58 用户）。
@@ -35,7 +38,8 @@ class ButlerPage extends StatefulWidget {
 }
 
 class _ButlerPageState extends State<ButlerPage> {
-  int _tab = 1; // 默认打开星球图（最惊艳）
+  int _tab = 1; // 默认打开关系图（最惊艳）
+  List<RelationRecord> _relationRecords = [];
   List<EmotionArc> _arcs = [];
   int _memoryCount = 0;
 
@@ -44,6 +48,23 @@ class _ButlerPageState extends State<ButlerPage> {
     super.initState();
     _loadMood();
     _loadMemoryCount();
+    // 男主记了新关系 → 刷新关系图
+    RelationChangeNotifier.instance.addListener(refreshRelations);
+  }
+
+  @override
+  void dispose() {
+    RelationChangeNotifier.instance.removeListener(refreshRelations);
+    super.dispose();
+  }
+
+  /// 关系图数据刷新（男主记了新关系后调用）
+  Future<void> refreshRelations() async {
+    try {
+      final records = await StorageRegistry.instance.relations.loadAll();
+      if (!mounted) return;
+      setState(() => _relationRecords = records);
+    } catch (_) {}
   }
 
   Future<void> _loadMood() async {
@@ -105,6 +126,7 @@ class _ButlerPageState extends State<ButlerPage> {
                 children: [
                   _MoodTab(arcs: _arcs),
                   _UniverseTab(
+                    records: _relationRecords,
                     memoryCount: _memoryCount,
                     onMemoryCountChanged: () => _loadMemoryCount(),
                   ),
@@ -382,14 +404,17 @@ class _MoodRingPainter extends CustomPainter {
 }
 
 // =====================================================================
-// 🌌 规律·记忆 Tab：星球图
+// 🌌 关系图 Tab：你是中心，周围是相关的人事物（8-07 01:13 用户）
 // =====================================================================
 class _UniverseTab extends StatefulWidget {
   const _UniverseTab({
+    required this.records,
     required this.memoryCount,
     this.onMemoryCountChanged,
   });
 
+  /// 全部关系记录（谁→谁→什么+原话+时间+归属）
+  final List<RelationRecord> records;
   final int memoryCount;
   final VoidCallback? onMemoryCountChanged;
 
@@ -398,120 +423,116 @@ class _UniverseTab extends StatefulWidget {
 }
 
 class _UniverseTabState extends State<_UniverseTab> {
-  List<PatternStats> get _patterns {
-    final engine = ButlerModuleHub.instance.sharedPatternEngine;
-    return engine?.confirmedPatterns ?? [];
+  /// 当前中心实体（默认"用户"——你是这张网的中心）
+  String _center = '用户';
+
+  /// 归属筛选：null=全部 / '共同' / '专属'（某个男主）
+  String? _ownerFilter;
+
+  List<RelationRecord> get _filtered {
+    final list = widget.records;
+    if (_ownerFilter == null) return list;
+    if (_ownerFilter == '共同') {
+      return list.where((r) => r.characterId == null || r.characterId!.isEmpty).toList();
+    }
+    return list.where((r) => r.characterId != null && r.characterId!.isNotEmpty).toList();
   }
 
-  void _showPatternDetail(PatternStats p) {
+  /// 实体详情弹窗：记录汇总 + 可继续进入下一层
+  void _showEntityDetail(String entity, List<RelationRecord> records) {
+    final themeRecords = records;
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF2A1B3D),
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFFFDF7F9),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
+      builder: (ctx) => FractionallySizedBox(
+        heightFactor: 0.72,
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: StarMapView.patternColor(p).withValues(alpha: 0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.public,
-                    color: StarMapView.patternColor(p),
-                    size: 20,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    p.keywords.join(' · '),
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '${StarMapView.patternMood(p)}方向 · 出现 ${p.count} 次 · '
-              '置信度 ${(p.confidence * 100).round()}%',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.white.withValues(alpha: 0.6),
-              ),
-            ),
-            const SizedBox(height: 18),
-            // 情绪偏移条
-            for (final (name, color, value) in [
-              ('喜悦', const Color(0xFFE896B8), p.shiftJoy),
-              ('依恋', const Color(0xFFB896E8), p.shiftAttachment),
-              ('悲伤', const Color(0xFF96B8E8), p.shiftSad),
-              ('愤怒', const Color(0xFFE8A078), p.shiftAnger),
-            ]) ...[
-              Row(
+            // 顶部：实体名 + 进入按钮
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 18, 24, 8),
+              child: Row(
                 children: [
-                  SizedBox(
-                    width: 32,
-                    child: Text(
-                      name,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.white.withValues(alpha: 0.55),
-                      ),
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFC896B4).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(
+                      Icons.public,
+                      color: Color(0xFFC896B4),
+                      size: 20,
                     ),
                   ),
+                  const SizedBox(width: 12),
                   Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: (value.abs() / 100).clamp(0.0, 1.0),
-                        minHeight: 6,
-                        backgroundColor:
-                            Colors.white.withValues(alpha: 0.08),
-                        valueColor: AlwaysStoppedAnimation(
-                          value >= 0 ? color : color.withValues(alpha: 0.4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          entity,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF6A4A5A),
+                          ),
+                        ),
+                        Text(
+                          '${themeRecords.length} 条记录',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: const Color(0xFF5A4A52).withValues(alpha: 0.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (entity != _center)
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFC896B4),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
+                      icon: const Icon(Icons.zoom_in, size: 16),
+                      label: const Text('进入'),
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        setState(() => _center = entity);
+                      },
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    width: 36,
-                    child: Text(
-                      value >= 0 ? '+${value.round()}' : '${value.round()}',
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white.withValues(alpha: 0.7),
-                      ),
-                    ),
-                  ),
                 ],
               ),
-              const SizedBox(height: 8),
-            ],
-            const SizedBox(height: 10),
-            Text(
-              '聊到这些词时你的情绪会 ${StarMapView.patternMood(p)}（相对平时偏移）',
-              style: TextStyle(
-                fontSize: 12,
-                height: 1.5,
-                color: Colors.white.withValues(alpha: 0.5),
-              ),
+            ),
+            const Divider(color: Color(0xFFC896B4)),
+            // 记录列表
+            Expanded(
+              child: themeRecords.isEmpty
+                  ? Center(
+                      child: Text(
+                        '还没有记录',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: const Color(0xFF5A4A52).withValues(alpha: 0.4),
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                      itemCount: themeRecords.length,
+                      itemBuilder: (context, i) {
+                        final r = themeRecords[i];
+                        return _RelationCard(record: r);
+                      },
+                    ),
             ),
           ],
         ),
@@ -521,18 +542,51 @@ class _UniverseTabState extends State<_UniverseTab> {
 
   @override
   Widget build(BuildContext context) {
-    final patterns = _patterns;
+    final filtered = _filtered;
     return Column(
       children: [
+        // 归属筛选
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
+          child: Row(
+            children: [
+              _FilterChip(
+                label: '全部',
+                selected: _ownerFilter == null,
+                onTap: () => setState(() => _ownerFilter = null),
+              ),
+              const SizedBox(width: 6),
+              _FilterChip(
+                label: '共同',
+                selected: _ownerFilter == '共同',
+                onTap: () => setState(() => _ownerFilter = '共同'),
+              ),
+              const SizedBox(width: 6),
+              _FilterChip(
+                label: '男主专属',
+                selected: _ownerFilter == '专属',
+                onTap: () => setState(() => _ownerFilter = '专属'),
+              ),
+              const Spacer(),
+              Text(
+                '${filtered.length} 条关系',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: const Color(0xFF5A4A52).withValues(alpha: 0.4),
+                ),
+              ),
+            ],
+          ),
+        ),
         Expanded(
           child: ClipRRect(
             borderRadius: BorderRadius.circular(24),
             child: Container(
-              margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-              child: StarMapView(
-                patterns: patterns,
-                memoryCount: widget.memoryCount,
-                onPatternTap: _showPatternDetail,
+              margin: const EdgeInsets.fromLTRB(12, 2, 12, 8),
+              child: RelationMapView(
+                records: filtered,
+                centerEntity: _center,
+                onEntityTap: _showEntityDetail,
               ),
             ),
           ),
@@ -546,7 +600,7 @@ class _UniverseTabState extends State<_UniverseTab> {
                 child: _StatChip(
                   icon: Icons.public,
                   color: const Color(0xFFB896E8),
-                  label: '规律 ${patterns.length} 条',
+                  label: '关系 ${filtered.length} 条',
                 ),
               ),
               const SizedBox(width: 8),
@@ -554,7 +608,7 @@ class _UniverseTabState extends State<_UniverseTab> {
                 child: _StatChip(
                   icon: Icons.star_outline,
                   color: const Color(0xFFE8D8A0),
-                  label: '记忆 ${widget.memoryCount} 条',
+                  label: '旧记忆 ${widget.memoryCount} 条',
                 ),
               ),
               const SizedBox(width: 8),
@@ -565,7 +619,8 @@ class _UniverseTabState extends State<_UniverseTab> {
                   label: '管理',
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) => PatternMemoryPage(hub: ButlerModuleHub.instance),
+                      builder: (_) =>
+                          PatternMemoryPage(hub: ButlerModuleHub.instance),
                     ),
                   ),
                 ),
@@ -574,6 +629,163 @@ class _UniverseTabState extends State<_UniverseTab> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 关系记录卡片（详情弹窗里用）：句子 + 原话 + 时间 + 归属
+class _RelationCard extends StatelessWidget {
+  const _RelationCard({required this.record});
+
+  final RelationRecord record;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = RelationMapView.relationColor(record);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  record.sentence,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF5A4A52),
+                  ),
+                ),
+              ),
+              // 归属徽章
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFC896B4).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  record.ownerLabel,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: Color(0xFFC896B4),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          // 原话（用户的话，一字不改）
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFDF0F5),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '"',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFFC896B4),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    record.quote,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      height: 1.5,
+                      fontStyle: FontStyle.italic,
+                      color: Color(0xFF6A4A5A),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // 时间 + 类型
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              '${record.time == null || record.time!.isEmpty ? '' : '${record.time} · '}'
+              '${record.category} · ${_ago(record.createdAt)}',
+              style: TextStyle(
+                fontSize: 11,
+                color: const Color(0xFF5A4A52).withValues(alpha: 0.45),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _ago(DateTime t) {
+    final d = DateTime.now().difference(t);
+    if (d.inMinutes < 60) return '${d.inMinutes} 分钟前';
+    if (d.inHours < 24) return '${d.inHours} 小时前';
+    if (d.inDays < 30) return '${d.inDays} 天前';
+    return '${(d.inDays / 30).round()} 个月前';
+  }
+}
+
+/// 筛选小胶囊
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0xFFC896B4)
+              : Colors.white.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected
+                ? const Color(0xFFC896B4)
+                : const Color(0xFFC896B4).withValues(alpha: 0.3),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            color: selected ? Colors.white : const Color(0xFF8A7A80),
+          ),
+        ),
+      ),
     );
   }
 }

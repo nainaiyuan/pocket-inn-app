@@ -13,6 +13,9 @@ import '../../services/working_pad_store.dart';
 import '../../services/flow_store.dart';
 import '../../services/timer_plan_store.dart';
 import '../../services/pending_queue_store.dart';
+import '../../butler/memory/relation_record.dart';
+import '../../butler/storage/storage_registry.dart';
+import '../../services/relation_change_notifier.dart';
 import '../../services/tool_catalog.dart';
 import 'widgets/task_list_page.dart';
 import '../../data/bug_knowledge_base.dart';
@@ -632,7 +635,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           final args = (call['arguments'] as Map<String, dynamic>?) ?? {};
           _ToolResult toolResult;
           DebugLogger.log('AI路由', '🔧 工具 $name 参数：${args.isEmpty ? '（空）' : args}');
-          if (name == 'record_memory') {
+          if (name == 'record_relation') {
+            toolResult = await _executeRelationTool(args);
+          } else if (name == 'record_memory') {
             final content = args['content']?.toString() ?? '';
             var category = args['category']?.toString() ?? '';
             // 8-03 06:29：男主不知道类别规范，常写"其他" → 管家兜底：
@@ -2634,7 +2639,51 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     }
   }
 
-  /// 工具执行：record_memory（弹窗确认 → 写记忆 → 返回结果给模型）
+  /// 工具执行：record_relation（8-07 01:13 用户：统一关系记录格式
+/// 谁→谁→什么＋原话＋时间＋归属，情绪/记忆/规律都这么记，织成关系网）
+Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
+  final subject = args['subject']?.toString().trim() ?? '';
+  final predicate = args['predicate']?.toString().trim() ?? '';
+  final object = args['object']?.toString().trim() ?? '';
+  final quote = args['quote']?.toString().trim() ?? '';
+  final time = args['time']?.toString().trim();
+  var category = args['category']?.toString().trim() ?? '';
+  if (subject.isEmpty || predicate.isEmpty || object.isEmpty) {
+    return const _ToolResult(
+        false, '关系不完整（需要 谁→谁→什么），请补齐再记');
+  }
+  if (quote.isEmpty) {
+    return const _ToolResult(false, '缺少原话（quote），记录要带上她的原话');
+  }
+  if (category.isEmpty || !const ['记忆', '情绪', '规律', '行为'].contains(category)) {
+    category = '记忆';
+  }
+  try {
+    await StorageRegistry.instance.relations.save(RelationRecord(
+      id: 'rel_${DateTime.now().millisecondsSinceEpoch}',
+      subject: subject,
+      predicate: predicate,
+      object: object,
+      quote: quote,
+      time: (time == null || time.isEmpty) ? null : time,
+      characterId: _state.personaId, // 归属当前男主；null=共同
+      category: category,
+    ));
+    // 通知关系图刷新（但ler_page 挂的是自己页面实例，需要全局通道）
+    RelationChangeNotifier.instance.notify();
+    DebugLogger.log('指令模块', '✅ 关系记录: $subject→$predicate→$object（$category）');
+    return _ToolResult(
+      true,
+      '已记关系：$subject → $predicate → $object'
+      '${time == null || time.isEmpty ? '' : '（$time）'}［$category］',
+    );
+  } catch (e) {
+    DebugLogger.log('指令模块', '⛔ 关系记录失败: $e');
+    return _ToolResult(false, '关系记录失败：$e');
+  }
+}
+
+/// 工具执行：record_memory（弹窗确认 → 写记忆 → 返回结果给模型）
   Future<_ToolResult> _executeRecordTool(
     String category,
     String content, {
@@ -3914,6 +3963,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   String? _buildExplicitToolHint(String userText) {
     const known = <String, String>{
       'record_memory': '记住',
+      'record_relation': '记关系',
       'recall_memory': '查看记忆',
       'save_identity_memory': '保存身份记忆',
       'list_tools': '查看工具',

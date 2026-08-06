@@ -90,6 +90,50 @@ class AiChatService {
     {
       'type': 'function',
       'function': {
+        'name': 'record_relation',
+        'description':
+            '记关系记录：谁→谁→什么＋原话＋时间＋归属，织成关系网（用户是中心，'
+            '妈妈/小猫/工作/男主都是点，点之间有线=关系，线下压着原话）。'
+            '用户提到任何人事物之间的关系、情绪变化、行为习惯时用这个记，'
+            '比如"每天晚上不开心会找男主A抱抱"= subject:她, predicate:找, '
+            'object:男主A抱抱, quote:用户原话, time:每天晚上, category:规律。'
+            '情绪/记忆/规律都用这个格式。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'subject': {
+              'type': 'string',
+              'description': '谁（主体），如：她、妈妈',
+            },
+            'predicate': {
+              'type': 'string',
+              'description': '关系/动作，如：喜欢、讨厌、是、想找',
+            },
+            'object': {
+              'type': 'string',
+              'description': '指向谁/什么（客体），如：猫、男主A抱抱',
+            },
+            'quote': {
+              'type': 'string',
+              'description': '她的原话（一字不改，能回忆起当时场景）',
+            },
+            'time': {
+              'type': 'string',
+              'description': '什么时间/频率，如：每天晚上、上周、去年3月（没有就省略）',
+            },
+            'category': {
+              'type': 'string',
+              'enum': ['记忆', '情绪', '规律', '行为'],
+              'description': '类型：记忆=事实喜好；情绪=情绪变化；规律=情境→反应模式；行为=习惯',
+            },
+          },
+          'required': ['subject', 'predicate', 'object', 'quote'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
         'name': 'recall_memory',
         'description':
             '查看你以前记住的关于用户的事。调用后你能知道她说过什么、喜欢什么，'
