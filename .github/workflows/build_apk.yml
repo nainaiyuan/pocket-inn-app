@@ -36,6 +36,8 @@ jobs:
       # 下载语义情绪模型（154MB int8 量化，托管在 model-assets Release；
       # 超过 GitHub 单文件 100MB 限制，不能进 git 仓库）
       - name: Download emotion model assets
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p assets/models
           REPO="${{ github.repository }}"
