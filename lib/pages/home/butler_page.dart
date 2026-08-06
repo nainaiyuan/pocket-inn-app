@@ -41,13 +41,11 @@ class ButlerPage extends StatefulWidget {
 class _ButlerPageState extends State<ButlerPage> {
   int _tab = 1; // 默认打开关系图（最惊艳）
   List<RelationRecord> _relationRecords = [];
-  List<EmotionArc> _arcs = [];
   int _memoryCount = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadMood();
     _loadMemoryCount();
     // 男主记了新关系 → 刷新关系图
     RelationChangeNotifier.instance.addListener(refreshRelations);
@@ -68,12 +66,6 @@ class _ButlerPageState extends State<ButlerPage> {
       if (!mounted) return;
       setState(() => _relationRecords = records);
     } catch (_) {}
-  }
-
-  Future<void> _loadMood() async {
-    final arcs = await StorageRegistry.instance.emotionArcs.loadAll();
-    if (!mounted) return;
-    setState(() => _arcs = arcs);
   }
 
   Future<void> _loadMemoryCount() async {
@@ -127,7 +119,7 @@ class _ButlerPageState extends State<ButlerPage> {
               child: IndexedStack(
                 index: _tab,
                 children: [
-                  _MoodTab(arcs: _arcs, records: _relationRecords),
+                  _MoodTab(records: _relationRecords),
                   _UniverseTab(
                     records: _relationRecords,
                     memoryCount: _memoryCount,
@@ -156,20 +148,11 @@ class _ButlerPageState extends State<ButlerPage> {
 // 💗 情绪 Tab：四色情绪环图
 // =====================================================================
 class _MoodTab extends StatelessWidget {
-  const _MoodTab({required this.arcs, required this.records});
+  const _MoodTab({required this.records});
 
-  final List<EmotionArc> arcs;
-
-  /// 关系记录（情绪类记录 → 动态情绪词环，8-07 01:23 用户"把所有的做好"）
+  /// 关系记录（情绪类记录 → 动态情绪词环）
+  /// 8-07 01:28 用户：没情绪就不显示内置环，提示再聊聊
   final List<RelationRecord> records;
-
-  /// 旧四色兜底（没有情绪记录时用）
-  static const _dims = [
-    ('喜悦', Color(0xFFE896B8)),
-    ('依恋', Color(0xFFB896E8)),
-    ('悲伤', Color(0xFF96B8E8)),
-    ('愤怒', Color(0xFFE8A078)),
-  ];
 
   /// 情绪词色板（动态环循环取色）
   static const _wordColors = [
@@ -212,17 +195,8 @@ class _MoodTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final words = _emotionWords;
-    final latest = arcs.isEmpty ? null : arcs.last;
-    final mood = latest?.endMood ?? const <String, double>{};
-
-    // 有情绪词 → 动态环；没有但有旧数据 → 四色兜底环
     final hasWords = words.isNotEmpty;
-    final ringDims = hasWords
-        ? words
-        : [
-            for (final (name, color) in _dims)
-              (label: name, value: mood[name] ?? 0, color: color),
-          ];
+    final ringDims = words;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
@@ -241,20 +215,31 @@ class _MoodTab extends StatelessWidget {
               color: const Color(0xFFC896B4).withValues(alpha: 0.2),
             ),
           ),
-          child: (hasWords || latest != null)
+          child: hasWords
               ? CustomPaint(
                   size: const Size(double.infinity, 260),
                   painter: _MoodRingPainter(dims: ringDims),
                 )
               : Center(
-                  child: Text(
-                    '还没有情绪记录\n聊起来之后这里会亮起情绪光环',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 13,
-                      height: 1.6,
-                      color: const Color(0xFF5A4A52).withValues(alpha: 0.45),
-                    ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.chat_bubble_outline,
+                        size: 34,
+                        color: Color(0xFFC896B4),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        '还没有情绪记录\n去跟男主聊聊吧，聊到你的情绪变化\n他会帮你记下来，这里就会亮起来',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 13,
+                          height: 1.7,
+                          color: const Color(0xFF5A4A52).withValues(alpha: 0.55),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
         ),
@@ -325,8 +310,7 @@ class _MoodTab extends StatelessWidget {
                 child: Text(
                   hasWords
                       ? '情绪词 ${words.length} 种 · 来自关系记录'
-                      : '共 ${arcs.length} 次情绪弧线'
-                          '${latest == null ? '' : ' · 最近 ${_ago(latest.time)}'}',
+                      : '还没有情绪记录',
                   style: const TextStyle(
                     fontSize: 13,
                     color: Color(0xFF5A4A52),
