@@ -594,6 +594,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       final consecutiveToolCounts = <String, int>{};
       // 8-06 21:36：continue 累计计数（交错调用也能防无限"继续说"）
       var continueCount = 0;
+      // 8-07 00:1x：用户连续拒绝计数（≥3 强制男主停止尝试）
+      var rejectedCount = 0;
       while (result.toolCalls != null && result.toolCalls!.isNotEmpty) {
         toolLoop++;
         toolExecuted = true;
@@ -610,6 +612,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             .where((c) => (c['id']?.toString() ?? '').isNotEmpty)
             .toList();
         final textToolResults = <String>[];
+        // 8-07 00:1x：用户拒绝收集——拒绝不走普通工具结果（男主会无视），
+        // 这轮工具执行完走【系统事件】通道强制男主决策
+        final rejectedTools = <String>[];
         final toolMessages = <AIChatMessage>[
           if (nativeCalls.isNotEmpty)
             AIChatMessage(
@@ -857,10 +862,29 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             } else if (action == 'status') {
               toolResult = _ToolResult(true,
                   FlowStore.text(personaId) ?? '没有流程（create 先立）');
+            } else if (action == 'update') {
+              // 8-07 00:1x 用户：用户提了新要求 → 更新流程目标/步骤，从头执行
+              final goal = args['goal']?.toString();
+              final stepsRaw = args['steps'];
+              List<String>? steps;
+              if (stepsRaw is List) {
+                steps = <String>[];
+                for (final st in stepsRaw) {
+                  final t = st.toString().trim();
+                  if (t.isNotEmpty) steps.add(t);
+                }
+              } else if (stepsRaw is String) {
+                steps = stepsRaw
+                    .split(RegExp(r'\n+'))
+                    .where((st) => st.trim().isNotEmpty)
+                    .toList();
+              }
+              toolResult = _ToolResult(true,
+                  await FlowStore.update(personaId, goal: goal, steps: steps));
             } else {
               toolResult = const _ToolResult(false,
-                  'manage_flow 参数：action=create/next/finish/cancel/resume/status，'
-                  'create 要 goal+steps');
+                  'manage_flow 参数：action=create/next/finish/cancel/resume/status/update，'
+                  'create/update 要 goal+steps');
             }
             // 流程状态变化 → 刷新停止条
             if (mounted) setState(() {});
@@ -927,6 +951,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           // 工具调用记录进上下文（stateless 全量带 → 男主看得到）
           ContextManager.instance
               .feedToolCall(personaId, name, toolResult.ok, toolResult.text);
+          // 8-07 00:1x：审批拒绝系统事件化——拒绝结果同时收集，
+          // 这轮工具执行完统一走【系统事件】通道（不是普通工具结果）
+          if (!toolResult.ok && toolResult.text.startsWith('用户拒绝')) {
+            rejectedTools.add(
+                '「$name」${toolResult.text.replaceFirst('用户拒绝：', '：')}');
+          }
           // 8-06 21:36：continue/resolve_pending 结果不回填工具消息
           final isContinue = name == 'continue_speaking' || name == 'resolve_pending';
           if (!isContinue && nativeCalls.contains(call)) {
@@ -1001,6 +1031,50 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         } else {
           // 工具轮没说话（可能又调工具）→ 工具阶段不显示
           ChatPresence.instance.endTyping();
+        }
+        // 8-07 00:1x 用户：审批拒绝系统事件化（GPT 方案④：task_rejected
+        // 不是普通 user/tool 消息）——男主收到明确事件，必须决策：
+        // 换方案 / 跳过这步 / 取消流程 / 先回复她。不能当没看见继续傻走。
+        if (rejectedTools.isNotEmpty) {
+          rejectedCount++;
+          String flowInfo = '';
+          final flowText = FlowStore.text(personaId);
+          if (flowText != null && flowText.isNotEmpty) {
+            flowInfo = '你正在执行流程：\n$flowText\n';
+          }
+          final event = '你调用的工具被她拒绝了：${rejectedTools.join('；')}。\n'
+              '$flowInfo'
+              '${rejectedCount >= 3
+                  ? '她已经连续拒绝 3 次了，别再尝试这个方向，直接回复她。'
+                  : '请决定下一步：换方案 / 跳过这步 / 取消流程 / 先回复她。'}';
+          rejectedTools.clear();
+          ChatPresence.instance.beginTyping();
+          result = await _aiSvc.generateReply(
+            '',
+            personaId,
+            personaName: personaName,
+            personaPrompt: _currentPersonaPrompt(),
+            userAlreadyReplied: true,
+            sessionId: _chatSessionId,
+            storagePersonaId: chatPid,
+            systemEvent: event,
+          );
+          if (result.text.trim().isNotEmpty) {
+            replyTexts.add(result.text.trim());
+            final eventText = await _displayableText(result.text);
+            if (eventText.isNotEmpty) {
+              _msgKey.currentState?.appendMessage(ChatMessage(
+                id: '${DateTime.now().microsecondsSinceEpoch}_aiRej$rejectedCount',
+                text: eventText,
+                isMe: false,
+                thinkingChain: result.reasoningContent,
+              ));
+            } else {
+              ChatPresence.instance.endTyping();
+            }
+          } else {
+            ChatPresence.instance.endTyping();
+          }
         }
       }
 

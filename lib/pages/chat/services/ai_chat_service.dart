@@ -618,29 +618,32 @@ class AiChatService {
             '管理你的流程（8-06 23:55 你设计：长任务先立流程，一条条执行，'
             '做完再结束）。action=create（立流程：goal 目标 + steps 步骤列表）'
             '/next（当前步完成，推进下一步）/finish（全部完成）/'
-            'cancel（取消）/resume（被她打断后继续）/status（看当前流程）。'
+            'cancel（取消）/resume（被她打断后继续）/status（看当前流程）/'
+            'update（她提了新要求 → 更新 goal/steps 从头执行）。'
             '⚠️ 你自己的流程，不需要她审批。'
             '流程执行中她发来的消息会被管家收集，你不用管，专注执行；'
             '被她打断会收到系统事件，告诉你停在哪一步、她说了什么，'
-            '你再决定继续还是先回复她。',
+            '你再决定继续还是先回复她；'
+            '她拒绝了你的工具调用也会收到系统事件，别无视，换方案或先回复她。',
         'parameters': {
           'type': 'object',
           'properties': {
             'action': {
               'type': 'string',
               'description':
-                  'create / next / finish / cancel / resume / status',
+                  'create / next / finish / cancel / resume / status / update',
             },
             'goal': {
               'type': 'string',
-              'description': 'create 时：流程目标，如"测所有工具"',
+              'description':
+                  'create 时：流程目标；update 时：新目标（可选）',
             },
             'steps': {
               'type': 'array',
               'items': {'type': 'string'},
               'description':
                   'create 时：步骤列表，如 ["查记忆类工具", "测 record_memory", '
-                  '"测 recall_memory"]',
+                  '"测 recall_memory"]；update 时：新步骤列表（可选）',
             },
           },
           'required': ['action'],

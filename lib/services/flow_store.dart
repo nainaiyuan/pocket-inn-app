@@ -101,6 +101,33 @@ class FlowStore {
     return '流程已立：$goal（${clean.length} 步，从第 1 步开始）';
   }
 
+  /// 8-07 00:1x 用户：用户提了新要求 → 男主更新流程（改目标/步骤），从头执行
+  static Future<String> update(String personaId,
+      {String? goal, List<String>? steps}) async {
+    final f = await _read(personaId);
+    if (f == null) return '没有流程（create 先立）';
+    if (goal != null && goal.trim().isNotEmpty) {
+      f['goal'] = goal.trim();
+    }
+    if (steps != null) {
+      final clean = <String>[];
+      for (final s in steps) {
+        final t = s.trim();
+        if (t.isNotEmpty) clean.add(t);
+      }
+      if (clean.isEmpty) return 'steps 至少要一步';
+      f['steps'] = clean;
+    }
+    f['currentStep'] = 0;
+    // 暂停/取消中更新 → 回到执行中
+    if (f['status'] == 'stopped' || f['status'] == 'cancelled') {
+      f['status'] = 'running';
+    }
+    f['stoppedNote'] = '';
+    await _write(personaId, f);
+    return '流程已更新：${f['goal']}（${_stepsOf(f).length} 步，从头开始）';
+  }
+
   /// 完成当前步，推进到下一步；已是最后一步则提示 finish
   static Future<String> next(String personaId) async {
     final f = await _read(personaId);
