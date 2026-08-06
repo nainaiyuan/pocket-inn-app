@@ -464,6 +464,109 @@ class AiChatService {
     {
       'type': 'function',
       'function': {
+        'name': 'query_record',
+        'description':
+            '查分类记录（8-06 18:41-19:21 你自管的分类记录体系）。'
+            '两种查法：① keywords 给一组词（如["猫","布偶"]）→ 返回命中的记录'
+            '（挂在分类下的原话+时间，同分类的一起出）；② object 给对象名'
+            '（如"妈妈"）→ 返回候选分类路径（用户·家人·妈妈 / 用户·亲戚·妈妈…），'
+            '你看哪个对，不对就 manage_record_tree 调整。'
+            '记东西前先查：已有就不动，没有才 add_record。只读，不需要审批。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'keywords': {
+              'type': 'array',
+              'items': {'type': 'string'},
+              'description': '关键词组（任一已存组 ⊆ 这些词即命中）',
+            },
+            'object': {
+              'type': 'string',
+              'description': '对象名（查候选分类路径用，如"妈妈""猫"）',
+            },
+          },
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'add_record',
+        'description':
+            '记一条分类记录（8-06 18:41-19:21 你自管）。'
+            '先 query_record 查过没有，才记。按 归属→关系→对象→类别 格式给 path'
+            '（如["用户","家人","妈妈","喜好"]；已有分类就挂进去，没有就让系统建）。'
+            'keyword_groups 多组关键词（a+b / a+b+c / b+d 任意一组命中都能调出这条）；'
+            'text 是原话（带时间自动记），凑不成关键词的单独一句话也记（合并进该分类）。'
+            '这是你观察到的她的信息，你记你整理，不用打扰她。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'path': {
+              'type': 'array',
+              'items': {'type': 'string'},
+              'description': '分类路径，如["用户","宠物"] 或 ["用户","家人","妈妈","喜好"]',
+            },
+            'keyword_groups': {
+              'type': 'array',
+              'items': {
+                'type': 'array',
+                'items': {'type': 'string'},
+              },
+              'description': '多组关键词，如[["喜欢","猫猫"],["想养","布偶"]]',
+            },
+            'text': {
+              'type': 'string',
+              'description': '原话/说明，如"她说好想养一只布偶"',
+            },
+            'summary': {
+              'type': 'string',
+              'description': '可选：一句话总结（如"她喜欢猫"）',
+            },
+          },
+          'required': ['path', 'text'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'manage_record_tree',
+        'description':
+            '调整分类树（8-06 19:13-19:19 你设计）。'
+            '你查候选分类后发现不对（如妈妈应该在"亲戚"不在"家人"）、想加个大类'
+            '（家人前面加"亲戚"）、改名、移动、删除 → 用这个工具。'
+            '⚠️ 改分类影响她（她看到的分类/记录会变）→ 必须弹窗给她确认，'
+            '她拒绝会给反馈，按反馈改完再提交。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'action': {
+              'type': 'string',
+              'enum': ['rename', 'move', 'add_node', 'delete_node'],
+              'description': 'rename=改名 move=移动(换父) add_node=加节点 delete_node=删节点',
+            },
+            'node_id': {
+              'type': 'string',
+              'description': '目标节点 id（query_record 返回里有）',
+            },
+            'name': {
+              'type': 'string',
+              'description': 'rename 的新名字 / add_node 的新节点名',
+            },
+            'new_parent_path': {
+              'type': 'array',
+              'items': {'type': 'string'},
+              'description': 'move 的新父路径，如["用户","亲戚"]',
+            },
+          },
+          'required': ['action', 'node_id'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
         'name': 'query_setting_history',
         'description':
             '查设定变更历史（哪个版本改了什么、什么时候改的）。'

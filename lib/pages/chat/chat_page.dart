@@ -8,6 +8,7 @@ import '../../services/tool_approval_store.dart';
 import '../../services/global_timer_card_service.dart';
 import '../../services/card_task_store.dart';
 import '../../services/setting_version_store.dart';
+import '../../services/record_tree_store.dart';
 import 'widgets/task_list_page.dart';
 import '../../data/bug_knowledge_base.dart';
 import 'companion_page.dart';
@@ -687,6 +688,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           } else if (name == 'query_setting_history') {
             // 8-06 18:08 用户：男主查设定变更历史（只读，不需要审批）
             toolResult = await _executeQuerySettingHistory(args);
+          } else if (name == 'query_record') {
+            // 8-06 18:41-19:21 用户：男主查分类记录（只读，不需要审批）
+            toolResult = await _executeQueryRecord(args);
+          } else if (name == 'add_record') {
+            // 男主自己记（他整理的，不打扰她）
+            toolResult = await _executeAddRecord(args);
+          } else if (name == 'manage_record_tree') {
+            // 改分类影响她 → 弹窗审批
+            toolResult = await _executeManageRecordTree(args);
           } else {
             toolResult = _ToolResult(false, '未知工具：$name');
           }
@@ -3179,6 +3189,271 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     return _ToolResult(true, buf.toString());
   }
 
+  /// 工具执行：query_record（男主查分类记录 / 候选分类路径）
+  Future<_ToolResult> _executeQueryRecord(Map<String, dynamic> args) async {
+    final tree = await RecordTreeStore.load();
+    final keywords = (args['keywords'] as List?)?.map((e) => e.toString()).toList() ?? [];
+    final object = args['object']?.toString().trim() ?? '';
+
+    final buf = StringBuffer();
+    var any = false;
+
+    if (object.isNotEmpty) {
+      final paths = RecordTreeStore.candidatePaths(tree, object);
+      if (paths.isNotEmpty) {
+        any = true;
+        buf.writeln('查「$object」的候选分类路径：');
+        for (final pt in paths) {
+          buf.writeln('- $pt');
+        }
+        buf.writeln('（看哪个对；不对就用 manage_record_tree 调整，会影响她所以要弹窗确认）');
+      }
+    }
+
+    if (keywords.isNotEmpty) {
+      final hits = RecordTreeStore.matchEntries(tree, keywords);
+      if (hits.isNotEmpty) {
+        any = true;
+        buf.writeln('关键词 ${keywords.join('+')} 命中的记录：');
+        for (final e in hits) {
+          final path = RecordTreeStore.pathText(tree, e.nodeId);
+          buf.writeln('📂 $path'
+              '${e.summary != null && e.summary!.isNotEmpty ? '（${e.summary}）' : ''}');
+          for (final n in e.notes) {
+            final t = n.time;
+            final ts = '${t.month.toString().padLeft(2, '0')}-'
+                '${t.day.toString().padLeft(2, '0')} '
+                '${t.hour.toString().padLeft(2, '0')}:'
+                '${t.minute.toString().padLeft(2, '0')}';
+            buf.writeln('  · $ts ${n.text}'
+                '${n.source != null && n.source!.isNotEmpty ? '（${n.source}）' : ''}');
+          }
+          if (e.keywordGroups.isNotEmpty) {
+            buf.writeln('  关键词组：${e.keywordGroups.map((g) => g.join('+')).join(' / ')}');
+          }
+        }
+        buf.writeln('（同一分类下的记录是一家人，一起出来了）');
+      }
+    }
+
+    if (!any) {
+      // 给出现有分类概览，帮男主决定挂哪
+      final paths = <String>[];
+      for (final n in tree.nodes) {
+        if (n.parentId != null) paths.add(RecordTreeStore.pathText(tree, n.id));
+      }
+      if (paths.isEmpty) {
+        return const _ToolResult(true, '没查到。现有分类也还没有——你可以 add_record 新建'
+            '（按 归属→关系→对象→类别 格式，如 ["用户","宠物"]）。');
+      }
+      buf.writeln('没查到匹配。现有分类：');
+      for (final pt in paths.take(40)) {
+        buf.writeln('- $pt');
+      }
+      if (paths.length > 40) buf.writeln('…还有 ${paths.length - 40} 个');
+      buf.writeln('（优先挂进现有分类；都不合适就 add_record 新建）');
+    }
+    return _ToolResult(true, buf.toString().trim());
+  }
+
+  /// 工具执行：add_record（男主自己记，挂分类下，免审批）
+  Future<_ToolResult> _executeAddRecord(Map<String, dynamic> args) async {
+    final path = (args['path'] as List?)?.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList() ?? [];
+    if (path.isEmpty) return const _ToolResult(false, '记录失败：没给分类路径');
+    final text = args['text']?.toString().trim() ?? '';
+    if (text.isEmpty) return const _ToolResult(false, '记录失败：没写原话');
+    final groups = (args['keyword_groups'] as List?)
+            ?.map((g) => (g as List).map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList())
+            .where((g) => g.isNotEmpty)
+            .toList() ??
+        [];
+    final summary = args['summary']?.toString().trim() ?? '';
+
+    final tree = await RecordTreeStore.load();
+    // 归属根校验：路径第一层必须是 用户/男主/其他
+    if (path.first != '用户' && path.first != '男主' && path.first != '其他') {
+      return const _ToolResult(false, '记录失败：路径第一层必须是 用户/男主/其他 之一'
+          '（分清楚是谁的）');
+    }
+    final nodeName = path.last;
+    final parentPath = path.sublist(0, path.length - 1);
+    final node = tree.ensureNode(parentPath, nodeName);
+
+    // 每分类一条记录容器：存在则合并（原话/关键词组追加），不存在则新建
+    var entry = tree.entries.where((e) => e.nodeId == node.id).firstOrNull;
+    if (entry == null) {
+      entry = RecordEntry(
+        id: RecordTreeStore.newId('re'),
+        nodeId: node.id,
+        keywordGroups: groups,
+        notes: [RecordNote(text: text, time: DateTime.now(), source: '男主记录')],
+        summary: summary.isEmpty ? null : summary,
+      );
+      tree.entries.add(entry);
+    } else {
+      for (final g in groups) {
+        if (!entry.keywordGroups.any((eg) => eg.join('|') == g.join('|'))) {
+          entry.keywordGroups.add(g);
+        }
+      }
+      entry.notes.add(RecordNote(text: text, time: DateTime.now(), source: '男主记录'));
+      if (summary.isNotEmpty) entry.summary = summary;
+    }
+    await RecordTreeStore.save(tree);
+    final pathText = RecordTreeStore.pathText(tree, node.id);
+    DebugLogger.log('指令模块', '🌳 男主记了一条：$pathText');
+    return _ToolResult(true, '已记到「$pathText」'
+        '${entry.keywordGroups.isNotEmpty ? '，关键词组：${entry.keywordGroups.map((g) => g.join('+')).join(' / ')}' : ''}'
+        '。原话和以后同分类的句子都会合并在这里。');
+  }
+
+  /// 工具执行：manage_record_tree（改分类影响她 → 弹窗审批）
+  Future<_ToolResult> _executeManageRecordTree(Map<String, dynamic> args) async {
+    final action = args['action']?.toString() ?? '';
+    final nodeId = args['node_id']?.toString() ?? '';
+    final name = args['name']?.toString().trim() ?? '';
+    final newParentPath = (args['new_parent_path'] as List?)
+            ?.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList() ??
+        [];
+
+    final tree = await RecordTreeStore.load();
+    final node = tree.nodeById(nodeId);
+    if (node == null) return const _ToolResult(false, '调整失败：找不到这个分类节点');
+
+    // 构造变更描述
+    String desc;
+    switch (action) {
+      case 'rename':
+        if (name.isEmpty) return const _ToolResult(false, '调整失败：没给新名字');
+        desc = '把「${RecordTreeStore.pathText(tree, node.id)}」改名为「$name」';
+        break;
+      case 'move':
+        if (newParentPath.isEmpty) return const _ToolResult(false, '调整失败：没给新位置');
+        desc = '把「${RecordTreeStore.pathText(tree, node.id)}」挪到「${newParentPath.join('·')}」下面';
+        break;
+      case 'add_node':
+        if (name.isEmpty) return const _ToolResult(false, '调整失败：没给新分类名');
+        desc = '在「${RecordTreeStore.pathText(tree, node.id)}」下面加分类「$name」';
+        break;
+      case 'delete_node':
+        desc = '删除「${RecordTreeStore.pathText(tree, node.id)}」'
+            '（它下面的子分类和记录一起删）';
+        break;
+      default:
+        return _ToolResult(false, '调整失败：未知动作 $action');
+    }
+
+    // 弹窗审批（复用设定审批弹窗模式：显示变更 + 确认/拒绝 + 反馈）
+    final result = await _showRecordTreeConfirmDialog(desc);
+    if (result == null) {
+      return _ToolResult(false, '她没回应分类调整（先别催，她可能在忙）');
+    }
+    if (!result.approved) {
+      final fb = result.feedback.trim();
+      return _ToolResult(
+        false,
+        '她拒绝了分类调整。'
+        '${fb.isNotEmpty ? '她的反馈：$fb——按她的意见改完再提交。' : '她没说原因，你可以问问她。'}',
+      );
+    }
+
+    // 执行
+    bool ok = false;
+    switch (action) {
+      case 'rename':
+        ok = tree.renameNode(nodeId, name);
+        break;
+      case 'move':
+        final parent = tree.ensureNode(
+            newParentPath.sublist(0, newParentPath.length - 1),
+            newParentPath.last);
+        ok = tree.moveNode(nodeId, parent.id);
+        if (!ok) {
+          return const _ToolResult(false, '移动失败：不能挪到它自己的子树里');
+        }
+        break;
+      case 'add_node':
+        tree.ensureNode([...RecordTreeStore.pathText(tree, node.id).split('·'), name].toList(), name);
+        ok = true;
+        break;
+      case 'delete_node':
+        ok = tree.deleteNode(nodeId);
+        if (!ok) {
+          return const _ToolResult(false, '删除失败：归属根（用户/男主/其他）不能删');
+        }
+        break;
+    }
+    if (!ok) return _ToolResult(false, '调整失败，请重试');
+    await RecordTreeStore.save(tree);
+    DebugLogger.log('指令模块', '🌳 分类已调整（她确认过）：$desc');
+    _appendToolBubble('🌳 分类已调整：$desc');
+    return _ToolResult(true, '已调整：$desc。她确认过了。');
+  }
+
+  /// 分类调整审批弹窗（8-06 19:19 用户：弹窗内对话迭代，改对才确认）
+  Future<({bool approved, String feedback})?> _showRecordTreeConfirmDialog(
+      String description) async {
+    if (!mounted) return null;
+    FocusManager.instance.primaryFocus?.unfocus();
+    final fbCtrl = TextEditingController();
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('🌳 男主想调整分类'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF7EAF1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '他想：$description',
+                  style: const TextStyle(fontSize: 13, height: 1.4),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: fbCtrl,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  hintText: '不同意的话，写给他让他再改…（可不填）',
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('拒绝', style: TextStyle(color: Color(0xFF8A7A80))),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('同意'),
+          ),
+        ],
+      ),
+    );
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (approved == null) return null;
+    return (approved: approved, feedback: fbCtrl.text);
+  }
+
   /// 通用超时唤醒：waitMinutes 后用户没回聊天页 → butlerWakeUp 唤醒男主
   /// （8-06 13:38 从 _scheduleNotifyWakeUp 泛化，notify_user / countdown_card 共用）
   void _scheduleWakeUp(int waitMinutes, String instruction) {
@@ -3227,6 +3502,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       'manage_task': '管理任务',
       'update_setting': '更新设定',
       'query_setting_history': '查设定历史',
+      'query_record': '查记录',
+      'add_record': '记记录',
+      'manage_record_tree': '调分类',
     };
     final matched = known.keys.where(userText.contains).toList();
     if (matched.isEmpty) return null;
@@ -3391,6 +3669,36 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                 '（这些都是你经历过/主动做出的设定调整，顺着时间线你就能明白'
                 '自己为什么是现在这个样子。需要细节可以调 query_setting_history。）';
           }
+          // 8-06 18:41-19:21 用户：分类记录体系 —— 记录职责 + 现有分类概览
+          final recordDuty = '\n\n【你的记录职责】'
+              '观察她的喜好/习惯/家人/宠物/说过的话，发现值得记的：'
+              '先调 query_record（给关键词组或对象名）查有没有，已有就不动；'
+              '没有就调 add_record 记下来——按「归属→关系→对象→类别」格式选分类路径'
+              '（归属必须是 用户/男主/其他 之一，分清楚是谁的；'
+              '如她妈妈的事 = ["用户","家人","妈妈","喜好"]）。'
+              '凑不成关键词组合的一句话也记，会合并进该分类。'
+              '记录里多挂几组关键词（a+b、a+b+c、b+d…），以后任意一组命中都能翻出原话和时间。'
+              '想改分类（改名/挪动/加大类/删除）会影响她 → 调 manage_record_tree，'
+              '会弹窗给她确认，她拒绝就给反馈，按反馈改完再提交。';
+          prompt += recordDuty;
+          // 现有分类概览（男主知道有什么，避免重复建；同步缓存读）
+          try {
+            final tree = RecordTreeStore.cached();
+            if (tree != null) {
+              final paths = <String>[];
+              for (final n in tree.nodes) {
+                if (n.parentId != null) {
+                  paths.add(RecordTreeStore.pathText(tree, n.id));
+                }
+              }
+              if (paths.isNotEmpty) {
+                prompt += '\n\n【现有分类】\n';
+                prompt += paths.take(50).join('\n');
+                if (paths.length > 50) prompt += '\n…共 ${paths.length} 个分类';
+                prompt += '\n（记东西优先挂进这些分类；都不合适再新建）';
+              }
+            }
+          } catch (_) {}
         }
       }
       return prompt;
