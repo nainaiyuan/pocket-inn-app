@@ -9,7 +9,6 @@ import '../../services/global_timer_card_service.dart';
 import '../../services/card_task_store.dart';
 import '../../services/setting_version_store.dart';
 import '../../services/record_tree_store.dart';
-import '../../services/tool_result_store.dart';
 import '../../services/working_pad_store.dart';
 import '../../services/timer_plan_store.dart';
 import '../../services/pending_queue_store.dart';
@@ -303,7 +302,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
     // 8-06 21:00：工具结果记忆预热（prompt 注入同步读，这里先刷新缓存）
-    ToolResultStore.warm(personaId);
     // 8-06 21:12：便签（当前任务模块）预热
     WorkingPadStore.warm(personaId);
     // 8-06 21:26：定时任务计划预热
@@ -775,13 +773,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           if (name != 'continue_speaking' && name != 'resolve_pending') {
             _appendToolResultBubble(name, toolResult);
           }
-          // 8-06 21:00 用户：工具结果记忆——记内容不记成败！
-          // 男主看记忆 = 直接看到上次查到的内容（如清单、查到的记忆），不用重查
-          // 8-06 21:36：continue/resolve_pending 不记（表达动作，非查询）
-          if (name != 'continue_speaking' && name != 'resolve_pending') {
-            ToolResultStore.add(personaId, name,
-                '${toolResult.ok ? '✅' : '❌'}${toolResult.text}');
-          }
           DebugLogger.log('AI路由', '🔧 工具 $name 结果：${toolResult.text.length > 80 ? toolResult.text.substring(0, 80) + '…' : toolResult.text}');
           // 8-04 17:0x（用户：上下文要留地方放工具，男主才知道做过什么；
           // 带时间戳+成败+原因，失败后才能继续调工具解决）：
@@ -1119,7 +1110,6 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
     // 8-06 21:00：工具结果记忆预热（prompt 注入同步读，这里先刷新缓存）
-    ToolResultStore.warm(personaId);
     // 8-06 21:12：便签（当前任务模块）预热
     WorkingPadStore.warm(personaId);
     // 8-06 21:26：定时任务计划预热
@@ -3875,18 +3865,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           // 8-06 20:53 用户报 bug：男主反复 list_tools → 工具概览注入（男主天生知道）
           // 8-06 21:54 用户：不写全量清单——分类概览 + 常用表，细节自查
           prompt += '\n\n${_toolListText()}'
-              '\n（测试工具时一个个来，调用完一个根据结果决定下一个，'
-              '不要重复查清单；查过的结果会记住。）';
-          // 8-06 21:00 用户：工具结果记忆——男主看最近结果 = 直接知道上次查到什么，
-          // 不用重查（根治"又查又查"）；没记录过就不注入
-          final recentTools = ToolResultStore.recent(pid);
-          if (recentTools.isNotEmpty) {
-            final lines = recentTools.map((e) =>
-                '${e['time']} ${e['tool']} → ${e['result']}').join('\n');
-            prompt += '\n\n【你最近用过的工具·结果】\n$lines'
-                '\n（这些是你刚做过的，结果都在这；要用的功能如果结果里已经有了，'
-                '直接照着用，不用重新查）';
-          }
+              '\n（连续测试/做事时：先把步骤立到便签（1. 2. 3.），'
+              '再一条条执行过去；查到的结果自己决定留不留，重要的存便签，'
+              '别重复查同一件事。）';
           // 8-06 21:12 用户：男主便签/当前任务模块——他自己维护，每轮注入
           final padText = WorkingPadStore.text(pid);
           if (padText != null) {
