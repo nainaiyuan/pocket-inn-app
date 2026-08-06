@@ -2490,16 +2490,32 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         '确认前不要当作已记住的信息使用。');
   }
 
+  /// 8-06 20:53 用户报 bug：男主反复 list_tools 没有工具记忆
+  /// → 工具清单统一成一份：prompt 注入（男主天生知道）+ list_tools 返回同一份
+  String _toolListText() {
+    return '你的工具清单（固定不变，直接调用；你本来就知道，不要反复查 list_tools）：\n'
+        '- record_memory：记用户的事（喜好/约定/日常/事实/其他）\n'
+        '- recall_memory：查以前记的关于用户的事\n'
+        '- save_identity_memory：记代号人物（如 家人A）的事\n'
+        '- write_diary：写日记存档\n'
+        '- query_diary：按关键词查日记\n'
+        '- notify_user：弹窗通知她（她能看到）\n'
+        '- request_permission：申请某能力免审批\n'
+        '- query_logs：查系统日志（排查问题用）\n'
+        '- report_bug：报 bug 给她\n'
+        '- countdown_card：发计时卡片（倒计时提醒）\n'
+        '- manage_task：管任务/卡片（cancel/extend/edit_title/reject）\n'
+        '- update_setting：改设定（必须她审批）\n'
+        '- query_setting_history：查设定变更历史\n'
+        '- query_record：查分类记录/候选分类路径\n'
+        '- add_record：记分类记录（你自己整理）\n'
+        '- manage_record_tree：调分类（改名/挪动/删除，必须她审批）\n'
+        '- list_tools：查看本清单（你已经知道了）';
+  }
+
   /// 工具执行：list_tools（男主查询自己有哪些工具可用）
   _ToolResult _executeListToolsTool() {
-    return const _ToolResult(true, '你现在可以使用的工具：\n'
-        '- record_memory：记录用户的事（类别：喜好/约定/日常/事实/其他）\n'
-        '- recall_memory：查看以前记住的关于用户的事\n'
-        '- save_identity_memory：保存关于某位代号人物（如 家人A）的事\n'
-        '- write_diary：写日记（把值得记住的细节存档）\n'
-        '- query_diary：查日记（按关键词回忆以前的细节）\n'
-        '- list_tools：查看工具清单（就是现在这个）\n'
-        '调用完成后自然地继续和用户说话。');
+    return _ToolResult(true, _toolListText());
   }
 
   /// 工具执行：write_diary（男主写日记 → 存档，无需用户审批）
@@ -3669,6 +3685,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                 '（这些都是你经历过/主动做出的设定调整，顺着时间线你就能明白'
                 '自己为什么是现在这个样子。需要细节可以调 query_setting_history。）';
           }
+          // 8-06 20:53 用户报 bug：男主反复 list_tools → 工具清单注入，男主天生知道
+          prompt += '\n\n【你的工具清单】\n${_toolListText()}'
+              '\n（工具就这些，直接调用。测试工具时一个个来，'
+              '调用完一个根据结果决定下一个，不要重复查清单。）';
           // 8-06 18:41-19:21 用户：分类记录体系 —— 记录职责 + 现有分类概览
           final recordDuty = '\n\n【你的记录职责】'
               '观察她的喜好/习惯/家人/宠物/说过的话，发现值得记的：'
