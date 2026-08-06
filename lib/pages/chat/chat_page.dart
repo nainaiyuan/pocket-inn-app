@@ -2864,9 +2864,25 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             );
           });
         }
-        // 逾期 → 唤醒男主再找她
-        _scheduleWakeUp(wakeMin, '卡片任务时间到了她还没回应/没回来，'
-            '你用 notify_user 弹消息问她，或直接说一句想她的话。自然点，别催。');
+        // 到期 → 系统给男主发判断指令（8-06 13:59 用户）：
+        // 男主自己判断延期 / 撤销换一个，用 manage_task 操作
+        final expireTxt = '【系统】卡片「$title」时间到了，她还没回应/没完成。'
+            '你来判断：要不要延期（manage_task extend）、'
+            '还是撤销换一个方式（manage_task cancel）？'
+            '决定好了用 manage_task 处理，卡片和任务列表会同步。';
+        if (pid.isNotEmpty) {
+          ContextManager.instance.feedAssistantMessage(pid, expireTxt);
+          ChatStorageService().appendMessage(
+            pid,
+            ChatMessage(
+              id: '${DateTime.now().microsecondsSinceEpoch}_exp',
+              text: '⏰ 卡片「$title」时间到了',
+              isMe: false,
+            ),
+          );
+        }
+        // 逾期还没处理 → 唤醒男主主动判断（判断指令同上）
+        _scheduleWakeUp(wakeMin, expireTxt);
       },
       onRequest: (reason) async {
         // 她提交了申请调整 → 进上下文+落库，男主自己判断（manage_task 回应）
