@@ -13,6 +13,7 @@ import '../../services/tool_result_store.dart';
 import '../../services/working_pad_store.dart';
 import '../../services/timer_plan_store.dart';
 import '../../services/pending_queue_store.dart';
+import '../../services/tool_catalog.dart';
 import 'widgets/task_list_page.dart';
 import '../../data/bug_knowledge_base.dart';
 import 'companion_page.dart';
@@ -309,6 +310,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     TimerPlanStore.warm(personaId);
     // 8-06 21:36：待回复队列预热
     PendingQueueStore.warm(personaId);
+    // 8-06 21:54：常用工具表预热
+    FrequentToolsStore.warm(personaId);
     // 8-05 14:36 用户修正：测试对话 ≠ 关功能，而是独立"测试空间"——
     // 模拟 AI 聊天时所有数据（会话/消息/记忆/情绪/上下文总结）落到
     // ${真实persona}__mock__test 这个测试 key，功能照常跑、数据不混；
@@ -612,7 +615,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               _appendToolBubble('❌ 你拒绝了查看工具清单');
               toolResult = _ToolResult(false, '用户拒绝：暂不查看工具清单');
             } else {
-              toolResult = _executeListToolsTool();
+              toolResult = await _executeListToolsTool(args);
             }
           } else if (name == 'write_diary') {
             final content = args['content']?.toString() ?? '';
@@ -715,6 +718,31 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             // 8-06 21:12 用户：男主自己的便签（当前任务模块），自己维护，免审批
             _appendToolBubble('📋 男主在整理自己的便签…');
             toolResult = await _executeManagePad(args);
+          } else if (name == 'manage_frequent_tools') {
+            // 8-06 21:54 用户：常用工具表维护（男主自己的，免审批）
+            final action = args['action']?.toString() ?? '';
+            final name = args['name']?.toString() ?? '';
+            if (action == 'add') {
+              if (!ToolCatalog.allNames.contains(name)) {
+                toolResult = _ToolResult(false, '没有「$name」这个工具');
+              } else {
+                await FrequentToolsStore.add(personaId, name);
+                toolResult = _ToolResult(true,
+                    '已加入常用表：$name（每轮都会出现在【你常用的工具】）');
+              }
+            } else if (action == 'remove') {
+              final ok = await FrequentToolsStore.remove(personaId, name);
+              toolResult = ok
+                  ? _ToolResult(true, '已从常用表移除：$name')
+                  : _ToolResult(false, '常用表里没有「$name」');
+            } else if (action == 'list') {
+              final list = FrequentToolsStore.list(personaId);
+              toolResult = _ToolResult(true,
+                  list.isEmpty ? '常用表是空的（add 添加）' : '常用表：${list.join('、')}');
+            } else {
+              toolResult = const _ToolResult(false,
+                  'manage_frequent_tools 参数：action=add/remove/list，name=工具名');
+            }
           } else if (name == 'resolve_pending') {
             // 8-06 21:41 用户：回复标记也走工具（原生就是调工具的）
             // 8-06 21:43：没有"不回"选项——没回的留在待回复区挂着
@@ -1098,6 +1126,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     TimerPlanStore.warm(personaId);
     // 8-06 21:36：待回复队列预热
     PendingQueueStore.warm(personaId);
+    // 8-06 21:54：常用工具表预热
+    FrequentToolsStore.warm(personaId);
     await showAiProviderSheet(
       context: context,
       personaId: personaId,
@@ -2575,31 +2605,57 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 8-06 20:53 用户报 bug：男主反复 list_tools 没有工具记忆
   /// → 工具清单统一成一份：prompt 注入（男主天生知道）+ list_tools 返回同一份
   String _toolListText() {
-    return '你的工具清单（固定不变，直接调用；你本来就知道，不要反复查 list_tools）：\n'
-        '- record_memory：记用户的事（喜好/约定/日常/事实/其他）\n'
-        '- recall_memory：查以前记的关于用户的事\n'
-        '- save_identity_memory：记代号人物（如 家人A）的事\n'
-        '- write_diary：写日记存档\n'
-        '- query_diary：按关键词查日记\n'
-        '- notify_user：弹窗通知她（她能看到）\n'
-        '- request_permission：申请某能力免审批\n'
-        '- query_logs：查系统日志（排查问题用）\n'
-        '- report_bug：报 bug 给她\n'
-        '- countdown_card：发计时卡片（倒计时提醒）\n'
-        '- manage_task：管任务/卡片（cancel/extend/edit_title/reject）\n'
-        '- update_setting：改设定（必须她审批）\n'
-        '- query_setting_history：查设定变更历史\n'
-        '- query_record：查分类记录/候选分类路径\n'
-        '- add_record：记分类记录（你自己整理）\n'
-        '- manage_record_tree：调分类（改名/挪动/删除，必须她审批）\n'
-        '- manage_pad：整理便签（当前任务模块，你自己维护，免审批）\n'
-        '- continue_speaking：继续说（不等她回，自动再生成一轮）\n'
-        '- resolve_pending：标记待回复处理结果（回了/放下，走工具）\n'
-        '- list_tools：查看本清单（你已经知道了）';
+    // 8-06 21:54 用户：不把全量工具写进 prompt——分类概览 + 常用表，
+    // 细节男主自己调 list_tools {category} 查（查完进结果记忆，不用反复查）
+    final pid = _state.personaId ?? '';
+    final parts = <String>[
+      '【你的工具·概览】\n${ToolCatalog.overview()}'
+          '\n（想不起来某类有哪些/怎么用 → 调 list_tools {category} 查，'
+          '查完结果会记住，不用反复查）',
+    ];
+    final freq = FrequentToolsStore.text(pid);
+    if (freq != null) parts.add(freq);
+    return parts.join('\n\n');
   }
 
-  /// 工具执行：list_tools（男主查询自己有哪些工具可用）
-  _ToolResult _executeListToolsTool() {
+  /// 工具执行：list_tools（男主查工具：{category} 分类详情 / {name} 单个 /
+  /// 无参数 → 概览；{action: add_frequent/remove_frequent, name} 维护常用表）
+  Future<_ToolResult> _executeListToolsTool(Map<String, dynamic> args) async {
+    final action = args['action']?.toString();
+    final name = args['name']?.toString() ?? '';
+    final category = args['category']?.toString() ?? '';
+    final pid = _state.personaId ?? '';
+    if (action == 'add_frequent' || action == 'remove_frequent') {
+      if (name.isEmpty) {
+        return const _ToolResult(false, '维护常用表要带 name（工具名）');
+      }
+      if (action == 'add_frequent') {
+        if (!ToolCatalog.allNames.contains(name)) {
+          return _ToolResult(false, '没有「$name」这个工具');
+        }
+        await FrequentToolsStore.add(pid, name);
+        return _ToolResult(true,
+            '已加入常用表：$name（之后每轮都会出现在【你常用的工具】）');
+      }
+      final ok = await FrequentToolsStore.remove(pid, name);
+      return ok
+          ? _ToolResult(true, '已从常用表移除：$name')
+          : _ToolResult(false, '常用表里没有「$name」');
+    }
+    if (category.isNotEmpty) {
+      final detail = ToolCatalog.categoryDetail(category);
+      if (detail == null) {
+        return _ToolResult(false,
+            '没有「$category」这个分类（分类：${ToolCatalog.categories.keys.join('、')}）');
+      }
+      return _ToolResult(true, detail);
+    }
+    if (name.isNotEmpty) {
+      final detail = ToolCatalog.toolDetail(name);
+      return detail == null
+          ? _ToolResult(false, '没有「$name」这个工具')
+          : _ToolResult(true, detail);
+    }
     return _ToolResult(true, _toolListText());
   }
 
@@ -3651,6 +3707,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       'manage_pad': '整理便签',
       'continue_speaking': '继续说',
       'resolve_pending': '标记回复',
+      'manage_frequent_tools': '维护常用工具',
     };
     final matched = known.keys.where(userText.contains).toList();
     if (matched.isEmpty) return null;
@@ -3815,10 +3872,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                 '（这些都是你经历过/主动做出的设定调整，顺着时间线你就能明白'
                 '自己为什么是现在这个样子。需要细节可以调 query_setting_history。）';
           }
-          // 8-06 20:53 用户报 bug：男主反复 list_tools → 工具清单注入，男主天生知道
-          prompt += '\n\n【你的工具清单】\n${_toolListText()}'
-              '\n（工具就这些，直接调用。测试工具时一个个来，'
-              '调用完一个根据结果决定下一个，不要重复查清单。）';
+          // 8-06 20:53 用户报 bug：男主反复 list_tools → 工具概览注入（男主天生知道）
+          // 8-06 21:54 用户：不写全量清单——分类概览 + 常用表，细节自查
+          prompt += '\n\n${_toolListText()}'
+              '\n（测试工具时一个个来，调用完一个根据结果决定下一个，'
+              '不要重复查清单；查过的结果会记住。）';
           // 8-06 21:00 用户：工具结果记忆——男主看最近结果 = 直接知道上次查到什么，
           // 不用重查（根治"又查又查"）；没记录过就不注入
           final recentTools = ToolResultStore.recent(pid);

@@ -139,11 +139,18 @@ class AiChatService {
       'function': {
         'name': 'list_tools',
         'description':
-            '查看你现在可以使用的所有工具（能力清单）。'
-            '不确定自己能做什么、或想确认某个能力是否存在时调用，'
-            '会返回工具名和用途说明。',
+            '查工具（8-06 21:54：按分类查，别全量看）。'
+            '{category} 查某分类全部详情（分类：记忆/通知互动/设定/分类记录/'
+            '排查反馈/自管理）；{name} 查单个；都不带 → 分类概览。'
+            '维护常用表：{action: add_frequent/remove_frequent, name}。'
+            '查完结果会记住，不用反复查。',
         'parameters': {
           'type': 'object',
+          'properties': {
+            'category': {'type': 'string', 'description': '分类名，如 记忆'},
+            'name': {'type': 'string', 'description': '工具名，如 record_memory'},
+            'action': {'type': 'string', 'description': 'add_frequent / remove_frequent'},
+          },
         },
       },
     },
@@ -597,6 +604,25 @@ class AiChatService {
               'type': 'integer',
               'description': 'remove 的结束行号（可省略，省略=只删 from 那一行）',
             },
+          },
+          'required': ['action'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'manage_frequent_tools',
+        'description':
+            '维护你的常用工具表（8-06 21:54 你设计：常用工具放概览里'
+            '每轮全量注入，不常用的按分类查）。'
+            'action=add（加入常用）/remove（移除）/list（看当前表），'
+            'name=工具名。⚠️ 你自己的表，不需要她审批。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'action': {'type': 'string', 'description': 'add / remove / list'},
+            'name': {'type': 'string', 'description': '工具名，如 record_memory'},
           },
           'required': ['action'],
         },
