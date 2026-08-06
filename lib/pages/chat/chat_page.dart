@@ -2592,6 +2592,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         '- query_record：查分类记录/候选分类路径\n'
         '- add_record：记分类记录（你自己整理）\n'
         '- manage_record_tree：调分类（改名/挪动/删除，必须她审批）\n'
+        '- manage_pad：整理便签（当前任务模块，你自己维护，免审批）\n'
         '- continue_speaking：继续说（不等她回，自动再生成一轮）\n'
         '- resolve_pending：标记待回复处理结果（回了/放下，走工具）\n'
         '- list_tools：查看本清单（你已经知道了）';
