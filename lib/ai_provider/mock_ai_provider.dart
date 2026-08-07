@@ -94,8 +94,11 @@ class MockAIProvider {
         .map((m) => m.content)
         .join('\n');
     if (systemText2.contains('设定修改会话')) {
-      // 8-07 15:5x 用户：选项要能连续点——男主一次问多个问题（每组
-      // A/B/C），用户连着点，他继续问/出正式版；点选消息含"我选"
+      // 8-07 15:5x 用户：选项连续点 + 版本结合——mock 剧本：
+      // ① 首轮问两个问题（两组选项）
+      // ② 用户点选（含"我选"）→ 出 v2（改喜好）
+      // ③ 用户再说"再来一版" → 出 v3（加备注段）
+      // ④ 用户说"结合" → 出 v4（v2+v3 合并）
       String lastUser2 = '';
       for (final m in messages.reversed) {
         if (m.role == 'user') {
@@ -103,8 +106,38 @@ class MockAIProvider {
           break;
         }
       }
+      if (lastUser2.contains('结合')) {
+        AiModuleLog.log('模拟AI', '💬 设定会话（结合两版）→ 模拟男主出合并版');
+        return AIProviderResult(
+          text:
+              '好，我把两版结合一下，取 v2 的身份和 v3 的备注：\n'
+              '【新方案】\n'
+              '【身份】测试角色\n'
+              '【喜好】测试喜好C\n'
+              '【备注】测试备注',
+          providerName: '模拟AI',
+        );
+      }
       if (lastUser2.contains('我选')) {
-        AiModuleLog.log('模拟AI', '💬 设定会话（选了选项）→ 模拟男主出正式版本');
+        // 统计用户消息里"我选"出现次数：第一次 → v2，第二次 → v3
+        final pickCount = messages
+            .where((m) => m.role == 'user')
+            .map((m) => m.content)
+            .where((c) => c.contains('我选'))
+            .length;
+        if (pickCount >= 2) {
+          AiModuleLog.log('模拟AI', '💬 设定会话（第二次点选）→ 模拟男主出 v3 加备注');
+          return AIProviderResult(
+            text:
+                '好，这个也定了，我把备注段加上：\n'
+                '【新方案】\n'
+                '【身份】测试角色\n'
+                '【喜好】测试喜好C\n'
+                '【备注】测试备注',
+            providerName: '模拟AI',
+          );
+        }
+        AiModuleLog.log('模拟AI', '💬 设定会话（选了选项）→ 模拟男主出正式版本 v2');
         return AIProviderResult(
           text:
               '好，就按你选的来，我出正式方案：\n'
