@@ -4294,11 +4294,38 @@ class _ChatPageState extends State<ChatPage>
               busy = false;
               final hasNew = versions.any((x) => x.text == ctrl.text);
               if (!hasNew && idx >= 0) {
+                // 8-07 15:5x 用户：从旧版继续改 → 该版之后的版本自动作废
+                // （截断），新方案接在后面重新编号
+                if (currentV < versions.length) {
+                  versions.removeRange(currentV, versions.length);
+                }
                 versions.add((v: versions.length + 1, text: ctrl.text));
                 currentV = versions.length;
               }
               // 男主回复带【问题N】+【选项】→ 渲染可点选项组；没有就清空
               questionGroups = _parseOptionGroups(reply);
+            });
+          }
+
+          // 弃用某一版（✕）：删除后重编号，至少保留一版；
+          // 若编辑框内容是被删的版 → 载入最后一版
+          void discardVersion(int v) {
+            if (versions.length <= 1) return;
+            setState(() {
+              versions.removeWhere((x) => x.v == v);
+              for (var i = 0; i < versions.length; i++) {
+                versions[i] = (v: i + 1, text: versions[i].text);
+              }
+              if (currentV > versions.length) {
+                currentV = versions.length;
+              }
+              if (!versions.any((x) => x.text == ctrl.text)) {
+                ctrl.text = versions.last.text;
+                ctrl.selection = TextSelection.collapsed(
+                  offset: ctrl.text.length,
+                );
+                currentV = versions.length;
+              }
             });
           }
 
@@ -4392,10 +4419,11 @@ class _ChatPageState extends State<ChatPage>
                       const SizedBox(height: 8),
                     ],
                   ],
-                  // 方案版本区：男主出过几版一目了然，点版本号回看
+                  // 方案版本区：男主出过几版一目了然，点编号回看/从这版继续，
+                  // ✕ 弃用改错的版（8-07 15:5x 用户：版本多了要能弃用/回退）
                   if (versions.length > 1) ...[
                     const Text(
-                      '📚 男主方案版本（点编号回看）：',
+                      '📚 男主方案版本：点编号=回看/从这版继续（后面版本自动作废），✕=弃用这版',
                       style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
                     ),
                     const SizedBox(height: 4),
@@ -4403,34 +4431,63 @@ class _ChatPageState extends State<ChatPage>
                       spacing: 6,
                       children: [
                         for (final ver in versions)
-                          GestureDetector(
-                            onTap: () {
-                              ctrl.text = ver.text;
-                              setState(() => currentV = ver.v);
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: currentV == ver.v
-                                    ? const Color(0xFFC896B4)
-                                    : const Color(0xFFF7EAF1),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                'v${ver.v}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: currentV == ver.v
-                                      ? Colors.white
-                                      : const Color(0xFF8A7A80),
-                                  fontWeight: currentV == ver.v
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
+                          Container(
+                            padding: const EdgeInsets.only(left: 8),
+                            decoration: BoxDecoration(
+                              color: currentV == ver.v
+                                  ? const Color(0xFFC896B4)
+                                  : const Color(0xFFF7EAF1),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                GestureDetector(
+                                  onTap: () {
+                                    ctrl.text = ver.text;
+                                    ctrl.selection = TextSelection.collapsed(
+                                      offset: ctrl.text.length,
+                                    );
+                                    setState(() => currentV = ver.v);
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 3,
+                                    ),
+                                    child: Text(
+                                      'v${ver.v}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: currentV == ver.v
+                                            ? Colors.white
+                                            : const Color(0xFF8A7A80),
+                                        fontWeight: currentV == ver.v
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                if (versions.length > 1)
+                                  GestureDetector(
+                                    onTap: () => discardVersion(ver.v),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 3,
+                                      ),
+                                      child: Text(
+                                        '✕',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: currentV == ver.v
+                                              ? Colors.white70
+                                              : const Color(0xFFB08A9C),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                       ],
@@ -4530,8 +4587,13 @@ class _ChatPageState extends State<ChatPage>
       ),
     );
     FocusManager.instance.primaryFocus?.unfocus();
+    // 8-07 15:5x 用户：缓存及时删——弹窗关闭后释放控制器，避免泄漏
+    final outContent = ctrl.text;
+    final outFeedback = fbCtrl.text;
+    ctrl.dispose();
+    fbCtrl.dispose();
     if (approved == null) return null;
-    return (approved: approved, content: ctrl.text, feedback: fbCtrl.text);
+    return (approved: approved, content: outContent, feedback: outFeedback);
   }
 
   /// 设定会话内：男主回复（一次 AI 回合，可查只读信息；查了=流程没走完，继续）
