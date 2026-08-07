@@ -724,6 +724,9 @@ class _ChatPageState extends State<ChatPage>
       // 只有"主调用直接空 + 无工具"才需要轻提示用户
       var toolExecuted = false;
       var toolLoop = 0;
+      // 8-08 01:2x 用户（管家编排）：工具轮男主中间文本攒这里，流程结束
+      // 统一呈现（男主最后生成的完整回复已包含全部内容，攒的仅作日志/兜底）
+      final _toolRoundTexts = <String>[];
       final consecutiveToolCounts = <String, int>{};
       // 8-06 21:36：continue 累计计数（交错调用也能防无限"继续说"）
       var continueCount = 0;
@@ -1298,53 +1301,17 @@ class _ChatPageState extends State<ChatPage>
           storagePersonaId: chatPid,
         );
         if (result.text.trim().isNotEmpty) {
-          replyTexts.add(result.text.trim());
-          // 8-03 18:2x：工具轮男主回复也立即追加显示（渐进，不等循环结束）
-          final roundText = await _displayableText(result.text);
-          if (roundText.isNotEmpty) {
-            // 8-07 多气泡：工具轮也走 _appendMaleReply（无标签裸文本兜底成对话）
-            dbRows.addAll(await _appendMaleReply(
-              result.text,
-              thinkingChain: result.reasoningContent,
-            ));
-            // 打字机接管，"正在输出"由播完时 endTyping 关闭
-          } else {
-            ChatPresence.instance.endTyping();
-          }
-        } else {
-          // 工具轮没说话（可能又调工具）→ 工具阶段不显示
-          ChatPresence.instance.endTyping();
-        }
-        // 8-07 00:1x 用户：审批拒绝系统事件化（GPT 方案④：task_rejected
-        // 不是普通 user/tool 消息）——男主收到明确事件，必须决策：
-        // 换方案 / 跳过这步 / 取消流程 / 先回复她。不能当没看见继续傻走。
-        if (rejectedTools.isNotEmpty) {
-          rejectedCount++;
-          String flowInfo = '';
-          final flowText = FlowStore.text(personaId);
-          if (flowText != null && flowText.isNotEmpty) {
-            flowInfo = '你正在执行流程：\n$flowText\n';
-          }
-          final event =
-              '你调用的工具被她拒绝了：${rejectedTools.join('；')}。\n'
-              '$flowInfo'
-              '${rejectedCount >= 2 ? '她已经连续拒绝 2 次了，别再尝试这个方向，直接回复她（她不想让你做这件事）。' : '请决定下一步：换方案 / 跳过这步 / 取消流程 / 先回复她。'}';
-          rejectedTools.clear();
-          ChatPresence.instance.beginTyping();
-          result = await _aiSvc.generateReply(
-            '',
-            personaId,
-            personaName: personaName,
-            personaPrompt: _currentPersonaPrompt(),
-            userAlreadyReplied: true,
-            sessionId: _chatSessionId,
-            storagePersonaId: chatPid,
-            systemEvent: event,
-          );
-          if (result.text.trim().isNotEmpty) {
+          // 8-08 01:2x 用户（管家编排）：工具轮男主文本分两类——
+          // ① 中间文本（toolCalls 非空，还要继续调工具）→ 攒起不显示
+          //    （根治"做一个给一个"：渐进显示 → 管家批量执行 → 最后统一）
+          // ② 最终回复（toolCalls 空，不再调工具）→ 立即显示（男主最后
+          //    基于全部结果一次性说的话，正是用户要的"统一呈现"）
+          final isFinalReply =
+              result.toolCalls == null || result.toolCalls!.isEmpty;
+          if (isFinalReply) {
             replyTexts.add(result.text.trim());
-            final eventText = await _displayableText(result.text);
-            if (eventText.isNotEmpty) {
+            final roundText = await _displayableText(result.text);
+            if (roundText.isNotEmpty) {
               dbRows.addAll(await _appendMaleReply(
                 result.text,
                 thinkingChain: result.reasoningContent,
@@ -1353,8 +1320,30 @@ class _ChatPageState extends State<ChatPage>
               ChatPresence.instance.endTyping();
             }
           } else {
+            _toolRoundTexts.add(result.text.trim());
+            DebugLogger.log('AI路由', '🗜️ 工具轮中间文本攒起（第 $toolLoop 轮，'
+                '${result.text.length} 字，最后统一呈现）');
             ChatPresence.instance.endTyping();
           }
+        } else {
+          // 工具轮没说话（可能又调工具）→ 工具阶段不显示
+          ChatPresence.instance.endTyping();
+        }
+        // 8-08 01:2x 用户（管家编排）：审批拒绝【不打断流程】——拒绝结果
+        // 已作为普通工具结果回传男主（"用户拒绝：X"），流程走完统一说；
+        // 只保留连续拒绝计数（≥2 下一轮注入提示，男主别再试同一方向）
+        if (rejectedTools.isNotEmpty) {
+          rejectedCount++;
+          if (rejectedCount >= 2) {
+            toolMessages.add(AIChatMessage(
+              role: 'user',
+              content: '【系统事件】她已连续拒绝你 ${rejectedCount} 次'
+                  '（${rejectedTools.join('；')}），别再尝试这个方向——'
+                  '走完当前流程就直接回复她。',
+            ));
+            DebugLogger.log('AI路由', '⛔ 连续拒绝 ${rejectedCount} 次，注入停止提示');
+          }
+          rejectedTools.clear();
         }
       }
 
