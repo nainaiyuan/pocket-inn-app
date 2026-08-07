@@ -71,21 +71,51 @@ final RegExp _invokeRe = RegExp(
     caseSensitive: false);
 
 final RegExp _invokeParamRe = RegExp(
-    r'<parameter\s+name="([^"]+)">([\s\S]*?)</parameter>',
+    r'<parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)</parameter>',
     caseSensitive: false);
+
+/// 清洗层（8-07 21:36 用户实测贴出的男主真实输出）：模型模仿 Anthropic
+/// 流式格式时，<|IDSMLI|> 增量标记会被切碎污染——I/l/| 混用、空格错位、
+/// string="true" 属性混进 parameter、_name 下划线变体、闭合标签错乱。
+/// 先按标签名锚点把污染还原成干净 XML，再剥残留标记。
+String _sanitizeInvokeText(String text) {
+  var t = text;
+  // 闭合标签污染：</|I DSMLIl invoke> → </invoke>
+  t = t.replaceAll(
+      RegExp(r'</[^>]*?invoke', caseSensitive: false), '</invoke');
+  t = t.replaceAll(
+      RegExp(r'</[^>]*?parameter', caseSensitive: false), '</parameter');
+  t = t.replaceAll(
+      RegExp(r'</[^>]*?tool_calls', caseSensitive: false), '</tool_calls');
+  // 开标签污染：<|I DSMLIl invoke name=...> → <invoke name=...>
+  t = t.replaceAll(
+      RegExp(r'<[^/][^>]*?invoke', caseSensitive: false), '<invoke');
+  t = t.replaceAll(
+      RegExp(r'<[^/][^>]*?parameter', caseSensitive: false), '<parameter');
+  t = t.replaceAll(
+      RegExp(r'<[^/][^>]*?tool_calls', caseSensitive: false), '<tool_calls');
+  // 参数名下划线变体：_name= → name=
+  t = t.replaceAll('_name=', 'name=');
+  // 剥剩余独立流式标记（含 DSML 的标签，如 <|IDSMLI|> 完整/碎片）
+  t = t.replaceAll(
+      RegExp(r'<[^>]*DSML[^>]*>', caseSensitive: false), '');
+  return t;
+}
 
 /// 剥掉所有流式标记 + 工具调用区域（tool_calls…</tool_calls> 或裸 invoke 块）
 String stripAnthropicInvokeBlocks(String text) {
-  var t = text.replaceAll(_idsmliRe, '');
-  t = t.replaceAll(
-      RegExp(r'tool_calls[\s\S]*?</tool_calls>', caseSensitive: false), '');
-  t = t.replaceAll(_invokeRe, '');
-  return t.trim();
+  final t = _sanitizeInvokeText(text);
+  return t
+      .replaceAll(
+          RegExp(r'tool_calls[\s\S]*?</tool_calls>', caseSensitive: false),
+          '')
+      .replaceAll(_invokeRe, '')
+      .trim();
 }
 
-/// 从文本解析 Anthropic invoke 工具调用（剥标记后匹配）
+/// 从文本解析 Anthropic invoke 工具调用（清洗污染后匹配）
 List<Map<String, dynamic>> parseAnthropicInvokeCalls(String text) {
-  final clean = text.replaceAll(_idsmliRe, '');
+  final clean = _sanitizeInvokeText(text);
   final result = <Map<String, dynamic>>[];
   for (final m in _invokeRe.allMatches(clean)) {
     final name = m.group(1) ?? '';
