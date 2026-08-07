@@ -1237,9 +1237,8 @@ class AiChatService {
       if (historyMsgs.isNotEmpty) ...[
         AIChatMessage(
           role: 'system',
-          content: '【上下文说明】以下是历史分区（男主摘要 / 工具使用历史 / '
-              '系统历史 / 聊天历史），都是已聊过的内容。'
-              '最后一条【当前用户消息】才是你要回复的。',
+          content: '【上下文说明】以下是已聊过的历史（摘要/工具/系统/聊天分区），'
+              '最后一条【当前用户消息】才是要回复的。',
         ),
         ...historyMsgs,
       ],

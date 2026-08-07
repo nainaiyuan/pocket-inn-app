@@ -6404,19 +6404,18 @@ class _ChatPageState extends State<ChatPage>
                 '触发完/她明确不要了就从这里移除）\n$timerText';
           }
           // 8-06 18:41-19:21 用户：分类记录体系 —— 记录职责 + 现有分类概览
+          // 8-08 00:4x：措辞压缩（12 行 → 7 行核心，男主"醒来"负担更小）
           final recordDuty =
               '\n\n【你的记录职责】'
-              '观察她的喜好/习惯/家人/宠物/说过的话，发现值得记的：'
-              '先调 query_record（给关键词组或对象名）查有没有，已有就不动；'
-              '没有就调 add_record 记下来——按「归属→关系→对象→类别」格式选分类路径'
-              '（归属必须是 用户/男主/其他 之一，分清楚是谁的；'
-              '如她妈妈的事 = ["用户","家人","妈妈","喜好"]）。'
-              '凑不成关键词组合的一句话也记，会合并进该分类。'
-              '记录里多挂几组关键词（a+b、a+b+c、b+d…），以后任意一组命中都能翻出原话和时间。'
-              '想改分类（改名/挪动/加大类/删除）会影响她 → 调 manage_record_tree，'
-              '会弹窗给她确认，她拒绝就给反馈，按反馈改完再提交。';
+              '发现值得记的（喜好/习惯/家人/说过的话）：先 query_record 查，'
+              '没有就 add_record 按「归属→关系→对象→类别」选路径'
+              '（归属=用户/男主/其他；如她妈妈的事=["用户","家人","妈妈","喜好"]）。'
+              '记录多挂几组关键词，任意一组命中都能翻出原话和时间。'
+              '改分类（改名/挪动/删除）→ manage_record_tree 弹窗她确认，'
+              '拒绝就给反馈改完再提交。';
           prompt += recordDuty;
           // 现有分类概览（男主知道有什么，避免重复建；同步缓存读）
+          // 8-08 00:4x：50 → 30 条 + 顶部归属概览一行（每轮省几百字）
           try {
             final tree = RecordTreeStore.cached();
             if (tree != null) {
@@ -6427,10 +6426,24 @@ class _ChatPageState extends State<ChatPage>
                 }
               }
               if (paths.isNotEmpty) {
-                prompt += '\n\n【现有分类】\n';
-                prompt += paths.take(50).join('\n');
-                if (paths.length > 50) prompt += '\n…共 ${paths.length} 个分类';
-                prompt += '\n（记东西优先挂进这些分类；都不合适再新建）';
+                prompt += '\n\n【现有分类】（记东西优先挂进这些；都不合适再新建）\n';
+                // 归属概览：顶层 → 直接子类计数（一行，男主先看结构）
+                final rootCounts = <String, int>{};
+                for (final n in tree.nodes) {
+                  if (n.parentId == null) continue;
+                  final parent = tree.nodeById(n.parentId ?? '');
+                  if (parent == null || parent.parentId != null) continue;
+                  rootCounts[parent.name] = (rootCounts[parent.name] ?? 0) + 1;
+                }
+                if (rootCounts.isNotEmpty) {
+                  prompt += '归属概览：' +
+                      rootCounts.entries
+                          .map((e) => '${e.key} ${e.value}类')
+                          .join('、') +
+                      '\n';
+                }
+                prompt += paths.take(30).join('\n');
+                if (paths.length > 30) prompt += '\n…共 ${paths.length} 个分类';
               }
             }
           } catch (_) {}
