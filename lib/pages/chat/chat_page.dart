@@ -3098,6 +3098,8 @@ class _ChatPageState extends State<ChatPage>
             '   → 想用先调 request_text_block 申请，她批准后才能用';
     return '管家支持这些工具调用格式（选一个照模板写，写完管家自动解析执行，'
         '结果会返回给你）：\n'
+        '0. 一句话暗号（推荐，最不容易写错）：工具:工具名 参数名=值 参数名=值\n'
+        '   → 例：工具:manage_flow 动作=next / 工具:record_memory 内容=… 类别=日常\n'
         '1. OpenAI 系（你熟悉的话优先用）：\n'
         '   tool_calls:[{"function":{"name":"工具名","arguments":"{\\"参数\\":\\"值\\"}"}}]\n'
         '   → name 填工具名，arguments 填参数 JSON 字符串\n'
