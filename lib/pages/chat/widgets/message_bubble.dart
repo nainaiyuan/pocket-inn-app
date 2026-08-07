@@ -370,7 +370,11 @@ class _MessageBubbleState extends State<MessageBubble>
                           // 8-07 22:20 用户：气泡只有思考过程+空正文（DeepSeek
                           // 空 content 场景）→ 显示占位，别留一块空白
                           _displayText.trim().isEmpty
-                              ? '（他想了想，没说话）'
+                              ? (message.thinkingChain?.trim().isNotEmpty ==
+                                      true
+                                  // 8-08 02:2x：思考气泡（工具轮中间文本攒起）
+                                  ? '（他正在思考…）'
+                                  : '（他想了想，没说话）')
                               : _displayText,
                           style: TextStyle(
                             fontSize: 15,

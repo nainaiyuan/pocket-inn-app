@@ -1192,6 +1192,17 @@ class _ChatPageState extends State<ChatPage>
             toolResult.ok,
             toolResult.text,
           );
+          // 8-08 02:2x 用户：男主查完不记一直查 → 查询结果自动进工具缓存
+          // （下次直接看【工具缓存】别重复查；缓存有预算，超了男主整理）
+          if (toolResult.ok && kQueryToolNames.contains(name)) {
+            var brief = toolResult.text.trim();
+            if (brief.length > 150) {
+              brief = '${brief.substring(0, 150)}…';
+            }
+            if (brief.isNotEmpty) {
+              await ToolCacheStore.add(personaId, '$name 查到：$brief');
+            }
+          }
           // 8-07 00:1x：审批拒绝系统事件化——拒绝结果同时收集，
           // 这轮工具执行完统一走【系统事件】通道（不是普通工具结果）
           if (!toolResult.ok && toolResult.text.startsWith('用户拒绝')) {
@@ -1232,15 +1243,7 @@ class _ChatPageState extends State<ChatPage>
           if (name == 'continue_speaking') continueCount++;
           // 8-07 22:5x 用户：男主反复查工具卡死——只读查询类工具
           // 本轮累计 ≥3 强制停（不管交错：query_logs→list_tools→query_logs 也拦）
-          const queryTools = {
-            'query_logs',
-            'list_tools',
-            'recall_memory',
-            'query_diary',
-            'query_setting_history',
-            'query_record',
-            'query_flow',
-          };
+          const queryTools = kQueryToolNames;
           var queryStop = false;
           if (queryTools.contains(name)) {
             queryToolCount++;
@@ -1346,8 +1349,18 @@ class _ChatPageState extends State<ChatPage>
             }
           } else {
             _toolRoundTexts.add(result.text.trim());
+            // 8-08 02:2x 用户：完全没看见思维链——中间文本攒起但
+            // thinkingChain 照常显示（思考气泡，text 空只显思维链）
+            if (result.reasoningContent?.trim().isNotEmpty == true) {
+              _msgKey.currentState?.appendMessage(ChatMessage(
+                id: '${DateTime.now().microsecondsSinceEpoch}_think_$toolLoop',
+                text: '',
+                isMe: false,
+                thinkingChain: result.reasoningContent,
+              ));
+            }
             DebugLogger.log('AI路由', '🗜️ 工具轮中间文本攒起（第 $toolLoop 轮，'
-                '${result.text.length} 字，最后统一呈现）');
+                '${result.text.length} 字，思维链已显示，文本最后统一呈现）');
             ChatPresence.instance.endTyping();
           }
         } else {
@@ -3095,6 +3108,17 @@ class _ChatPageState extends State<ChatPage>
     if (isFirst) _firstAiMsgId = firstMsgId;
     return rows;
   }
+
+  /// 8-08 02:2x：查询类工具名（卡顿防护 + 结果自动进工具缓存共用）
+  static const Set<String> kQueryToolNames = {
+    'query_logs',
+    'list_tools',
+    'recall_memory',
+    'query_diary',
+    'query_setting_history',
+    'query_record',
+    'query_flow',
+  };
 
   /// 8-07 19:15：query_tool_formats 实现——返回管家支持的调用格式模板。
   /// 文本块模板按锁过滤（textBlockEnabled 默认 false，per-persona 存储）
@@ -6442,6 +6466,15 @@ class _ChatPageState extends State<ChatPage>
                 '自己判断留删——干完活的删、正文里已经有的删（上下文已有的优先），'
                 '不设限额，删的时候自己说行号范围。'
                 '写摘要时自己清理。下一句对话你还知道有什么没干。）';
+          }
+          // 8-08 02:2x 用户：管家没同步流程进度 → 男主永远从第一步开始。
+          // 注入【流程】块（FlowStore.text：目标/状态/每步 ✅▶☐）
+          final flowText = FlowStore.text(pid);
+          if (flowText != null) {
+            prompt +=
+                '\n\n【流程】（你正在执行的长任务。进度管家不会自动推进——'
+                '每完成一步调 manage_flow 动作=next 推进，全部做完调 finish；'
+                '这是唯一进度来源，别从第一步重来）\n$flowText';
           }
           // 8-08 02:1x 用户：工具工作缓存（干活中间数据，短命；
           // 干完把要长期用的整理进记录/便签后 clear——"别查完就丢"）
