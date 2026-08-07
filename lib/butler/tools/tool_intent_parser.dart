@@ -20,13 +20,36 @@ class ToolIntentParser {
   static void Function(String tag, String msg)? logSink;
 
   /// 已知工具名集合（宽松格式/JSON容错只认这些，防误抓）
+  /// 8-07 23:5x：扩展为全量 28 个——与 ai_chat_service.dart 工具列表
+  /// 同步（新增工具时两边都要加）；句式暗号（工具:name）只认这些，
+  /// 日常聊天"工具:还不错"（无已知名）永不触发
   static final Set<String> _knownToolNames = {
-    'record_memory',
-    'recall_memory',
-    'save_identity_memory',
+    'add_record',
+    'continue_speaking',
+    'countdown_card',
     'list_tools',
-    'write_diary',
+    'manage_flow',
+    'manage_frequent_tools',
+    'manage_pad',
+    'manage_record_tree',
+    'manage_task',
+    'notify_user',
     'query_diary',
+    'query_logs',
+    'query_record',
+    'query_setting_history',
+    'query_tool_formats',
+    'recall_memory',
+    'record_memory',
+    'record_relation',
+    'report_bug',
+    'request_permission',
+    'request_text_block',
+    'resolve_pending',
+    'save_identity_memory',
+    'save_summary',
+    'update_setting',
+    'write_diary',
   };
 
   /// ⟨工具:name⟩{json}⟨/工具⟩ 文本协议块（37批 TextProtocolAdapter 同款格式）
@@ -54,6 +77,14 @@ class ToolIntentParser {
       logSink?.call('工具意图',
           '🔧 识别 ${json.length} 个 JSON 工具调用（${json.map((b) => b['name']).join('、')}）');
       return json;
+    }
+    // 8-07 23:5x（用户建议"写一句话对暗号"）：句式暗号第三通道——
+    // "工具:manage_flow 动作=next" 一句话调工具；精确工具名才识别
+    final sentence = extractSentenceCalls(text);
+    if (sentence != null && sentence.isNotEmpty) {
+      logSink?.call('工具意图',
+          '🔧 识别 ${sentence.length} 个句式暗号（${sentence.map((b) => b['name']).join('、')}）');
+      return sentence;
     }
     logSink?.call('工具意图', '❓ 无明确工具格式（文本含工具痕迹但识别不到）');
     return null;
@@ -105,9 +136,53 @@ class ToolIntentParser {
     return results.isEmpty ? null : results;
   }
 
-  /// 从回复文本里剥离 ⟨工具:…⟩ 块（用户只看到男主自然的话）
-  static String stripToolBlocks(String text) =>
-      text.replaceAll(_toolBlock, '').trim();
+  /// 一句话工具暗号（8-07 23:5x 用户建议）：
+  /// "工具:工具名 参数名=值 参数名=值"——模型写原生 tool_calls 写岔时的
+  /// 简单兜底（简单到几乎不会写错）；精确工具名 + 键=值 结构，防误触发。
+  /// 例：工具:manage_flow 动作=next → manage_flow{action:next}
+  ///    工具:list_tools               → list_tools{}
+  static final RegExp _sentenceRe = RegExp(
+      r'工具\s*[:：]\s*([a-zA-Z_]+)([\s\S]*?)(?=工具\s*[:：]|$)');
+  static final RegExp _kvRe = RegExp(r'(\S+?)=(\S+)');
+
+  /// 中文参数键 → 工具参数名（男主是中文模型，写"动作=next"很自然；
+  /// 映射后 manage_flow 能收到 action=next，不用男主记英文键）
+  static const Map<String, String> _cnKeyMap = {
+    '动作': 'action', '内容': 'content', '类别': 'category',
+    '目标': 'goal', '步骤': 'steps', '关键词': 'keywords',
+    '名称': 'name', '标题': 'title', '文本': 'text', '提醒': 'text',
+    'id': 'id', '编号': 'id', '时间': 'time', '日期': 'date',
+    '参数': 'arguments', '数量': 'count', '路径': 'path',
+  };
+
+  static List<Map<String, dynamic>>? extractSentenceCalls(String text) {
+    final results = <Map<String, dynamic>>[];
+    for (final m in _sentenceRe.allMatches(text)) {
+      final name = m.group(1) ?? '';
+      if (!_knownToolNames.contains(name)) continue; // 防误触发
+      final rest = (m.group(2) ?? '').trim();
+      final args = <String, dynamic>{};
+      for (final kv in _kvRe.allMatches(rest)) {
+        final key = kv.group(1)!;
+        args[_cnKeyMap[key] ?? key] = kv.group(2)!;
+      }
+      results.add({'name': name, 'arguments': args});
+    }
+    return results.isEmpty ? null : results;
+  }
+
+  /// 从回复文本里剥离 ⟨工具:…⟩ 块 + 一句话暗号（用户只看到男主自然的话）
+  static String stripToolBlocks(String text) {
+    var t = text.replaceAll(_toolBlock, '').trim();
+    // 剥句式暗号（只剥已知工具名的整句；"工具:还不错"无已知名不剥）
+    for (final m in _sentenceRe.allMatches(t)) {
+      final name = m.group(1) ?? '';
+      if (_knownToolNames.contains(name)) {
+        t = t.replaceRange(m.start, m.end, '');
+      }
+    }
+    return t.trim();
+  }
 
   /// 从文本里提取 JSON 工具调用指令
   /// 兼容：完整 tool_calls 数组 / 单对象 / function 包裹 / 混在自然语言里 /

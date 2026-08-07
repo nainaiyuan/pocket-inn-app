@@ -653,7 +653,13 @@ class _ChatPageState extends State<ChatPage>
         var textToShow = result.text;
         // 8-07 19:15（用户拍板）：男主回复不带任何标签（<reply>/<msg>/<act>）
         // → 整条打回重写：不显示、不执行、不落库；连续 3 次熔断放行防死循环
-        if (!_hasAnyTag(textToShow)) {
+        // 8-07 23:5x（男主自诊断+用户建议）：**工具写岔 ≠ 纯聊天不按格式**——
+        // 男主调工具格式没对上时，不当"格式违规"打回（会熔断放行漏裸 <
+        // 且工具没执行 → 流程挂起）；而是豁免打回：提示正确格式注入下轮，
+        // 疑似工具串剥掉后显示（空则不显示），流程不卡
+        final suspHint = ToolIntentParser.detectSuspicious(textToShow);
+        final isToolWriteOff = suspHint != null;
+        if (!_hasAnyTag(textToShow) && !isToolWriteOff) {
           _formatFailCount++;
           if (_formatFailCount >= 3) {
             _formatFailCount = 0; // 熔断：第 3 次强制放行（按纯文本显示）
@@ -683,6 +689,11 @@ class _ChatPageState extends State<ChatPage>
               return; // 重写也空 → 结束本轮（别死循环）
             }
           }
+        } else if (isToolWriteOff) {
+          // 工具写岔豁免：不当格式违规打回；疑似工具串剥掉后显示剩余
+          DebugLogger.log('AI路由', '📐 男主工具写岔（豁免打回），提示下轮修正格式');
+          textToShow = ToolIntentParser.stripToolBlocks(textToShow);
+          textToShow = stripAnthropicInvokeBlocks(textToShow);
         }
         final firstText = await _displayableText(textToShow);
         if (firstText.isNotEmpty) {

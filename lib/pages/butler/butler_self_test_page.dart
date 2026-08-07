@@ -560,6 +560,55 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
       ));
     }
 
+    // ── 第 1.55 层：一句话工具暗号（8-07 23:5x 用户："我按工具规定的格式
+    // 写一句话，系统解析器一看句式就知道调哪个工具，对上就执行，对不上当普通聊天"）──
+    {
+      var allOk = true;
+      final checks = <String>[];
+      void check(String label, bool ok, String actual) {
+        if (!ok) allOk = false;
+        checks.add('$label:${ok ? '✅' : '❌'}($actual)');
+      }
+
+      // ① 无参数暗号
+      final c1 = ToolIntentParser.extractSentenceCalls('工具:list_tools');
+      check('无参暗号', c1 != null && c1.length == 1 && c1.first['name'] == 'list_tools',
+          c1?.map((e) => e['name']).join(',') ?? 'null');
+      // ② 中文参数键映射
+      final c2 = ToolIntentParser.extractSentenceCalls('工具:manage_flow 动作=next');
+      check('中文键映射', c2 != null &&
+          (c2.first['arguments'] as Map)['action'] == 'next',
+          '${c2?.first['arguments']}');
+      // ③ 多参数
+      final c3 = ToolIntentParser.extractSentenceCalls(
+          '工具:record_memory 内容=今天很开心 类别=日常');
+      final a3 = (c3?.first['arguments'] as Map?) ?? {};
+      check('多参数', c3 != null && a3['content'] == '今天很开心' &&
+          a3['category'] == '日常', '$a3');
+      // ④ 未知工具名 → 不识别（防误触发）
+      final c4 = ToolIntentParser.extractSentenceCalls('工具:还不错 参数=1');
+      check('未知名不触发', c4 == null, c4?.toString() ?? 'null');
+      // ⑤ extract 总入口命中暗号
+      final c5 = ToolIntentParser.extract('先记录一下 工具:record_memory 内容=开心');
+      check('总入口命中', c5 != null && c5.first['name'] == 'record_memory',
+          c5?.map((e) => e['name']).join(',') ?? 'null');
+      // ⑥ 剥离暗号后剩自然话
+      final c6 = ToolIntentParser.stripToolBlocks('好的 工具:manage_flow 动作=next 我们继续');
+      check('剥离暗号', c6 == '好的 我们继续', '"$c6"');
+      // ⑦ 日常聊天不误判暗号
+      final c7 = ToolIntentParser.extractSentenceCalls('这个工具:还挺好用的');
+      check('日常不误判', c7 == null, c7?.toString() ?? 'null');
+      items.add(ButlerSelfTestItem(
+        message: '一句话工具暗号',
+        expected: '工具:name 键=值 句式识别+中文键映射+未知名/日常不误触发+剥离',
+        actual: checks.join(' '),
+        passed: allOk,
+        failedReason: allOk ? null : '某用例挂了（见 actual）',
+        guidance: '检查 tool_intent_parser.extractSentenceCalls：句式正则 → '
+            '已知工具名白名单 → 中文键映射；stripToolBlocks 同步剥离',
+      ));
+    }
+
     // ── 第 1.6 层：JSON 输出协议（8-07 23:3x 用户："按json的格式把我们的
     // <…>包进去，AI应该都认JSON吧"）——男主输出 JSON 块，解析器双兼容 ──
     {
