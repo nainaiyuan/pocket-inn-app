@@ -32,12 +32,20 @@ class SettingVersionStore {
     if (test.currentMale.trim().isEmpty && test.currentUser.trim().isEmpty) {
       final real = await load(realPid);
       if (real.currentMale.trim().isNotEmpty) {
-        await saveNewVersion(testPid, male, real.currentMale,
-            note: '测试空间初始化（复制自真实设定）');
+        await saveNewVersion(
+          testPid,
+          male,
+          real.currentMale,
+          note: '测试空间初始化（复制自真实设定）',
+        );
       }
       if (real.currentUser.trim().isNotEmpty) {
-        await saveNewVersion(testPid, user, real.currentUser,
-            note: '测试空间初始化（复制自真实设定）');
+        await saveNewVersion(
+          testPid,
+          user,
+          real.currentUser,
+          note: '测试空间初始化（复制自真实设定）',
+        );
       }
     }
   }
@@ -48,9 +56,11 @@ class SettingVersionStore {
     final p = await SharedPreferences.getInstance();
     final keys = p
         .getKeys()
-        .where((k) =>
-            k.startsWith('setting_versions_') &&
-            k.endsWith(AIProviderManager.mockTestSuffix))
+        .where(
+          (k) =>
+              k.startsWith('setting_versions_') &&
+              k.endsWith(AIProviderManager.mockTestSuffix),
+        )
         .toList();
     for (final k in keys) {
       await p.remove(k);
@@ -66,7 +76,8 @@ class SettingVersionStore {
     if (raw != null && raw.isNotEmpty) {
       try {
         book = SettingBook.fromJson(
-            Map<String, dynamic>.from(jsonDecode(raw) as Map));
+          Map<String, dynamic>.from(jsonDecode(raw) as Map),
+        );
       } catch (_) {
         book = SettingBook();
       }
@@ -85,7 +96,10 @@ class SettingVersionStore {
 
   /// 覆盖当前版（不产生新版本）
   static Future<void> saveCurrent(
-      String personaId, String type, String content) async {
+    String personaId,
+    String type,
+    String content,
+  ) async {
     final book = await load(personaId);
     book.setCurrent(type, content);
     await _save(personaId, book);
@@ -93,10 +107,28 @@ class SettingVersionStore {
 
   /// 存为新版本（旧当前自动进历史堆叠）
   static Future<SettingVersion> saveNewVersion(
-      String personaId, String type, String content,
-      {String? note}) async {
+    String personaId,
+    String type,
+    String content, {
+    String? note,
+  }) async {
     final book = await load(personaId);
     final v = book.pushVersion(type, content, note: note);
+    await _save(personaId, book);
+    return v;
+  }
+
+  /// 8-07 18:0x 修复：右页手动「存为新版本」= 编辑框内容只存进历史堆叠，
+  /// **不改变当前版**——否则连续存两个版本时，旧当前会重复进历史
+  /// （a1=X 存完当前=X，再存 a2=Y 时旧当前还是 X → a2 也变成 X，a1/a2 相同）
+  static Future<SettingVersion> saveAsVersion(
+    String personaId,
+    String type,
+    String content, {
+    String? note,
+  }) async {
+    final book = await load(personaId);
+    final v = book.addHistoryVersion(type, content, note: note);
     await _save(personaId, book);
     return v;
   }
@@ -109,8 +141,7 @@ class SettingVersionStore {
   }
 
   /// 删除某个历史版本（当前版不可删；变更日志保留）
-  static Future<bool> deleteVersion(
-      String personaId, String versionId) async {
+  static Future<bool> deleteVersion(String personaId, String versionId) async {
     final book = await load(personaId);
     final ok = book.deleteVersion(versionId);
     if (ok) await _save(personaId, book);
@@ -118,11 +149,16 @@ class SettingVersionStore {
   }
 
   /// 追加变更日志（只追加不删）
-  static Future<void> addChangelog(String personaId, String type,
-      String summary) async {
+  static Future<void> addChangelog(
+    String personaId,
+    String type,
+    String summary,
+  ) async {
     final book = await load(personaId);
     book.changelog.insert(
-        0, ChangeEntry(time: DateTime.now(), type: type, summary: summary));
+      0,
+      ChangeEntry(time: DateTime.now(), type: type, summary: summary),
+    );
     await _save(personaId, book);
   }
 
@@ -135,7 +171,8 @@ class SettingVersionStore {
     final buf = StringBuffer();
     for (final e in book.changelog.take(5)) {
       final t = e.time;
-      final ts = '${t.month.toString().padLeft(2, '0')}-'
+      final ts =
+          '${t.month.toString().padLeft(2, '0')}-'
           '${t.day.toString().padLeft(2, '0')} '
           '${t.hour.toString().padLeft(2, '0')}:'
           '${t.minute.toString().padLeft(2, '0')}';
@@ -151,7 +188,8 @@ class SettingVersionStore {
     final buf = StringBuffer();
     for (final e in book.changelog.take(5)) {
       final t = e.time;
-      final ts = '${t.month.toString().padLeft(2, '0')}-'
+      final ts =
+          '${t.month.toString().padLeft(2, '0')}-'
           '${t.day.toString().padLeft(2, '0')} '
           '${t.hour.toString().padLeft(2, '0')}:'
           '${t.minute.toString().padLeft(2, '0')}';
@@ -173,8 +211,8 @@ class SettingBook {
     this.currentUser = '',
     List<SettingVersion>? versions,
     List<ChangeEntry>? changelog,
-  })  : versions = versions ?? [],
-        changelog = changelog ?? [];
+  }) : versions = versions ?? [],
+       changelog = changelog ?? [];
 
   String currentOf(String type) =>
       type == SettingVersionStore.male ? currentMale : currentUser;
@@ -192,14 +230,15 @@ class SettingBook {
     final old = currentOf(type);
     if (old.trim().isNotEmpty) {
       versions.insert(
-          0,
-          SettingVersion(
-            id: SettingVersionStore.newId(),
-            type: type,
-            content: old,
-            createdAt: DateTime.now(),
-            note: note,
-          ));
+        0,
+        SettingVersion(
+          id: SettingVersionStore.newId(),
+          type: type,
+          content: old,
+          createdAt: DateTime.now(),
+          note: note,
+        ),
+      );
     }
     setCurrent(type, content);
     return SettingVersion(
@@ -212,6 +251,24 @@ class SettingBook {
     );
   }
 
+  /// 8-07 18:0x 修复：只进历史堆叠，当前版不动
+  /// （右页手动存版本用；返回的新版本 id 用于 UI 定位）
+  SettingVersion addHistoryVersion(
+    String type,
+    String content, {
+    String? note,
+  }) {
+    final v = SettingVersion(
+      id: SettingVersionStore.newId(),
+      type: type,
+      content: content,
+      createdAt: DateTime.now(),
+      note: note,
+    );
+    versions.insert(0, v);
+    return v;
+  }
+
   /// 选用历史版本为当前（旧当前进历史）
   void applyVersion(String versionId) {
     final idx = versions.indexWhere((v) => v.id == versionId);
@@ -220,14 +277,15 @@ class SettingBook {
     final old = currentOf(v.type);
     if (old.trim().isNotEmpty) {
       versions.insert(
-          0,
-          SettingVersion(
-            id: SettingVersionStore.newId(),
-            type: v.type,
-            content: old,
-            createdAt: DateTime.now(),
-            note: '（原当前版，被 v${v.id} 替换）',
-          ));
+        0,
+        SettingVersion(
+          id: SettingVersionStore.newId(),
+          type: v.type,
+          content: old,
+          createdAt: DateTime.now(),
+          note: '（原当前版，被 v${v.id} 替换）',
+        ),
+      );
     }
     setCurrent(v.type, v.content);
   }
@@ -240,26 +298,31 @@ class SettingBook {
   }
 
   Map<String, dynamic> toJson() => {
-        'currentMale': currentMale,
-        'currentUser': currentUser,
-        'versions': versions.map((v) => v.toJson()).toList(),
-        'changelog': changelog.map((e) => e.toJson()).toList(),
-      };
+    'currentMale': currentMale,
+    'currentUser': currentUser,
+    'versions': versions.map((v) => v.toJson()).toList(),
+    'changelog': changelog.map((e) => e.toJson()).toList(),
+  };
 
   factory SettingBook.fromJson(Map<String, dynamic> j) => SettingBook(
-        currentMale: j['currentMale']?.toString() ?? '',
-        currentUser: j['currentUser']?.toString() ?? '',
-        versions: (j['versions'] as List?)
-                ?.map((e) =>
-                    SettingVersion.fromJson(Map<String, dynamic>.from(e as Map)))
-                .toList() ??
-            [],
-        changelog: (j['changelog'] as List?)
-                ?.map((e) =>
-                    ChangeEntry.fromJson(Map<String, dynamic>.from(e as Map)))
-                .toList() ??
-            [],
-      );
+    currentMale: j['currentMale']?.toString() ?? '',
+    currentUser: j['currentUser']?.toString() ?? '',
+    versions:
+        (j['versions'] as List?)
+            ?.map(
+              (e) =>
+                  SettingVersion.fromJson(Map<String, dynamic>.from(e as Map)),
+            )
+            .toList() ??
+        [],
+    changelog:
+        (j['changelog'] as List?)
+            ?.map(
+              (e) => ChangeEntry.fromJson(Map<String, dynamic>.from(e as Map)),
+            )
+            .toList() ??
+        [],
+  );
 }
 
 /// 一个设定版本
@@ -281,21 +344,21 @@ class SettingVersion {
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'type': type,
-        'content': content,
-        'createdAt': createdAt.toIso8601String(),
-        'note': note,
-      };
+    'id': id,
+    'type': type,
+    'content': content,
+    'createdAt': createdAt.toIso8601String(),
+    'note': note,
+  };
 
   factory SettingVersion.fromJson(Map<String, dynamic> j) => SettingVersion(
-        id: j['id']?.toString() ?? '',
-        type: j['type']?.toString() ?? 'male',
-        content: j['content']?.toString() ?? '',
-        createdAt:
-            DateTime.tryParse(j['createdAt']?.toString() ?? '') ?? DateTime.now(),
-        note: j['note']?.toString(),
-      );
+    id: j['id']?.toString() ?? '',
+    type: j['type']?.toString() ?? 'male',
+    content: j['content']?.toString() ?? '',
+    createdAt:
+        DateTime.tryParse(j['createdAt']?.toString() ?? '') ?? DateTime.now(),
+    note: j['note']?.toString(),
+  );
 }
 
 /// 变更日志条目（只追加不删）
@@ -304,21 +367,17 @@ class ChangeEntry {
   final String type; // male / user
   final String summary; // 改了什么（男主自己总结）
 
-  ChangeEntry({
-    required this.time,
-    required this.type,
-    required this.summary,
-  });
+  ChangeEntry({required this.time, required this.type, required this.summary});
 
   Map<String, dynamic> toJson() => {
-        'time': time.toIso8601String(),
-        'type': type,
-        'summary': summary,
-      };
+    'time': time.toIso8601String(),
+    'type': type,
+    'summary': summary,
+  };
 
   factory ChangeEntry.fromJson(Map<String, dynamic> j) => ChangeEntry(
-        time: DateTime.tryParse(j['time']?.toString() ?? '') ?? DateTime.now(),
-        type: j['type']?.toString() ?? 'male',
-        summary: j['summary']?.toString() ?? '',
-      );
+    time: DateTime.tryParse(j['time']?.toString() ?? '') ?? DateTime.now(),
+    type: j['type']?.toString() ?? 'male',
+    summary: j['summary']?.toString() ?? '',
+  );
 }

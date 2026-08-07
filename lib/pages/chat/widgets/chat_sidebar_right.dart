@@ -32,11 +32,11 @@ class ChatSidebarRight extends StatefulWidget {
 
 /// 角色设定结构化字段
 class _RoleFields {
-  String world;        // 世界观·背景
-  String relation;     // 与用户的关系
-  String traits;       // 喜好·性格·习惯
-  String connections;  // 亲朋好友
-  String history;      // 经历
+  String world; // 世界观·背景
+  String relation; // 与用户的关系
+  String traits; // 喜好·性格·习惯
+  String connections; // 亲朋好友
+  String history; // 经历
 
   _RoleFields({
     this.world = '',
@@ -157,10 +157,19 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
         title: Text('删除 "${p.name}"？'),
         content: const Text('此操作不可恢复。'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消', style: TextStyle(color: Color(0xFF8A7A80)))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消', style: TextStyle(color: Color(0xFF8A7A80))),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定删除', style: TextStyle(color: Color(0xFFE55050), fontWeight: FontWeight.w600)),
+            child: const Text(
+              '确定删除',
+              style: TextStyle(
+                color: Color(0xFFE55050),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
         ],
       ),
@@ -178,14 +187,28 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
           context: context,
           builder: (ctx) => AlertDialog(
             backgroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
             title: const Text('删除后没有可以聊天的角色了'),
             content: const Text('删掉这个形象后，系统会自动重建默认角色。确认删除吗？'),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消', style: TextStyle(color: Color(0xFF8A7A80)))),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text(
+                  '取消',
+                  style: TextStyle(color: Color(0xFF8A7A80)),
+                ),
+              ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('确认删除', style: TextStyle(color: Color(0xFFE55050), fontWeight: FontWeight.w600)),
+                child: const Text(
+                  '确认删除',
+                  style: TextStyle(
+                    color: Color(0xFFE55050),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ],
           ),
@@ -224,10 +247,19 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
         title: const Text('删除所有聊天记录？'),
         content: const Text('当前角色的聊天记录将被清空，此操作不可恢复。'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消', style: TextStyle(color: Color(0xFF8A7A80)))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消', style: TextStyle(color: Color(0xFF8A7A80))),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定清空', style: TextStyle(color: Color(0xFFE55050), fontWeight: FontWeight.w600)),
+            child: const Text(
+              '确定清空',
+              style: TextStyle(
+                color: Color(0xFFE55050),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
         ],
       ),
@@ -238,7 +270,10 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
       widget.onClearChat?.call();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('聊天记录已清空'), duration: Duration(seconds: 1)),
+          const SnackBar(
+            content: Text('聊天记录已清空'),
+            duration: Duration(seconds: 1),
+          ),
         );
       }
     }
@@ -246,7 +281,8 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
 
   @override
   Widget build(BuildContext context) {
-    final isLead = widget.currentPersona == null || widget.currentPersona!.isDefault;
+    final isLead =
+        widget.currentPersona == null || widget.currentPersona!.isDefault;
 
     return Container(
       color: const Color(0xFFF5EEF0),
@@ -281,7 +317,12 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                     title: isLead ? '角色设定（所有形象的经历同步到本体）' : '角色设定',
                     child: Column(
                       children: [
-                        _FieldBox(label: '首次问候', ctrl: _greetingCtrl, onChanged: _saveAll, maxLines: 2),
+                        _FieldBox(
+                          label: '首次问候',
+                          ctrl: _greetingCtrl,
+                          onChanged: _saveAll,
+                          maxLines: 2,
+                        ),
                         const SizedBox(height: 8),
 
                         // 8-06 18:04 用户：合并分类 → 男主框/用户框 + 版本堆叠管理
@@ -308,9 +349,19 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                         children: [
                           Row(
                             children: [
-                              _TabBtn(label: '系统 Prompt', active: _showingPrompt, onTap: () => setState(() => _showingPrompt = true)),
+                              _TabBtn(
+                                label: '系统 Prompt',
+                                active: _showingPrompt,
+                                onTap: () =>
+                                    setState(() => _showingPrompt = true),
+                              ),
                               const SizedBox(width: 8),
-                              _TabBtn(label: '关键词', active: !_showingPrompt, onTap: () => setState(() => _showingPrompt = false)),
+                              _TabBtn(
+                                label: '关键词',
+                                active: !_showingPrompt,
+                                onTap: () =>
+                                    setState(() => _showingPrompt = false),
+                              ),
                             ],
                           ),
                           const SizedBox(height: 10),
@@ -323,12 +374,22 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                               ),
                               child: const Text(
                                 '（系统 Prompt 由管家自动生成，可在上方编辑原始设定）',
-                                style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80), height: 1.5),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF8A7A80),
+                                  height: 1.5,
+                                ),
                               ),
                             )
                           else
                             Center(
-                              child: Text('尚未收集到关键词', style: TextStyle(fontSize: 13, color: const Color(0xFF8A7A80))),
+                              child: Text(
+                                '尚未收集到关键词',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: const Color(0xFF8A7A80),
+                                ),
+                              ),
                             ),
                         ],
                       ),
@@ -345,7 +406,8 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                           label: '管家不干预自然语言',
                           subtitle: '开启后用户输入不经过管家处理',
                           value: !_butlerIntervention,
-                          onChanged: (v) => setState(() => _butlerIntervention = !v),
+                          onChanged: (v) =>
+                              setState(() => _butlerIntervention = !v),
                         ),
                         const SizedBox(height: 4),
                         _SwitchTile(
@@ -367,7 +429,9 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                       child: InkWell(
                         borderRadius: BorderRadius.circular(12),
                         onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const TaskListPage()),
+                          MaterialPageRoute(
+                            builder: (_) => const TaskListPage(),
+                          ),
                         ),
                         child: Container(
                           padding: const EdgeInsets.all(12),
@@ -377,7 +441,11 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                           ),
                           child: const Row(
                             children: [
-                              Icon(Icons.list_alt, size: 18, color: Color(0xFFC896B4)),
+                              Icon(
+                                Icons.list_alt,
+                                size: 18,
+                                color: Color(0xFFC896B4),
+                              ),
                               SizedBox(width: 8),
                               Text(
                                 '📋 任务列表',
@@ -388,7 +456,11 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                                 ),
                               ),
                               Spacer(),
-                              Icon(Icons.chevron_right, size: 18, color: Color(0xFFB0A0A6)),
+                              Icon(
+                                Icons.chevron_right,
+                                size: 18,
+                                color: Color(0xFFB0A0A6),
+                              ),
                             ],
                           ),
                         ),
@@ -413,15 +485,28 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                                 borderRadius: BorderRadius.circular(12),
                                 onTap: _confirmDeletePersona,
                                 child: Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 10,
+                                  ),
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Icon(Icons.delete_outline_rounded, size: 16, color: Colors.redAccent.withValues(alpha: 0.6)),
+                                      Icon(
+                                        Icons.delete_outline_rounded,
+                                        size: 16,
+                                        color: Colors.redAccent.withValues(
+                                          alpha: 0.6,
+                                        ),
+                                      ),
                                       const SizedBox(width: 6),
                                       Text(
                                         '删除当前形象「${widget.currentPersona!.name}」',
-                                        style: TextStyle(fontSize: 13, color: Colors.redAccent.withValues(alpha: 0.8)),
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: Colors.redAccent.withValues(
+                                            alpha: 0.8,
+                                          ),
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -440,15 +525,28 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                               borderRadius: BorderRadius.circular(12),
                               onTap: _confirmDeleteAllChats,
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Icon(Icons.chat_bubble_outline_rounded, size: 16, color: Colors.orange.withValues(alpha: 0.6)),
+                                    Icon(
+                                      Icons.chat_bubble_outline_rounded,
+                                      size: 16,
+                                      color: Colors.orange.withValues(
+                                        alpha: 0.6,
+                                      ),
+                                    ),
                                     const SizedBox(width: 6),
                                     Text(
                                       '删除所有聊天记录',
-                                      style: TextStyle(fontSize: 13, color: Colors.orange.withValues(alpha: 0.8)),
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.orange.withValues(
+                                          alpha: 0.8,
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -511,7 +609,9 @@ class _DeviceZoneState extends State<_DeviceZone> {
               child: Row(
                 children: [
                   Icon(
-                    _connected.isEmpty ? Icons.bluetooth_disabled : Icons.bluetooth_connected,
+                    _connected.isEmpty
+                        ? Icons.bluetooth_disabled
+                        : Icons.bluetooth_connected,
                     size: 13,
                     color: _connected.isEmpty
                         ? const Color(0xFF8A7A80).withValues(alpha: 0.5)
@@ -519,7 +619,9 @@ class _DeviceZoneState extends State<_DeviceZone> {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    _connected.isEmpty ? '未连接任何设备' : '已连接 ${_connected.length} 个设备',
+                    _connected.isEmpty
+                        ? '未连接任何设备'
+                        : '已连接 ${_connected.length} 个设备',
                     style: TextStyle(
                       fontSize: 11,
                       color: _connected.isEmpty
@@ -550,10 +652,14 @@ class _DeviceZoneState extends State<_DeviceZone> {
               child: Wrap(
                 spacing: 6,
                 runSpacing: 6,
-                children: _presetDevices.map((d) => _buildDeviceChip(d)).toList(),
+                children: _presetDevices
+                    .map((d) => _buildDeviceChip(d))
+                    .toList(),
               ),
             ),
-            crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            crossFadeState: _expanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
             duration: const Duration(milliseconds: 200),
           ),
         ],
@@ -589,15 +695,24 @@ class _DeviceZoneState extends State<_DeviceZone> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(d.icon, size: 12,
-              color: connected ? const Color(0xFFC87090) : const Color(0xFF8A7A80).withValues(alpha: 0.4),
+            Icon(
+              d.icon,
+              size: 12,
+              color: connected
+                  ? const Color(0xFFC87090)
+                  : const Color(0xFF8A7A80).withValues(alpha: 0.4),
             ),
             const SizedBox(width: 4),
-            Text(d.name, style: TextStyle(
-              fontSize: 10,
-              color: connected ? const Color(0xFF6A4A5A) : const Color(0xFF8A7A80).withValues(alpha: 0.5),
-              fontWeight: connected ? FontWeight.w500 : FontWeight.normal,
-            )),
+            Text(
+              d.name,
+              style: TextStyle(
+                fontSize: 10,
+                color: connected
+                    ? const Color(0xFF6A4A5A)
+                    : const Color(0xFF8A7A80).withValues(alpha: 0.5),
+                fontWeight: connected ? FontWeight.w500 : FontWeight.normal,
+              ),
+            ),
           ],
         ),
       ),
@@ -647,14 +762,18 @@ class _ButlerCodeZoneState extends State<_ButlerCodeZone> {
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(
                 children: [
-                  Icon(Icons.code_outlined, size: 13,
+                  Icon(
+                    Icons.code_outlined,
+                    size: 13,
                     color: _enabledCodes.isEmpty
                         ? const Color(0xFF8A7A80).withValues(alpha: 0.5)
                         : const Color(0xFFE8A0B8),
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    _enabledCodes.isEmpty ? '管家暗号（未启用）' : '已启用 ${_enabledCodes.length} 个暗号',
+                    _enabledCodes.isEmpty
+                        ? '管家暗号（未启用）'
+                        : '已启用 ${_enabledCodes.length} 个暗号',
                     style: TextStyle(
                       fontSize: 11,
                       color: _enabledCodes.isEmpty
@@ -685,7 +804,9 @@ class _ButlerCodeZoneState extends State<_ButlerCodeZone> {
                 children: _presetCodes.map((c) => _buildCodeRow(c)).toList(),
               ),
             ),
-            crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            crossFadeState: _expanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
             duration: const Duration(milliseconds: 200),
           ),
         ],
@@ -711,7 +832,9 @@ class _ButlerCodeZoneState extends State<_ButlerCodeZone> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
-            color: enabled ? const Color(0xFFE8A0B8).withValues(alpha: 0.08) : Colors.transparent,
+            color: enabled
+                ? const Color(0xFFE8A0B8).withValues(alpha: 0.08)
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(
@@ -729,35 +852,57 @@ class _ButlerCodeZoneState extends State<_ButlerCodeZone> {
                         : const Color(0xFF8A7A80).withValues(alpha: 0.1),
                   ),
                 ),
-                child: Text(c.code, style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: enabled ? const Color(0xFFC87090) : const Color(0xFF8A7A80).withValues(alpha: 0.4),
-                )),
+                child: Text(
+                  c.code,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: enabled
+                        ? const Color(0xFFC87090)
+                        : const Color(0xFF8A7A80).withValues(alpha: 0.4),
+                  ),
+                ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(c.label, style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: enabled ? const Color(0xFF6A4A5A) : const Color(0xFF8A7A80).withValues(alpha: 0.5),
-                    )),
-                    Text(c.desc, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(
-                      fontSize: 9,
-                      color: const Color(0xFF8A7A80).withValues(alpha: 0.4),
-                    )),
+                    Text(
+                      c.label,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: enabled
+                            ? const Color(0xFF6A4A5A)
+                            : const Color(0xFF8A7A80).withValues(alpha: 0.5),
+                      ),
+                    ),
+                    Text(
+                      c.desc,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: const Color(0xFF8A7A80).withValues(alpha: 0.4),
+                      ),
+                    ),
                   ],
                 ),
               ),
               Container(
-                width: 16, height: 16,
+                width: 16,
+                height: 16,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: enabled ? const Color(0xFFE8A0B8) : Colors.white.withValues(alpha: 0.5),
-                  border: Border.all(color: enabled ? const Color(0xFFE8A0B8) : const Color(0xFF8A7A80).withValues(alpha: 0.2)),
+                  color: enabled
+                      ? const Color(0xFFE8A0B8)
+                      : Colors.white.withValues(alpha: 0.5),
+                  border: Border.all(
+                    color: enabled
+                        ? const Color(0xFFE8A0B8)
+                        : const Color(0xFF8A7A80).withValues(alpha: 0.2),
+                  ),
                 ),
                 child: enabled
                     ? Icon(Icons.check_rounded, size: 10, color: Colors.white)
@@ -819,19 +964,29 @@ class _ApiZoneState extends State<_ApiZone> {
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(
                 children: [
-                  Icon(Icons.api_outlined, size: 13, color: const Color(0xFF8A7A80).withValues(alpha: 0.5)),
+                  Icon(
+                    Icons.api_outlined,
+                    size: 13,
+                    color: const Color(0xFF8A7A80).withValues(alpha: 0.5),
+                  ),
                   const SizedBox(width: 4),
-                  Text('AI 模型：$_selected', style: const TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFF6A4A5A),
-                    fontWeight: FontWeight.w500,
-                  )),
+                  Text(
+                    'AI 模型：$_selected',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF6A4A5A),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                   const Spacer(),
                   AnimatedRotation(
                     turns: _expanded ? 0.5 : 0,
                     duration: const Duration(milliseconds: 200),
-                    child: Icon(Icons.keyboard_arrow_down_rounded, size: 14,
-                      color: const Color(0xFF8A7A80).withValues(alpha: 0.5)),
+                    child: Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      size: 14,
+                      color: const Color(0xFF8A7A80).withValues(alpha: 0.5),
+                    ),
                   ),
                 ],
               ),
@@ -859,17 +1014,38 @@ class _ApiZoneState extends State<_ApiZone> {
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10),
                             decoration: BoxDecoration(
-                              color: sel ? const Color(0xFFE8A0B8).withValues(alpha: 0.12) : Colors.transparent,
+                              color: sel
+                                  ? const Color(
+                                      0xFFE8A0B8,
+                                    ).withValues(alpha: 0.12)
+                                  : Colors.transparent,
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(
-                                color: sel ? const Color(0xFFE8A0B8).withValues(alpha: 0.25) : const Color(0xFF8A7A80).withValues(alpha: 0.08),
+                                color: sel
+                                    ? const Color(
+                                        0xFFE8A0B8,
+                                      ).withValues(alpha: 0.25)
+                                    : const Color(
+                                        0xFF8A7A80,
+                                      ).withValues(alpha: 0.08),
                               ),
                             ),
-                            child: Center(child: Text(ai, style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: sel ? FontWeight.w600 : FontWeight.normal,
-                              color: sel ? const Color(0xFFC87090) : const Color(0xFF8A7A80).withValues(alpha: 0.5),
-                            ))),
+                            child: Center(
+                              child: Text(
+                                ai,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: sel
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                                  color: sel
+                                      ? const Color(0xFFC87090)
+                                      : const Color(
+                                          0xFF8A7A80,
+                                        ).withValues(alpha: 0.5),
+                                ),
+                              ),
+                            ),
                           ),
                         );
                       },
@@ -883,15 +1059,28 @@ class _ApiZoneState extends State<_ApiZone> {
                       controller: _apiKeyCtrl,
                       maxLines: 1,
                       obscureText: true,
-                      style: const TextStyle(fontSize: 11, color: Color(0xFF6A4A5A)),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF6A4A5A),
+                      ),
                       decoration: InputDecoration(
                         hintText: 'API Key（可选）',
-                        hintStyle: TextStyle(fontSize: 10, color: const Color(0xFF8A7A80).withValues(alpha: 0.3)),
+                        hintStyle: TextStyle(
+                          fontSize: 10,
+                          color: const Color(0xFF8A7A80).withValues(alpha: 0.3),
+                        ),
                         isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 6,
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: const Color(0xFF8A7A80).withValues(alpha: 0.1)),
+                          borderSide: BorderSide(
+                            color: const Color(
+                              0xFF8A7A80,
+                            ).withValues(alpha: 0.1),
+                          ),
                         ),
                         filled: true,
                         fillColor: Colors.white.withValues(alpha: 0.2),
@@ -905,15 +1094,28 @@ class _ApiZoneState extends State<_ApiZone> {
                     child: TextField(
                       controller: _endpointCtrl,
                       maxLines: 1,
-                      style: const TextStyle(fontSize: 11, color: Color(0xFF6A4A5A)),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF6A4A5A),
+                      ),
                       decoration: InputDecoration(
                         hintText: '自定义 Endpoint（可选）',
-                        hintStyle: TextStyle(fontSize: 10, color: const Color(0xFF8A7A80).withValues(alpha: 0.3)),
+                        hintStyle: TextStyle(
+                          fontSize: 10,
+                          color: const Color(0xFF8A7A80).withValues(alpha: 0.3),
+                        ),
                         isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 6,
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: const Color(0xFF8A7A80).withValues(alpha: 0.1)),
+                          borderSide: BorderSide(
+                            color: const Color(
+                              0xFF8A7A80,
+                            ).withValues(alpha: 0.1),
+                          ),
                         ),
                         filled: true,
                         fillColor: Colors.white.withValues(alpha: 0.2),
@@ -923,7 +1125,9 @@ class _ApiZoneState extends State<_ApiZone> {
                 ],
               ),
             ),
-            crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            crossFadeState: _expanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
             duration: const Duration(milliseconds: 200),
           ),
         ],
@@ -958,7 +1162,9 @@ class _QuoteZoneState extends State<_QuoteZone> {
       ),
       child: Row(
         children: [
-          Icon(Icons.format_quote_outlined, size: 13,
+          Icon(
+            Icons.format_quote_outlined,
+            size: 13,
             color: hasText
                 ? const Color(0xFFE8A0B8)
                 : const Color(0xFF8A7A80).withValues(alpha: 0.3),
@@ -970,7 +1176,11 @@ class _QuoteZoneState extends State<_QuoteZone> {
               child: TextField(
                 controller: _ctrl,
                 maxLines: 1,
-                style: const TextStyle(fontSize: 12, color: Color(0xFF6A4A5A), fontStyle: FontStyle.italic),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFF6A4A5A),
+                  fontStyle: FontStyle.italic,
+                ),
                 decoration: InputDecoration(
                   hintText: '角色语录（不写不显示）',
                   hintStyle: TextStyle(
@@ -1052,8 +1262,11 @@ class _SettingVersionPanelState extends State<_SettingVersionPanel> {
       }
       if (migrated.trim().isNotEmpty) {
         book.setCurrent(SettingVersionStore.male, migrated.trim());
-        await SettingVersionStore.addChangelog(widget.personaId,
-            SettingVersionStore.male, '从旧版设定迁移合并（初始导入）');
+        await SettingVersionStore.addChangelog(
+          widget.personaId,
+          SettingVersionStore.male,
+          '从旧版设定迁移合并（初始导入）',
+        );
         book = await SettingVersionStore.load(widget.personaId);
       }
     }
@@ -1071,8 +1284,8 @@ class _SettingVersionPanelState extends State<_SettingVersionPanel> {
     setState(() {
       _book = book;
       // 若查看的版本被删了 → 回当前
-      final stillExists = _viewId == null ||
-          book.versions.any((v) => v.id == _viewId);
+      final stillExists =
+          _viewId == null || book.versions.any((v) => v.id == _viewId);
       if (!stillExists) _viewId = null;
       _ctrl.text = _viewId == null
           ? book.currentOf(_tab)
@@ -1090,25 +1303,41 @@ class _SettingVersionPanelState extends State<_SettingVersionPanel> {
   }
 
   Future<void> _saveCurrent() async {
-    await SettingVersionStore.saveCurrent(
-        widget.personaId, _tab, _ctrl.text);
+    await SettingVersionStore.saveCurrent(widget.personaId, _tab, _ctrl.text);
     _refresh();
   }
 
   Future<void> _saveNewVersion() async {
     if (_ctrl.text.trim().isEmpty) return;
-    await SettingVersionStore.saveNewVersion(
-        widget.personaId, _tab, _ctrl.text,
-        note: '手动保存为新版本');
+    // 8-07 18:0x 修复：手动存版本 = 只进历史，不碰当前版
+    // （之前用 saveNewVersion 会把旧当前重复推进历史 → a1/a2 变相同）
+    final v = await SettingVersionStore.saveAsVersion(
+      widget.personaId,
+      _tab,
+      _ctrl.text,
+      note: '手动保存为新版本',
+    );
     await SettingVersionStore.addChangelog(
-        widget.personaId, _tab, '手动更新了$_typeName');
+      widget.personaId,
+      _tab,
+      '手动更新了$_typeName',
+    );
+    if (!mounted) return;
+    setState(() {
+      // 定位到刚存的版本（编辑框保持用户输入内容，不跳回当前）
+      _viewId = v.id;
+      _ctrl.text = v.content;
+    });
     _refresh();
   }
 
   Future<void> _applyVersion(String id) async {
     await SettingVersionStore.applyVersion(widget.personaId, id);
     await SettingVersionStore.addChangelog(
-        widget.personaId, _tab, '恢复使用了旧版$_typeName');
+      widget.personaId,
+      _tab,
+      '恢复使用了旧版$_typeName',
+    );
     _refresh();
   }
 
@@ -1132,8 +1361,7 @@ class _SettingVersionPanelState extends State<_SettingVersionPanel> {
         ),
       );
     }
-    final versions =
-        book.versions.where((v) => v.type == _tab).toList();
+    final versions = book.versions.where((v) => v.type == _tab).toList();
     final isViewingCurrent = _viewId == null;
 
     return Column(
@@ -1392,7 +1620,15 @@ class _SectionCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF5A4A52), letterSpacing: 1)),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF5A4A52),
+              letterSpacing: 1,
+            ),
+          ),
           const SizedBox(height: 10),
           child,
         ],
@@ -1425,7 +1661,14 @@ class _FieldBox extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF5A4A52), fontWeight: FontWeight.w500)),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF5A4A52),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
           const SizedBox(height: 6),
           TextField(
             controller: ctrl,
@@ -1449,7 +1692,12 @@ class _SwitchTile extends StatelessWidget {
   final String subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
-  const _SwitchTile({required this.label, required this.subtitle, required this.value, required this.onChanged});
+  const _SwitchTile({
+    required this.label,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1466,11 +1714,25 @@ class _SwitchTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(label, style: const TextStyle(fontSize: 14, color: Color(0xFF3D2C33))),
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF3D2C33),
+                      ),
+                    ),
                     if (subtitle.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
-                        child: Text(subtitle, style: TextStyle(fontSize: 11, color: const Color(0xFF8A7A80).withValues(alpha: 0.7))),
+                        child: Text(
+                          subtitle,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: const Color(
+                              0xFF8A7A80,
+                            ).withValues(alpha: 0.7),
+                          ),
+                        ),
                       ),
                   ],
                 ),
@@ -1481,7 +1743,9 @@ class _SwitchTile extends StatelessWidget {
                 height: 22,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(11),
-                  color: value ? const Color(0xFFE8A0B8).withValues(alpha: 0.5) : const Color(0xFF5A4A52).withValues(alpha: 0.12),
+                  color: value
+                      ? const Color(0xFFE8A0B8).withValues(alpha: 0.5)
+                      : const Color(0xFF5A4A52).withValues(alpha: 0.12),
                 ),
                 child: Stack(
                   children: [
@@ -1495,7 +1759,12 @@ class _SwitchTile extends StatelessWidget {
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: Colors.white,
-                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 2)],
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.08),
+                              blurRadius: 2,
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -1514,12 +1783,18 @@ class _TabBtn extends StatelessWidget {
   final String label;
   final bool active;
   final VoidCallback onTap;
-  const _TabBtn({required this.label, required this.active, required this.onTap});
+  const _TabBtn({
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: active ? const Color(0xFFE8A0B8).withValues(alpha: 0.2) : Colors.transparent,
+      color: active
+          ? const Color(0xFFE8A0B8).withValues(alpha: 0.2)
+          : Colors.transparent,
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
