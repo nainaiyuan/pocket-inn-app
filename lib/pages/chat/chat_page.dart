@@ -74,6 +74,10 @@ class _ChatPageState extends State<ChatPage>
   Panel _currentPanel = Panel.center;
   Timer? _notifyWakeTimer; // 8-06 notify_user 超时唤醒
 
+  /// 设定审批弹窗内的版本快照（8-07 15:5x 用户：男主用 query_setting_version
+  /// 按需查某版某段原文，不把全文塞给他）；弹窗关闭时置空
+  List<({int v, String text, String diff})>? _dialogVersions;
+
   /// 用户是否在聊天页（全局标志：HomePage 切 tab 同步）——超时唤醒判断用
   bool get _isChatPageActive => GlobalBannerService.instance.userOnChat;
 
@@ -2731,17 +2735,19 @@ class _ChatPageState extends State<ChatPage>
       );
 
       // ⑫ 多轮会话弹窗 + 版本管理（用户手动：
-      // 点选项 A → v2；点选项 B → v3；🔀 结合 v2+v3 → v4；
+      // 点选项 A → v2；点选项 B → v3；在反馈框打字说
+      // "第一版喜好不好，第二版喜好好，结合一下" → 男主查段落 → 出 v4；
       // 看版本区 diff；可 ✕ 弃用一版再继续 → 同意）
       await sw('builtin-mock', '⑫/⑫ 设定·多轮会话+版本管理');
-      _acceptingStep = '⑫/12 设定·多轮商量+版本结合';
+      _acceptingStep = '⑫/12 设定·多轮商量+段落结合';
       note(
         '📋 ⑫ 改【喜好】——弹窗里男主会先给两组选项：\n'
         '1️⃣ 点选项 A → 男主出 v2（可看版本区「📝 v2 这版改了」）\n'
         '2️⃣ 再点选项 B → 男主出 v3（加【备注】段）\n'
-        '3️⃣ 点「🔀 结合」→ 选 v2 和 v3 → 男主自动出合并版 v4\n'
+        '3️⃣ 在下面反馈框打字："第一版喜好不好，第二版喜好好，结合一下"'
+        ' → 男主查段落 → 出合并版 v4\n'
         '4️⃣ 可选：✕ 弃用某版，看男主下轮还记不记得它\n'
-        '5️⃣ 最后点「就用这版」定案（预期含 身份+喜好C+备注）',
+        '5️⃣ 最后点「就用这版」定案（预期含 身份+喜好C）',
       );
       await say(
         '用 update_setting 把【喜好】改成"测试喜好C"。'
@@ -4231,6 +4237,29 @@ class _ChatPageState extends State<ChatPage>
     return lines.isEmpty ? '（无变化）' : lines.join('\n');
   }
 
+  /// 版本段落索引（8-07 15:5x 用户：不把全文塞给男主，只给"每版有哪些段"
+  /// 的标签+预览，男主需要哪段用 query_setting_version 查原文）：
+  /// v1：①【身份】测试角色 ②【喜好】xxx…
+  static String _buildVersionIndex(
+    List<({int v, String text, String diff})> versions,
+  ) {
+    if (versions.isEmpty) return '（无）';
+    final buf = StringBuffer();
+    for (final ver in versions) {
+      final secs = _parseSettingSections(ver.text);
+      final parts = <String>[];
+      for (var i = 0; i < secs.length; i++) {
+        final sec = secs[i];
+        final preview = sec.body.length > 12
+            ? '${sec.body.substring(0, 12)}…'
+            : sec.body;
+        parts.add('${i + 1}【${sec.tag.isEmpty ? '未分段' : sec.tag}】$preview');
+      }
+      buf.writeln('v${ver.v}：${parts.join(' / ')}');
+    }
+    return buf.toString().trim();
+  }
+
   /// 设定文本 → 编号显示（prompt 注入用）；没分段就原样
   static String _formatSectionsNumbered(String text) {
     final sections = _parseSettingSections(text);
@@ -4255,15 +4284,14 @@ class _ChatPageState extends State<ChatPage>
     var busy = false;
     // 8-07 15:2x 用户：男主方案要打版本号，看得出改了几版、每版长啥样
     // v1 = 男主最初方案；每次男主带【新方案】回复 → 追加新版本
-    // 8-07 15:5x：每版带 diff（相对上一版改了哪些段），可 🔀 结合两版
+    // 8-07 15:5x：每版带 diff（相对上一版改了哪些段）；用户用嘴说
+    // "第X版的XX好/不好"，男主按版本段落索引+查询工具自己结合
     final versions = <({int v, String text, String diff})>[
       (v: 1, text: content, diff: '（初始方案）'),
     ];
     var currentV = 1;
-    // 8-07 15:5x 用户：版本多了要能结合——选两版发男主，他基于两版出
-    // 新方案；true = 点版本号变成"选中"（不载入编辑框）
-    var combining = false;
-    final selectedVs = <int>[];
+    // 弹窗内版本列表快照（给查询工具 query_setting_version 用）
+    _dialogVersions = versions;
     // 8-07 15:5x 用户：男主了解阶段可以连续问多个问题，每个问题一组
     // 选项（A/B/C），用户连着点/反驳，直到点「就用这版」才定案——
     // 男主回复带【问题N】+【选项】块 → 渲染成可点按钮组
@@ -4294,7 +4322,9 @@ class _ChatPageState extends State<ChatPage>
               maleLast: maleText,
               userMsg: userMsg,
               history: history,
-              versionHistory: versions.length > 1 ? versions : null,
+              versionIndex: versions.length > 1
+                  ? _buildVersionIndex(versions)
+                  : null,
             );
             history.add('男主说：$reply');
             final idx = reply.indexOf('【新方案】');
@@ -4342,9 +4372,6 @@ class _ChatPageState extends State<ChatPage>
               }
               // 男主回复带【问题N】+【选项】→ 渲染可点选项组；没有就清空
               questionGroups = _parseOptionGroups(reply);
-              // 结合模式用完即退（选了版发出去了）
-              combining = false;
-              selectedVs.clear();
             });
           }
 
@@ -4381,26 +4408,7 @@ class _ChatPageState extends State<ChatPage>
                 );
                 currentV = versions.length;
               }
-              selectedVs.remove(v);
-              if (selectedVs.length < 2) combining = false;
             });
-          }
-
-          // 🔀 结合两版：把选中的版本全文发给男主，他基于两版出新方案
-          Future<void> combineSelected() async {
-            if (selectedVs.length != 2) return;
-            final picks =
-                versions.where((x) => selectedVs.contains(x.v)).toList()
-                  ..sort((a, b) => a.v.compareTo(b.v));
-            final msg = StringBuffer(
-              '把 v${picks[0].v} 和 v${picks[1].v} '
-              '这两版结合一下（两版内容如下，你参考后出个新方案）：\n',
-            );
-            for (final p in picks) {
-              msg.writeln('--- v${p.v} ---');
-              msg.writeln(p.text);
-            }
-            await sendToMale(msg.toString().trim());
           }
 
           return AlertDialog(
@@ -4494,46 +4502,12 @@ class _ChatPageState extends State<ChatPage>
                     ],
                   ],
                   // 方案版本区：男主出过几版一目了然，点编号回看/从这版继续，
-                  // ✕ 弃用改错的版；🔀 结合两版（8-07 15:5x 用户）
+                  // ✕ 弃用改错的版（8-07 15:5x 用户：结合不用按钮，直接跟男主说
+                  // "第一版喜好不好，第二版喜好好"——他有版本段落索引，能自己判断）
                   if (versions.length > 1) ...[
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            '📚 男主方案版本：点编号=回看/从这版继续，✕=弃用（男主仍看得到），🔀=结合两版',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF8A7A80),
-                            ),
-                          ),
-                        ),
-                        if (!combining && !busy)
-                          GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                combining = true;
-                                selectedVs.clear();
-                              });
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF0DCE6),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: const Text(
-                                '🔀 结合',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Color(0xFF8A5A72),
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
+                    const Text(
+                      '📚 男主方案版本：点编号=回看/从这版继续，✕=弃用（男主仍看得到）。想结合就说"第一版的XX好/不好，第二版的XX…"',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
                     ),
                     const SizedBox(height: 4),
                     Wrap(
@@ -4543,47 +4517,22 @@ class _ChatPageState extends State<ChatPage>
                           Container(
                             padding: const EdgeInsets.only(left: 8),
                             decoration: BoxDecoration(
-                              color: combining
-                                  ? (selectedVs.contains(ver.v)
-                                        ? const Color(0xFFC896B4)
-                                        : const Color(0xFFF7EAF1))
-                                  : (currentV == ver.v
-                                        ? const Color(0xFFC896B4)
-                                        : const Color(0xFFF7EAF1)),
+                              color: currentV == ver.v
+                                  ? const Color(0xFFC896B4)
+                                  : const Color(0xFFF7EAF1),
                               borderRadius: BorderRadius.circular(10),
-                              border: combining && selectedVs.contains(ver.v)
-                                  ? Border.all(
-                                      color: const Color(0xFF8A5A72),
-                                      width: 1.5,
-                                    )
-                                  : null,
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 GestureDetector(
-                                  onTap: combining
-                                      ? () {
-                                          setState(() {
-                                            if (selectedVs.contains(ver.v)) {
-                                              selectedVs.remove(ver.v);
-                                            } else if (selectedVs.length < 2) {
-                                              selectedVs.add(ver.v);
-                                            }
-                                          });
-                                          // 选满 2 个 → 自动发给男主结合
-                                          if (selectedVs.length == 2) {
-                                            combineSelected();
-                                          }
-                                        }
-                                      : () {
-                                          ctrl.text = ver.text;
-                                          ctrl.selection =
-                                              TextSelection.collapsed(
-                                                offset: ctrl.text.length,
-                                              );
-                                          setState(() => currentV = ver.v);
-                                        },
+                                  onTap: () {
+                                    ctrl.text = ver.text;
+                                    ctrl.selection = TextSelection.collapsed(
+                                      offset: ctrl.text.length,
+                                    );
+                                    setState(() => currentV = ver.v);
+                                  },
                                   child: Padding(
                                     padding: const EdgeInsets.symmetric(
                                       vertical: 3,
@@ -4592,27 +4541,17 @@ class _ChatPageState extends State<ChatPage>
                                       'v${ver.v}',
                                       style: TextStyle(
                                         fontSize: 12,
-                                        color:
-                                            (combining &&
-                                                    selectedVs.contains(
-                                                      ver.v,
-                                                    )) ||
-                                                currentV == ver.v
+                                        color: currentV == ver.v
                                             ? Colors.white
                                             : const Color(0xFF8A7A80),
-                                        fontWeight:
-                                            (combining &&
-                                                    selectedVs.contains(
-                                                      ver.v,
-                                                    )) ||
-                                                currentV == ver.v
+                                        fontWeight: currentV == ver.v
                                             ? FontWeight.bold
                                             : FontWeight.normal,
                                       ),
                                     ),
                                   ),
                                 ),
-                                if (versions.length > 1 && !combining)
+                                if (versions.length > 1)
                                   GestureDetector(
                                     onTap: () => discardVersion(ver.v),
                                     child: Padding(
@@ -4636,20 +4575,8 @@ class _ChatPageState extends State<ChatPage>
                           ),
                       ],
                     ),
-                    // 结合模式提示 + 当前选中版 diff（8-07 15:5x）
-                    if (combining) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        selectedVs.isEmpty
-                            ? '🔀 结合模式：点两个版本号（再点取消），选完自动发给男主结合'
-                            : '🔀 已选 ${selectedVs.length}/2：${selectedVs.map((v) => 'v$v').join('、')}'
-                                  '${selectedVs.length == 2 ? '——正在发给男主…' : '（再选一个）'}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF8A5A72),
-                        ),
-                      ),
-                    ] else if (currentV > 1) ...[
+                    // 当前选中版 diff（8-07 15:5x 用户：看得出每版改了什么）
+                    if (currentV > 1) ...[
                       const SizedBox(height: 6),
                       Builder(
                         builder: (_) {
@@ -4766,6 +4693,7 @@ class _ChatPageState extends State<ChatPage>
     final outFeedback = fbCtrl.text;
     ctrl.dispose();
     fbCtrl.dispose();
+    _dialogVersions = null;
     if (approved == null) return null;
     return (approved: approved, content: outContent, feedback: outFeedback);
   }
@@ -4780,9 +4708,9 @@ class _ChatPageState extends State<ChatPage>
     required String maleLast,
     required String userMsg,
     required List<String> history,
-    // 8-07 15:5x 用户：男主需要看版本历史——知道每版改了什么、
-    // 能结合两版、弃用了哪版（上下文不丢）
-    List<({int v, String text, String diff})>? versionHistory,
+    // 8-07 15:5x 用户：不把版本全文塞给男主（他会混乱）——只给段落索引
+    // （每版有哪些段+预览），他需要哪段用 query_setting_version 查原文
+    String? versionIndex,
   }) async {
     try {
       final personaPrompt = _state.persona?.prompt ?? '';
@@ -4799,13 +4727,6 @@ class _ChatPageState extends State<ChatPage>
             ? '（空）'
             : book.currentUser,
       );
-      final verBuf = StringBuffer();
-      if (versionHistory != null && versionHistory.length > 1) {
-        verBuf.writeln('【版本历史】（她可能让你参考旧版/结合两版，别弄混）：');
-        for (final ver in versionHistory) {
-          verBuf.writeln('v${ver.v} 改动：${ver.diff}');
-        }
-      }
       final system = SystemTemplate.build(
         personaName: personaName,
         personaPrompt: personaPrompt,
@@ -4813,20 +4734,21 @@ class _ChatPageState extends State<ChatPage>
         taskState:
             '【设定修改会话】你在和她讨论「$typeName」的修改，还没定案。\n'
             '$currentInfo\n'
-            '${verBuf.toString()}'
+            '${versionIndex != null && versionIndex.isNotEmpty ? '【版本段落索引】（她可能说"第X版的XX好/不好"，这是每版的段落标签+预览；需要某段原文时用 query_setting_version 工具查，别凭预览猜）：\n$versionIndex\n' : ''}'
             '你刚才的方案：\n$draft\n'
             '你上一轮说：$maleLast\n'
             '她本轮回复你：$userMsg\n'
             '回应她（像平时聊天一样自然）：可以解释、追问细节、或查资料'
             '（recall_memory/query_diary/query_setting_history/query_record/'
-            'list_tools 可直接查，不用她审批）。'
+            'query_setting_version/list_tools 可直接查，不用她审批）。'
             '【连续问答】你可以一次问多个问题，每个问题带一组选项，格式：\n'
             '【问题1】问题内容\n【选项】\nA. 选项内容\nB. 选项内容\nC. 其他/我自己说\n'
             '【问题2】问题内容\n【选项】\nA. ...\n（要几个问题写几组，选项一般 2-3 个）\n'
             '她点选项或反驳后，你可以继续追问下一个问题，也可以给出修改后的方案'
             '（最后单独一行写【新方案】然后写完整新内容）。'
-            '【结合请求】她说"结合 vX 和 vY"时，把两版内容合并成一份新方案'
-            '（保留两边有用的部分，冲突的地方问她或取更合适的），'
+            '【结合请求】她说"第X版的XX好/不好"时：用 query_setting_version'
+            '查对应版本对应段落的原文，分清她喜欢哪版哪段、不喜欢哪版哪段，'
+            '把喜欢的段落组合成一份新方案（冲突的地方问她或取更合适的），'
             '最后单独一行写【新方案】然后写完整新内容。'
             '【别中途断流程】她没点「就用这版」之前，讨论都没结束——'
             '她还在提需求/点选项，你就继续问或改，别急着定案收尾。',
@@ -4876,6 +4798,7 @@ class _ChatPageState extends State<ChatPage>
     'query_setting_history',
     'query_record',
     'list_tools',
+    'query_setting_version',
   };
 
   /// 设定会话内执行只读工具（免审批，用户在弹窗里全程可见）
@@ -4903,10 +4826,56 @@ class _ChatPageState extends State<ChatPage>
       case 'list_tools':
         r = await _executeListToolsTool(args);
         break;
+      case 'query_setting_version':
+        r = await _executeQuerySettingVersionTool(args);
+        break;
       default:
         r = const _ToolResult(false, '这个工具在设定会话里不能用');
     }
     return '${r.ok ? '✅' : '❌'} ${r.text}';
+  }
+
+  /// 工具执行：query_setting_version（8-07 15:5x 用户：男主按需查某版某段
+  /// 原文——结合用户"第X版的XX好/不好"时用，不把全文塞给他）
+  Future<_ToolResult> _executeQuerySettingVersionTool(
+    Map<String, dynamic> args,
+  ) async {
+    final versions = _dialogVersions;
+    if (versions == null || versions.isEmpty) {
+      return const _ToolResult(false, '当前没有可查的版本（还没出过方案）');
+    }
+    final v = (args['version'] as num?)?.toInt();
+    final tag = args['tag']?.toString();
+    if (v == null || v < 1 || v > versions.length) {
+      final list = versions.map((x) => 'v${x.v}').join('、');
+      return _ToolResult(false, '版本号不对，当前有：$list');
+    }
+    final ver = versions.firstWhere((x) => x.v == v);
+    if (tag == null || tag.trim().isEmpty) {
+      return _ToolResult(true, 'v$v 全文：\n${ver.text}');
+    }
+    final secs = _parseSettingSections(ver.text);
+    final sec = secs.where((x) => x.tag == tag.trim()).toList();
+    if (sec.isEmpty) {
+      final tags = secs.map((x) => '【${x.tag}】').join('、');
+      return _ToolResult(false, 'v$v 里没有【$tag】段，有的段：$tags');
+    }
+    // 顺便带上该段相对上一版的变化（男主判断"这版改没改这块"用）
+    String prevNote = '';
+    if (v > 1) {
+      final prev = versions.firstWhere((x) => x.v == v - 1);
+      final prevSecs = _parseSettingSections(prev.text);
+      final prevSec = prevSecs.where((x) => x.tag == tag.trim()).toList();
+      if (prevSec.isEmpty) {
+        prevNote = '\n（v${v - 1} 没有这段，是 v$v 新增的）';
+      } else if (prevSec.first.body != sec.first.body) {
+        prevNote = '\n（v${v - 1} 是：${prevSec.first.body}）';
+      }
+    }
+    return _ToolResult(
+      true,
+      'v$v 的【${sec.first.tag}】：${sec.first.body}$prevNote',
+    );
   }
 
   /// 工具执行：query_setting_history（男主查设定变更历史）

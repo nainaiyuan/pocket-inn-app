@@ -118,6 +118,24 @@ class MockAIProvider {
           providerName: '模拟AI',
         );
       }
+      if (lastUser2.contains('结合') ||
+          lastUser2.contains('第') && lastUser2.contains('版')) {
+        // 8-07 15:5x 用户：结合不用按钮，用户用嘴说"第一版喜好不好，第二版
+        // 喜好好"——模拟男主先调 query_setting_version 查段落原文，再结合
+        AiModuleLog.log('模拟AI', '💬 设定会话（结合请求）→ 模拟男主查段落原文');
+        return AIProviderResult(
+          text: '好，我看看这两版的具体段落：',
+          reasoningContent: _reasoning ? '模拟思考：她说要结合，我查一下两版的喜好段。' : null,
+          toolCalls: [
+            {
+              'id': 'mock_qsv_001',
+              'name': 'query_setting_version',
+              'arguments': {'version': 2, 'tag': '喜好'},
+            },
+          ],
+          providerName: '模拟AI',
+        );
+      }
       if (lastUser2.contains('我选')) {
         // 统计用户消息里"我选"出现次数：第一次 → v2，第二次 → v3
         final pickCount = messages
@@ -346,6 +364,29 @@ class MockAIProvider {
 
   /// 工具轮：逐项校验程序回传格式，通过/失败都明确报出来
   AIProviderResult _handleToolRound(List<AIChatMessage> messages) {
+    // 8-07 15:5x 设定会话"结合"剧本：男主查完版本段落（query_setting_version
+    // 工具结果已回传）→ 直接出合并方案（不走下面的通用校验，那是验收①用的）
+    final sysTxt = messages
+        .where((m) => m.role == 'system')
+        .map((m) => m.content)
+        .join('\n');
+    final toolContents = messages
+        .where((m) => m.role == 'tool')
+        .map((m) => m.content)
+        .join('\n');
+    if (sysTxt.contains('设定修改会话') && toolContents.contains('v2 的【喜好】')) {
+      AiModuleLog.log('模拟AI', '💬 设定会话（查到段落原文）→ 模拟男主出合并版');
+      return AIProviderResult(
+        text:
+            '好，我查了这两段：v1 的喜好是"测试喜好A"，v2 改成"测试喜好C"了。'
+            '按你说的——身份用第一版，喜好用第二版：\n'
+            '【新方案】\n'
+            '【身份】测试角色\n'
+            '【喜好】测试喜好C',
+        reasoningContent: _reasoning ? '模拟思考：按她说的分段结合，身份取v1，喜好取v2。' : null,
+        providerName: '模拟AI',
+      );
+    }
     final sb = StringBuffer('🧪 工具轮回传校验：\n');
     var ok = true;
 
