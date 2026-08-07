@@ -26,6 +26,7 @@ import 'failover_router.dart';
 import 'mock_ai_provider.dart';
 import 'models.dart';
 import 'provider_presets.dart';
+import 'anthropic_transport.dart';
 import 'tool_format_adapter.dart';
 
 class AIProviderManager {
@@ -1291,6 +1292,10 @@ class AIProviderManager {
         return ['text', 'none'];
       case 'none':
         return ['none'];
+      // 8-07 23:0x：实测识别出 Anthropic 原生格式 → 原生调用优先，
+      // 失败再降级文本协议（格式错误才降，网络/鉴权走 provider failover）
+      case 'anthropic':
+        return ['anthropic', 'text', 'none'];
       default:
         return ['openai', 'text', 'none'];
     }
@@ -1326,15 +1331,27 @@ class AIProviderManager {
         }
       }
     }
-    final apiResult = await _api.createChatCompletion(
-      _resolve(config),
-      messages: [
-        for (final message in effectiveMessages) message.toApiJson(),
-      ],
-      defaults: defaults,
-      tools: translatedTools,
-      cancellationToken: cancellationToken,
-    );
+    // 8-07 23:0x 用户：MCP 式统一适配——不管男主用什么格式，管家统一转换调用。
+    // anthropic 原生格式走独立 transport（POST /v1/messages）；其余走 OpenAI 兼容
+    final apiResult = adapter.formatId == 'anthropic'
+        ? await createAnthropicCompletion(
+            _resolve(config),
+            messages: [
+              for (final message in effectiveMessages) message.toApiJson(),
+            ],
+            defaults: defaults,
+            tools: translatedTools,
+            cancellationToken: cancellationToken,
+          )
+        : await _api.createChatCompletion(
+            _resolve(config),
+            messages: [
+              for (final message in effectiveMessages) message.toApiJson(),
+            ],
+            defaults: defaults,
+            tools: translatedTools,
+            cancellationToken: cancellationToken,
+          );
     // 文本残留工具块处理（8-07 21:2x 用户实测：男主会在文本里写其他家原生
     // 格式，如 anthropic 的 <invoke name="X">…</invoke>（流式带 <|IDSMLI|>
     // 标记）。原生 tool_calls 已有时 = 双写残留（剥掉不显示，不重复执行）；

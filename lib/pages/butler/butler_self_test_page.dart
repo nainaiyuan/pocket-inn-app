@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../../ai_provider/ai_provider_manager.dart';
 import '../../ai_provider/mock_ai_provider.dart';
-import '../../ai_provider/models.dart';
 import '../../ai_provider/tool_format_adapter.dart';
+import '../../ai_provider/models.dart';
 import '../../butler/tools/tool_intent_parser.dart';
 import '../../pages/chat/services/ai_chat_service.dart';
 import '../../pages/chat/services/context_manager.dart';
@@ -504,6 +504,58 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
         passed: calls == null,
         failedReason: calls == null ? null : '纯聊天被误判成工具调用',
         guidance: '自然语言应零副作用（中文意图已移除）',
+      ));
+    }
+
+    // ── 第 1.5 层：统一适配层多格式解析（8-07 23:0x 用户：MCP 式统一适配——
+    // 不管男主用什么格式，管家都识别执行；不按名字猜格式）──
+    // 用 tool_format_adapter 的 parseToolCallsFromText 喂各格式样本：
+    // openai JSON / anthropic invoke XML（干净）/ invoke XML（<|IDSMLI|>
+    // 流式切碎污染）/ anthropic tool_use JSON / 普通文本不误报
+    {
+      const samples = <String, String>{
+        'openai JSON 文本': '{"name":"manage_flow","arguments":{"action":"next"}}',
+        'invoke XML 干净': '<invoke name="manage_flow"><parameter name="action">next</parameter></invoke>',
+        'invoke XML 污染': '<|I DSMLIl invoke name="manage_flow"><| I DSML I I parameter name="action" string="true">next</| IDSML I I parameter></II DSMLI l invoke>',
+        'tool_use JSON': '{"type":"tool_use","name":"manage_flow","input":{"action":"next"}}',
+        '双写残留(原生+文本)': '好的我查一下<invoke name="list_tools"><parameter name="category">记忆</parameter></invoke>',
+      };
+      final openaiAdapter = const OpenAICompatAdapter();
+      final anthropicAdapter = const AnthropicAdapter();
+      var allHit = true;
+      final actuals = <String>[];
+      for (final entry in samples.entries) {
+        // 任何 adapter 解析都行——统一适配 = 多格式都认
+        final calls = <Map<String, dynamic>>[
+          ...openaiAdapter.parseToolCallsFromText(entry.value),
+          ...anthropicAdapter.parseToolCallsFromText(entry.value),
+        ];
+        final names = calls.map((c) => c['name']).whereType<String>().toSet();
+        final hit = calls.any((c) => c['name'] == 'manage_flow') ||
+            calls.any((c) => c['name'] == 'list_tools');
+        if (!hit) allHit = false;
+        actuals.add('${entry.key}:${names.isEmpty ? '✗' : names.join('、')}');
+      }
+      items.add(ButlerSelfTestItem(
+        message: '统一适配：多格式解析',
+        expected: 'openai/invoke XML(干净+污染)/tool_use 全能识别，普通文本不误报',
+        actual: actuals.join('；'),
+        passed: allHit,
+        failedReason: allHit ? null : '某格式没解析出来（见 actual）',
+        guidance: '检查 tool_format_adapter：parseToolCallsFromText + '
+            'parseAnthropicInvokeCalls + _sanitizeInvokeText 清洗链',
+      ));
+      // 普通文本不误报
+      final plain = openaiAdapter.parseToolCallsFromText('今天天气真好，我们去散步吧');
+      final plainHit = plain.isEmpty &&
+          anthropicAdapter.parseToolCallsFromText('今天天气真好，我们去散步吧').isEmpty;
+      items.add(ButlerSelfTestItem(
+        message: '统一适配：普通文本不误报',
+        expected: '纯聊天文本解析不出任何工具',
+        actual: plainHit ? '（无工具，正常）' : '误识别: $plain',
+        passed: plainHit,
+        failedReason: plainHit ? null : '普通文本被误判成工具调用',
+        guidance: '检查 parseToolCallsFromText 是否只在标签/JSON 结构出现时触发',
       ));
     }
 

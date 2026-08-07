@@ -27,6 +27,7 @@ import '../services/i_openai_api_service.dart';
 import '../services/openai_compatible_api_service.dart';
 import 'ai_key_value_store.dart';
 import 'ai_module_log.dart';
+import 'anthropic_transport.dart';
 import 'tool_format_adapter.dart';
 
 /// 探测出的能力画像（可序列化，缓存用）。
@@ -121,7 +122,10 @@ class CapabilityCache {
   static final CapabilityCache instance = CapabilityCache._();
 
   /// 8-05 升 v2：新增后台记忆实测字段，旧缓存没有该结果 → 作废重测
-  static const String storageKey = 'ai_provider_capabilities_v2';
+  /// 8-07 23:1x 升 v3：探测增强（openai 不通时实测 anthropic 原生格式，
+  /// 不按 URL 名字猜；deepseek 优先 + /anthropic 归一化）——旧缓存可能存了
+  /// 误判的 'text' 格式，作废重测
+  static const String storageKey = 'ai_provider_capabilities_v3';
 
   AiKeyValueStore _store = const SharedPrefsAiStore();
 
@@ -232,8 +236,11 @@ class CapabilityProbe {
         toolFormat = 'openai';
       } else {
         // 成功但没调工具：prompt 都明说"请调用 ping 工具"了还不调，
-        // 说明模型不会原生调用 → 文本协议兜底（8-04 用户确认的规则）
-        toolFormat = 'text';
+        // 不一定是模型不会——也可能是端点实际是 Anthropic 格式、
+        // OpenAI 格式请求被当成普通文本对话。8-07 23:0x 用户：
+        // "不要匹配名字去匹配调用方式，管家统一适配（像 MCP）"→
+        // 再实测 Anthropic 原生格式，识别真实能力再定
+        toolFormat = await _probeAnthropicFormat(config) ?? 'text';
       }
       final thinking = result.thinkingChain;
       if (thinking != null && thinking.trim().isNotEmpty) {
@@ -241,8 +248,9 @@ class CapabilityProbe {
       }
     } on Object catch (error) {
       if (isFormatError(error)) {
-        // API 不认 tools 字段（报错提到工具/函数/参数）→ 文本协议
-        toolFormat = 'text';
+        // API 不认 tools 字段（报错提到工具/函数/参数）→ 可能根本不是
+        // OpenAI 兼容端点 → 试 Anthropic 原生格式
+        toolFormat = await _probeAnthropicFormat(config) ?? 'text';
       } else {
         // 网络/鉴权/超时 → 实测不了，用 URL 猜测
         final g = guess(config);
@@ -351,6 +359,50 @@ class CapabilityProbe {
         '${error.toString().length > 120 ? error.toString().substring(0, 120) : error}',
       );
       return false;
+    }
+  }
+
+  /// Anthropic 原生格式实测（8-07 23:0x 用户：不按名字猜格式，实测为准）。
+  /// 用 Anthropic 格式（POST /v1/messages + tools）发 ping，能返回 tool_use
+  /// = 端点真是 Anthropic 格式 → 返回 'anthropic'；失败/不识别 → null。
+  Future<String?> _probeAnthropicFormat(ResolvedApiConfig config) async {
+    try {
+      final result = await createAnthropicCompletion(
+        config,
+        messages: const [
+          {'role': 'user', 'content': '请调用 ping 工具。只输出工具调用，不要解释。'},
+        ],
+        defaults: const {'max_tokens': 60, 'temperature': 0},
+        tools: const AnthropicAdapter().translateTools(const [
+          {
+            'type': 'function',
+            'function': {
+              'name': 'ping',
+              'description': '测试工具调用',
+              'parameters': {
+                'type': 'object',
+                'properties': <String, dynamic>{},
+              },
+            },
+          },
+        ]),
+      );
+      if (result.toolCalls != null && result.toolCalls!.isNotEmpty) {
+        AiModuleLog.log(
+          'AI探测',
+          '🔍 ${config.name} 实测识别为 Anthropic 原生格式'
+          '（OpenAI 格式不通，Anthropic 格式 ping 成功）',
+        );
+        return 'anthropic';
+      }
+      return null;
+    } on Object catch (error) {
+      AiModuleLog.log(
+        'AI探测',
+        '🔍 ${config.name} Anthropic 格式实测失败（非 Anthropic 端点）: '
+        '${error.toString().length > 100 ? error.toString().substring(0, 100) : error}',
+      );
+      return null;
     }
   }
 
