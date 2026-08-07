@@ -1088,12 +1088,16 @@ class _ChatPageState extends State<ChatPage>
             // 8-06 21:41 用户：回复标记也走工具（原生就是调工具的）
             // 8-06 21:43：没有"不回"选项——没回的留在待回复区挂着
             // 免审批、不弹气泡（男主的话本身就是回复）
-            final rIds = <int>[];
+            final rIds = <String>[];
             final rRaw = args['replied_ids'];
             if (rRaw is List) {
               for (final v in rRaw) {
-                final n = (v as num?)?.toInt();
-                if (n != null && n >= 1) rIds.add(n);
+                // 数字或字母（管家提醒 #A）都认
+                final s = v.toString().trim();
+                if (RegExp(r'^\d+$').hasMatch(s) ||
+                    RegExp(r'^[A-Za-z]$').hasMatch(s)) {
+                  rIds.add(s.toUpperCase());
+                }
               }
             }
             if (rIds.isEmpty) {
@@ -1285,11 +1289,11 @@ class _ChatPageState extends State<ChatPage>
       var displayText = ButlerPipelineResult.extractKeywordsFromReply(
         replyTexts.join('\n'),
       );
-      // 8-07 19:15：剥 <msg>/<act>/<reply> 标签 → 落库干净文本
-      //（气泡显示用 spans 渲染，重载不显示标签壳）
+      // 8-07 19:15：剥 <msg>/<act>/<reply>/<sys> 标签 → 落库干净文本
+      //（气泡显示用 spans 渲染，重载不显示标签壳；<sys> 是回管家静默块）
       displayText = displayText
           .replaceAll(
-            RegExp(r'</?msg>|</?act>|</?reply>', caseSensitive: false),
+            RegExp(r'</?msg>|</?act>|</?reply>|</?sys>', caseSensitive: false),
             '',
           )
           .trim();
@@ -2934,7 +2938,7 @@ class _ChatPageState extends State<ChatPage>
 
   /// 8-07 19:15：男主回复是否带任何标签（<reply>/<msg>/<act>）
   static bool _hasAnyTag(String text) =>
-      RegExp(r'<reply>|<msg>|<act>', caseSensitive: false).hasMatch(text);
+      RegExp(r'<reply>|<msg>|<act>|<sys>', caseSensitive: false).hasMatch(text);
 
   /// 8-07 19:15（用户设计）：男主回复 → 解析 <msg>/<act> → 逐条 append
   /// - msg 块 → 对话气泡（spans 混排：话正常 + 动作斜体淡色）
@@ -2948,10 +2952,14 @@ class _ChatPageState extends State<ChatPage>
     bool isFirst = false,
   }) async {
     final rows = <_BubbleRow>[];
-    // 剥 <reply> 标注（不显示）
+    // 剥 <reply> 标注（不显示）+ <sys> 回管家块（静默不显示不落库）
     final clean = rawText
         .replaceAll(
           RegExp(r'<reply>[\s\S]*?</reply>', caseSensitive: false),
+          '',
+        )
+        .replaceAll(
+          RegExp(r'<sys>[\s\S]*?</sys>', caseSensitive: false),
           '',
         )
         .trim();
@@ -4534,6 +4542,8 @@ class _ChatPageState extends State<ChatPage>
     String? settingType,
   }) async {
     if (!mounted) return null;
+    // 8-07 19:5x 用户：状态感知——设定弹窗打开 = 走流程（男主状态感知知道）
+    FlowStore.settingDialogActive = true;
     FocusManager.instance.primaryFocus?.unfocus();
     // 检查该类型有没有当前版本（isCurrent）；没有 → 先选版本再聊
     var needPick = false;
@@ -5398,6 +5408,7 @@ class _ChatPageState extends State<ChatPage>
     fbCtrl.dispose();
     customCtrl.dispose();
     _dialogVersions = null;
+    FlowStore.settingDialogActive = false;
     if (approved == null) return null;
     // 8-07 18:2x：approved = ''放弃 / 'keep'留档定案 / 'overwrite'覆盖定案
     return (approved: approved, content: outContent, feedback: outFeedback);
@@ -5431,6 +5442,10 @@ class _ChatPageState extends State<ChatPage>
     try {
       final personaPrompt = _state.persona?.prompt ?? '';
       final book = SettingVersionStore.cached(settingPid ?? personaId);
+      // 8-07 19:5x 用户：弹窗会话也带主对话情况摘要——男主在弹窗里
+      // 也知道外面她说了什么（状态感知：弹窗讨论完要接上主对话待回复）
+      final _pdUser = PendingQueueStore.pendingUserText(personaId);
+      final _pdButler = PendingQueueStore.pendingButlerText(personaId);
       final currentInfo = StringBuffer('当前男主设定：');
       currentInfo.writeln(
         (book == null || book.currentMale.trim().isEmpty)
@@ -5448,6 +5463,9 @@ class _ChatPageState extends State<ChatPage>
         personaPrompt: personaPrompt,
         needsWindow: false,
         taskState:
+            '【主对话情况】（弹窗外她在主对话说的、还没回的——弹窗讨论完记得接上）：\n'
+            '${_pdUser ?? '（主对话暂无待回复）'}\n'
+            '${_pdButler != null ? _pdButler + '\n' : ''}'
             '【设定修改会话】你在和她讨论「$typeName」的修改，还没定案。\n'
             '${testStep != null && testStep.isNotEmpty ? '【验收剧本】$testStep\n' : ''}'
             '$currentInfo\n'

@@ -1159,12 +1159,50 @@ class AiChatService {
     // 他回复时标注"（回待#1、待#2）"，管家按编号消除（男主聪明，管家听话）。
     // 系统不猜他回了哪几条（自动算有漏洞：他决定不回的/只回一条的，系统分不清）。
     final prView = ContextManager.instance.pendingRepliedView(ctxPid);
-    final pendingText = PendingQueueStore.pendingText(ctxPid);
+    final pendingUser = PendingQueueStore.pendingUserText(ctxPid);
+    final pendingButler = PendingQueueStore.pendingButlerText(ctxPid);
     // 8-06 23:55 用户：流程层——【当前流程】注入（男主自管，每轮可见）
     // 执行中她发来的消息会被收集（PendingQueueStore），男主专注流程；
     // 被打断（stopped）会看到停在哪、她说了什么 → 决定 resume 还是先回复
     final flowText = FlowStore.text(ctxPid);
+    // 8-07 19:5x 用户：状态感知——男主每轮先知道"当前在哪"再决定怎么回
+    // （走流程 / 等工具结果 / 正常对话）；流程中她主对话说的话进【流程输入】，
+    // 流程结束自动回到【待回复】<user>（编号不变，不会丢）
+    final inFlow = FlowStore.isActive(ctxPid) || FlowStore.settingDialogActive;
+    final flowGoal = FlowStore.goalOf(ctxPid);
     final statusBlocks = <AIChatMessage>[
+      // 【当前情况】状态感知块（永远在，男主先看这个）
+      AIChatMessage(
+        role: 'system',
+        content: '【当前情况】（先看这个——你现在在哪，再决定怎么回）：\n'
+            '状态：${inFlow
+                ? '走流程中${flowGoal != null ? '「$flowGoal」' : '（设定弹窗中）'}'
+                : '正常对话'}\n'
+            '策略：${inFlow
+                ? '流程优先——她主对话说的话已收进【流程输入】，'
+                    '流程结束（finish/cancel）自动回到正常对话、待回复不会丢，'
+                    '到时记得接上；她觉得急的事你也可以先回（你判断）'
+                : '正常回复【待回复】'}',
+      ),
+      if (!inFlow && pendingUser != null)
+        AIChatMessage(
+          role: 'system',
+          content: '【待回复】（主对话她说的——一般要回，特殊情况可不回；'
+              '要消必须显式标注 <reply>回#N</reply>，一句话可回多条；'
+              '不回就挂着，她问起来你老实说）\n$pendingUser',
+        ),
+      if (inFlow && pendingUser != null)
+        AIChatMessage(
+          role: 'system',
+          content: '【流程输入】（流程进行中她主对话说的——插进流程，'
+              '你判断继续流程还是重置；要回她也用 <reply> 标注消掉）\n$pendingUser',
+        ),
+      if (pendingButler != null)
+        AIChatMessage(
+          role: 'system',
+          content: '【系统消息】（管家/系统提醒——不用回，执行或判断即可；'
+              '觉得该让她知道才用 <msg> 转达）\n$pendingButler',
+        ),
       if (flowText != null && flowText.isNotEmpty)
         AIChatMessage(
           role: 'system',
@@ -1172,16 +1210,6 @@ class AiChatService {
               '\n（执行中她发来的消息管家会收集，不用管，专注执行；'
               '想结束调 manage_flow finish/cancel；'
               '被她打断会收到【系统事件】，你决定继续还是先回复她）',
-        ),
-      if (pendingText != null && pendingText.isNotEmpty)
-        AIChatMessage(
-          role: 'system',
-          content: '【待回复】（她说的、你还没回的。'
-              '**没有"不回"选项**——没回的就一直挂在这，你赖不掉。'
-              '8-07 19:15 用户拍板：你的回复**第一行必须带回复标注**'
-              '<reply>回#1、#2</reply>（回用户#数字 / 回管家提醒#字母），'
-              '管家按标注消除；也可以调 resolve_pending。'
-              '纯闲聊不想回的：不用标，让它挂着（她问起来你老实说没回））\n$pendingText',
         ),
       if (prView.replied.isNotEmpty)
         AIChatMessage(

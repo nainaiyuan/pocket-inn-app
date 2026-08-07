@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'working_pad_store.dart';
 
 /// FlowStore —— 男主流程（Flow 层，8-06 23:55 用户定稿）
 ///
@@ -16,6 +17,19 @@ class FlowStore {
   FlowStore._();
 
   static const String _prefix = 'flow_';
+
+  /// 8-07 19:5x 用户：设定弹窗打开状态（chat_page 弹窗打开/关闭时设置）——
+  /// 弹窗会话走独立通道，但主对话的状态感知要知道"当前在走流程（弹窗）"
+  static bool settingDialogActive = false;
+
+  /// 流程目标（【当前情况】状态行用，简短）
+  static String? goalOf(String personaId) {
+    final f = _memCache;
+    if (f == null || f.isEmpty) return null;
+    final g = f['goal']?.toString().trim() ?? '';
+    return g.isEmpty ? null : g;
+  }
+
 
   static Map<String, dynamic>? _memCache;
 
@@ -143,26 +157,45 @@ class FlowStore {
     return '第 ${cur + 1} 步完成，现在第 ${cur + 2} 步：${steps[cur + 1]}';
   }
 
-  /// 流程完成
+  /// 流程完成（8-07 19:5x：完成时流程要点自动沉淀进便签——
+  /// 男主流程结束不能忘了流程里需要记住的东西）
   static Future<String> finish(String personaId) async {
     final f = await _read(personaId);
     if (f == null) return '没有流程';
     final steps = _stepsOf(f);
-    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
     f['status'] = 'done';
     f['stoppedNote'] = '';
     await _write(personaId, f);
+    await _sinkToPad(personaId, f, done: true);
     return '流程完成：${f['goal']}（${steps.length} 步全部做完）';
   }
 
-  /// 取消流程
+  /// 取消流程（取消也沉淀：男主知道流程停在哪，便签里的要点不丢）
   static Future<String> cancel(String personaId) async {
     final f = await _read(personaId);
     if (f == null) return '没有流程';
     f['status'] = 'cancelled';
     f['stoppedNote'] = '';
     await _write(personaId, f);
+    await _sinkToPad(personaId, f, done: false);
     return '流程已取消：${f['goal']}';
+  }
+
+  /// 流程结束沉淀：要点写进男主便签（WorkingPadStore），
+  /// 并提醒他主对话待回复不会丢（流程结束要接上）
+  static Future<void> _sinkToPad(String personaId, Map<String, dynamic> f,
+      {required bool done}) async {
+    try {
+      final now = DateTime.now();
+      final hhmm = '${now.hour.toString().padLeft(2, '0')}:'
+          '${now.minute.toString().padLeft(2, '0')}';
+      final steps = _stepsOf(f);
+      await WorkingPadStore.append(personaId,
+          '[$hhmm] 流程${done ? '已完成' : '已取消'}：${f['goal']}（${steps.length} 步）。'
+          '便签里记的要点保留；她主对话的待回复也还挂着，处理完流程记得接上。');
+    } catch (_) {
+      // 沉淀失败不影响流程主流程
+    }
   }
 
   /// 用户打断（停止按钮）：running → stopped，记下用户消息
