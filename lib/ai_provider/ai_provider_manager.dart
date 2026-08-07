@@ -1350,10 +1350,20 @@ class AIProviderManager {
       if (finalToolCalls == null || finalToolCalls.isEmpty) {
         finalToolCalls = textCalls;
       }
+      // 8-07 21:42 用户：多记日志，男主会辅助找 bug
+      AiModuleLog.log(
+        'AI路由',
+        '📝 文本残留工具调用 ${textCalls.length} 个'
+        '（${textCalls.map((c) => c['name']).join('、')}）'
+        '${finalToolCalls == null || finalToolCalls.isEmpty ? '→ 作为唯一调用执行' : '→ 原生已有，只剥不重复'}',
+      );
       finalText = adapter.stripToolBlocks(apiResult.text);
       // 自家 strip 没剥掉（如 openai 空实现）→ invoke XML 剥离兜底
       if (finalText == apiResult.text) {
         finalText = stripAnthropicInvokeBlocks(apiResult.text);
+        if (finalText != apiResult.text) {
+          AiModuleLog.log('AI路由', '🧹 invoke XML 兜底剥离（含流式标记清洗）');
+        }
       }
     }
     return AIProviderResult(
