@@ -94,8 +94,8 @@ class MockAIProvider {
         .map((m) => m.content)
         .join('\n');
     if (systemText2.contains('设定修改会话')) {
-      // 8-07 15:3x 用户：了解阶段男主先给选项（A/B/C），用户点选后
-      // 再出正式版本——第一轮回选项，用户选完（消息含"我选"）回新方案
+      // 8-07 15:5x 用户：选项要能连续点——男主一次问多个问题（每组
+      // A/B/C），用户连着点，他继续问/出正式版；点选消息含"我选"
       String lastUser2 = '';
       for (final m in messages.reversed) {
         if (m.role == 'user') {
@@ -114,14 +114,21 @@ class MockAIProvider {
           providerName: '模拟AI',
         );
       }
-      AiModuleLog.log('模拟AI', '💬 设定修改会话 → 模拟男主先给选项');
+      AiModuleLog.log('模拟AI', '💬 设定修改会话 → 模拟男主一次问两个问题');
       return AIProviderResult(
         text:
-            '我理了一下，有两个方向你看哪个更合你意，或者你说说自己的想法：\n'
+            '我理了一下，有两个问题想先问你，每个给你几个方向，'
+            '你可以连着点，也可以自己说：\n'
+            '【问题1】身份部分想怎么写？\n'
             '【选项】\n'
-            'A. 【身份】测试角色\n【喜好】测试喜好C\n'
-            'B. 【身份】测试角色\n【喜好】测试喜好C\n【备注】测试备注\n'
-            'C. 都不太对，我自己说',
+            'A. 测试角色\n'
+            'B. 测试角色，温柔系\n'
+            'C. 其他/我自己说\n'
+            '【问题2】喜好部分呢？\n'
+            '【选项】\n'
+            'A. 测试喜好C\n'
+            'B. 测试喜好C，再加点细节\n'
+            'C. 其他/我自己说',
         providerName: '模拟AI',
       );
     }

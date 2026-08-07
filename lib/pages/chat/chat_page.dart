@@ -4106,22 +4106,60 @@ class _ChatPageState extends State<ChatPage>
 
   // ── 设定段落工具（8-07 用户：段落化+标签，男主精准修改省 token）──
 
-  /// 解析男主回复里的【选项】块（8-07 15:3x 用户：了解阶段给选项）：
-  /// 格式：每行 "A. 内容" / "B）内容" / "C: 内容"，返回 (key, text) 列表
-  static List<({String key, String text})> _parseOptionBlock(String reply) {
-    final idx = reply.indexOf('【选项】');
-    if (idx < 0) return [];
-    final rest = reply.substring(idx + '【选项】'.length).trim();
-    final opts = <({String key, String text})>[];
-    for (final line in rest.split('\n')) {
-      final t = line.trim();
-      if (t.isEmpty) continue;
-      final m = RegExp(r'^([A-Za-z0-9])[.、:：)）]\s*(.+)$').firstMatch(t);
-      if (m != null) {
-        opts.add((key: m.group(1)!, text: m.group(2)!.trim()));
+  /// 解析男主回复里的【问题N】+【选项】组（8-07 15:5x 用户：选项要能连续点，
+  /// 男主一次可以问多个问题，每个问题一组 A/B/C）：
+  /// 格式：
+  ///   【问题1】身份部分想怎么定？
+  ///   【选项】
+  ///   A. 内容
+  ///   B）内容
+  ///   C: 内容
+  ///   【问题2】喜好部分呢？
+  ///   【选项】
+  ///   A. ...
+  /// 也兼容旧格式：单独的【选项】块（无【问题N】）→ 一组 question=''
+  static List<({String question, List<({String key, String text})> options})>
+  _parseOptionGroups(String reply) {
+    final groups =
+        <({String question, List<({String key, String text})> options})>[];
+    final blockReg = RegExp(
+      r'【问题\d*】([\s\S]*?)【选项】([\s\S]*?)(?=【问题\d*】|$)',
+    );
+    for (final m in blockReg.allMatches(reply)) {
+      final question = m.group(1)!.trim();
+      final opts = <({String key, String text})>[];
+      for (final line in m.group(2)!.split('\n')) {
+        final t = line.trim();
+        if (t.isEmpty) continue;
+        final om = RegExp(r'^([A-Za-z0-9])[.、:：)）]\s*(.+)$').firstMatch(t);
+        if (om != null) {
+          opts.add((key: om.group(1)!, text: om.group(2)!.trim()));
+        }
+      }
+      if (opts.isNotEmpty) {
+        groups.add((question: question, options: opts));
       }
     }
-    return opts;
+    // 兼容旧格式：单独【选项】块
+    if (groups.isEmpty) {
+      final idx = reply.indexOf('【选项】');
+      if (idx >= 0) {
+        final rest = reply.substring(idx + '【选项】'.length).trim();
+        final opts = <({String key, String text})>[];
+        for (final line in rest.split('\n')) {
+          final t = line.trim();
+          if (t.isEmpty) continue;
+          final m = RegExp(r'^([A-Za-z0-9])[.、:：)）]\s*(.+)$').firstMatch(t);
+          if (m != null) {
+            opts.add((key: m.group(1)!, text: m.group(2)!.trim()));
+          }
+        }
+        if (opts.isNotEmpty) {
+          groups.add((question: '', options: opts));
+        }
+      }
+    }
+    return groups;
   }
 
   /// 设定文本按【标签】切段；没有标签 → 整段一个（tag 空）
@@ -4194,9 +4232,11 @@ class _ChatPageState extends State<ChatPage>
     // v1 = 男主最初方案；每次男主带【新方案】回复 → 追加新版本
     final versions = <({int v, String text})>[(v: 1, text: content)];
     var currentV = 1;
-    // 8-07 15:3x 用户：男主了解阶段先给选项（A/B/C），用户点选/反驳，
-    // 聊透了再出正式版本——男主回复带【选项】块 → 渲染成可点按钮
-    var options = <({String key, String text})>[];
+    // 8-07 15:5x 用户：男主了解阶段可以连续问多个问题，每个问题一组
+    // 选项（A/B/C），用户连着点/反驳，直到点「就用这版」才定案——
+    // 男主回复带【问题N】+【选项】块 → 渲染成可点按钮组
+    var questionGroups =
+        <({String question, List<({String key, String text})> options})>[];
     // 会话记录（每轮：她说/男主说，给男主当上下文）
     final history = <String>[];
     final pid = _state.personaId ?? '';
@@ -4257,8 +4297,8 @@ class _ChatPageState extends State<ChatPage>
                 versions.add((v: versions.length + 1, text: ctrl.text));
                 currentV = versions.length;
               }
-              // 男主回复带【选项】→ 渲染可点选项；没有就清空
-              options = _parseOptionBlock(reply);
+              // 男主回复带【问题N】+【选项】→ 渲染可点选项组；没有就清空
+              questionGroups = _parseOptionGroups(reply);
             });
           }
 
@@ -4291,49 +4331,66 @@ class _ChatPageState extends State<ChatPage>
                     ),
                   ),
                   const SizedBox(height: 10),
-                  // 选项区：男主给的方向，点一个 → 自动发男主出正式版本
-                  if (options.isNotEmpty) ...[
+                  // 选项区：男主问的问题（一组问题+一组选项），点一个回复他；
+                  // 可以连着点多个，也可以下面反驳；他出【新方案】才算定版
+                  if (questionGroups.isNotEmpty) ...[
                     const Text(
-                      '🎯 男主给了几个方向，点一个（也可以自己在下面改/反驳）：',
+                      '🎯 男主在问你（点选项直接回复他，可以连着点；也可以自己在下面改/反驳）：',
                       style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
                     ),
                     const SizedBox(height: 6),
-                    for (final opt in options)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: GestureDetector(
-                          onTap: busy
-                              ? null
-                              : () {
-                                  // 选项内容带段落标签 → 当完整设定填框
-                                  ctrl.text = opt.text;
-                                  ctrl.selection = TextSelection.collapsed(
-                                    offset: ctrl.text.length,
-                                  );
-                                  // 自动发男主一轮：告诉他选了哪个 → 他出正式版
-                                  sendToMale('我选 ${opt.key}：${opt.text}');
-                                },
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF7EAF1),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: const Color(0xFFE8C9D8),
-                              ),
-                            ),
-                            child: Text(
-                              '${opt.key}. ${opt.text}',
-                              style: const TextStyle(fontSize: 13, height: 1.4),
+                    for (final group in questionGroups) ...[
+                      if (group.question.isNotEmpty) ...[
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Text(
+                            '❓ ${group.question}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF6B5560),
                             ),
                           ),
                         ),
-                      ),
-                    const SizedBox(height: 8),
+                      ],
+                      for (final opt in group.options)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: GestureDetector(
+                            onTap: busy
+                                ? null
+                                : () {
+                                    // 告诉男主选了哪个 → 他继续问/出正式版
+                                    sendToMale(
+                                      '${group.question.isEmpty ? '' : '【${group.question}】'}'
+                                      '我选 ${opt.key}：${opt.text}',
+                                    );
+                                  },
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF7EAF1),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: const Color(0xFFE8C9D8),
+                                ),
+                              ),
+                              child: Text(
+                                '${opt.key}. ${opt.text}',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 8),
+                    ],
                   ],
                   // 方案版本区：男主出过几版一目了然，点版本号回看
                   if (versions.length > 1) ...[
@@ -4515,9 +4572,14 @@ class _ChatPageState extends State<ChatPage>
             '她本轮回复你：$userMsg\n'
             '回应她（像平时聊天一样自然）：可以解释、追问细节、或查资料'
             '（recall_memory/query_diary/query_setting_history/query_record/'
-            'list_tools 可直接查，不用她审批）。如果你要给出修改后的方案，'
-            '最后单独一行写【新方案】然后写完整新内容（她看到会继续讨论）；'
-            '她还在提需求就别急着定案。',
+            'list_tools 可直接查，不用她审批）。'
+            '【连续问答】你可以一次问多个问题，每个问题带一组选项，格式：\n'
+            '【问题1】问题内容\n【选项】\nA. 选项内容\nB. 选项内容\nC. 其他/我自己说\n'
+            '【问题2】问题内容\n【选项】\nA. ...\n（要几个问题写几组，选项一般 2-3 个）\n'
+            '她点选项或反驳后，你可以继续追问下一个问题，也可以给出修改后的方案'
+            '（最后单独一行写【新方案】然后写完整新内容）。'
+            '【别中途断流程】她没点「就用这版」之前，讨论都没结束——'
+            '她还在提需求/点选项，你就继续问或改，别急着定案收尾。',
       );
       final msgs = <AIChatMessage>[
         AIChatMessage(role: 'system', content: system),
