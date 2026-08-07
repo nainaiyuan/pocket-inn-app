@@ -20,6 +20,10 @@ _ChatMessage _$ChatMessageFromJson(Map<String, dynamic> json) => _ChatMessage(
           .toList() ??
       const [],
   thinkingChain: json['thinkingChain'] as String?,
+  spans:
+      (json['spans'] as List<dynamic>?)
+          ?.map((e) => BubbleSpan.fromJson(e as Map<String, dynamic>))
+          .toList(),
 );
 
 Map<String, dynamic> _$ChatMessageToJson(_ChatMessage instance) =>
@@ -33,4 +37,5 @@ Map<String, dynamic> _$ChatMessageToJson(_ChatMessage instance) =>
       'total': instance.total,
       'siblingIds': instance.siblingIds,
       'thinkingChain': instance.thinkingChain,
+      'spans': instance.spans?.map((e) => e.toJson()).toList(),
     };

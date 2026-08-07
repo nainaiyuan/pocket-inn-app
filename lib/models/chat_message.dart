@@ -1,5 +1,7 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import '../pages/chat/services/multi_bubble_parser.dart';
+
 part 'chat_message.freezed.dart';
 part 'chat_message.g.dart';
 
@@ -22,6 +24,9 @@ abstract class ChatMessage with _$ChatMessage {
     @Default([]) List<String> siblingIds,
     /// 思考链内容（可选）
     String? thinkingChain,
+    /// 多气泡分段样式（8-07 用户设计）：null = 纯文本；
+    /// text 存纯文本（标签剥掉），spans 存"哪段是动作"（斜体淡色混排）
+    List<BubbleSpan>? spans,
   }) = _ChatMessage;
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) =>

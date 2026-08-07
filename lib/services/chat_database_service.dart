@@ -9,6 +9,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../models/chat_memory.dart';
 import '../models/chat_message.dart';
 import '../models/chat_session.dart';
+import '../pages/chat/services/multi_bubble_parser.dart';
 import '../pages/chat/state/chat_presence.dart';
 
 class ChatDatabaseService {
@@ -17,7 +18,7 @@ class ChatDatabaseService {
   static final ChatDatabaseService instance = ChatDatabaseService._();
   final ValueNotifier<int> changeNotifier = ValueNotifier<int>(0);
 
-  static const int _dbVersion = 7;
+  static const int _dbVersion = 8;
   static const String _dbName = 'pocket_inn_chat.db';
 
   Database? _database;
@@ -146,6 +147,11 @@ class ChatDatabaseService {
     // 不升版本号则 onUpgrade 永不触发。升 7 强制所有库补建。
     if (oldVersion < 7 && newVersion >= 7) {
       await _createRecoverySchema(db);
+    }
+    if (oldVersion < 8 && newVersion >= 8) {
+      // v8: 多气泡 spans 列（8-07 19:15 用户：混合气泡样式重载后保持）
+      await db.execute(
+          'ALTER TABLE chat_messages ADD COLUMN spans TEXT');
     }
     // v3: 仅调整 _dbVersion 占位，无 schema 变更。
     // 若未来需要在 v3 引入列/索引，请在此处添加 oldVersion < 3 分支。
@@ -416,6 +422,7 @@ class ChatDatabaseService {
         role TEXT NOT NULL,
         text TEXT NOT NULL,
         thinking_chain TEXT,
+        spans TEXT,
         created_at TEXT NOT NULL,
         sibling_order INTEGER NOT NULL,
         FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE,
@@ -836,6 +843,7 @@ class ChatDatabaseService {
     required String? parentMessageId,
     required String text,
     String? thinkingChain,
+    String? spans,
   }) {
     return _appendMessage(
       sessionId: sessionId,
@@ -843,6 +851,7 @@ class ChatDatabaseService {
       role: ChatNodeRole.assistant,
       text: text,
       thinkingChain: thinkingChain,
+      spans: spans,
     );
   }
 
@@ -1062,6 +1071,13 @@ class ChatDatabaseService {
           total: siblingIds.isNotEmpty ? siblingIds.length : 1,
           siblingIds: siblingIds,
           thinkingChain: node.thinkingChain,
+          // 8-07 19:15：多气泡样式分段（JSON → BubbleSpan 列表；null=纯文本）
+          spans: node.spans == null
+              ? null
+              : (jsonDecode(node.spans!) as List<dynamic>)
+                  .map((e) =>
+                      BubbleSpan.fromJson(e as Map<String, dynamic>))
+                  .toList(),
         ),
       );
     }
@@ -1075,6 +1091,7 @@ class ChatDatabaseService {
     required ChatNodeRole role,
     required String text,
     String? thinkingChain,
+    String? spans,
   }) async {
     final now = DateTime.now();
     final node = await _db.transaction((tx) async {
@@ -1091,6 +1108,7 @@ class ChatDatabaseService {
         role: role,
         text: text,
         thinkingChain: thinkingChain,
+        spans: spans,
         createdAt: now,
         siblingOrder: siblingOrder,
       );
@@ -1568,6 +1586,7 @@ class ChatDatabaseService {
       'role': node.role.value,
       'text': node.text,
       'thinking_chain': node.thinkingChain,
+      'spans': node.spans,
       'created_at': node.createdAt.toIso8601String(),
       'sibling_order': node.siblingOrder,
     };
@@ -1581,6 +1600,7 @@ class ChatDatabaseService {
       role: ChatNodeRole.fromValue(map['role'] as String? ?? 'assistant'),
       text: map['text'] as String? ?? '',
       thinkingChain: map['thinking_chain'] as String?,
+      spans: map['spans'] as String?,
       createdAt: DateTime.parse(map['created_at'] as String),
       siblingOrder: map['sibling_order'] as int? ?? 0,
     );

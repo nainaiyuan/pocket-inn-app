@@ -753,6 +753,42 @@ class AiChatService {
     {
       'type': 'function',
       'function': {
+        'name': 'query_tool_formats',
+        'description':
+            '查询管家支持的工具调用格式（8-07 你设计：管家识别不了你的'
+            '原生调用方式时用）。返回管家能识别的所有格式模板——'
+            '照模板写文本管家就能解析执行（你当普通文本写也会成功）。'
+            '⚠️ 只读查询，不需要她审批。',
+        'parameters': {
+          'type': 'object',
+          'properties': {},
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'request_text_block',
+        'description':
+            '申请使用文本块格式（8-07 你设计：原生调用 + 其他家格式都试过'
+            '还不行时申请）。文本块 = ⟨工具:工具名⟩{"参数":"值"}⟨/工具⟩，'
+            '更简单的兜底格式，默认锁定，需要她批准后才能用。'
+            '调用时说明为什么原生和其他格式用不了。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'reason': {
+              'type': 'string',
+              'description': '为什么需要文本块（原生和其他格式的失败情况）',
+            },
+          },
+          'required': ['reason'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
         'name': 'continue_speaking',
         'description':
             '继续说话（8-06 21:36 你设计）。你说完一句还想接着说、'
@@ -1138,13 +1174,13 @@ class AiChatService {
               '被她打断会收到【系统事件】，你决定继续还是先回复她）',
         ),
       if (pendingText != null && pendingText.isNotEmpty)
-      if (pendingText != null && pendingText.isNotEmpty)
         AIChatMessage(
           role: 'system',
           content: '【待回复】（她说的、你还没回的。'
               '**没有"不回"选项**——没回的就一直挂在这，你赖不掉。'
-              '回了几条就标几条：回复多条时**必须标注编号**'
-              '如"（回待#1、待#2）"或调 resolve_pending，管家按标注消除。'
+              '8-07 19:15 用户拍板：你的回复**第一行必须带回复标注**'
+              '<reply>回#1、#2</reply>（回用户#数字 / 回管家提醒#字母），'
+              '管家按标注消除；也可以调 resolve_pending。'
               '纯闲聊不想回的：不用标，让它挂着（她问起来你老实说没回））\n$pendingText',
         ),
       if (prView.replied.isNotEmpty)

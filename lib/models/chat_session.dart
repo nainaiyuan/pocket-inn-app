@@ -43,6 +43,8 @@ abstract class ChatNode with _$ChatNode {
     required ChatNodeRole role,
     required String text,
     String? thinkingChain,
+    /// 8-07 19:15 多气泡分段样式 JSON（BubbleSpan 列表序列化；null=无）
+    String? spans,
     required DateTime createdAt,
     required int siblingOrder,
   }) = _ChatNode;

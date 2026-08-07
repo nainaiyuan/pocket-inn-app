@@ -92,7 +92,10 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
   void appendMessage(ChatMessage msg, {String? insertBeforeId}) {
     if (widget.currentPersona == null) return;
     // 实时插入的男主消息 → 打字机动效 + 未读（历史加载不播）
-    if (!msg.isMe && !msg.text.startsWith('[tool]')) {
+    // 8-07 19:15：[act] 独立动作气泡和 [tool] 一样不播打字机、不算未读
+    if (!msg.isMe &&
+        !msg.text.startsWith('[tool]') &&
+        !msg.text.startsWith('[act]')) {
       _typewritingIds.add(msg.id ?? '');
       if (msg.id != null) ChatPresence.instance.markCharacterUnread(msg.id!);
     }

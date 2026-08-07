@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/global_banner_service.dart';
 import '../../services/tool_approval_store.dart';
 import '../../services/global_timer_card_service.dart';
@@ -47,6 +49,7 @@ import 'widgets/chat_sidebar_right.dart';
 import 'widgets/chat_top_bar.dart';
 import 'widgets/chat_message_area.dart';
 import 'services/chat_storage_service.dart';
+import 'services/multi_bubble_parser.dart';
 import 'widgets/character_world_page.dart';
 import 'widgets/chat_input_bar.dart';
 import 'widgets/debug_log_sheet.dart';
@@ -608,6 +611,8 @@ class _ChatPageState extends State<ChatPage>
       // 收集男主各轮文本（第一轮 + 工具轮）——文本与工具可共存：
       // 模型第一轮既说话又调工具时，文本不丢，工具执行后合并显示
       final replyTexts = <String>[];
+      // 8-07 19:15：多气泡逐条落库记录（链式 parent 还原顺序 + spans 样式）
+      final dbRows = <_BubbleRow>[];
       if (result.text.trim().isNotEmpty) {
         replyTexts.add(result.text.trim());
       }
@@ -647,18 +652,52 @@ class _ChatPageState extends State<ChatPage>
       // 第一轮文本立即显示（不等工具轮跑完），
       // 用户先看到男主说话 → 再看工具气泡 → 再看男主基于结果继续说话
       if (result.text.trim().isNotEmpty) {
-        final firstText = await _displayableText(result.text);
+        replyTexts.add(result.text.trim());
+        var textToShow = result.text;
+        // 8-07 19:15（用户拍板）：男主回复不带任何标签（<reply>/<msg>/<act>）
+        // → 整条打回重写：不显示、不执行、不落库；连续 3 次熔断放行防死循环
+        if (!_hasAnyTag(textToShow)) {
+          _formatFailCount++;
+          if (_formatFailCount >= 3) {
+            _formatFailCount = 0; // 熔断：第 3 次强制放行（按纯文本显示）
+          } else {
+            final rewriteEvent = '你的回复没有按格式输出（缺少 <reply>/<msg>/<act> 标签），'
+                '已被打回，用户没看到。请按格式重写：'
+                '<reply>回#N</reply>（标注回哪条）+ <act>动作</act>（可选）'
+                '+ <msg>你说的话</msg>。标签小写不嵌套。';
+            DebugLogger.log('AI路由', '⛔ 男主无标签回复，打回重写（第 $_formatFailCount 次）');
+            ChatPresence.instance.beginTyping();
+            final rewritten = await _aiSvc.generateReply(
+              '',
+              personaId,
+              personaName: personaName,
+              personaPrompt: _currentPersonaPrompt(),
+              sessionId: _chatSessionId,
+              storagePersonaId: chatPid,
+              systemEvent: rewriteEvent,
+            );
+            if (rewritten.text.trim().isNotEmpty) {
+              replyTexts.add(rewritten.text.trim());
+              result = rewritten; // 整体替换 → 工具解析/工具轮用重写结果
+              textToShow = rewritten.text;
+            } else {
+              ChatPresence.instance.endTyping();
+              return; // 重写也空 → 结束本轮（别死循环）
+            }
+          }
+        }
+        final firstText = await _displayableText(textToShow);
         if (firstText.isNotEmpty) {
-          final firstMsgId = '${DateTime.now().microsecondsSinceEpoch}_ai0';
-          _firstAiMsgId = firstMsgId;
-          _msgKey.currentState?.appendMessage(
-            ChatMessage(
-              id: firstMsgId,
-              text: firstText,
-              isMe: false,
-              thinkingChain: result.reasoningContent,
-            ),
+          final rows = await _appendMaleReply(
+            textToShow,
+            thinkingChain: result.reasoningContent,
+            isFirst: true,
           );
+          dbRows.addAll(rows);
+          if (rows.isEmpty) {
+            // 解析后为空（纯标签壳）→ 没有打字 → 关"正在输出"
+            ChatPresence.instance.endTyping();
+          }
           // 文字进入打字机播放 → "正在输出"由打字机播完时 endTyping 关闭
         } else {
           // 文本被剥离成空（纯指令/工具块）→ 本轮没有打字 → 关"正在输出"
@@ -1070,6 +1109,21 @@ class _ChatPageState extends State<ChatPage>
             // 8-06 21:36 用户：男主不等她继续说话——调"继续"工具，
             // 系统自动再生成一轮（不带她消息）；免审批、不弹气泡
             toolResult = _ToolResult(true, '继续');
+          } else if (name == 'query_tool_formats') {
+            // 8-07 19:15 用户：管家识别不了男主的调用方式 → 查格式模板
+            // 按文本块锁过滤：未解锁不返回文本块模板
+            toolResult = _ToolResult(true, await _queryToolFormats(personaId));
+          } else if (name == 'request_text_block') {
+            // 8-07 19:15 用户：AI 主动申请文本块（原生+其他格式都试过）→ 用户批准
+            final reason = args['reason']?.toString() ?? '';
+            final approved =
+                await _approveTextBlock(personaId, personaName, reason);
+            toolResult = _ToolResult(
+              approved,
+              approved
+                  ? '✅ 她已批准文本块！现在可以用：⟨工具:工具名⟩{"参数":"值"}⟨/工具⟩'
+                  : '她暂时没批准文本块。继续用原生或其他家格式（查 query_tool_formats）',
+            );
           } else {
             toolResult = _ToolResult(false, '未知工具：$name');
           }
@@ -1171,14 +1225,11 @@ class _ChatPageState extends State<ChatPage>
           // 8-03 18:2x：工具轮男主回复也立即追加显示（渐进，不等循环结束）
           final roundText = await _displayableText(result.text);
           if (roundText.isNotEmpty) {
-            _msgKey.currentState?.appendMessage(
-              ChatMessage(
-                id: '${DateTime.now().microsecondsSinceEpoch}_ai$toolLoop',
-                text: roundText,
-                isMe: false,
-                thinkingChain: result.reasoningContent,
-              ),
-            );
+            // 8-07 多气泡：工具轮也走 _appendMaleReply（无标签裸文本兜底成对话）
+            dbRows.addAll(await _appendMaleReply(
+              result.text,
+              thinkingChain: result.reasoningContent,
+            ));
             // 打字机接管，"正在输出"由播完时 endTyping 关闭
           } else {
             ChatPresence.instance.endTyping();
@@ -1217,14 +1268,10 @@ class _ChatPageState extends State<ChatPage>
             replyTexts.add(result.text.trim());
             final eventText = await _displayableText(result.text);
             if (eventText.isNotEmpty) {
-              _msgKey.currentState?.appendMessage(
-                ChatMessage(
-                  id: '${DateTime.now().microsecondsSinceEpoch}_aiRej$rejectedCount',
-                  text: eventText,
-                  isMe: false,
-                  thinkingChain: result.reasoningContent,
-                ),
-              );
+              dbRows.addAll(await _appendMaleReply(
+                result.text,
+                thinkingChain: result.reasoningContent,
+              ));
             } else {
               ChatPresence.instance.endTyping();
             }
@@ -1238,6 +1285,14 @@ class _ChatPageState extends State<ChatPage>
       var displayText = ButlerPipelineResult.extractKeywordsFromReply(
         replyTexts.join('\n'),
       );
+      // 8-07 19:15：剥 <msg>/<act>/<reply> 标签 → 落库干净文本
+      //（气泡显示用 spans 渲染，重载不显示标签壳）
+      displayText = displayText
+          .replaceAll(
+            RegExp(r'</?msg>|</?act>|</?reply>', caseSensitive: false),
+            '',
+          )
+          .trim();
       // 8-06 21:36 用户：男主回复带编号 → 管家按标注消除待回复
       // （"回待#1、待#2"消除对应；"不回待#3"也消除=放下；没标注兜底消最老一条）
       if (result.text.trim().isNotEmpty) {
@@ -1280,17 +1335,33 @@ class _ChatPageState extends State<ChatPage>
         DebugLogger.log('管家流程', '✖ 代号还原失败: $e');
       }
       // 男主回复落库（静默执行时 displayText 为空 → 只记工具气泡，不记男主空回复）
-      // 注：渐进显示已把各轮文本实时插入 UI（第一轮 _ai0、工具轮 _aiN），
-      // 这里只落库不重复显示
+      // 8-07 19:15 多气泡：逐条链式落库（每条气泡一条记录，parent 指向上一条
+      // → 重载后气泡顺序 + 混合样式（spans）都保持）；旧版合并一条的兼容
+      //（无 dbRows 时退回合并落库）
       if (_chatSessionId != null && displayText.trim().isNotEmpty) {
         try {
-          final aiNode = await ChatDatabaseService.instance
-              .appendAssistantMessage(
-                sessionId: _chatSessionId!,
-                parentMessageId: _chatLeafId,
-                text: displayText,
-              );
-          _chatLeafId = aiNode.id;
+          if (dbRows.isNotEmpty) {
+            var parentId = _chatLeafId;
+            for (final row in dbRows) {
+              final aiNode = await ChatDatabaseService.instance
+                  .appendAssistantMessage(
+                    sessionId: _chatSessionId!,
+                    parentMessageId: parentId,
+                    text: row.text,
+                    spans: row.spansJson,
+                  );
+              parentId = aiNode.id;
+            }
+            _chatLeafId = parentId;
+          } else {
+            final aiNode = await ChatDatabaseService.instance
+                .appendAssistantMessage(
+                  sessionId: _chatSessionId!,
+                  parentMessageId: _chatLeafId,
+                  text: displayText,
+                );
+            _chatLeafId = aiNode.id;
+          }
         } catch (e) {
           DebugLogger.log('管家流程', '✖ 对话落库失败（男主回复）: $e');
         }
@@ -2857,6 +2928,148 @@ class _ChatPageState extends State<ChatPage>
   /// 8-03 18:2x：本轮男主第一句话气泡 id——工具气泡都挂在它头上
   /// （用户要求：调工具显示在第一句话的上方，后续句子在下方）
   String? _firstAiMsgId;
+
+  /// 8-07 19:15：男主回复无标签打回计数（连续 3 次熔断放行，防死循环）
+  int _formatFailCount = 0;
+
+  /// 8-07 19:15：男主回复是否带任何标签（<reply>/<msg>/<act>）
+  static bool _hasAnyTag(String text) =>
+      RegExp(r'<reply>|<msg>|<act>', caseSensitive: false).hasMatch(text);
+
+  /// 8-07 19:15（用户设计）：男主回复 → 解析 <msg>/<act> → 逐条 append
+  /// - msg 块 → 对话气泡（spans 混排：话正常 + 动作斜体淡色）
+  /// - act 块 → 独立动作气泡（text 加 '[act] ' 前缀，同 [tool] 机制，无头像斜体）
+  /// - <reply> 标注在解析前剥掉（不显示；消除待回复走 PendingQueueStore.resolve）
+  /// - 无标签裸文本 → 兜底成对话气泡（内容永不丢）
+  /// 返回逐条记录（id/text/spansJson）供落库（链式 parent 还原顺序 + 样式）
+  Future<List<_BubbleRow>> _appendMaleReply(
+    String rawText, {
+    String? thinkingChain,
+    bool isFirst = false,
+  }) async {
+    final rows = <_BubbleRow>[];
+    // 剥 <reply> 标注（不显示）
+    final clean = rawText
+        .replaceAll(
+          RegExp(r'<reply>[\s\S]*?</reply>', caseSensitive: false),
+          '',
+        )
+        .trim();
+    final parts = parseMultiBubbles(clean);
+    if (parts.isEmpty) return rows;
+    String? firstMsgId;
+    for (var i = 0; i < parts.length; i++) {
+      final part = parts[i];
+      final id =
+          '${DateTime.now().microsecondsSinceEpoch}_ai${isFirst ? '0' : 'x'}_$i';
+      if (part.kind == BubbleKind.act) {
+        // 独立动作气泡：[act] 前缀（同 [tool] 机制）→ message_bubble 渲染斜体淡色
+        _msgKey.currentState?.appendMessage(
+          ChatMessage(id: id, text: '[act] ${part.text}', isMe: false),
+        );
+        rows.add(_BubbleRow(id, '[act] ${part.text}', null));
+      } else {
+        final msg = ChatMessage(
+          id: id,
+          text: part.text,
+          isMe: false,
+          // 纯文本段落不挂 spans（null = 旧行为）；有动作片段才挂
+          spans: (part.spans.length > 1 ||
+                  part.spans.first.kind == SpanKind.act)
+              ? part.spans
+              : null,
+          // 思考链只挂第一条 msg 气泡
+          thinkingChain: i == 0 ? thinkingChain : null,
+        );
+        _msgKey.currentState?.appendMessage(msg);
+        rows.add(_BubbleRow(
+          id,
+          part.text,
+          msg.spans == null
+              ? null
+              : jsonEncode(msg.spans!.map((s) => s.toJson()).toList()),
+        ));
+        firstMsgId ??= id;
+      }
+    }
+    if (isFirst) _firstAiMsgId = firstMsgId;
+    return rows;
+  }
+
+  /// 8-07 19:15：query_tool_formats 实现——返回管家支持的调用格式模板。
+  /// 文本块模板按锁过滤（textBlockEnabled 默认 false，per-persona 存储）
+  static String _textBlockKey(String personaId) =>
+      'text_block_enabled_$personaId';
+
+  static Future<bool> _isTextBlockEnabled(String personaId) async {
+    final p = await SharedPreferences.getInstance();
+    return p.getBool(_textBlockKey(personaId)) ?? false;
+  }
+
+  Future<String> _queryToolFormats(String personaId) async {
+    final enabled = await _isTextBlockEnabled(personaId);
+    final textBlockLine = enabled
+        ? '4. 文本块（已批准）：⟨工具:工具名⟩{"参数":"值"}⟨/工具⟩\n'
+            '   → name 填工具名，arguments 填参数 JSON'
+        : '4. 文本块（未批准，默认锁定）：⟨工具:工具名⟩{"参数":"值"}⟨/工具⟩\n'
+            '   → 想用先调 request_text_block 申请，她批准后才能用';
+    return '管家支持这些工具调用格式（选一个照模板写，写完管家自动解析执行，'
+        '结果会返回给你）：\n'
+        '1. OpenAI 系（你熟悉的话优先用）：\n'
+        '   tool_calls:[{"function":{"name":"工具名","arguments":"{\\"参数\\":\\"值\\"}"}}]\n'
+        '   → name 填工具名，arguments 填参数 JSON 字符串\n'
+        '2. Claude 系：{"type":"tool_use","name":"工具名","input":{"参数":"值"}}\n'
+        '   → name 填工具名，input 填参数\n'
+        '3. Gemini 系：{"functionCall":{"name":"工具名","args":{"参数":"值"}}}\n'
+        '   → name 填工具名，args 填参数\n'
+        '$textBlockLine';
+  }
+
+  /// 8-07 19:15：request_text_block 实现——AI 主动申请文本块 → 用户审批
+  Future<bool> _approveTextBlock(
+    String personaId,
+    String personaName,
+    String reason,
+  ) async {
+    if (!mounted) return false;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7F9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('📦 男主申请用文本块'),
+        content: Text(
+          '$personaName 想用文本块格式调用工具（更简单的兜底格式，'
+          '默认锁定）。\n\n理由：${reason.isEmpty ? '（没写理由）' : reason}\n\n'
+          '批准后他就能用 ⟨工具:工具名⟩{"参数":"值"}⟨/工具⟩ 调用工具。',
+          style: const TextStyle(fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(
+              '保持禁用',
+              style: TextStyle(color: Color(0xFF8A7A80)),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFC896B4),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('✅ 允许'),
+          ),
+        ],
+      ),
+    );
+    if (approved == true) {
+      final p = await SharedPreferences.getInstance();
+      await p.setBool(_textBlockKey(personaId), true);
+      DebugLogger.log('工具权限', '📦 已批准文本块：$personaId');
+      return true;
+    }
+    return false;
+  }
 
   /// 男主回复 → 用户可见文本（剥离工具块 + #指令 + 还原代号）。
   /// 8-03 18:2x：渐进显示用——每轮文本单独显示，不等全部跑完
@@ -6100,4 +6313,12 @@ class _ToolResult {
   final bool ok;
   final String text;
   const _ToolResult(this.ok, this.text);
+}
+
+/// 8-07 19:15：多气泡逐条落库记录（链式 parent 还原气泡顺序 + spans 样式）
+class _BubbleRow {
+  final String id;
+  final String text;
+  final String? spansJson;
+  const _BubbleRow(this.id, this.text, this.spansJson);
 }

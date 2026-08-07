@@ -20,6 +20,8 @@ mixin _$ChatMessage {
  int get total;/// 同级消息 ID 列表，顺序与 index/total 对应
  List<String> get siblingIds;/// 思考链内容（可选）
  String? get thinkingChain;
+  List<BubbleSpan>? get spans;
+
 /// Create a copy of ChatMessage
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -32,16 +34,16 @@ $ChatMessageCopyWith<ChatMessage> get copyWith => _$ChatMessageCopyWithImpl<Chat
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ChatMessage&&(identical(other.id, id) || other.id == id)&&(identical(other.sessionId, sessionId) || other.sessionId == sessionId)&&(identical(other.parentId, parentId) || other.parentId == parentId)&&(identical(other.text, text) || other.text == text)&&(identical(other.isMe, isMe) || other.isMe == isMe)&&(identical(other.index, index) || other.index == index)&&(identical(other.total, total) || other.total == total)&&const DeepCollectionEquality().equals(other.siblingIds, siblingIds)&&(identical(other.thinkingChain, thinkingChain) || other.thinkingChain == thinkingChain));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ChatMessage&&(identical(other.id, id) || other.id == id)&&(identical(other.sessionId, sessionId) || other.sessionId == sessionId)&&(identical(other.parentId, parentId) || other.parentId == parentId)&&(identical(other.text, text) || other.text == text)&&(identical(other.isMe, isMe) || other.isMe == isMe)&&(identical(other.index, index) || other.index == index)&&(identical(other.total, total) || other.total == total)&&const DeepCollectionEquality().equals(other.siblingIds, siblingIds)&&(identical(other.thinkingChain, thinkingChain) || other.thinkingChain == thinkingChain)&&(identical(other.spans, spans) || other.spans == spans));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,sessionId,parentId,text,isMe,index,total,const DeepCollectionEquality().hash(siblingIds),thinkingChain);
+int get hashCode => Object.hash(runtimeType,id,sessionId,parentId,text,isMe,index,total,const DeepCollectionEquality().hash(siblingIds),thinkingChain,spans);
 
 @override
 String toString() {
-  return 'ChatMessage(id: $id, sessionId: $sessionId, parentId: $parentId, text: $text, isMe: $isMe, index: $index, total: $total, siblingIds: $siblingIds, thinkingChain: $thinkingChain)';
+  return 'ChatMessage(id: $id, sessionId: $sessionId, parentId: $parentId, text: $text, isMe: $isMe, index: $index, total: $total, siblingIds: $siblingIds, thinkingChain: $thinkingChain, spans: $spans)';
 }
 
 
@@ -52,7 +54,7 @@ abstract mixin class $ChatMessageCopyWith<$Res>  {
   factory $ChatMessageCopyWith(ChatMessage value, $Res Function(ChatMessage) _then) = _$ChatMessageCopyWithImpl;
 @useResult
 $Res call({
- String? id, String? sessionId, String? parentId, String text, bool isMe, int index, int total, List<String> siblingIds, String? thinkingChain
+ String? id, String? sessionId, String? parentId, String text, bool isMe, int index, int total, List<String> siblingIds, String? thinkingChain, List<BubbleSpan>? spans
 });
 
 
@@ -69,7 +71,7 @@ class _$ChatMessageCopyWithImpl<$Res>
 
 /// Create a copy of ChatMessage
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = freezed,Object? sessionId = freezed,Object? parentId = freezed,Object? text = null,Object? isMe = null,Object? index = null,Object? total = null,Object? siblingIds = null,Object? thinkingChain = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = freezed,Object? sessionId = freezed,Object? parentId = freezed,Object? text = null,Object? isMe = null,Object? index = null,Object? total = null,Object? siblingIds = null,Object? thinkingChain = freezed,Object? spans = freezed,}) {
   return _then(_self.copyWith(
 id: freezed == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String?,sessionId: freezed == sessionId ? _self.sessionId : sessionId // ignore: cast_nullable_to_non_nullable
@@ -80,7 +82,8 @@ as bool,index: null == index ? _self.index : index // ignore: cast_nullable_to_n
 as int,total: null == total ? _self.total : total // ignore: cast_nullable_to_non_nullable
 as int,siblingIds: null == siblingIds ? _self.siblingIds : siblingIds // ignore: cast_nullable_to_non_nullable
 as List<String>,thinkingChain: freezed == thinkingChain ? _self.thinkingChain : thinkingChain // ignore: cast_nullable_to_non_nullable
-as String?,
+as String?,spans: freezed == spans ? _self.spans : spans // ignore: cast_nullable_to_non_nullable
+as List<BubbleSpan>?,
   ));
 }
 
@@ -165,10 +168,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String? id,  String? sessionId,  String? parentId,  String text,  bool isMe,  int index,  int total,  List<String> siblingIds,  String? thinkingChain)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String? id,  String? sessionId,  String? parentId,  String text,  bool isMe,  int index,  int total,  List<String> siblingIds,  String? thinkingChain,  List<BubbleSpan>? spans)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _ChatMessage() when $default != null:
-return $default(_that.id,_that.sessionId,_that.parentId,_that.text,_that.isMe,_that.index,_that.total,_that.siblingIds,_that.thinkingChain);case _:
+return $default(_that.id,_that.sessionId,_that.parentId,_that.text,_that.isMe,_that.index,_that.total,_that.siblingIds,_that.thinkingChain,_that.spans);case _:
   return orElse();
 
 }
@@ -186,10 +189,10 @@ return $default(_that.id,_that.sessionId,_that.parentId,_that.text,_that.isMe,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String? id,  String? sessionId,  String? parentId,  String text,  bool isMe,  int index,  int total,  List<String> siblingIds,  String? thinkingChain)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String? id,  String? sessionId,  String? parentId,  String text,  bool isMe,  int index,  int total,  List<String> siblingIds,  String? thinkingChain,  List<BubbleSpan>? spans)  $default,) {final _that = this;
 switch (_that) {
 case _ChatMessage():
-return $default(_that.id,_that.sessionId,_that.parentId,_that.text,_that.isMe,_that.index,_that.total,_that.siblingIds,_that.thinkingChain);case _:
+return $default(_that.id,_that.sessionId,_that.parentId,_that.text,_that.isMe,_that.index,_that.total,_that.siblingIds,_that.thinkingChain,_that.spans);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -206,10 +209,10 @@ return $default(_that.id,_that.sessionId,_that.parentId,_that.text,_that.isMe,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String? id,  String? sessionId,  String? parentId,  String text,  bool isMe,  int index,  int total,  List<String> siblingIds,  String? thinkingChain)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String? id,  String? sessionId,  String? parentId,  String text,  bool isMe,  int index,  int total,  List<String> siblingIds,  String? thinkingChain,  List<BubbleSpan>? spans)?  $default,) {final _that = this;
 switch (_that) {
 case _ChatMessage() when $default != null:
-return $default(_that.id,_that.sessionId,_that.parentId,_that.text,_that.isMe,_that.index,_that.total,_that.siblingIds,_that.thinkingChain);case _:
+return $default(_that.id,_that.sessionId,_that.parentId,_that.text,_that.isMe,_that.index,_that.total,_that.siblingIds,_that.thinkingChain,_that.spans);case _:
   return null;
 
 }
@@ -221,7 +224,7 @@ return $default(_that.id,_that.sessionId,_that.parentId,_that.text,_that.isMe,_t
 @JsonSerializable()
 
 class _ChatMessage extends ChatMessage {
-  const _ChatMessage({this.id, this.sessionId, this.parentId, required this.text, required this.isMe, this.index = 1, this.total = 1, final  List<String> siblingIds = const [], this.thinkingChain}): _siblingIds = siblingIds,super._();
+  const _ChatMessage({this.id, this.sessionId, this.parentId, required this.text, required this.isMe, this.index = 1, this.total = 1, final  List<String> siblingIds = const [], this.thinkingChain, this.spans}): _siblingIds = siblingIds,super._();
   factory _ChatMessage.fromJson(Map<String, dynamic> json) => _$ChatMessageFromJson(json);
 
 @override final  String? id;
@@ -244,6 +247,7 @@ class _ChatMessage extends ChatMessage {
 
 /// 思考链内容（可选）
 @override final  String? thinkingChain;
+  @override final List<BubbleSpan>? spans;
 
 /// Create a copy of ChatMessage
 /// with the given fields replaced by the non-null parameter values.
@@ -258,16 +262,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ChatMessage&&(identical(other.id, id) || other.id == id)&&(identical(other.sessionId, sessionId) || other.sessionId == sessionId)&&(identical(other.parentId, parentId) || other.parentId == parentId)&&(identical(other.text, text) || other.text == text)&&(identical(other.isMe, isMe) || other.isMe == isMe)&&(identical(other.index, index) || other.index == index)&&(identical(other.total, total) || other.total == total)&&const DeepCollectionEquality().equals(other._siblingIds, _siblingIds)&&(identical(other.thinkingChain, thinkingChain) || other.thinkingChain == thinkingChain));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ChatMessage&&(identical(other.id, id) || other.id == id)&&(identical(other.sessionId, sessionId) || other.sessionId == sessionId)&&(identical(other.parentId, parentId) || other.parentId == parentId)&&(identical(other.text, text) || other.text == text)&&(identical(other.isMe, isMe) || other.isMe == isMe)&&(identical(other.index, index) || other.index == index)&&(identical(other.total, total) || other.total == total)&&const DeepCollectionEquality().equals(other._siblingIds, _siblingIds)&&(identical(other.thinkingChain, thinkingChain) || other.thinkingChain == thinkingChain)&&(identical(other.spans, spans) || other.spans == spans));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,sessionId,parentId,text,isMe,index,total,const DeepCollectionEquality().hash(_siblingIds),thinkingChain);
+int get hashCode => Object.hash(runtimeType,id,sessionId,parentId,text,isMe,index,total,const DeepCollectionEquality().hash(_siblingIds),thinkingChain,spans);
 
 @override
 String toString() {
-  return 'ChatMessage(id: $id, sessionId: $sessionId, parentId: $parentId, text: $text, isMe: $isMe, index: $index, total: $total, siblingIds: $siblingIds, thinkingChain: $thinkingChain)';
+  return 'ChatMessage(id: $id, sessionId: $sessionId, parentId: $parentId, text: $text, isMe: $isMe, index: $index, total: $total, siblingIds: $siblingIds, thinkingChain: $thinkingChain, spans: $spans)';
 }
 
 
@@ -278,7 +282,7 @@ abstract mixin class _$ChatMessageCopyWith<$Res> implements $ChatMessageCopyWith
   factory _$ChatMessageCopyWith(_ChatMessage value, $Res Function(_ChatMessage) _then) = __$ChatMessageCopyWithImpl;
 @override @useResult
 $Res call({
- String? id, String? sessionId, String? parentId, String text, bool isMe, int index, int total, List<String> siblingIds, String? thinkingChain
+ String? id, String? sessionId, String? parentId, String text, bool isMe, int index, int total, List<String> siblingIds, String? thinkingChain, List<BubbleSpan>? spans
 });
 
 
@@ -295,7 +299,7 @@ class __$ChatMessageCopyWithImpl<$Res>
 
 /// Create a copy of ChatMessage
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = freezed,Object? sessionId = freezed,Object? parentId = freezed,Object? text = null,Object? isMe = null,Object? index = null,Object? total = null,Object? siblingIds = null,Object? thinkingChain = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = freezed,Object? sessionId = freezed,Object? parentId = freezed,Object? text = null,Object? isMe = null,Object? index = null,Object? total = null,Object? siblingIds = null,Object? thinkingChain = freezed,Object? spans = freezed,}) {
   return _then(_ChatMessage(
 id: freezed == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String?,sessionId: freezed == sessionId ? _self.sessionId : sessionId // ignore: cast_nullable_to_non_nullable
@@ -306,7 +310,8 @@ as bool,index: null == index ? _self.index : index // ignore: cast_nullable_to_n
 as int,total: null == total ? _self.total : total // ignore: cast_nullable_to_non_nullable
 as int,siblingIds: null == siblingIds ? _self._siblingIds : siblingIds // ignore: cast_nullable_to_non_nullable
 as List<String>,thinkingChain: freezed == thinkingChain ? _self.thinkingChain : thinkingChain // ignore: cast_nullable_to_non_nullable
-as String?,
+as String?,spans: freezed == spans ? _self.spans : spans // ignore: cast_nullable_to_non_nullable
+as List<BubbleSpan>?,
   ));
 }
 

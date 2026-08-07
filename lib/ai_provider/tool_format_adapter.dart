@@ -146,6 +146,44 @@ class AnthropicAdapter extends ToolFormatAdapter {
     }
     return result;
   }
+
+  /// 文本解析（8-07 19:15 用户：允许 AI 在文本里写其他家原生格式，管家识别执行）：
+  /// 识别 `{"type":"tool_use","name":...,"input":{...}}` JSON 或 `<tool_use>…</tool_use>` 块
+  static final RegExp _toolUseRe = RegExp(
+      r'<tool_use>([\s\S]*?)</tool_use>|\{"type"\s*:\s*"tool_use"[\s\S]*?\}',
+      caseSensitive: false);
+
+  @override
+  List<Map<String, dynamic>> parseToolCallsFromText(String text) {
+    final result = <Map<String, dynamic>>[];
+    for (final m in _toolUseRe.allMatches(text)) {
+      final raw = (m.group(1) ?? m.group(0) ?? '').trim();
+      Map<String, dynamic>? obj;
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic>) obj = decoded;
+      } catch (_) {}
+      // 也兼容 <tool_use> 里直接写 {"name":...,"input":...}（无 type 字段）
+      if (obj == null && m.group(1) != null) {
+        try {
+          final decoded = jsonDecode(m.group(1)!.trim());
+          if (decoded is Map<String, dynamic>) obj = decoded;
+        } catch (_) {}
+      }
+      final name = obj?['name']?.toString() ?? '';
+      final input = obj?['input'];
+      if (name.isEmpty) continue;
+      result.add({
+        'name': name,
+        'arguments': input is Map<String, dynamic> ? input : <String, dynamic>{},
+      });
+    }
+    return result;
+  }
+
+  @override
+  String stripToolBlocks(String text) =>
+      text.replaceAll(_toolUseRe, '').trim();
 }
 
 /// Gemini 原生格式（未来接 Gemini API 用）
@@ -191,6 +229,36 @@ class GeminiAdapter extends ToolFormatAdapter {
     }
     return result;
   }
+
+  /// 文本解析（8-07 19:15 用户：允许 AI 在文本里写 Gemini 原生格式，管家识别执行）：
+  /// 识别 `{"functionCall":{"name":...,"args":{...}}}` JSON
+  static final RegExp _functionCallRe = RegExp(
+      r'\{"functionCall"\s*:\s*\{[\s\S]*?\}\}',
+      caseSensitive: false);
+
+  @override
+  List<Map<String, dynamic>> parseToolCallsFromText(String text) {
+    final result = <Map<String, dynamic>>[];
+    for (final m in _functionCallRe.allMatches(text)) {
+      try {
+        final decoded = jsonDecode(m.group(0)!);
+        if (decoded is! Map<String, dynamic>) continue;
+        final fc = decoded['functionCall'];
+        if (fc is! Map<String, dynamic>) continue;
+        final name = fc['name']?.toString() ?? '';
+        if (name.isEmpty) continue;
+        result.add({
+          'name': name,
+          'arguments': (fc['args'] as Map<String, dynamic>?) ?? {},
+        });
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  @override
+  String stripToolBlocks(String text) =>
+      text.replaceAll(_functionCallRe, '').trim();
 }
 
 /// 文本协议兜底（本地不支持原生 function calling 的模型，用户 19:42 确认）

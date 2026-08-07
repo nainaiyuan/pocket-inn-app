@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../models/chat_message.dart';
 import '../../../models/user_setting.dart';
 import '../../../services/chat_character_resolver.dart';
+import '../services/multi_bubble_parser.dart';
 import '../state/chat_presence.dart';
 import 'thinking_chain_widget.dart';
 
@@ -144,6 +145,34 @@ class _MessageBubbleState extends State<MessageBubble>
     return widget.message.text;
   }
 
+  /// 8-07 多气泡：spans → TextSpan 列表（打字机按可见字符截断，按 spans 边界分配）
+  List<TextSpan> _buildSpans(List<BubbleSpan> spans, int visibleChars) {
+    var remaining = visibleChars < 0
+        ? spans.fold(0, (sum, s) => sum + s.text.length)
+        : visibleChars;
+    final result = <TextSpan>[];
+    for (final s in spans) {
+      if (remaining <= 0) break;
+      final t = s.text;
+      if (t.isEmpty) continue;
+      final take = t.length <= remaining ? t : t.substring(0, remaining);
+      remaining -= take.length;
+      result.add(
+        TextSpan(
+          text: take,
+          style: s.kind == SpanKind.act
+              ? const TextStyle(
+                  fontStyle: FontStyle.italic,
+                  fontSize: 13,
+                  color: Color(0xFF9A6B84),
+                )
+              : null,
+        ),
+      );
+    }
+    return result;
+  }
+
   @override
   Widget build(BuildContext context) {
     final message = widget.message;
@@ -173,6 +202,45 @@ class _MessageBubbleState extends State<MessageBubble>
                           .replaceFirst('[tool]', ''),
                       style: const TextStyle(
                         fontSize: 11,
+                        color: Color(0xFF9A6B84),
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    // 8-07 19:15 独立动作气泡：男主 <act> 块 → ✦ 斜体淡色小字、无头像、不播打字机
+    if (message.text.startsWith('[act]')) {
+      return Padding(
+        padding: const EdgeInsets.only(left: 60, right: 60, top: 3, bottom: 2),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: const Color(0xFFC896B4).withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('✦',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF9A6B84))),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: Text(
+                      message.text
+                          .replaceFirst('[act] ', '')
+                          .replaceFirst('[act]', ''),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
                         color: Color(0xFF9A6B84),
                         height: 1.4,
                       ),
@@ -282,14 +350,30 @@ class _MessageBubbleState extends State<MessageBubble>
                         ),
                         const SizedBox(height: 8),
                       ],
-                      Text(
-                        _displayText,
-                        style: TextStyle(
-                          fontSize: 15,
-                          color: const Color(0xFF6A4A5A),
-                          height: 1.5,
+                      // 8-07 多气泡：有 spans → Text.rich 混排（话正常 + 动作斜体淡色）
+                      if (message.spans != null && message.spans!.isNotEmpty)
+                        Text.rich(
+                          TextSpan(
+                            children: _buildSpans(
+                              message.spans!,
+                              _visibleChars,
+                            ),
+                          ),
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: const Color(0xFF6A4A5A),
+                            height: 1.5,
+                          ),
+                        )
+                      else
+                        Text(
+                          _displayText,
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: const Color(0xFF6A4A5A),
+                            height: 1.5,
+                          ),
                         ),
-                      ),
                       // 操作按钮（仅在 showActions 时显示）
                       if (widget.showActions) ...[
                         const SizedBox(height: 8),

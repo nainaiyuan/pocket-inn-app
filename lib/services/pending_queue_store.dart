@@ -94,7 +94,16 @@ class PendingQueueStore {
     if (es.isEmpty) return const <int>[];
     final removed = <int>[];
     final repliedIds = <int>{};
-    // "回待#N" / "回复待#N" → 回
+    // 8-07 19:15 新格式：<reply>回#1、#2</reply>（男主回复标注，必带）
+    for (final m
+        in RegExp(r'<reply>([\s\S]*?)</reply>', caseSensitive: false)
+            .allMatches(reply)) {
+      for (final n in RegExp(r'#(\d+)').allMatches(m.group(1) ?? '')) {
+        final v = int.tryParse(n.group(1)!);
+        if (v != null && v >= 1) repliedIds.add(v);
+      }
+    }
+    // 旧格式兼容："回待#N" / "回复待#N" → 回
     for (final m in RegExp(r'回(?:复)?\s*待#(\d+)').allMatches(reply)) {
       final n = int.tryParse(m.group(1)!);
       if (n != null && n >= 1) repliedIds.add(n);

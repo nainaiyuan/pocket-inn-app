@@ -304,7 +304,8 @@ as DateTime,
 /// @nodoc
 mixin _$ChatNode {
 
- String get id; String get sessionId; String? get parentId; ChatNodeRole get role; String get text; String? get thinkingChain; DateTime get createdAt; int get siblingOrder;
+ String get id; String get sessionId; String? get parentId; ChatNodeRole get role; String get text; String? get thinkingChain;
+  String? get spans; DateTime get createdAt; int get siblingOrder;
 /// Create a copy of ChatNode
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -320,11 +321,11 @@ bool operator ==(Object other) {
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,sessionId,parentId,role,text,thinkingChain,createdAt,siblingOrder);
+int get hashCode => Object.hash(runtimeType,id,sessionId,parentId,role,text,thinkingChain,spans,createdAt,siblingOrder);
 
 @override
 String toString() {
-  return 'ChatNode(id: $id, sessionId: $sessionId, parentId: $parentId, role: $role, text: $text, thinkingChain: $thinkingChain, createdAt: $createdAt, siblingOrder: $siblingOrder)';
+  return 'ChatNode(id: $id, sessionId: $sessionId, parentId: $parentId, role: $role, text: $text, thinkingChain: $thinkingChain, spans: $spans, createdAt: $createdAt, siblingOrder: $siblingOrder)';
 }
 
 
@@ -335,7 +336,7 @@ abstract mixin class $ChatNodeCopyWith<$Res>  {
   factory $ChatNodeCopyWith(ChatNode value, $Res Function(ChatNode) _then) = _$ChatNodeCopyWithImpl;
 @useResult
 $Res call({
- String id, String sessionId, String? parentId, ChatNodeRole role, String text, String? thinkingChain, DateTime createdAt, int siblingOrder
+ String id, String sessionId, String? parentId, ChatNodeRole role, String text, String? thinkingChain, String? spans, DateTime createdAt, int siblingOrder
 });
 
 
@@ -352,7 +353,7 @@ class _$ChatNodeCopyWithImpl<$Res>
 
 /// Create a copy of ChatNode
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? sessionId = null,Object? parentId = freezed,Object? role = null,Object? text = null,Object? thinkingChain = freezed,Object? createdAt = null,Object? siblingOrder = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? sessionId = null,Object? parentId = freezed,Object? role = null,Object? text = null,Object? thinkingChain = freezed,Object? spans = freezed,Object? createdAt = null,Object? siblingOrder = null,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,sessionId: null == sessionId ? _self.sessionId : sessionId // ignore: cast_nullable_to_non_nullable
@@ -360,6 +361,7 @@ as String,parentId: freezed == parentId ? _self.parentId : parentId // ignore: c
 as String?,role: null == role ? _self.role : role // ignore: cast_nullable_to_non_nullable
 as ChatNodeRole,text: null == text ? _self.text : text // ignore: cast_nullable_to_non_nullable
 as String,thinkingChain: freezed == thinkingChain ? _self.thinkingChain : thinkingChain // ignore: cast_nullable_to_non_nullable
+as String?,spans: freezed == spans ? _self.spans : spans // ignore: cast_nullable_to_non_nullable
 as String?,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
 as DateTime,siblingOrder: null == siblingOrder ? _self.siblingOrder : siblingOrder // ignore: cast_nullable_to_non_nullable
 as int,
@@ -447,10 +449,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String sessionId,  String? parentId,  ChatNodeRole role,  String text,  String? thinkingChain,  DateTime createdAt,  int siblingOrder)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String sessionId,  String? parentId,  ChatNodeRole role,  String text,  String? thinkingChain,  String? spans,  DateTime createdAt,  int siblingOrder)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _ChatNode() when $default != null:
-return $default(_that.id,_that.sessionId,_that.parentId,_that.role,_that.text,_that.thinkingChain,_that.createdAt,_that.siblingOrder);case _:
+return $default(_that.id,_that.sessionId,_that.parentId,_that.role,_that.text,_that.thinkingChain,_that.spans,_that.createdAt,_that.siblingOrder);case _:
   return orElse();
 
 }
@@ -468,10 +470,10 @@ return $default(_that.id,_that.sessionId,_that.parentId,_that.role,_that.text,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String sessionId,  String? parentId,  ChatNodeRole role,  String text,  String? thinkingChain,  DateTime createdAt,  int siblingOrder)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String sessionId,  String? parentId,  ChatNodeRole role,  String text,  String? thinkingChain,  String? spans,  DateTime createdAt,  int siblingOrder)  $default,) {final _that = this;
 switch (_that) {
 case _ChatNode():
-return $default(_that.id,_that.sessionId,_that.parentId,_that.role,_that.text,_that.thinkingChain,_that.createdAt,_that.siblingOrder);case _:
+return $default(_that.id,_that.sessionId,_that.parentId,_that.role,_that.text,_that.thinkingChain,_that.spans,_that.createdAt,_that.siblingOrder);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -488,10 +490,10 @@ return $default(_that.id,_that.sessionId,_that.parentId,_that.role,_that.text,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String sessionId,  String? parentId,  ChatNodeRole role,  String text,  String? thinkingChain,  DateTime createdAt,  int siblingOrder)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String sessionId,  String? parentId,  ChatNodeRole role,  String text,  String? thinkingChain,  String? spans,  DateTime createdAt,  int siblingOrder)?  $default,) {final _that = this;
 switch (_that) {
 case _ChatNode() when $default != null:
-return $default(_that.id,_that.sessionId,_that.parentId,_that.role,_that.text,_that.thinkingChain,_that.createdAt,_that.siblingOrder);case _:
+return $default(_that.id,_that.sessionId,_that.parentId,_that.role,_that.text,_that.thinkingChain,_that.spans,_that.createdAt,_that.siblingOrder);case _:
   return null;
 
 }
@@ -503,7 +505,7 @@ return $default(_that.id,_that.sessionId,_that.parentId,_that.role,_that.text,_t
 
 
 class _ChatNode implements ChatNode {
-  const _ChatNode({required this.id, required this.sessionId, this.parentId, required this.role, required this.text, this.thinkingChain, required this.createdAt, required this.siblingOrder});
+  const _ChatNode({required this.id, required this.sessionId, this.parentId, required this.role, required this.text, this.thinkingChain, this.spans, required this.createdAt, required this.siblingOrder});
   
 
 @override final  String id;
@@ -512,6 +514,7 @@ class _ChatNode implements ChatNode {
 @override final  ChatNodeRole role;
 @override final  String text;
 @override final  String? thinkingChain;
+@override final String? spans;
 @override final  DateTime createdAt;
 @override final  int siblingOrder;
 
@@ -530,11 +533,11 @@ bool operator ==(Object other) {
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,sessionId,parentId,role,text,thinkingChain,createdAt,siblingOrder);
+int get hashCode => Object.hash(runtimeType,id,sessionId,parentId,role,text,thinkingChain,spans,createdAt,siblingOrder);
 
 @override
 String toString() {
-  return 'ChatNode(id: $id, sessionId: $sessionId, parentId: $parentId, role: $role, text: $text, thinkingChain: $thinkingChain, createdAt: $createdAt, siblingOrder: $siblingOrder)';
+  return 'ChatNode(id: $id, sessionId: $sessionId, parentId: $parentId, role: $role, text: $text, thinkingChain: $thinkingChain, spans: $spans, createdAt: $createdAt, siblingOrder: $siblingOrder)';
 }
 
 
@@ -545,7 +548,7 @@ abstract mixin class _$ChatNodeCopyWith<$Res> implements $ChatNodeCopyWith<$Res>
   factory _$ChatNodeCopyWith(_ChatNode value, $Res Function(_ChatNode) _then) = __$ChatNodeCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String sessionId, String? parentId, ChatNodeRole role, String text, String? thinkingChain, DateTime createdAt, int siblingOrder
+ String id, String sessionId, String? parentId, ChatNodeRole role, String text, String? thinkingChain, String? spans, DateTime createdAt, int siblingOrder
 });
 
 
@@ -562,7 +565,7 @@ class __$ChatNodeCopyWithImpl<$Res>
 
 /// Create a copy of ChatNode
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? sessionId = null,Object? parentId = freezed,Object? role = null,Object? text = null,Object? thinkingChain = freezed,Object? createdAt = null,Object? siblingOrder = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? sessionId = null,Object? parentId = freezed,Object? role = null,Object? text = null,Object? thinkingChain = freezed,Object? spans = freezed,Object? createdAt = null,Object? siblingOrder = null,}) {
   return _then(_ChatNode(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,sessionId: null == sessionId ? _self.sessionId : sessionId // ignore: cast_nullable_to_non_nullable
@@ -570,6 +573,7 @@ as String,parentId: freezed == parentId ? _self.parentId : parentId // ignore: c
 as String?,role: null == role ? _self.role : role // ignore: cast_nullable_to_non_nullable
 as ChatNodeRole,text: null == text ? _self.text : text // ignore: cast_nullable_to_non_nullable
 as String,thinkingChain: freezed == thinkingChain ? _self.thinkingChain : thinkingChain // ignore: cast_nullable_to_non_nullable
+as String?,spans: freezed == spans ? _self.spans : spans // ignore: cast_nullable_to_non_nullable
 as String?,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
 as DateTime,siblingOrder: null == siblingOrder ? _self.siblingOrder : siblingOrder // ignore: cast_nullable_to_non_nullable
 as int,
