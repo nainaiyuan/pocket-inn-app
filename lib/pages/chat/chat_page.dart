@@ -2751,9 +2751,9 @@ class _ChatPageState extends State<ChatPage>
         '第一版不能定案（验证点1）；设定原文也不显示（验证点2）\n'
         '3️⃣ 在反馈框打字："第一版喜好不好，喜好写具体点" → 「💬 发给他」'
         ' → 男主查段落 → 出 v2【最终方案】\n'
-        '4️⃣ 这时底部出现「就用这版」（男主确认了解完了，验证点3）；'
+        '4️⃣ 这时底部出现「✅ 就用这版（留档）」和「♻️ 覆盖我原来写的」（男主确认了解完了，验证点3）；'
         '可点版本编号 v2 卡片看「📝 这版改了」\n'
-        '5️⃣ 点「就用这版」定案（预期含 身份+喜好C）',
+        '5️⃣ 点「✅ 就用这版（留档）」定案（预期含 身份+喜好C）',
       );
       await say(
         '用 update_setting 把【喜好】改成"测试喜好C"。'
@@ -4089,11 +4089,13 @@ class _ChatPageState extends State<ChatPage>
       content: newText,
       reason: opDesc,
       testStep: _acceptingStep,
+      settingPid: settingPid,
+      settingType: type,
     );
     if (result == null) {
       return _ToolResult(false, '她没回应设定更新（先别催，她可能在忙）');
     }
-    if (!result.approved) {
+    if (result.approved.isEmpty) {
       final fb = result.feedback.trim();
       return _ToolResult(
         false,
@@ -4103,7 +4105,24 @@ class _ChatPageState extends State<ChatPage>
     }
 
     // 批准 → 存为新版本 + 变更日志
+    // 8-07 18:2x 用户：定案二选一——'keep'留档（用户原稿进历史，
+    // 男主定稿成新当前）/ 'overwrite'覆盖（男主定稿直接替换当前版本内容）
     final finalContent = result.content.trim();
+    if (result.approved == 'overwrite') {
+      await SettingVersionStore.saveCurrent(settingPid, type, finalContent);
+      await SettingVersionStore.addChangelog(
+        settingPid,
+        type,
+        '$opDesc（覆盖了原来的当前版本）',
+      );
+      DebugLogger.log('指令模块', '📚 $typeName 已覆盖更新（$opDesc）');
+      _appendToolBubble('📚 男主更新了$typeName：$opDesc（已覆盖原当前版本）');
+      return _ToolResult(
+        true,
+        '$typeName 已更新生效（$opDesc，已覆盖原当前版本）。当前段落结构：\n'
+        '${_sectionsOutline(_parseSettingSections(finalContent))}',
+      );
+    }
     await SettingVersionStore.saveNewVersion(
       settingPid,
       type,
@@ -4291,15 +4310,34 @@ class _ChatPageState extends State<ChatPage>
   }
 
   /// 设定更新审批弹窗（8-06 18:12 用户：弹窗内迭代，不进聊天框）
-  Future<({bool approved, String content, String feedback})?>
+  Future<({String approved, String content, String feedback})?>
   _showSettingApprovalDialog({
     required String typeName,
     required String content,
     required String reason,
     String? testStep,
+    // 8-07 18:2x 用户：无当前版本 → 弹窗内先选一个版本作为当前
+    String? settingPid,
+    String? settingType,
   }) async {
     if (!mounted) return null;
     FocusManager.instance.primaryFocus?.unfocus();
+    // 检查该类型有没有当前版本（isCurrent）；没有 → 先选版本再聊
+    var needPick = false;
+    var hasCurrentVersion = true;
+    var pickVersions = <SettingVersion>[];
+    if (settingPid != null && settingType != null) {
+      final book = await SettingVersionStore.load(settingPid);
+      hasCurrentVersion = book.versions.any(
+        (v) => v.type == settingType && v.isCurrent,
+      );
+      needPick = !hasCurrentVersion;
+      if (needPick) {
+        pickVersions = book.versions
+            .where((v) => v.type == settingType)
+            .toList();
+      }
+    }
     final ctrl = TextEditingController(text: content);
     final fbCtrl = TextEditingController();
     var maleText = reason.isEmpty ? '我想更新$typeName，你看看这样行不行。' : reason;
@@ -4346,7 +4384,7 @@ class _ChatPageState extends State<ChatPage>
     final pid = _state.personaId ?? '';
     final pName = _state.personaName ?? _state.lead?.name ?? '角色';
 
-    final approved = await showDialog<bool>(
+    final approved = await showDialog<String>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
@@ -4528,9 +4566,77 @@ class _ChatPageState extends State<ChatPage>
           // 8-07 17:0x 修复死锁：弹窗打开自动触发第一轮男主会话
           // （只触发一次；男主回复带【问题】→ asking 出卡片题，
           //   带【最终方案】→ reviewing 直接出定案按钮）
-          if (!autoStarted && !busy) {
+          if (!autoStarted && !busy && !needPick) {
             autoStarted = true;
             Future.microtask(() => sendToMale('我想更新$typeName：$reason'));
+          }
+
+          // 8-07 18:2x：没有当前版本 → 先选一个版本作为当前，选完再进对话
+          if (needPick) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFFFDF7F9),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              title: Text('先选一个「$typeName」版本作为当前'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: pickVersions.isEmpty
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Text(
+                          '还没有任何版本。先去右页写一版（➕ 新建），'
+                          '或直接在这里放弃，从零开始。',
+                          style: TextStyle(fontSize: 13),
+                        ),
+                      )
+                    : ListView(
+                        shrinkWrap: true,
+                        children: [
+                          for (final v in pickVersions)
+                            ListTile(
+                              dense: true,
+                              title: Text(
+                                _dialogVersionLabel(v),
+                                style: const TextStyle(fontSize: 13),
+                              ),
+                              subtitle: Text(
+                                v.content.replaceAll('\n', ' '),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                              onTap: () async {
+                                await SettingVersionStore.applyVersion(
+                                  settingPid!,
+                                  v.id,
+                                );
+                                await SettingVersionStore.addChangelog(
+                                  settingPid!,
+                                  settingType!,
+                                  '弹窗内选用「$_dialogVersionLabel(v)」作为当前$typeName',
+                                );
+                                if (ctx.mounted) {
+                                  setState(() {
+                                    needPick = false;
+                                    hasCurrentVersion = true;
+                                  });
+                                }
+                              },
+                            ),
+                        ],
+                      ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, ''),
+                  child: const Text(
+                    '放弃',
+                    style: TextStyle(color: Color(0xFF8A7A80)),
+                  ),
+                ),
+              ],
+            );
           }
 
           return AlertDialog(
@@ -5019,7 +5125,7 @@ class _ChatPageState extends State<ChatPage>
             ),
             actions: [
               TextButton(
-                onPressed: busy ? null : () => Navigator.pop(ctx, false),
+                onPressed: busy ? null : () => Navigator.pop(ctx, ''),
                 child: const Text(
                   '放弃',
                   style: TextStyle(color: Color(0xFF8A7A80)),
@@ -5041,7 +5147,19 @@ class _ChatPageState extends State<ChatPage>
               // 8-07 16:1x 用户：只有男主出【最终方案】（确认了解完需求）
               // 才显示「就用这版」；【新方案】=还在了解/迭代，不出现；
               // 16:4x：asking 阶段（还在答题目）也不显示
-              if (!busy && stage == 'reviewing' && maleHasFinal)
+              // 18:2x 用户：定案二选一——留档（默认）/ 覆盖我原来写的
+              if (!busy && stage == 'reviewing' && maleHasFinal) ...[
+                if (hasCurrentVersion)
+                  TextButton(
+                    onPressed: () {
+                      setState(() => busy = true);
+                      Navigator.pop(ctx, 'overwrite');
+                    },
+                    child: const Text(
+                      '♻️ 覆盖我原来写的',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF8A6A96)),
+                    ),
+                  ),
                 FilledButton(
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFFC896B4),
@@ -5049,10 +5167,11 @@ class _ChatPageState extends State<ChatPage>
                   onPressed: () {
                     // 8-07 15:0x：防连点——先置 busy 再 pop，双击不会 pop 两次
                     setState(() => busy = true);
-                    Navigator.pop(ctx, true);
+                    Navigator.pop(ctx, 'keep');
                   },
-                  child: const Text('✅ 就用这版'),
+                  child: const Text('✅ 就用这版（留档）'),
                 ),
+              ],
             ],
           );
         },
@@ -5067,7 +5186,17 @@ class _ChatPageState extends State<ChatPage>
     customCtrl.dispose();
     _dialogVersions = null;
     if (approved == null) return null;
+    // 8-07 18:2x：approved = ''放弃 / 'keep'留档定案 / 'overwrite'覆盖定案
     return (approved: approved, content: outContent, feedback: outFeedback);
+  }
+
+  /// 弹窗内版本标签（选当前版本列表用）
+  String _dialogVersionLabel(SettingVersion v) {
+    final t = v.createdAt;
+    return '${t.month.toString().padLeft(2, '0')}-'
+        '${t.day.toString().padLeft(2, '0')} '
+        '${t.hour.toString().padLeft(2, '0')}:'
+        '${t.minute.toString().padLeft(2, '0')}';
   }
 
   /// 设定会话内：男主回复（一次 AI 回合，可查只读信息；查了=流程没走完，继续）

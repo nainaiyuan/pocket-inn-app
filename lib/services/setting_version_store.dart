@@ -84,6 +84,28 @@ class SettingVersionStore {
     } else {
       book = SettingBook();
     }
+    // 8-07 18:2x 迁移：旧数据没有 isCurrent 标记但当前内容非空
+    // → 自动补一个 isCurrent 版本（当前版绑定版本）
+    var migrated = false;
+    for (final type in const [male, user]) {
+      final cur = type == male ? book.currentMale : book.currentUser;
+      final hasCur = book.versions.any((v) => v.type == type && v.isCurrent);
+      if (cur.trim().isNotEmpty && !hasCur) {
+        book.versions.insert(
+          0,
+          SettingVersion(
+            id: newId(),
+            type: type,
+            content: cur,
+            createdAt: DateTime.now(),
+            note: '旧数据迁移（当前版绑定）',
+            isCurrent: true,
+          ),
+        );
+        migrated = true;
+      }
+    }
+    if (migrated) await _save(personaId, book);
     _cache[personaId] = book;
     return book;
   }
@@ -94,7 +116,7 @@ class SettingVersionStore {
     await p.setString(_key(personaId), jsonEncode(book.toJson()));
   }
 
-  /// 覆盖当前版（不产生新版本）
+  /// 覆盖当前版（不产生新版本；8-07 18:2x：同步覆盖 isCurrent 版本内容）
   static Future<void> saveCurrent(
     String personaId,
     String type,
@@ -102,7 +124,54 @@ class SettingVersionStore {
   ) async {
     final book = await load(personaId);
     book.setCurrent(type, content);
+    for (final v in book.versions) {
+      if (v.type == type && v.isCurrent) v.content = content;
+    }
     await _save(personaId, book);
+  }
+
+  /// 8-07 18:2x：覆盖某个历史版本的内容（弹确认后调用）
+  static Future<void> updateVersion(
+    String personaId,
+    String versionId,
+    String content,
+  ) async {
+    final book = await load(personaId);
+    final v = book.versions.firstWhere((x) => x.id == versionId);
+    v.content = content;
+    if (v.isCurrent) book.setCurrent(v.type, content); // 覆盖的是当前 → 同步
+    await _save(personaId, book);
+  }
+
+  /// 8-07 18:2x：复制某版本内容 → 新标签副本（原版本不动，isCurrent=false）
+  static Future<SettingVersion> copyVersion(
+    String personaId,
+    String versionId, {
+    String? note,
+  }) async {
+    final book = await load(personaId);
+    final src = book.versions.firstWhere((v) => v.id == versionId);
+    final v = book.addHistoryVersion(
+      src.type,
+      src.content,
+      note: note ?? '复制自 ${_versionLabel(src)}',
+    );
+    await _save(personaId, book);
+    return v;
+  }
+
+  static String _versionLabel(SettingVersion v) {
+    final t = v.createdAt;
+    return '${t.month.toString().padLeft(2, '0')}-'
+        '${t.day.toString().padLeft(2, '0')} '
+        '${t.hour.toString().padLeft(2, '0')}:'
+        '${t.minute.toString().padLeft(2, '0')}';
+  }
+
+  /// 8-07 18:2x：该类型是否有当前版本（版本列表里 isCurrent=true）
+  static Future<bool> hasCurrent(String personaId, String type) async {
+    final book = await load(personaId);
+    return book.versions.any((v) => v.type == type && v.isCurrent);
   }
 
   /// 存为新版本（旧当前自动进历史堆叠）
@@ -225,23 +294,14 @@ class SettingBook {
     }
   }
 
-  /// 存新版本：旧当前进历史堆叠，新内容成当前
+  /// 存新版本：旧当前版本降级留档（不复制副本），新内容成当前
+  /// 8-07 18:2x：当前版绑定版本——旧 isCurrent 版本只清标记留在列表里，
+  /// 不再把旧当前内容重复插一份（之前会 a1/a2 变相同）
   SettingVersion pushVersion(String type, String content, {String? note}) {
-    final old = currentOf(type);
-    if (old.trim().isNotEmpty) {
-      versions.insert(
-        0,
-        SettingVersion(
-          id: SettingVersionStore.newId(),
-          type: type,
-          content: old,
-          createdAt: DateTime.now(),
-          note: note,
-        ),
-      );
+    for (final v in versions) {
+      if (v.type == type && v.isCurrent) v.isCurrent = false;
     }
-    setCurrent(type, content);
-    return SettingVersion(
+    final v = SettingVersion(
       id: SettingVersionStore.newId(),
       type: type,
       content: content,
@@ -249,6 +309,9 @@ class SettingBook {
       note: note,
       isCurrent: true,
     );
+    versions.insert(0, v);
+    setCurrent(type, content);
+    return v;
   }
 
   /// 8-07 18:0x 修复：只进历史堆叠，当前版不动
@@ -269,32 +332,34 @@ class SettingBook {
     return v;
   }
 
-  /// 选用历史版本为当前（旧当前进历史）
+  /// 选用某版本为当前：只改 isCurrent 标记，版本留在列表原位
+  /// 8-07 18:2x：当前版绑定版本——不再把目标从列表摘走
   void applyVersion(String versionId) {
-    final idx = versions.indexWhere((v) => v.id == versionId);
-    if (idx < 0) return;
-    final v = versions.removeAt(idx);
-    final old = currentOf(v.type);
-    if (old.trim().isNotEmpty) {
-      versions.insert(
-        0,
-        SettingVersion(
-          id: SettingVersionStore.newId(),
-          type: v.type,
-          content: old,
-          createdAt: DateTime.now(),
-          note: '（原当前版，被 v${v.id} 替换）',
-        ),
-      );
+    final target = versions.firstWhere(
+      (v) => v.id == versionId,
+      orElse: () => SettingVersion(
+        id: '',
+        type: SettingVersionStore.male,
+        content: '',
+        createdAt: DateTime.now(),
+      ),
+    );
+    if (target.id.isEmpty) return;
+    for (final v in versions) {
+      if (v.type == target.type && v.isCurrent) v.isCurrent = false;
     }
-    setCurrent(v.type, v.content);
+    target.isCurrent = true;
+    setCurrent(target.type, target.content);
   }
 
-  /// 删除历史版本（当前版不可删）
+  /// 删除版本；若删的是当前版本 → 该类型 currentX 清空（无当前状态）
   bool deleteVersion(String versionId) {
-    final before = versions.length;
-    versions.removeWhere((v) => v.id == versionId);
-    return versions.length != before;
+    final idx = versions.indexWhere((v) => v.id == versionId);
+    if (idx < 0) return false;
+    final v = versions[idx];
+    versions.removeAt(idx);
+    if (v.isCurrent) setCurrent(v.type, '');
+    return true;
   }
 
   Map<String, dynamic> toJson() => {
@@ -329,10 +394,10 @@ class SettingBook {
 class SettingVersion {
   final String id;
   final String type; // male / user
-  final String content;
+  String content; // 8-07 18:2x：可变（覆盖此版本/覆盖当前用）
   final DateTime createdAt;
   final String? note; // 版本备注（男主写的：改了什么/为什么）
-  final bool isCurrent; // 仅展示用（pushVersion 返回时标记）
+  bool isCurrent; // 8-07 18:2x：当前版绑定版本（持久化，每 type 至多一个）
 
   SettingVersion({
     required this.id,
@@ -349,6 +414,7 @@ class SettingVersion {
     'content': content,
     'createdAt': createdAt.toIso8601String(),
     'note': note,
+    'isCurrent': isCurrent,
   };
 
   factory SettingVersion.fromJson(Map<String, dynamic> j) => SettingVersion(
@@ -358,6 +424,7 @@ class SettingVersion {
     createdAt:
         DateTime.tryParse(j['createdAt']?.toString() ?? '') ?? DateTime.now(),
     note: j['note']?.toString(),
+    isCurrent: j['isCurrent'] == true,
   );
 }
 

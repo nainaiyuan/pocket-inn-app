@@ -1224,10 +1224,25 @@ class _SettingVersionPanel extends StatefulWidget {
 class _SettingVersionPanelState extends State<_SettingVersionPanel> {
   SettingBook? _book;
   String _tab = SettingVersionStore.male; // male / user
-  String? _viewId; // null = 当前版
+  String? _viewId; // = 当前版本 id / 备用版本 id；null = 无当前版本
+  bool _draft = false; // 正在写新版本（➕新建 或 📦新建副本，未落地）
+  String? _draftFrom; // 副本来源版本 id（提示用）
   late final TextEditingController _ctrl;
 
   String get _typeName => _tab == SettingVersionStore.user ? '用户设定' : '男主设定';
+
+  // 该类型版本列表（新的在前）
+  List<SettingVersion> get _versions =>
+      _book?.versions.where((v) => v.type == _tab).toList() ?? [];
+
+  // 当前版本（isCurrent=true）
+  SettingVersion? get _currentVersion {
+    final vs = _versions;
+    for (final v in vs) {
+      if (v.isCurrent) return v;
+    }
+    return null;
+  }
 
   @override
   void initState() {
@@ -1273,8 +1288,10 @@ class _SettingVersionPanelState extends State<_SettingVersionPanel> {
     if (!mounted) return;
     setState(() {
       _book = book;
-      _viewId = null;
-      _ctrl.text = book.currentOf(_tab);
+      _draft = false;
+      _draftFrom = null;
+      _viewId = _currentVersion?.id;
+      _ctrl.text = _currentVersion?.content ?? book.currentOf(_tab);
     });
   }
 
@@ -1283,13 +1300,20 @@ class _SettingVersionPanelState extends State<_SettingVersionPanel> {
     if (!mounted) return;
     setState(() {
       _book = book;
-      // 若查看的版本被删了 → 回当前
+      // 若查看的版本被删了 → 回当前（isCurrent 版本）
       final stillExists =
           _viewId == null || book.versions.any((v) => v.id == _viewId);
       if (!stillExists) _viewId = null;
-      _ctrl.text = _viewId == null
-          ? book.currentOf(_tab)
-          : (book.versions.firstWhere((v) => v.id == _viewId).content);
+      final cur = book.versions
+          .where((v) => v.type == _tab && v.isCurrent)
+          .toList();
+      if (_viewId == null && cur.isNotEmpty) _viewId = cur.first.id;
+      if (!_draft) {
+        final viewing = _viewId == null
+            ? null
+            : book.versions.where((v) => v.id == _viewId).toList().firstOrNull;
+        _ctrl.text = viewing?.content ?? book.currentOf(_tab);
+      }
     });
   }
 
@@ -1297,26 +1321,58 @@ class _SettingVersionPanelState extends State<_SettingVersionPanel> {
     if (_tab == tab) return;
     setState(() {
       _tab = tab;
-      _viewId = null;
-      _ctrl.text = _book?.currentOf(tab) ?? '';
+      _draft = false;
+      _draftFrom = null;
+      _viewId = _currentVersion?.id;
+      _ctrl.text = _currentVersion?.content ?? _book?.currentOf(tab) ?? '';
     });
   }
 
-  Future<void> _saveCurrent() async {
-    await SettingVersionStore.saveCurrent(widget.personaId, _tab, _ctrl.text);
-    _refresh();
+  // ── ➕ 新建：空白新版本（不基于任何版本，不碰现有版本）──
+  void _startNewDraft() {
+    setState(() {
+      _draft = true;
+      _draftFrom = null;
+      _ctrl.clear();
+    });
   }
 
+  // ── 📦 新建副本：复制某版本内容到编辑框（未落地），原版本不动 ──
+  void _startCopyDraft(SettingVersion src) {
+    setState(() {
+      _draft = true;
+      _draftFrom = src.id;
+      _ctrl.text = src.content;
+    });
+  }
+
+  void _cancelDraft() {
+    setState(() {
+      _draft = false;
+      _draftFrom = null;
+      _viewId = _currentVersion?.id;
+      _ctrl.text = _currentVersion?.content ?? _book?.currentOf(_tab) ?? '';
+    });
+  }
+
+  // ── 保存新版本（draft / 从当前另存）──
   Future<void> _saveNewVersion() async {
     if (_ctrl.text.trim().isEmpty) return;
-    // 8-07 18:0x 修复：手动存版本 = 只进历史，不碰当前版
-    // （之前用 saveNewVersion 会把旧当前重复推进历史 → a1/a2 变相同）
-    final v = await SettingVersionStore.saveAsVersion(
-      widget.personaId,
-      _tab,
-      _ctrl.text,
-      note: '手动保存为新版本',
-    );
+    final hasAny = _versions.isNotEmpty;
+    final v = hasAny
+        ? await SettingVersionStore.saveAsVersion(
+            widget.personaId,
+            _tab,
+            _ctrl.text,
+            note: _draftFrom != null ? '复制修改（副本）' : '手动保存为新版本',
+          )
+        // 一个版本都没有 → 第一个版本自动成为当前（没得选）
+        : await SettingVersionStore.saveNewVersion(
+            widget.personaId,
+            _tab,
+            _ctrl.text,
+            note: '初始设定',
+          );
     await SettingVersionStore.addChangelog(
       widget.personaId,
       _tab,
@@ -1324,26 +1380,135 @@ class _SettingVersionPanelState extends State<_SettingVersionPanel> {
     );
     if (!mounted) return;
     setState(() {
-      // 定位到刚存的版本（编辑框保持用户输入内容，不跳回当前）
+      _draft = false;
+      _draftFrom = null;
       _viewId = v.id;
       _ctrl.text = v.content;
     });
     _refresh();
   }
 
+  // ── 💾 覆盖当前版本（确认后）──
+  Future<void> _saveCurrent() async {
+    await SettingVersionStore.saveCurrent(widget.personaId, _tab, _ctrl.text);
+    await SettingVersionStore.addChangelog(
+      widget.personaId,
+      _tab,
+      '覆盖了当前$_typeName',
+    );
+    _refresh();
+  }
+
+  // ── 🔁 覆盖某个版本（确认后）──
+  Future<void> _overwriteVersion(SettingVersion v) async {
+    await SettingVersionStore.updateVersion(widget.personaId, v.id, _ctrl.text);
+    await SettingVersionStore.addChangelog(
+      widget.personaId,
+      _tab,
+      '覆盖了版本 ${_versionLabel(v)}',
+    );
+    _refresh();
+  }
+
+  // ── ✨ 选用某版本为当前 ──
   Future<void> _applyVersion(String id) async {
     await SettingVersionStore.applyVersion(widget.personaId, id);
     await SettingVersionStore.addChangelog(
       widget.personaId,
       _tab,
-      '恢复使用了旧版$_typeName',
+      '选用 ${_versionLabel(_versions.firstWhere((v) => v.id == id))} 作为当前$_typeName',
     );
     _refresh();
   }
 
-  Future<void> _deleteVersion(String id) async {
-    await SettingVersionStore.deleteVersion(widget.personaId, id);
+  // ── 🗑 删除版本（当前版本带警告）──
+  Future<void> _deleteVersion(SettingVersion v) async {
+    final isCur = v.isCurrent;
+    final ok = await _confirmDialog(
+      '删除此版本？',
+      isCur
+          ? '⚠️ 这是当前版本！删除后设定不再生效，需要重新选一个版本作为当前。'
+          : '「${_versionLabel(v)}」会被删除（变更日志保留）。',
+      okLabel: '删除',
+    );
+    if (!ok) return;
+    await SettingVersionStore.deleteVersion(widget.personaId, v.id);
+    await SettingVersionStore.addChangelog(
+      widget.personaId,
+      _tab,
+      '删除了版本 ${_versionLabel(v)}',
+    );
     _refresh();
+  }
+
+  // ── 选一个版本作为当前（无当前版本时）──
+  Future<void> _pickCurrentDialog() async {
+    final vs = _versions;
+    if (vs.isEmpty) {
+      await _confirmDialog('还没有任何版本', '先在编辑框写一版，点「📦 存为新版本」（第一个版本会自动成为当前）。');
+      return;
+    }
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('选一个版本作为当前'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final v in vs)
+                ListTile(
+                  dense: true,
+                  title: Text(
+                    '${_versionLabel(v)}${v.isCurrent ? '（当前）' : ''}',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  subtitle: Text(
+                    v.content.replaceAll('\n', ' '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  onTap: () => Navigator.pop(ctx, v.id),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
+    if (picked != null) await _applyVersion(picked);
+  }
+
+  Future<bool> _confirmDialog(
+    String title,
+    String message, {
+    String okLabel = '确定',
+  }) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title, style: const TextStyle(fontSize: 16)),
+        content: Text(message, style: const TextStyle(fontSize: 13)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(okLabel),
+          ),
+        ],
+      ),
+    );
+    return ok ?? false;
   }
 
   @override
@@ -1361,8 +1526,15 @@ class _SettingVersionPanelState extends State<_SettingVersionPanel> {
         ),
       );
     }
-    final versions = book.versions.where((v) => v.type == _tab).toList();
-    final isViewingCurrent = _viewId == null;
+    final versions = _versions;
+    final current = _currentVersion;
+    final hasCurrent = current != null;
+    // 正在查看/编辑的版本：_viewId 指向的（无当前时 _viewId=null）
+    final viewing = _viewId == null
+        ? null
+        : versions.where((v) => v.id == _viewId).toList().firstOrNull;
+    final isViewingCurrent = viewing != null && viewing.isCurrent;
+    final isViewingBackup = viewing != null && !viewing.isCurrent;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1392,11 +1564,16 @@ class _SettingVersionPanelState extends State<_SettingVersionPanel> {
               icon: const Icon(Icons.chevron_left, size: 18),
               color: const Color(0xFF8A7A80),
               onPressed: () {
-                final list = <String?>[null, ...versions.map((v) => v.id)];
+                final list = <String?>[
+                  current?.id,
+                  ...versions.map((v) => v.id),
+                ];
                 final idx = list.indexOf(_viewId);
                 if (idx > 0) {
                   final target = list[idx - 1];
                   setState(() {
+                    _draft = false;
+                    _draftFrom = null;
                     _viewId = target;
                     _ctrl.text = target == null
                         ? book.currentOf(_tab)
@@ -1411,21 +1588,28 @@ class _SettingVersionPanelState extends State<_SettingVersionPanel> {
                 reverse: true,
                 child: Row(
                   children: [
-                    // 当前版 chip 在最右（中间位置，新版本叠上去）
-                    _VersionChip(
-                      label: '当前',
-                      active: isViewingCurrent,
-                      onTap: () => setState(() {
-                        _viewId = null;
-                        _ctrl.text = book.currentOf(_tab);
-                      }),
-                    ),
+                    // 当前版本 chip 在最右（⭐ 标记）
+                    if (hasCurrent) ...[
+                      _VersionChip(
+                        label: '⭐当前',
+                        active: isViewingCurrent && !_draft,
+                        onTap: () => setState(() {
+                          _draft = false;
+                          _draftFrom = null;
+                          _viewId = current.id;
+                          _ctrl.text = current.content;
+                        }),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
                     for (final v in versions.reversed) ...[
                       const SizedBox(width: 6),
                       _VersionChip(
                         label: _versionLabel(v),
-                        active: _viewId == v.id,
+                        active: _viewId == v.id && !_draft,
                         onTap: () => setState(() {
+                          _draft = false;
+                          _draftFrom = null;
                           _viewId = v.id;
                           _ctrl.text = v.content;
                         }),
@@ -1440,11 +1624,16 @@ class _SettingVersionPanelState extends State<_SettingVersionPanel> {
               icon: const Icon(Icons.chevron_right, size: 18),
               color: const Color(0xFF8A7A80),
               onPressed: () {
-                final list = <String?>[null, ...versions.map((v) => v.id)];
+                final list = <String?>[
+                  current?.id,
+                  ...versions.map((v) => v.id),
+                ];
                 final idx = list.indexOf(_viewId);
                 if (idx >= 0 && idx < list.length - 1) {
                   final target = list[idx + 1];
                   setState(() {
+                    _draft = false;
+                    _draftFrom = null;
                     _viewId = target;
                     _ctrl.text = target == null
                         ? book.currentOf(_tab)
@@ -1456,15 +1645,60 @@ class _SettingVersionPanelState extends State<_SettingVersionPanel> {
           ],
         ),
         const SizedBox(height: 4),
-        // 编辑框（当前版或历史版，都可编辑）
+        // ⚠️ 无当前版本警示条
+        if (!hasCurrent && !_draft)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFEDE3),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE8A87A)),
+            ),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    '⚠️ 没有当前版本，设定未生效',
+                    style: TextStyle(fontSize: 12, color: Color(0xFFB06030)),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: _pickCurrentDialog,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8A87A),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      '选一个版本作为当前',
+                      style: TextStyle(fontSize: 11, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        // 编辑框
         TextField(
           controller: _ctrl,
           maxLines: 8,
           minLines: 4,
           decoration: InputDecoration(
-            hintText: isViewingCurrent
-                ? '$_typeName（男主自己分类，自由写：身份/性格/关系/习惯…）'
-                : '正在查看历史版本，可修改后「选用此版本」',
+            hintText: _draft
+                ? (_draftFrom != null
+                      ? '副本修改中（原版本不动），改完点「📦 存为新版本」'
+                      : '写全新版本（不基于任何版本），写完点「📦 存为新版本」')
+                : isViewingCurrent
+                ? '$_typeName（当前生效版本，自由写：身份/性格/关系/习惯…）'
+                : isViewingBackup
+                ? '查看历史版本：可「🔁 覆盖修改」「📦 新建副本」「🗑 删除」'
+                : '$_typeName（还没有当前版本，先写一版或选一个）',
             filled: true,
             fillColor: Colors.white.withValues(alpha: 0.6),
             border: OutlineInputBorder(
@@ -1479,35 +1713,75 @@ class _SettingVersionPanelState extends State<_SettingVersionPanel> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            _PanelBtn(
-              label: '↩ 回当前',
-              color: const Color(0xFFC896B4),
-              onTap: () => setState(() {
-                _viewId = null;
-                _ctrl.text = book.currentOf(_tab);
-              }),
-            ),
-            if (isViewingCurrent) ...[
+            // ➕ 新建：常驻（不基于任何版本，不碰现有版本）
+            if (!_draft)
+              _PanelBtn(
+                label: '➕ 新建',
+                color: const Color(0xFF7FA88A),
+                onTap: _startNewDraft,
+              ),
+            if (_draft) ...[
+              _PanelBtn(
+                label: '📦 存为新版本',
+                color: const Color(0xFF7FA88A),
+                onTap: _saveNewVersion,
+              ),
+              _PanelBtn(
+                label: '↩ 取消',
+                color: const Color(0xFFC896B4),
+                onTap: _cancelDraft,
+              ),
+            ] else if (isViewingCurrent) ...[
               _PanelBtn(
                 label: '💾 覆盖当前',
                 color: const Color(0xFF8A6A96),
-                onTap: _saveCurrent,
+                onTap: () async {
+                  final ok = await _confirmDialog(
+                    '覆盖当前版本？',
+                    '「${_versionLabel(viewing)}」的内容会被替换成编辑框里的内容，原内容不可恢复。',
+                  );
+                  if (ok) _saveCurrent();
+                },
               ),
               _PanelBtn(
                 label: '📦 存为新版本',
                 color: const Color(0xFF7FA88A),
                 onTap: _saveNewVersion,
               ),
-            ] else ...[
+            ] else if (isViewingBackup) ...[
               _PanelBtn(
-                label: '✨ 选用此版本',
+                label: '🔁 覆盖此版本',
+                color: const Color(0xFF8A6A96),
+                onTap: () async {
+                  final ok = await _confirmDialog(
+                    '覆盖此版本？',
+                    '「${_versionLabel(viewing)}」的内容会被替换成编辑框里的内容，原内容不可恢复。',
+                  );
+                  if (ok) _overwriteVersion(viewing);
+                },
+              ),
+              _PanelBtn(
+                label: '📦 新建副本',
                 color: const Color(0xFF7FA88A),
-                onTap: () => _applyVersion(_viewId!),
+                onTap: () => _startCopyDraft(viewing),
               ),
               _PanelBtn(
                 label: '🗑 删除此版本',
                 color: const Color(0xFFD98A9E),
-                onTap: () => _deleteVersion(_viewId!),
+                onTap: () => _deleteVersion(viewing),
+              ),
+            ] else ...[
+              // 无当前版本（_viewId == null）
+              if (versions.isNotEmpty)
+                _PanelBtn(
+                  label: '选一个版本作为当前',
+                  color: const Color(0xFFC896B4),
+                  onTap: _pickCurrentDialog,
+                ),
+              _PanelBtn(
+                label: '📦 存为新版本',
+                color: const Color(0xFF7FA88A),
+                onTap: _saveNewVersion,
               ),
             ],
           ],
