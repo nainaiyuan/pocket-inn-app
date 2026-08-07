@@ -2119,6 +2119,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 验收顶部横幅当前提示
   String? _acceptanceNote;
 
+  /// 8-07 15:0x 用户：验收弹窗分不清是哪一步——当前验收步骤标签
+  /// （如 '⑨/12 设定·只改喜好段'），弹窗标题里显示，非验收时 null
+  String? _acceptingStep;
+
   /// 8-04 21:1x 用户："一键跑对话，自动切换 AI，对话体现在聊天框，
   /// 我只需要点允许写/允许查，写成一个验收流程看逻辑对不对"
   /// 真实对话全链路验收：自动切 5 个模拟 AI 形态 + 自动发消息，
@@ -2363,6 +2367,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           '【身份】测试角色\n【喜好】测试喜好A', note: '验收剧本初始化');
       // ⑨ 段落化 update：只改【喜好】段，其他段落不动（弹窗用户点同意）
       await sw('builtin-mock', '⑨/⑫ 设定·改一段（tag 定位）');
+      _acceptingStep = '⑨/12 设定·只改【喜好】段（其他段不能动）';
       note('📋 ⑨ 让男主用 update_setting 只改【喜好】段——弹窗弹出后点「同意并应用」');
       await say('用 update_setting 工具，把男主设定里的【喜好】段改成"测试喜好B"，'
           '只改这一段，别动其他段落。');
@@ -2378,6 +2383,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
       // ⑩ 段落化 add：新增一段
       await sw('builtin-mock', '⑩/⑫ 设定·新增一段');
+      _acceptingStep = '⑩/12 设定·新增【测试段】';
       note('📋 ⑩ 让男主用 update_setting 新增【测试段】——弹窗点「同意并应用」');
       await say('再用 update_setting 新增一段【测试段】，内容写"验收新增"，别动其他段落。');
       final book10 = await SettingVersionStore.load(testPid);
@@ -2388,6 +2394,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
       // ⑪ 段落化 delete：删掉新增段
       await sw('builtin-mock', '⑪/⑫ 设定·删一段');
+      _acceptingStep = '⑪/12 设定·删除【测试段】';
       note('📋 ⑪ 让男主用 update_setting 删掉【测试段】——弹窗点「同意并应用」');
       await say('再用 update_setting 把【测试段】删掉。');
       final book11 = await SettingVersionStore.load(testPid);
@@ -2404,6 +2411,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // ⑫ 多轮会话弹窗：弹窗里跟男主商量一轮再同意（用户手动：
       // 点「💬 发给他」写"改成测试喜好C" → 看男主回复自动填方案 → 同意）
       await sw('builtin-mock', '⑫/⑫ 设定·多轮会话弹窗');
+      _acceptingStep = '⑫/12 设定·商量后改【喜好】为测试喜好C';
       note('📋 ⑫ 改【喜好】——弹窗里先跟男主商量：点「💬 发给他」写'
           '"改成测试喜好C吧"，看男主回复填进方案，再点「同意并应用」');
       await say('用 update_setting 把【喜好】改成"测试喜好C"。'
@@ -2443,6 +2451,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         setState(() {
           _accepting = false;
           _acceptanceNote = null;
+          _acceptingStep = null;
         });
       }
     }
@@ -3641,6 +3650,7 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
       typeName: typeName,
       content: newText,
       reason: opDesc,
+      testStep: _acceptingStep,
     );
     if (result == null) {
       return _ToolResult(false, '她没回应设定更新（先别催，她可能在忙）');
@@ -3725,6 +3735,7 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     required String typeName,
     required String content,
     required String reason,
+    String? testStep,
   }) async {
     if (!mounted) return null;
     FocusManager.instance.primaryFocus?.unfocus();
@@ -3746,8 +3757,10 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
         builder: (ctx, setState) => AlertDialog(
           backgroundColor: const Color(0xFFFDF7F9),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title:
-              Text('📚 男主想更新$typeName${round > 1 ? '（第 $round 轮）' : ''}'),
+          title: Text(
+              '📚 男主想更新$typeName'
+              '${testStep != null ? ' · 验收 $testStep' : ''}'
+              '${round > 1 ? '（第 $round 轮）' : ''}'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
