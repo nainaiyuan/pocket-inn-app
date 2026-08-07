@@ -3894,7 +3894,11 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
               FilledButton(
                 style:
                     FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
-                onPressed: () => Navigator.pop(ctx, true),
+                onPressed: () {
+                  // 8-07 15:0x：防连点——先置 busy 再 pop，双击不会 pop 两次
+                  setState(() => busy = true);
+                  Navigator.pop(ctx, true);
+                },
                 child: const Text('✅ 同意并应用'),
               ),
           ],
