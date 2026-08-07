@@ -3116,8 +3116,15 @@ class _ChatPageState extends State<ChatPage>
 
   /// 工具执行完成/失败气泡（用户 8-03 01:57）：执行完必须给用户明确反馈。
   void _appendToolResultBubble(String toolName, _ToolResult r) {
+    // 8-07 22:25 借鉴 Clawra 模式：工具报错不输出堆栈/JSON/报错给用户——
+    // 技术详情只进上下文+日志（男主看得到，能继续处理），
+    // 用户侧气泡显示友好文案；男主拿到完整错误后用角色口吻委婉回应
+    var text = r.text;
+    if (!r.ok && text.startsWith('工具执行异常')) {
+      text = '（详情已记录，他会换个方式处理）';
+    }
     _appendToolBubble(
-      '${r.ok ? '✅' : '❌'} $toolName ${r.ok ? '完成' : '失败'}：${r.text}',
+      '${r.ok ? '✅' : '❌'} $toolName ${r.ok ? '完成' : '失败'}：$text',
     );
   }
 
