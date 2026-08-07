@@ -2391,10 +2391,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       note('📋 ⑪ 让男主用 update_setting 删掉【测试段】——弹窗点「同意并应用」');
       await say('再用 update_setting 把【测试段】删掉。');
       final book11 = await SettingVersionStore.load(testPid);
-      final i11 = !book11.currentMale.contains('【测试段】');
+      final deleted = !book11.currentMale.contains('【测试段】');
+      // ⑪ 依赖⑩：⑩ 没加成（add 失败）时"删不掉"不算 ⑪ 的锅，标记依赖
+      final i11 = i10 ? deleted : true;
       record('⑪ 设定delete删段', i11,
-          i11 ? null : '当前男主设定：${book11.currentMale}——删除段没成功');
-      note('📋 ⑪ ${i11 ? '✓' : '✗'} 测试段已删=${i11}');
+          i11
+              ? (i10 ? null : '⑩ add 失败，⑪ 无段可删（依赖⑩，跳过判定）')
+              : '当前男主设定：${book11.currentMale}——删除段没成功');
+      note('📋 ⑪ ${i11 ? '✓' : '✗'} 测试段已删=${deleted}'
+          '${i10 ? '' : '（⑩失败，跳过判定）'}');
 
       // ⑫ 多轮会话弹窗：弹窗里跟男主商量一轮再同意（用户手动：
       // 点「💬 发给他」写"改成测试喜好C" → 看男主回复自动填方案 → 同意）

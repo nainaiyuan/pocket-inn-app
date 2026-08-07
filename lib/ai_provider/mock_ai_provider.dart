@@ -164,6 +164,12 @@ class MockAIProvider {
 
     // 非工具轮：按最后一条 user 消息内容触发脚本
     String lastUser = '';
+    for (final m in messages.reversed) {
+      if (m.role == 'user') {
+        lastUser = m.content;
+        break;
+      }
+    }
     // 8-07 14:12（一键测设定剧本⑨⑩⑪）：设定段落化——update_setting
     // 新增/删/改三种操作（按剧本消息里的关键词区分）
     if (lastUser.contains('update_setting') && lastUser.contains('新增')) {
@@ -195,12 +201,6 @@ class MockAIProvider {
     if (lastUser.contains('query_setting_history')) {
       return _toolCall('query_setting_history', {},
           '模拟思考：用户让我查设定变更历史。');
-    }
-    for (final m in messages.reversed) {
-      if (m.role == 'user') {
-        lastUser = m.content;
-        break;
-      }
     }
     if (lastUser.contains('记住') || lastUser.contains('喜欢喝')) {
       // 8-03 22:3x（用户确认设计）：男主记录的是【男主总结的话】，
