@@ -359,10 +359,6 @@ class OpenAICompatibleApiService implements IOpenAiApiService {
         });
       }
     }
-    if (text.isEmpty && toolCalls.isEmpty) {
-      throw const FormatException('聊天接口返回了空回复');
-    }
-
     // 8-03 06:57：DeepSeek 思考模式 reasoning_content 可能在
     // message / choice / 顶层三个位置；且要求"原样回传"→ 不 trim。
     // 三处全读，取第一个非空；原样保留（思考模式回传必须一字不差）
@@ -375,6 +371,14 @@ class OpenAICompatibleApiService implements IOpenAiApiService {
           break;
         }
       }
+    }
+    // 8-07 22:15 修复（用户 22:12 反馈：空回复导致 AI 不能用）：
+    // DeepSeek Reasoner 已知服务端问题——返回 content 空但 reasoning_content
+    // 有内容（官方负载过高）。text 空+无工具但**有思考**不算空回复：
+    // 正常返回（text 空 + thinking 非空），上层（generateReply 重试链）
+    // 会救回；只有三者全空才是真空回复。
+    if (text.isEmpty && toolCalls.isEmpty && thinkingRaw.isEmpty) {
+      throw const FormatException('聊天接口返回了空回复');
     }
     final thinkingChain = thinkingRaw;
     await ApiRequestLogService.instance.append(

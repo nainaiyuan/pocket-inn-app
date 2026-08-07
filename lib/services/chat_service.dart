@@ -893,10 +893,11 @@ class ChatService {
         cancellationToken: cancellationToken,
       );
       final text = result.text.trim();
-      if (text.isEmpty) {
+      final thinking = result.thinking.trim();
+      // 8-07 22:15：DeepSeek 思考模式 content 空但 reasoning 非空不算空回复
+      if (text.isEmpty && thinking.isEmpty) {
         throw const FormatException('聊天接口返回了空回复');
       }
-      final thinking = result.thinking.trim();
       return ChatCompletionResult(
         text: text,
         thinkingChain: thinking.isEmpty ? null : thinking,
@@ -940,10 +941,11 @@ class ChatService {
     }
 
     final text = textBuffer.toString().trim();
-    if (text.isEmpty) {
+    final thinking = thinkingBuffer.toString().trim();
+    // 8-07 22:15：同上——思考非空不算空回复
+    if (text.isEmpty && thinking.isEmpty) {
       throw const FormatException('聊天接口返回了空回复');
     }
-    final thinking = thinkingBuffer.toString().trim();
     return ChatCompletionResult(
       text: text,
       thinkingChain: thinking.isEmpty ? null : thinking,

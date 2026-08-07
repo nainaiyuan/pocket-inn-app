@@ -1286,26 +1286,61 @@ class AiChatService {
         toolRound: toolRound,
       );
     } on Object catch (e) {
-      // 上下文超限 → 窗口自动校准（表值只是起点，真实 API 行为说了算）
+      // 8-07 22:15 修复（用户 22:12 反馈：空回复导致 AI 不能用）：
+      // DeepSeek 空回复在 API service 层直接抛异常（8-03 的重试链在
+      // result 返回后才判断，异常路径永远轮不到）→ 这里拦截空回复异常
+      // 走重试：第1次带工具 / 第2次不带工具；都空返回空结果不抛。
       final msg = e.toString();
-      final overflow = msg.contains('context length') ||
-          msg.contains('maximum context') ||
-          msg.contains('context_length') ||
-          msg.contains('too many tokens') ||
-          msg.contains('token limit') ||
-          msg.contains('超出上下文') ||
-          msg.contains('最大上下文');
-      if (overflow) {
-        try {
-          final butler = ChatService.instance.butler;
-          final used = butler?.totalPromptTokens ?? 0;
-          final calibrated = used + 2000;
-          ContextTracker.instance.setWindow(ctxPid, calibrated);
-          DebugLogger.log('上下文', '⚠️ 上下文超限 → 窗口校准: → $calibrated'
-              '（已用 $used + 余量2000）');
-        } catch (_) {}
+      if (msg.contains('空回复')) {
+        DebugLogger.log('AI路由', '⚠️ API 层空回复异常 → 重试第 1 次（带工具）');
+        final r1 = await _chat(
+          personaId,
+          messages,
+          tools: toolRound ? null : butlerTools,
+          toolRound: toolRound,
+        );
+        if (r1.text.trim().isNotEmpty ||
+            (r1.toolCalls != null && r1.toolCalls!.isNotEmpty)) {
+          if (r1.text.trim().isNotEmpty) {
+            ContextManager.instance.feedAssistantMessage(ctxPid, r1.text.trim());
+          }
+          result = r1;
+        } else {
+          DebugLogger.log('AI路由', '⚠️ 空回复重试第 1 次仍空 → 重试第 2 次（不带工具）');
+          final r2 = await _chat(personaId, messages, toolRound: toolRound);
+          if (r2.text.trim().isNotEmpty ||
+              (r2.toolCalls != null && r2.toolCalls!.isNotEmpty)) {
+            if (r2.text.trim().isNotEmpty) {
+              ContextManager.instance.feedAssistantMessage(ctxPid, r2.text.trim());
+            }
+            result = r2;
+          } else {
+            // 两次重试都空 → 返回空结果，不抛异常（chat_page 侧轻提示）
+            DebugLogger.log('AI路由', '⚠️ 空回复重试 2 次仍为空，返回空结果（不抛异常）');
+            return AIProviderResult(text: '', toolCalls: null, usage: null);
+          }
+        }
+      } else {
+        // 上下文超限 → 窗口自动校准（表值只是起点，真实 API 行为说了算）
+        final overflow = msg.contains('context length') ||
+            msg.contains('maximum context') ||
+            msg.contains('context_length') ||
+            msg.contains('too many tokens') ||
+            msg.contains('token limit') ||
+            msg.contains('超出上下文') ||
+            msg.contains('最大上下文');
+        if (overflow) {
+          try {
+            final butler = ChatService.instance.butler;
+            final used = butler?.totalPromptTokens ?? 0;
+            final calibrated = used + 2000;
+            ContextTracker.instance.setWindow(ctxPid, calibrated);
+            DebugLogger.log('上下文', '⚠️ 上下文超限 → 窗口校准: → $calibrated'
+                '（已用 $used + 余量2000）');
+          } catch (_) {}
+        }
+        rethrow;
       }
-      rethrow;
     }
     // 男主回复进上下文（当前话题原文）
     if (result.text.trim().isNotEmpty) {

@@ -5536,11 +5536,24 @@ class _ChatPageState extends State<ChatPage>
           )
           .toList();
       for (var i = 0; i < 3; i++) {
-        final res = await AIProviderManager.instance.chat(
-          personaId,
-          msgs,
-          tools: readOnly,
-        );
+        AIProviderResult res;
+        try {
+          res = await AIProviderManager.instance.chat(
+            personaId,
+            msgs,
+            tools: readOnly,
+          );
+        } on FormatException catch (e) {
+          // 8-07 22:15 修复：弹窗会话也拦截空回复（DeepSeek 已知服务端问题），
+          // 重试 1 次；仍失败按"卡了一下"处理（不弹红错）
+          if (!e.message.contains('空回复')) rethrow;
+          DebugLogger.log('设定会话', '⚠️ 弹窗会话空回复 → 重试 1 次');
+          res = await AIProviderManager.instance.chat(
+            personaId,
+            msgs,
+            tools: readOnly,
+          );
+        }
         final calls = res.toolCalls;
         if (calls != null && calls.isNotEmpty) {
           for (final call in calls) {
