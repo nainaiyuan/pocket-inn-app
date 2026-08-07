@@ -2745,8 +2745,8 @@ class _ChatPageState extends State<ChatPage>
         '📋 ⑫ 改【喜好】——弹窗自动弹出，男主自动问两道卡片题'
         '（一次只显示一题，答完自动下一题）：\n'
         '1️⃣ 第1题（单选）身份：点 A → 自动跳第2题；'
-        '第2题（多选）喜好：点 A（可再点 B，或点「✏️ 我自己写」打字）'
-        '→ 全部答完自动发给男主 → 男主出 v1【新方案】\n'
+        '第2题（多选）喜好：点 A、B 勾选（可再点取消）→ 点「✓ 答完了，'
+        '发给他」→ 自动发给男主 → 男主出 v1【新方案】\n'
         '2️⃣ 注意：底部【没有】「就用这版」按钮——男主还在了解需求，'
         '第一版不能定案（验证点1）；设定原文也不显示（验证点2）\n'
         '3️⃣ 在反馈框打字："第一版喜好不好，喜好写具体点" → 「💬 发给他」'
@@ -4439,6 +4439,19 @@ class _ChatPageState extends State<ChatPage>
 
           // 8-07 16:4x 用户：问答卡片——答当前题，答完自动跳下一题；
           // 全部答完自动发男主（不手动攒、不手动滑）
+          // 8-07 17:2x 修复：多选点选项只是勾选（可继续选多个），
+          // 不会自动发送——多选要再点「✓ 答完这题」才跳题/发送；
+          // 单选点选项即答完（自动跳/发）
+          String assembleAnswers() {
+            final buf = StringBuffer();
+            for (final g in questionGroups) {
+              final list = answers[g.question] ?? [];
+              if (list.isEmpty) continue;
+              buf.writeln('【${g.question}】${list.join('；')}');
+            }
+            return buf.toString().trim();
+          }
+
           void answerQuestion(String question, String ans) {
             setState(() {
               answers.putIfAbsent(question, () => []).add(ans);
@@ -4448,16 +4461,28 @@ class _ChatPageState extends State<ChatPage>
                 curQ++; // 自动跳下一题
               } else {
                 // 全部答完 → 组装消息自动发男主
-                final buf = StringBuffer();
-                for (final g in questionGroups) {
-                  final list = answers[g.question] ?? [];
-                  if (list.isEmpty) continue;
-                  buf.writeln('【${g.question}】${list.join('；')}');
-                }
                 fbCtrl.clear();
-                final msg = buf.toString().trim();
+                final msg = assembleAnswers();
                 if (msg.isNotEmpty) {
                   // 延迟到 setState 外发（避免在 setState 里 await）
+                  Future.microtask(() => sendToMale(msg));
+                }
+              }
+            });
+          }
+
+          // 多选「✓ 答完这题」：选够了点它 → 跳下一题 / 全部答完自动发送
+          void finishMultiQuestion() {
+            setState(() {
+              customOpen = false;
+              customCtrl.clear();
+              if (curQ + 1 < questionGroups.length) {
+                curQ++; // 自动跳下一题
+              } else {
+                // 全部答完 → 组装消息自动发男主
+                fbCtrl.clear();
+                final msg = assembleAnswers();
+                if (msg.isNotEmpty) {
                   Future.microtask(() => sendToMale(msg));
                 }
               }
@@ -4734,6 +4759,38 @@ class _ChatPageState extends State<ChatPage>
                                   child: const Text(
                                     '✓ 答完这题',
                                     style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                          // 8-07 17:2x 修复：多选点选项只是勾选（可继续选多个），
+                          // 不会自动发送——选够了点「✓ 答完这题」才跳题/发送
+                          if (questionGroups[curQ].multi &&
+                              (answers[questionGroups[curQ].question] ?? [])
+                                  .isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: GestureDetector(
+                                onTap: busy ? null : finishMultiQuestion,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 7,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFC896B4),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    curQ + 1 < questionGroups.length
+                                        ? '✓ 答完这题，下一题'
+                                        : '✓ 答完了，发给他',
+                                    style: const TextStyle(
                                       fontSize: 12,
                                       color: Colors.white,
                                     ),
