@@ -26,6 +26,7 @@ Future<void> showAiProviderSheet({
   /// 8-07 14:03 用户：一键测设定 → 真实 AI 通道自动发测试指令，
   /// 测设定段落化（update_setting tag 定位 + 多轮审批弹窗）。
   Future<void> Function()? onTestSetting,
+  Future<void> Function()? onTestAllTools,
   /// 8-05 21:36 用户：假窗口满·手动触发总结（验证后拆）。
   /// 点「🧪 假窗口满」→ 关弹层 → 回调聊天页直接跑一遍总结流程。
   Future<void> Function()? onForceSummarize,
@@ -48,6 +49,8 @@ Future<void> showAiProviderSheet({
               colorScheme: colorScheme,
               maxHeight: screenHeight * 0.72,
               onAcceptance: onAcceptance,
+              onTestSetting: onTestSetting,
+              onTestAllTools: onTestAllTools,
               onForceSummarize: onForceSummarize,
             );
           },
@@ -65,6 +68,7 @@ class _AiProviderSheetBody extends StatefulWidget {
     required this.maxHeight,
     this.onAcceptance,
     this.onTestSetting,
+    this.onTestAllTools,
     this.onForceSummarize,
   });
 
@@ -74,6 +78,7 @@ class _AiProviderSheetBody extends StatefulWidget {
   final double maxHeight;
   final Future<void> Function()? onAcceptance;
   final Future<void> Function()? onTestSetting;
+  final Future<void> Function()? onTestAllTools;
   final Future<void> Function()? onForceSummarize;
 
   @override
@@ -629,6 +634,23 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
                     ),
                     icon: const Icon(Icons.edit_note, size: 18),
                     label: const Text('🚀 一键测设定'),
+                  ),
+                // 8-08 02:3x 用户：一键测全部工具（真实 AI 通道 DeepSeek，
+                // 引导批量调用，找"一卡一卡"卡点）——测试模式关 → 不显示
+                if (widget.onTestAllTools != null &&
+                    AIProviderManager.testModeEnabled)
+                  FilledButton.icon(
+                    onPressed: () {
+                      final navigator = Navigator.of(context);
+                      final cb = widget.onTestAllTools!;
+                      navigator.pop();
+                      unawaited(cb());
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFB3593C),
+                    ),
+                    icon: const Icon(Icons.handyman, size: 18),
+                    label: const Text('🚀 一键测全部工具'),
                   ),
                 // 8-05 21:36 用户：假窗口满·手动触发总结 → 22:07 放开到
                 // 真实 AI 验证通过（真实 DeepSeek 走 save_summary 完整闭环）

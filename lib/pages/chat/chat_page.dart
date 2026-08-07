@@ -1708,6 +1708,7 @@ class _ChatPageState extends State<ChatPage>
       onAcceptance: _runAcceptance,
       onForceSummarize: _forceSummarizeNow,
       onTestSetting: _runTestSetting,
+      onTestAllTools: _runTestAllTools,
     );
   }
 
@@ -1728,6 +1729,31 @@ class _ChatPageState extends State<ChatPage>
       '2. 再用 query_setting_history 查一下，确认这次变更已记录；\n'
       '3. 最后告诉我：你加了哪段、用的什么 action。\n'
       '（审批弹窗正常发起即可，这是测试）',
+    );
+  }
+
+  /// 8-08 02:3x 用户：一键测全部工具——真实 AI 通道（DeepSeek）把工具全调
+  /// 一遍，验证批量请求 + 找"一卡一卡"的卡点。数据落测试空间，退出清空。
+  Future<void> _runTestAllTools() async {
+    final pid = _state.personaId ?? '';
+    if (pid.isEmpty) return;
+    await SettingVersionStore.ensureTestCopy(pid);
+    if (mounted) {
+      _appendToolBubble('🧪 一键测全部工具：真实 AI 通道测试开始（批量调用，数据落测试空间）');
+    }
+    await _sendMsg(
+      '【测试指令】现在测一下「工具调用」功能，请把你能调的工具全部调一遍：\n'
+      '1. 先 list_tools 看完整清单；\n'
+      '2. 然后尽量【批量】调用——能一起做的工具一次请求多个（管家会按顺序'
+      '执行完、统一把结果给你，不用一个一个来）；\n'
+      '3. 只读类（query_diary/query_record/query_setting_history/query_flow/'
+      'query_logs/recall_memory 等）直接查；\n'
+      '4. 写操作类里你自己管的（manage_pad/manage_tool_cache/manage_flow/'
+      'manage_frequent_tools）直接执行；\n'
+      '5. 需要审批的（record_memory/add_record 等）审批弹窗正常发起即可，'
+      '这是测试；\n'
+      '6. 最后告诉我：一共调了哪些工具、每个的结果、有没有失败的。\n'
+      '（数据落测试空间，退出测试模式自动清空）',
     );
   }
 
