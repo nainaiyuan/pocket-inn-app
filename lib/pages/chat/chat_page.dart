@@ -726,9 +726,23 @@ class _ChatPageState extends State<ChatPage>
       var continueCount = 0;
       // 8-07 00:1x：用户连续拒绝计数（≥3 强制男主停止尝试）
       var rejectedCount = 0;
+      // 8-07 22:5x 用户：男主"一直查一直查工具"卡死——交错调用防不住
+      // （consecutive 只数连续同工具）。加：
+      // ① 本轮查询类工具累计 ≥3 强制停（不管交错）
+      // ② 工具轮总轮数上限 6（防 query_logs→list_tools→query_logs 死循环）
+      var queryToolCount = 0;
+      const maxToolRounds = 6;
       while (result.toolCalls != null && result.toolCalls!.isNotEmpty) {
         toolLoop++;
         toolExecuted = true;
+        if (toolLoop > maxToolRounds) {
+          // 防御兜底（正常路径由下方 stop 事件先拦，这里保证不无限循环）
+          DebugLogger.log(
+            'AI路由',
+            '⚠️ 工具轮超过 $maxToolRounds 轮，强制跳出（防死循环）',
+          );
+          break;
+        }
         DebugLogger.log(
           'AI路由',
           '🔧 第 $toolLoop 轮：男主请求 ${result.toolCalls!.length} 个工具',
@@ -1201,15 +1215,41 @@ class _ChatPageState extends State<ChatPage>
           consecutiveToolCounts[name] = n;
           // 8-06 21:36：continue 本轮累计 ≥3 次也停（交错调用防不住"连续"计数）
           if (name == 'continue_speaking') continueCount++;
-          if (n >= 3 || (name == 'continue_speaking' && continueCount >= 3)) {
+          // 8-07 22:5x 用户：男主反复查工具卡死——只读查询类工具
+          // 本轮累计 ≥3 强制停（不管交错：query_logs→list_tools→query_logs 也拦）
+          const queryTools = {
+            'query_logs',
+            'list_tools',
+            'recall_memory',
+            'query_diary',
+            'query_setting_history',
+            'query_record',
+            'query_flow',
+          };
+          var queryStop = false;
+          if (queryTools.contains(name)) {
+            queryToolCount++;
+            if (queryToolCount >= 3) {
+              queryStop = true;
+              DebugLogger.log(
+                'AI路由',
+                '⚠️ 本轮查询类工具累计 $queryToolCount 次（$name），强制停止（防反复查）',
+              );
+            }
+          }
+          if (n >= 3 ||
+              (name == 'continue_speaking' && continueCount >= 3) ||
+              queryStop) {
             loopExceeded = true;
             DebugLogger.log(
               'AI路由',
-              '⚠️ 工具 $name 调用 $n 次（continue 累计 $continueCount），强制停止（防死循环）',
+              '⚠️ 工具 $name 调用 $n 次（continue 累计 $continueCount，'
+              '查询类累计 $queryToolCount），强制停止（防死循环）',
             );
           }
         }
-        if (loopExceeded) break;
+        // 8-07 22:5x：不再这里提前 break——loopExceeded 时也要先注入
+        // stop 事件（下方【系统事件】）让男主知道为什么停，再生成一轮
         // 文本块工具结果：合并注入 user 消息（不走原生 tool_calls，兜底通道）
         // 8-04 18:1x（用户：男主分不清用户话和工具结果）：明确标注
         // "这是工具返回结果，不是用户说的"——防止模型把结果当用户指令
@@ -1223,6 +1263,22 @@ class _ChatPageState extends State<ChatPage>
                   '基于结果自然地回复用户，不要再调用工具。',
             ),
           );
+        }
+        // 8-07 22:5x 用户：男主反复查工具卡死——触发防循环后必须明确告知
+        // 男主"别再调了直接回复"，否则他不知道为什么停、下轮又调
+        if (loopExceeded || toolLoop >= maxToolRounds) {
+          toolMessages.add(
+            AIChatMessage(
+              role: 'user',
+              content:
+                  '【系统事件】你本轮调用工具过多（同工具连续/查询类累计/'
+                  '总轮数触发防护），系统已停止你的工具调用。'
+                  '现在就基于已有结果直接回复她，别再申请任何工具；'
+                  '真做不到就老实说"这个我现在做不到"。',
+            ),
+          );
+          // 注入后这轮生成完就停（不继续 while）
+          loopExceeded = true;
         }
         // 8-03 18:27：工具轮生成也是男主打字阶段 → 显示"正在输出"
         ChatPresence.instance.beginTyping();
@@ -1269,7 +1325,7 @@ class _ChatPageState extends State<ChatPage>
           final event =
               '你调用的工具被她拒绝了：${rejectedTools.join('；')}。\n'
               '$flowInfo'
-              '${rejectedCount >= 3 ? '她已经连续拒绝 3 次了，别再尝试这个方向，直接回复她。' : '请决定下一步：换方案 / 跳过这步 / 取消流程 / 先回复她。'}';
+              '${rejectedCount >= 2 ? '她已经连续拒绝 2 次了，别再尝试这个方向，直接回复她（她不想让你做这件事）。' : '请决定下一步：换方案 / 跳过这步 / 取消流程 / 先回复她。'}';
           rejectedTools.clear();
           ChatPresence.instance.beginTyping();
           result = await _aiSvc.generateReply(

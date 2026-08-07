@@ -102,7 +102,16 @@ List<BubblePart> parseMultiBubbles(String raw) {
         if (t.isEmpty) continue; // 空标签丢弃
         result.add(BubblePart(BubbleKind.act, [BubbleSpan(SpanKind.act, t)]));
       case _BlockKind.bare:
-        final t = b.content.trim();
+        var t = b.content.trim();
+        if (t.isEmpty) continue;
+        // 8-07 22:5x 用户：气泡出现裸 '<'——男主输出未闭合标签（如
+        // "<msg>hi" 没写 </msg>）→ parser 当裸文本 → '<' 显示出来。
+        // 剥掉孤立/残留的已知标签（只认完整标签名，不会误伤 "<3" 之类）
+        t = t.replaceAll(
+          RegExp(r'</?(msg|act|reply|sys|flow|user|tool|quote)[^>]*>',
+              caseSensitive: false),
+          '',
+        ).trim();
         if (t.isEmpty) continue;
         result.add(BubblePart(BubbleKind.msg, [BubbleSpan(SpanKind.text, t)]));
     }
