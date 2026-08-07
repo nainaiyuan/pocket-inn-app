@@ -763,6 +763,10 @@ class _ChatPageState extends State<ChatPage>
             'AI路由',
             '🔧 工具 $name 参数：${args.isEmpty ? '（空）' : args}',
           );
+          // 8-07 21:2x 用户：工具气泡没显示全/跳过——工具循环无异常保护，
+          // 一个工具执行炸了后面全断。每个工具单独 try-catch：炸了显示 ❌
+          // 气泡继续下一个，男主看得到哪个失败，下一轮能处理
+          try {
           if (name == 'record_relation') {
             toolResult = await _executeRelationTool(args);
           } else if (name == 'record_memory') {
@@ -1131,6 +1135,10 @@ class _ChatPageState extends State<ChatPage>
             );
           } else {
             toolResult = _ToolResult(false, '未知工具：$name');
+          }
+          } catch (e) {
+            DebugLogger.log('AI路由', '🔧 工具 $name 执行异常: $e');
+            toolResult = _ToolResult(false, '工具执行异常：$e');
           }
           // 完成/失败气泡（用户 8-03 01:57）：执行完必须给用户明确反馈
           // 8-06 21:36：continue/resolve_pending 不弹气泡（男主的话本身就是反馈）

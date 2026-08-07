@@ -264,6 +264,11 @@ class FlowStore {
     if (status == 'stopped' && (f['stoppedNote']?.toString() ?? '').isNotEmpty) {
       sb.writeln('（她打断时说了：${f['stoppedNote']}）');
     }
+    // 8-07 21:2x 用户：男主以为流程自动推进 → 明确告知要手动调 next
+    if (status == 'running' || status == 'stopped') {
+      sb.writeln('（每完成一步调 manage_flow next 推进，会收到"第N步完成，'
+          '现在第N+1步"的反馈；全部做完调 finish；中途要停调 cancel）');
+    }
     return sb.toString();
   }
 

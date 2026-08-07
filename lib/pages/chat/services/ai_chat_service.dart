@@ -1206,9 +1206,11 @@ class AiChatService {
       if (flowText != null && flowText.isNotEmpty)
         AIChatMessage(
           role: 'system',
-          content: '【当前流程】（你自己立的流程，管家只负责存和执行）\n$flowText'
+          content: '【当前流程】（你自己立的流程，管家只负责存和执行；'
+              '**流程不会自动推进**——每完成一步必须调 manage_flow next '
+              '（会收到"第N步完成，现在第N+1步"反馈，那才算推进了）；'
+              '全部做完调 finish；中途要停调 cancel）\n$flowText'
               '\n（执行中她发来的消息管家会收集，不用管，专注执行；'
-              '想结束调 manage_flow finish/cancel；'
               '被她打断会收到【系统事件】，你决定继续还是先回复她）',
         ),
       if (prView.replied.isNotEmpty)
