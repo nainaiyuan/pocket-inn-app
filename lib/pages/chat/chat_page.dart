@@ -102,6 +102,9 @@ class _ChatPageState extends State<ChatPage>
     super.initState();
     _localStore.init();
     DebugLogger.init();
+    // 8-07 21:48 用户：日志增强——纯 Dart store 的日志钩子统一接 DebugLogger
+    FlowStore.logSink = (t, m) => DebugLogger.log(t, m);
+    PendingQueueStore.logSink = (t, m) => DebugLogger.log(t, m);
     _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),

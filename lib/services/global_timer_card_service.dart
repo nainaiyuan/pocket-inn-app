@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../main.dart' show appNavigatorKey;
 import 'card_task_store.dart';
+import '../utils/debug_logger.dart';
 
 /// ⏱ 全局计时/互动卡片服务（8-06 13:38 用户，13:53 升级任务系统 v2）
 ///
@@ -76,6 +77,12 @@ class GlobalTimerCardService {
     _options = options;
     _picked = null;
     _onOption = onOption;
+    DebugLogger.log(
+      '卡片',
+      '📇 显示「$title」'
+      '${options.isEmpty ? '无选项' : '${options.length}选项'}'
+      '${minutes != null ? '(倒计时$minutes分)' : '(纯选择)'}',
+    );
     _onExpire = onExpire;
     _onRequest = onRequest;
     _onDone = onDone;
@@ -192,6 +199,11 @@ class GlobalTimerCardService {
     try {
       _picked = opt.label;
       _entry?.markNeedsBuild();
+      DebugLogger.log(
+        '卡片',
+        '👆 她点了「${opt.label}」（action=${opt.action}'
+        '${opt.minutes != null ? ' +${opt.minutes}分' : ''}）',
+      );
       if (opt.action == 'extend' && opt.minutes != null) {
         extend(opt.minutes!);
       } else if (opt.action == 'finish') {

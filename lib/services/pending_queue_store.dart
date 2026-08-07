@@ -14,6 +14,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// - 消除的条目 + 男主的话 → 在上下文原文里自然配对（raw 自动记了双方）
 /// - 兜底：男主没标编号 → 只消最老一条（默认他回最老的）；队列空则不动
 class PendingQueueStore {
+  /// 8-07 21:48 用户：日志增强（男主 query_logs 自查待回复问题）。
+  /// 纯 Dart 库用可注入钩子，Flutter 侧注入 DebugLogger。
+  static void Function(String tag, String msg)? logSink;
+  static void _log(String tag, String msg) => logSink?.call(tag, msg);
+
   PendingQueueStore._();
 
   static const _maxEntries = 30;
@@ -56,6 +61,8 @@ class PendingQueueStore {
       'text': text.length > 120 ? '${text.substring(0, 120)}…' : text,
       'type': type,
     });
+    _log('待回复',
+        '📥 入队 #$id [${isButler ? '系统' : '她'}] $hhmm：${text.length > 60 ? text.substring(0, 60) + '…' : text}');
     if (es.length > _maxEntries) {
       es.removeRange(0, es.length - _maxEntries);
     }
@@ -142,6 +149,7 @@ class PendingQueueStore {
     if (es.isEmpty || ids.isEmpty) return;
     final remaining = es.where((e) => !ids.contains(e['id'].toString())).toList();
     _renumber(remaining);
+    _log('待回复', '🗑 消队 ${ids.join('、')}（剩 ${remaining.length} 条）');
     await _save(personaId, remaining);
   }
 
@@ -186,6 +194,7 @@ class PendingQueueStore {
     final remaining = es.where((e) => !removed.contains(e['id'].toString())).toList();
     _renumber(remaining);
     await _save(personaId, remaining);
+    _log('待回复', '✔ resolve 消除 ${removed.join('、')}');
     return removed;
   }
 

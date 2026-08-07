@@ -10,6 +10,7 @@ import '../models/chat_memory.dart';
 import '../models/chat_message.dart';
 import '../models/chat_session.dart';
 import '../pages/chat/services/multi_bubble_parser.dart';
+import '../utils/debug_logger.dart';
 import '../pages/chat/state/chat_presence.dart';
 
 class ChatDatabaseService {
@@ -1093,6 +1094,7 @@ class ChatDatabaseService {
     String? thinkingChain,
     String? spans,
   }) async {
+    try {
     final now = DateTime.now();
     final node = await _db.transaction((tx) async {
       final siblingOrder = await _nextSiblingOrder(
@@ -1135,6 +1137,10 @@ class ChatDatabaseService {
 
     _notifyChanged();
     return node;
+  } catch (e) {
+    DebugLogger.log('DB', '❌ 落库失败 role=$role: ${text.length > 60 ? text.substring(0, 60) + '…' : text} → $e');
+    rethrow;
+  }
   }
 
   Future<int> _deleteSessionsByIds(List<String> sessionIds) async {

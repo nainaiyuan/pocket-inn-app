@@ -14,6 +14,14 @@ import 'working_pad_store.dart';
 ///
 /// 男主自管（免审批），管家只做存储，不做任何判断。
 class FlowStore {
+  /// 8-07 21:48 用户：日志增强（男主 query_logs 自查流程问题）。
+  /// 纯 Dart 库不直接依赖 DebugLogger（Flutter），用可注入钩子——
+  /// chat_page 初始化时注入，测试环境不注入也能跑。
+  static void Function(String tag, String msg)? logSink;
+  static void _log(String tag, String msg) =>
+      logSink?.call(tag, msg);
+
+
   FlowStore._();
 
   static const String _prefix = 'flow_';
@@ -112,6 +120,7 @@ class FlowStore {
       'createdAt': DateTime.now().toIso8601String(),
     };
     await _write(personaId, flow);
+    _log('流程', '📋 create 「$goal」${clean.length}步');
     return '流程已立：$goal（${clean.length} 步，从第 1 步开始）';
   }
 
@@ -154,6 +163,7 @@ class FlowStore {
     }
     f['currentStep'] = cur + 1;
     await _write(personaId, f);
+    _log('流程', '▶ next 第${cur + 1}→${cur + 2}步');
     return '第 ${cur + 1} 步完成，现在第 ${cur + 2} 步：${steps[cur + 1]}';
   }
 
@@ -166,6 +176,7 @@ class FlowStore {
     f['status'] = 'done';
     f['stoppedNote'] = '';
     await _write(personaId, f);
+    _log('流程', '✅ finish 流程完成');
     await _sinkToPad(personaId, f, done: true);
     return '流程完成：${f['goal']}（${steps.length} 步全部做完）';
   }
@@ -177,6 +188,7 @@ class FlowStore {
     f['status'] = 'cancelled';
     f['stoppedNote'] = '';
     await _write(personaId, f);
+    _log('流程', '⏹ cancel 流程取消');
     await _sinkToPad(personaId, f, done: false);
     return '流程已取消：${f['goal']}';
   }
@@ -217,6 +229,7 @@ class FlowStore {
     f['status'] = 'running';
     f['stoppedNote'] = '';
     await _write(personaId, f);
+    _log('流程', '▶ resume 继续流程');
     final steps = _stepsOf(f);
     final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
     return '继续流程：${f['goal']}，第 ${cur + 1} 步：${steps[cur]}';
