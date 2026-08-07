@@ -55,9 +55,10 @@ class MockAIProvider {
       final userMsgs = messages.where((m) => m.role == 'user').length;
       if (userMsgs > 1) {
         AiModuleLog.log(
-            '模拟AI',
-            '⚠️ 检测到 $userMsgs 条 user 消息（应该只有 1 条当前消息）——'
-            '上下文参考混进对话流了，男主会分不清哪条要回复！');
+          '模拟AI',
+          '⚠️ 检测到 $userMsgs 条 user 消息（应该只有 1 条当前消息）——'
+              '上下文参考混进对话流了，男主会分不清哪条要回复！',
+        );
       }
       final history = messages
           .where((m) => m.role == 'system' && m.content.contains('上下文参考'))
@@ -71,11 +72,12 @@ class MockAIProvider {
         final hasSummary = raw.contains('男主摘要');
         final hasRecovery = raw.contains('恢复包');
         AiModuleLog.log(
-            '模拟AI',
-            '📊 模式报告：上下文参考 用户 $userCount 条 / 男主 $aiCount 条'
-            '${hasSummary ? ' / 有摘要' : ''}${hasRecovery ? ' / 有恢复包' : ''}'
-            ' → ${userCount == 0 && aiCount == 0 ? '轻量模式（stateful 或首次）' : '全量模式（stateless）'}'
-            '${aiCount >= userCount - 1 ? ' ✅ 男主消息在' : ' ❌ 男主消息丢失！'}');
+          '模拟AI',
+          '📊 模式报告：上下文参考 用户 $userCount 条 / 男主 $aiCount 条'
+              '${hasSummary ? ' / 有摘要' : ''}${hasRecovery ? ' / 有恢复包' : ''}'
+              ' → ${userCount == 0 && aiCount == 0 ? '轻量模式（stateful 或首次）' : '全量模式（stateless）'}'
+              '${aiCount >= userCount - 1 ? ' ✅ 男主消息在' : ' ❌ 男主消息丢失！'}',
+        );
       } else {
         AiModuleLog.log('模拟AI', '📊 模式报告：无上下文参考（轻量模式）');
       }
@@ -92,12 +94,34 @@ class MockAIProvider {
         .map((m) => m.content)
         .join('\n');
     if (systemText2.contains('设定修改会话')) {
-      AiModuleLog.log('模拟AI', '💬 设定修改会话 → 模拟男主商量后给新方案');
+      // 8-07 15:3x 用户：了解阶段男主先给选项（A/B/C），用户点选后
+      // 再出正式版本——第一轮回选项，用户选完（消息含"我选"）回新方案
+      String lastUser2 = '';
+      for (final m in messages.reversed) {
+        if (m.role == 'user') {
+          lastUser2 = m.content;
+          break;
+        }
+      }
+      if (lastUser2.contains('我选')) {
+        AiModuleLog.log('模拟AI', '💬 设定会话（选了选项）→ 模拟男主出正式版本');
+        return AIProviderResult(
+          text:
+              '好，就按你选的来，我出正式方案：\n'
+              '【新方案】\n'
+              '【身份】测试角色\n'
+              '【喜好】测试喜好C',
+          providerName: '模拟AI',
+        );
+      }
+      AiModuleLog.log('模拟AI', '💬 设定修改会话 → 模拟男主先给选项');
       return AIProviderResult(
-        text: '好，我明白了。那就按你说的改成测试喜好C，你看这样行不行：\n'
-            '【新方案】\n'
-            '【身份】测试角色\n'
-            '【喜好】测试喜好C',
+        text:
+            '我理了一下，有两个方向你看哪个更合你意，或者你说说自己的想法：\n'
+            '【选项】\n'
+            'A. 【身份】测试角色\n【喜好】测试喜好C\n'
+            'B. 【身份】测试角色\n【喜好】测试喜好C\n【备注】测试备注\n'
+            'C. 都不太对，我自己说',
         providerName: '模拟AI',
       );
     }
@@ -116,7 +140,8 @@ class MockAIProvider {
       // _generateAndStoreThree 三类存档指令：写日记 + 摘要 + 恢复包
       AiModuleLog.log('模拟AI', '📦 管家三类存档指令 → 模拟男主写日记+摘要+恢复包');
       return AIProviderResult(
-        text: '【摘要】\n'
+        text:
+            '【摘要】\n'
             '周末约好爬山\n'
             '她在学做菜、喜欢蓝色和咖啡\n'
             '【恢复包】\n'
@@ -125,9 +150,7 @@ class MockAIProvider {
           {
             'name': 'write_diary',
             'id': 'mock_diary_${DateTime.now().millisecondsSinceEpoch}',
-            'arguments': {
-              'content': '和她聊了颜色、咖啡、爬山和做菜，她喜欢蓝色，爱喝美式咖啡，约好周末去爬山。',
-            },
+            'arguments': {'content': '和她聊了颜色、咖啡、爬山和做菜，她喜欢蓝色，爱喝美式咖啡，约好周末去爬山。'},
           },
         ],
         providerName: '模拟AI',
@@ -199,8 +222,7 @@ class MockAIProvider {
       }, '模拟思考：用户让我改设定，我用 update_setting 只改【喜好】这一段。');
     }
     if (lastUser.contains('query_setting_history')) {
-      return _toolCall('query_setting_history', {},
-          '模拟思考：用户让我查设定变更历史。');
+      return _toolCall('query_setting_history', {}, '模拟思考：用户让我查设定变更历史。');
     }
     if (lastUser.contains('记住') || lastUser.contains('喜欢喝')) {
       // 8-03 22:3x（用户确认设计）：男主记录的是【男主总结的话】，
@@ -213,29 +235,30 @@ class MockAIProvider {
         'keywords': ['喜欢', '咖啡'],
       }, '模拟思考：用户想让我记住这个偏好，我总结成一句话用 record_memory 存进记忆库。');
     }
-    if (lastUser.contains('之前说过') || lastUser.contains('查一下') ||
+    if (lastUser.contains('之前说过') ||
+        lastUser.contains('查一下') ||
         lastUser.contains('记得')) {
-      return _toolCall('recall_memory', {'query': lastUser},
-          '模拟思考：用户问我之前说过什么，我用 recall_memory 查记忆库。');
+      return _toolCall('recall_memory', {
+        'query': lastUser,
+      }, '模拟思考：用户问我之前说过什么，我用 recall_memory 查记忆库。');
     }
     if (lastUser.contains('工具')) {
-      return _toolCall('list_tools', {},
-          '模拟思考：用户想知道我能做什么，我调用 list_tools 列出来。');
+      return _toolCall('list_tools', {}, '模拟思考：用户想知道我能做什么，我调用 list_tools 列出来。');
     }
     if (lastUser.contains('日记')) {
-      return _toolCall('write_diary', {'content': '模拟日记内容'},
-          '模拟思考：用户要写日记，我调用 write_diary 存档。');
+      return _toolCall('write_diary', {
+        'content': '模拟日记内容',
+      }, '模拟思考：用户要写日记，我调用 write_diary 存档。');
     }
     return _textReply('（模拟AI）好的呢，我在听。');
   }
 
   /// 纯文本回复（思考链开关控制是否带 reasoningContent）
   AIProviderResult _textReply(String text) => AIProviderResult(
-        text: text,
-        reasoningContent:
-            _reasoning ? '模拟思考：普通聊天，直接自然回复就好。' : null,
-        providerName: '模拟AI',
-      );
+    text: text,
+    reasoningContent: _reasoning ? '模拟思考：普通聊天，直接自然回复就好。' : null,
+    providerName: '模拟AI',
+  );
 
   /// 模拟男主总结：用户原话（可能啰嗦/带指令）→ 精炼的总结句
   /// "记住我喜欢喝咖啡" → "用户喜欢喝咖啡"
@@ -255,7 +278,10 @@ class MockAIProvider {
   }
 
   AIProviderResult _toolCall(
-      String name, Map<String, dynamic> args, String reasoning) {
+    String name,
+    Map<String, dynamic> args,
+    String reasoning,
+  ) {
     final call = <String, dynamic>{
       'id': 'call_mock_${DateTime.now().millisecondsSinceEpoch}',
       'name': name,
@@ -272,8 +298,7 @@ class MockAIProvider {
     AiModuleLog.log('模拟AI', '🔧 模拟AI 决定调用工具：$name 参数=$args');
     return AIProviderResult(
       text: '',
-      reasoningContent:
-          _reasoning ? reasoning : null, // 思考链开关控制
+      reasoningContent: _reasoning ? reasoning : null, // 思考链开关控制
       toolCalls: [call],
       providerName: '模拟AI',
     );
@@ -285,13 +310,16 @@ class MockAIProvider {
     var ok = true;
 
     if (_lastAssistant != null) {
-      sb.writeln('上次模拟AI返回的调用：${_lastAssistant!['name']} '
-          'id=${_lastAssistant!['id']}');
+      sb.writeln(
+        '上次模拟AI返回的调用：${_lastAssistant!['name']} '
+        'id=${_lastAssistant!['id']}',
+      );
     }
 
     // ① assistant 工具轮消息必须在（tool_calls 带 id + reasoning_content 原样带回）
-    final assistants =
-        messages.where((m) => m.role == 'assistant' && m.toolCalls != null).toList();
+    final assistants = messages
+        .where((m) => m.role == 'assistant' && m.toolCalls != null)
+        .toList();
     if (assistants.isEmpty) {
       sb.writeln('❌ 没找到 assistant 工具轮消息（tool_calls 整条丢了？）');
       ok = false;
@@ -308,14 +336,18 @@ class MockAIProvider {
         }
         if (a.reasoningContent == null || a.reasoningContent!.isEmpty) {
           if (_reasoning) {
-            sb.writeln('❌ assistant 消息 reasoning_content 丢了——'
-                'DeepSeek 思考模式必须原样回传，否则 HTTP 400');
+            sb.writeln(
+              '❌ assistant 消息 reasoning_content 丢了——'
+              'DeepSeek 思考模式必须原样回传，否则 HTTP 400',
+            );
             ok = false;
           } else {
             sb.writeln('ℹ️ reasoning_content 为空（思考链开关已关，正常）');
           }
         } else {
-          sb.writeln('✅ reasoning_content 原样带回（${a.reasoningContent!.length} 字）');
+          sb.writeln(
+            '✅ reasoning_content 原样带回（${a.reasoningContent!.length} 字）',
+          );
         }
       }
     }
@@ -331,20 +363,19 @@ class MockAIProvider {
           sb.writeln('❌ tool 消息缺 tool_call_id：「${t.content}」');
           ok = false;
         } else {
-          sb.writeln('✅ tool 结果配对 tool_call_id=${t.toolCallId}：'
-              '「${t.content.length > 30 ? '${t.content.substring(0, 30)}…' : t.content}」');
+          sb.writeln(
+            '✅ tool 结果配对 tool_call_id=${t.toolCallId}：'
+            '「${t.content.length > 30 ? '${t.content.substring(0, 30)}…' : t.content}」',
+          );
         }
       }
     }
 
-    sb.writeln(ok
-        ? '✅ 校验通过：回传格式符合 DeepSeek 原生规范'
-        : '❌ 校验失败：程序回传格式有 bug（见上）');
+    sb.writeln(ok ? '✅ 校验通过：回传格式符合 DeepSeek 原生规范' : '❌ 校验失败：程序回传格式有 bug（见上）');
     AiModuleLog.log('模拟AI', sb.toString());
     return AIProviderResult(
       text: '（模拟AI）$sb',
-      reasoningContent:
-          _reasoning ? '模拟思考：工具结果已收到，逐项校验完成。' : null,
+      reasoningContent: _reasoning ? '模拟思考：工具结果已收到，逐项校验完成。' : null,
       providerName: '模拟AI',
     );
   }

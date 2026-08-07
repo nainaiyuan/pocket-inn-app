@@ -2735,8 +2735,8 @@ class _ChatPageState extends State<ChatPage>
       await sw('builtin-mock', '⑫/⑫ 设定·多轮会话弹窗');
       _acceptingStep = '⑫/12 设定·商量后改【喜好】为测试喜好C';
       note(
-        '📋 ⑫ 改【喜好】——弹窗里先跟男主商量：点「💬 发给他」写'
-        '"改成测试喜好C吧"，看男主回复填进方案，再点「就用这版」',
+        '📋 ⑫ 改【喜好】——弹窗里男主会给选项：直接点选项 A（他会'
+        '出正式版本 v2），再点「就用这版」；也可以先「发给他」商量',
       );
       await say(
         '用 update_setting 把【喜好】改成"测试喜好C"。'
@@ -4106,6 +4106,24 @@ class _ChatPageState extends State<ChatPage>
 
   // ── 设定段落工具（8-07 用户：段落化+标签，男主精准修改省 token）──
 
+  /// 解析男主回复里的【选项】块（8-07 15:3x 用户：了解阶段给选项）：
+  /// 格式：每行 "A. 内容" / "B）内容" / "C: 内容"，返回 (key, text) 列表
+  static List<({String key, String text})> _parseOptionBlock(String reply) {
+    final idx = reply.indexOf('【选项】');
+    if (idx < 0) return [];
+    final rest = reply.substring(idx + '【选项】'.length).trim();
+    final opts = <({String key, String text})>[];
+    for (final line in rest.split('\n')) {
+      final t = line.trim();
+      if (t.isEmpty) continue;
+      final m = RegExp(r'^([A-Za-z0-9])[.、:：)）]\s*(.+)$').firstMatch(t);
+      if (m != null) {
+        opts.add((key: m.group(1)!, text: m.group(2)!.trim()));
+      }
+    }
+    return opts;
+  }
+
   /// 设定文本按【标签】切段；没有标签 → 整段一个（tag 空）
   static List<({String tag, String body})> _parseSettingSections(String text) {
     final reg = RegExp(r'【([^】]+)】([\s\S]*?)(?=【[^】]+】|$)');
@@ -4176,6 +4194,9 @@ class _ChatPageState extends State<ChatPage>
     // v1 = 男主最初方案；每次男主带【新方案】回复 → 追加新版本
     final versions = <({int v, String text})>[(v: 1, text: content)];
     var currentV = 1;
+    // 8-07 15:3x 用户：男主了解阶段先给选项（A/B/C），用户点选/反驳，
+    // 聊透了再出正式版本——男主回复带【选项】块 → 渲染成可点按钮
+    var options = <({String key, String text})>[];
     // 会话记录（每轮：她说/男主说，给男主当上下文）
     final history = <String>[];
     final pid = _state.personaId ?? '';
@@ -4185,220 +4206,270 @@ class _ChatPageState extends State<ChatPage>
       context: context,
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) => AlertDialog(
-          backgroundColor: const Color(0xFFFDF7F9),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: Text(
-            '📚 男主想更新$typeName'
-            '${testStep != null ? ' · 验收 $testStep' : ''}'
-            ' · 方案 v$currentV/${versions.length}'
-            '${round > 1 ? '（第 $round 轮）' : ''}',
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF7EAF1),
-                    borderRadius: BorderRadius.circular(12),
+        builder: (ctx, setState) {
+          // 发给男主一轮（"发给他"按钮和"点选项"共用）：男主回复
+          // 带【新方案】→ 自动更新设定框并记新版本；带【选项】→ 显示可点选项
+          Future<void> sendToMale(String userMsg) async {
+            fbCtrl.clear();
+            setState(() => busy = true);
+            history.add('她说：$userMsg');
+            final reply = await _askMaleInSession(
+              personaId: pid,
+              settingPid: _settingPid(),
+              personaName: pName,
+              typeName: typeName,
+              draft: ctrl.text,
+              maleLast: maleText,
+              userMsg: userMsg,
+              history: history,
+            );
+            history.add('男主说：$reply');
+            final idx = reply.indexOf('【新方案】');
+            if (idx >= 0) {
+              final rest = reply.substring(idx + '【新方案】'.length).trim();
+              if (rest.startsWith('【')) {
+                final secs = _parseSettingSections(ctrl.text);
+                final m = RegExp(r'^【([^】]+)】([\s\S]*)').firstMatch(rest);
+                if (m != null) {
+                  final t = m.group(1)!.trim();
+                  final b = m.group(2)!.trim();
+                  final i = secs.indexWhere((x) => x.tag == t);
+                  if (i >= 0) {
+                    secs[i] = (tag: t, body: b);
+                  } else {
+                    secs.add((tag: t, body: b));
+                  }
+                  ctrl.text = _sectionsToText(secs);
+                }
+              } else if (rest.isNotEmpty) {
+                ctrl.text = rest;
+              }
+              ctrl.selection = TextSelection.collapsed(
+                offset: ctrl.text.length,
+              );
+            }
+            setState(() {
+              maleText = reply;
+              round++;
+              busy = false;
+              final hasNew = versions.any((x) => x.text == ctrl.text);
+              if (!hasNew && idx >= 0) {
+                versions.add((v: versions.length + 1, text: ctrl.text));
+                currentV = versions.length;
+              }
+              // 男主回复带【选项】→ 渲染可点选项；没有就清空
+              options = _parseOptionBlock(reply);
+            });
+          }
+
+          return AlertDialog(
+            backgroundColor: const Color(0xFFFDF7F9),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: Text(
+              '📚 男主想更新$typeName'
+              '${testStep != null ? ' · 验收 $testStep' : ''}'
+              ' · 方案 v$currentV/${versions.length}'
+              '${round > 1 ? '（第 $round 轮）' : ''}',
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF7EAF1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '💬 男主${round > 1 ? '（第 $round 轮）' : ''}：$maleText',
+                      style: const TextStyle(fontSize: 13, height: 1.4),
+                    ),
                   ),
-                  child: Text(
-                    '💬 男主${round > 1 ? '（第 $round 轮）' : ''}：$maleText',
-                    style: const TextStyle(fontSize: 13, height: 1.4),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                // 方案版本区：男主出过几版一目了然，点版本号回看
-                if (versions.length > 1) ...[
-                  const Text(
-                    '📚 男主方案版本（点编号回看）：',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
-                  ),
-                  const SizedBox(height: 4),
-                  Wrap(
-                    spacing: 6,
-                    children: [
-                      for (final ver in versions)
-                        GestureDetector(
-                          onTap: () {
-                            ctrl.text = ver.text;
-                            setState(() => currentV = ver.v);
-                          },
+                  const SizedBox(height: 10),
+                  // 选项区：男主给的方向，点一个 → 自动发男主出正式版本
+                  if (options.isNotEmpty) ...[
+                    const Text(
+                      '🎯 男主给了几个方向，点一个（也可以自己在下面改/反驳）：',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
+                    ),
+                    const SizedBox(height: 6),
+                    for (final opt in options)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: GestureDetector(
+                          onTap: busy
+                              ? null
+                              : () {
+                                  // 选项内容带段落标签 → 当完整设定填框
+                                  ctrl.text = opt.text;
+                                  ctrl.selection = TextSelection.collapsed(
+                                    offset: ctrl.text.length,
+                                  );
+                                  // 自动发男主一轮：告诉他选了哪个 → 他出正式版
+                                  sendToMale('我选 ${opt.key}：${opt.text}');
+                                },
                           child: Container(
+                            width: double.infinity,
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
+                              horizontal: 10,
+                              vertical: 8,
                             ),
                             decoration: BoxDecoration(
-                              color: currentV == ver.v
-                                  ? const Color(0xFFC896B4)
-                                  : const Color(0xFFF7EAF1),
+                              color: const Color(0xFFF7EAF1),
                               borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: const Color(0xFFE8C9D8),
+                              ),
                             ),
                             child: Text(
-                              'v${ver.v}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: currentV == ver.v
-                                    ? Colors.white
-                                    : const Color(0xFF8A7A80),
-                                fontWeight: currentV == ver.v
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                              ),
+                              '${opt.key}. ${opt.text}',
+                              style: const TextStyle(fontSize: 13, height: 1.4),
                             ),
                           ),
                         ),
-                    ],
+                      ),
+                    const SizedBox(height: 8),
+                  ],
+                  // 方案版本区：男主出过几版一目了然，点版本号回看
+                  if (versions.length > 1) ...[
+                    const Text(
+                      '📚 男主方案版本（点编号回看）：',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        for (final ver in versions)
+                          GestureDetector(
+                            onTap: () {
+                              ctrl.text = ver.text;
+                              setState(() => currentV = ver.v);
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: currentV == ver.v
+                                    ? const Color(0xFFC896B4)
+                                    : const Color(0xFFF7EAF1),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                'v${ver.v}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: currentV == ver.v
+                                      ? Colors.white
+                                      : const Color(0xFF8A7A80),
+                                  fontWeight: currentV == ver.v
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  const Text(
+                    '📄 设定全文（可以直接改；点「就用这版」= 按这个定案）：',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
                   ),
-                  const SizedBox(height: 8),
-                ],
-                const Text(
-                  '📄 设定全文（可以直接改；点「就用这版」= 按这个定案）：',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
-                ),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: ctrl,
-                  maxLines: 8,
-                  decoration: InputDecoration(
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: ctrl,
+                    maxLines: 8,
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: fbCtrl,
-                  maxLines: 2,
-                  decoration: InputDecoration(
-                    hintText: '跟男主说：哪里不对、想要什么…他出下一版（说需求=还没定案）',
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
-                if (busy) ...[
                   const SizedBox(height: 10),
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                  TextField(
+                    controller: fbCtrl,
+                    maxLines: 2,
+                    decoration: InputDecoration(
+                      hintText: '跟男主说：哪里不对、想要什么…他出下一版（说需求=还没定案）',
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
                       ),
-                      SizedBox(width: 8),
-                      Text(
-                        '男主正在回复…',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF8A7A80),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
+                  if (busy) ...[
+                    const SizedBox(height: 10),
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          '男主正在回复…',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF8A7A80),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: busy ? null : () => Navigator.pop(ctx, false),
-              child: const Text(
-                '放弃',
-                style: TextStyle(color: Color(0xFF8A7A80)),
               ),
             ),
-            if (!busy)
+            actions: [
               TextButton(
-                onPressed: () async {
-                  final msg = fbCtrl.text.trim();
-                  if (msg.isEmpty) return;
-                  fbCtrl.clear();
-                  setState(() => busy = true);
-                  history.add('她说：$msg');
-                  final reply = await _askMaleInSession(
-                    personaId: pid,
-                    settingPid: _settingPid(),
-                    personaName: pName,
-                    typeName: typeName,
-                    draft: ctrl.text,
-                    maleLast: maleText,
-                    userMsg: msg,
-                    history: history,
-                  );
-                  history.add('男主说：$reply');
-                  // 男主回复里带【新方案】→ 自动更新编辑框（她可再改）
-                  // 支持两种：段落级（【新方案】+【标签】+新内容 → 只替换该段）
-                  // 或全文级（【新方案】+ 完整全文 → 整体替换）
-                  final idx = reply.indexOf('【新方案】');
-                  if (idx >= 0) {
-                    final rest = reply.substring(idx + '【新方案】'.length).trim();
-                    if (rest.startsWith('【')) {
-                      final secs = _parseSettingSections(ctrl.text);
-                      final m = RegExp(r'^【([^】]+)】([\s\S]*)').firstMatch(rest);
-                      if (m != null) {
-                        final t = m.group(1)!.trim();
-                        final b = m.group(2)!.trim();
-                        final i = secs.indexWhere((x) => x.tag == t);
-                        if (i >= 0) {
-                          secs[i] = (tag: t, body: b);
-                        } else {
-                          secs.add((tag: t, body: b));
-                        }
-                        ctrl.text = _sectionsToText(secs);
-                      }
-                    } else if (rest.isNotEmpty) {
-                      ctrl.text = rest;
-                    }
-                    ctrl.selection = TextSelection.collapsed(
-                      offset: ctrl.text.length,
-                    );
-                  }
-                  setState(() {
-                    maleText = reply;
-                    round++;
-                    busy = false;
-                    // 男主出了新方案 → 记为新版本（v2、v3…）
-                    final hasNew = versions.any((x) => x.text == ctrl.text);
-                    if (!hasNew && idx >= 0) {
-                      versions.add((v: versions.length + 1, text: ctrl.text));
-                      currentV = versions.length;
-                    }
-                  });
-                },
+                onPressed: busy ? null : () => Navigator.pop(ctx, false),
                 child: const Text(
-                  '💬 发给他·出下一版',
-                  style: TextStyle(color: Color(0xFFC896B4)),
+                  '放弃',
+                  style: TextStyle(color: Color(0xFF8A7A80)),
                 ),
               ),
-            if (!busy)
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFC896B4),
+              if (!busy)
+                TextButton(
+                  onPressed: () async {
+                    final msg = fbCtrl.text.trim();
+                    if (msg.isEmpty) return;
+                    await sendToMale(msg);
+                  },
+                  child: const Text(
+                    '💬 发给他·出下一版',
+                    style: TextStyle(color: Color(0xFFC896B4)),
+                  ),
                 ),
-                onPressed: () {
-                  // 8-07 15:0x：防连点——先置 busy 再 pop，双击不会 pop 两次
-                  setState(() => busy = true);
-                  Navigator.pop(ctx, true);
-                },
-                child: const Text('✅ 就用这版'),
-              ),
-          ],
-        ),
+              if (!busy)
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFC896B4),
+                  ),
+                  onPressed: () {
+                    // 8-07 15:0x：防连点——先置 busy 再 pop，双击不会 pop 两次
+                    setState(() => busy = true);
+                    Navigator.pop(ctx, true);
+                  },
+                  child: const Text('✅ 就用这版'),
+                ),
+            ],
+          );
+        },
       ),
     );
     FocusManager.instance.primaryFocus?.unfocus();
