@@ -2678,9 +2678,7 @@ class _ChatPageState extends State<ChatPage>
       // ⑨ 段落化 update：只改【喜好】段，其他段落不动（弹窗用户点同意）
       await sw('builtin-mock', '⑨/⑫ 设定·改一段（tag 定位）');
       _acceptingStep = '⑨/12 设定·只改【喜好】段（其他段不能动）';
-      note(
-        '📋 ⑨ 让男主用 update_setting 只改【喜好】段——弹窗里男主会先问问题，在下面打字「就用这版」发给他 → 出现定案按钮 → 点「就用这版」',
-      );
+      note('📋 ⑨ 让男主用 update_setting 只改【喜好】段——弹窗点「就用这版」定案（指令明确，男主直接出最终方案）');
       await say(
         '用 update_setting 工具，把男主设定里的【喜好】段改成"测试喜好B"，'
         '只改这一段，别动其他段落。',
@@ -2704,7 +2702,7 @@ class _ChatPageState extends State<ChatPage>
       // ⑩ 段落化 add：新增一段
       await sw('builtin-mock', '⑩/⑫ 设定·新增一段');
       _acceptingStep = '⑩/12 设定·新增【测试段】';
-      note('📋 ⑩ 让男主用 update_setting 新增【测试段】——弹窗里同上：打字「就用这版」发给他 → 点定案按钮');
+      note('📋 ⑩ 让男主用 update_setting 新增【测试段】——弹窗点「就用这版」定案（指令明确，男主直接出最终方案）');
       await say('再用 update_setting 新增一段【测试段】，内容写"验收新增"，别动其他段落。');
       final book10 = await SettingVersionStore.load(testPid);
       final i10 = book10.currentMale.contains('【测试段】验收新增');
@@ -2718,7 +2716,7 @@ class _ChatPageState extends State<ChatPage>
       // ⑪ 段落化 delete：删掉新增段
       await sw('builtin-mock', '⑪/⑫ 设定·删一段');
       _acceptingStep = '⑪/12 设定·删除【测试段】';
-      note('📋 ⑪ 让男主用 update_setting 删掉【测试段】——弹窗里同上：打字「就用这版」发给他 → 点定案按钮');
+      note('📋 ⑪ 让男主用 update_setting 删掉【测试段】——弹窗点「就用这版」定案');
       await say('再用 update_setting 把【测试段】删掉。');
       final book11 = await SettingVersionStore.load(testPid);
       final deleted = !book11.currentMale.contains('【测试段】');
@@ -2737,22 +2735,24 @@ class _ChatPageState extends State<ChatPage>
       );
 
       // ⑫ 多轮会话弹窗 + 版本管理（用户手动：
-      // 攒着点选项 A+A → 💬 发给他 → 男主出 v1【新方案】（此时没有
-      // 「就用这版」按钮=还在了解需求）→ 反馈框打字"第一版喜好不好，
-      // 喜好改具体点" → 男主查段落 → 出 v2【最终方案】（出现定案按钮）
-      // → 看版本区 diff → 就用这版）
+      // 男主问卡片题（一次一题，单选/多选，答完自动下一题）→ 全部答完
+      // 自动发 → 出 v1【新方案】（此时没有「就用这版」按钮=还在了解需求）
+      // → 反馈框打字"第一版喜好不好，喜好改具体点" → 男主查段落 →
+      // 出 v2【最终方案】（出现定案按钮）→ 点版本卡片看 diff → 就用这版）
       await sw('builtin-mock', '⑫/⑫ 设定·多轮会话+版本管理');
       _acceptingStep = '⑫/12 设定·多轮商量+版本管理';
       note(
-        '📋 ⑫ 改【喜好】——弹窗里男主先问两组问题（选项）：\n'
-        '1️⃣ 点选项 A（身份）+ 选项 A（喜好）→ 两个都高亮=攒着，'
-        '点下方「💬 发给他」一起发 → 男主出 v1【新方案】\n'
-        '2️⃣ 注意：现在底部【没有】「就用这版」按钮——男主还在了解需求，'
-        '第一版不能定案（验证点1）\n'
-        '3️⃣ 在反馈框打字："第一版喜好不好，喜好写具体点" → 发给他'
+        '📋 ⑫ 改【喜好】——弹窗里男主先问两道卡片题（一次只显示一题，'
+        '答完自动下一题）：\n'
+        '1️⃣ 第1题（单选）身份：点 A → 自动跳第2题；'
+        '第2题（多选）喜好：点 A（可再点 B，或点「✏️ 我自己写」打字）'
+        '→ 全部答完自动发给男主 → 男主出 v1【新方案】\n'
+        '2️⃣ 注意：底部【没有】「就用这版」按钮——男主还在了解需求，'
+        '第一版不能定案（验证点1）；设定原文也不显示（验证点2）\n'
+        '3️⃣ 在反馈框打字："第一版喜好不好，喜好写具体点" → 「💬 发给他」'
         ' → 男主查段落 → 出 v2【最终方案】\n'
-        '4️⃣ 这时底部出现「就用这版」（男主确认了解完了，验证点2）；'
-        '可看版本区「📝 v2 这版改了」\n'
+        '4️⃣ 这时底部出现「就用这版」（男主确认了解完了，验证点3）；'
+        '可点版本编号 v2 卡片看「📝 这版改了」\n'
         '5️⃣ 点「就用这版」定案（预期含 身份+喜好C）',
       );
       await say(
@@ -4123,25 +4123,42 @@ class _ChatPageState extends State<ChatPage>
 
   // ── 设定段落工具（8-07 用户：段落化+标签，男主精准修改省 token）──
 
-  /// 解析男主回复里的【问题N】+【选项】组（8-07 15:5x 用户：选项要能连续点，
-  /// 男主一次可以问多个问题，每个问题一组 A/B/C）：
+  /// 解析男主回复里的【问题N】+【选项】组（8-07 16:4x 用户：问答卡片化——
+  /// 一次只弹一个题目，单选/多选由男主定，C=用户自己写）：
   /// 格式：
-  ///   【问题1】身份部分想怎么定？
+  ///   【问题1】（单选）身份部分想怎么定？
   ///   【选项】
   ///   A. 内容
   ///   B）内容
   ///   C: 内容
-  ///   【问题2】喜好部分呢？
+  ///   【问题2】（多选）喜好部分呢？
   ///   【选项】
   ///   A. ...
   /// 也兼容旧格式：单独的【选项】块（无【问题N】）→ 一组 question=''
-  static List<({String question, List<({String key, String text})> options})>
+  static List<
+    ({String question, bool multi, List<({String key, String text})> options})
+  >
   _parseOptionGroups(String reply) {
     final groups =
-        <({String question, List<({String key, String text})> options})>[];
+        <
+          ({
+            String question,
+            bool multi,
+            List<({String key, String text})> options,
+          })
+        >[];
     final blockReg = RegExp(r'【问题\d*】([\s\S]*?)【选项】([\s\S]*?)(?=【问题\d*】|$)');
     for (final m in blockReg.allMatches(reply)) {
-      final question = m.group(1)!.trim();
+      var question = m.group(1)!.trim();
+      // （单选）/（多选）标记：没写默认单选
+      var multi = false;
+      final multiM = RegExp(r'（\s*多选\s*）').firstMatch(question);
+      if (multiM != null) {
+        multi = true;
+        question = question.replaceFirst(multiM.group(0)!, '').trim();
+      } else {
+        question = question.replaceFirst(RegExp(r'（\s*单选\s*）'), '').trim();
+      }
       final opts = <({String key, String text})>[];
       for (final line in m.group(2)!.split('\n')) {
         final t = line.trim();
@@ -4152,7 +4169,7 @@ class _ChatPageState extends State<ChatPage>
         }
       }
       if (opts.isNotEmpty) {
-        groups.add((question: question, options: opts));
+        groups.add((question: question, multi: multi, options: opts));
       }
     }
     // 兼容旧格式：单独【选项】块
@@ -4170,7 +4187,7 @@ class _ChatPageState extends State<ChatPage>
           }
         }
         if (opts.isNotEmpty) {
-          groups.add((question: '', options: opts));
+          groups.add((question: '', multi: false, options: opts));
         }
       }
     }
@@ -4298,14 +4315,26 @@ class _ChatPageState extends State<ChatPage>
     var currentV = 1;
     // 弹窗内版本列表快照（给查询工具 query_setting_version 用）
     _dialogVersions = versions;
-    // 8-07 15:5x 用户：男主了解阶段可以连续问多个问题，每个问题一组
-    // 选项（A/B/C），用户连着点/反驳，直到点「就用这版」才定案——
-    // 男主回复带【问题N】+【选项】块 → 渲染成可点按钮组
+    // 8-07 16:4x 用户：问答卡片化——一次只弹一个题目（不用手动滑），
+    // 单选点一个/多选点完+自己写 → 自动跳下一个，全部答完自动发男主；
+    // 了解需求阶段（asking）不显示设定原文和定案按钮，男主出方案后
+    // 才进入 reviewing（看版本卡片+全文+反馈）
+    var stage = 'asking'; // 'asking'=男主在收集需求 | 'reviewing'=男主出方案了
+    var curQ = 0; // 当前显示第几题（0 起）
+    // 每题已答内容：题目 → 答案列表（单选1个/多选多个/自己写）
+    final answers = <String, List<String>>{};
+    // 自己写的输入控制器（每题一个，用完即弃）
+    var customCtrl = TextEditingController();
+    var customOpen = false; // 当前题是否打开了"自己写"输入框
+    // 男主回复带【问题N】+【选项】块 → 解析成可点卡片题组
     var questionGroups =
-        <({String question, List<({String key, String text})> options})>[];
-    // 8-07 16:1x 用户：点选项先攒着（不立即发男主），选完/自己补充完
-    // 再点「💬 发给他」统一发——不然选都没选完就发出去没意义
-    final pendingSelections = <({String question, String key, String text})>[];
+        <
+          ({
+            String question,
+            bool multi,
+            List<({String key, String text})> options,
+          })
+        >[];
     // 8-07 16:1x 用户：「就用这版」只在男主确认了解完需求、出【最终方案】
     // 后才出现；【新方案】=还在了解/迭代中，不显示（第一版第二版都不算数）
     var maleHasFinal = false;
@@ -4344,7 +4373,9 @@ class _ChatPageState extends State<ChatPage>
             final finalIdx = reply.indexOf('【最终方案】');
             final idx = finalIdx >= 0 ? finalIdx : reply.indexOf('【新方案】');
             if (idx >= 0) {
-              final rest = reply.substring(idx + '【新方案】'.length).trim();
+              final rest = reply
+                  .substring(idx + (finalIdx >= 0 ? '【最终方案】' : '【新方案】').length)
+                  .trim();
               if (rest.startsWith('【')) {
                 final secs = _parseSettingSections(ctrl.text);
                 final m = RegExp(r'^【([^】]+)】([\s\S]*)').firstMatch(rest);
@@ -4371,8 +4402,19 @@ class _ChatPageState extends State<ChatPage>
               round++;
               busy = false;
               maleHasFinal = finalIdx >= 0;
-              // 发出去了 → 攒的选项清空
-              pendingSelections.clear();
+              // 男主出方案（或最终方案）→ 进 reviewing 阶段，显示全文+版本
+              final newGroups = _parseOptionGroups(reply);
+              if (newGroups.isNotEmpty) {
+                // 男主又问了新问题 → 回到 asking，从第一题开始答
+                questionGroups = newGroups;
+                curQ = 0;
+                answers.clear();
+                customOpen = false;
+                stage = 'asking';
+              } else {
+                questionGroups = [];
+                stage = 'reviewing';
+              }
               final hasNew = versions.any((x) => x.text == ctrl.text);
               if (!hasNew && idx >= 0) {
                 // 8-07 15:5x 用户：从旧版继续改 → 该版之后的版本自动作废
@@ -4388,8 +4430,33 @@ class _ChatPageState extends State<ChatPage>
                 ));
                 currentV = versions.length;
               }
-              // 男主回复带【问题N】+【选项】→ 渲染可点选项组；没有就清空
-              questionGroups = _parseOptionGroups(reply);
+            });
+          }
+
+          // 8-07 16:4x 用户：问答卡片——答当前题，答完自动跳下一题；
+          // 全部答完自动发男主（不手动攒、不手动滑）
+          void answerQuestion(String question, String ans) {
+            setState(() {
+              answers.putIfAbsent(question, () => []).add(ans);
+              customOpen = false;
+              customCtrl.clear();
+              if (curQ + 1 < questionGroups.length) {
+                curQ++; // 自动跳下一题
+              } else {
+                // 全部答完 → 组装消息自动发男主
+                final buf = StringBuffer();
+                for (final g in questionGroups) {
+                  final list = answers[g.question] ?? [];
+                  if (list.isEmpty) continue;
+                  buf.writeln('【${g.question}】${list.join('；')}');
+                }
+                fbCtrl.clear();
+                final msg = buf.toString().trim();
+                if (msg.isNotEmpty) {
+                  // 延迟到 setState 外发（避免在 setState 里 await）
+                  Future.microtask(() => sendToMale(msg));
+                }
+              }
             });
           }
 
@@ -4458,128 +4525,260 @@ class _ChatPageState extends State<ChatPage>
                     ),
                   ),
                   const SizedBox(height: 10),
-                  // 选项区：男主问的问题（一组问题+一组选项），点一个先攒着
-                  // （高亮=已选，再点取消），选完点下方「💬 发给他」统一回复；
-                  // 也可以自己打字补充/反驳（8-07 16:1x 用户：别点一个发一个）
-                  if (questionGroups.isNotEmpty) ...[
-                    const Text(
-                      '🎯 男主在问你：点选项先攒着（可多选/再点取消），选完点下方「💬 发给他」一起回复；也可以自己在下面打字说想法',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
+                  // ── asking 阶段：问答卡片（8-07 16:4x 用户：一次只弹一题，
+                  // 单选点一个自动跳下一题，多选可点多个+C自己写；全部答完
+                  // 自动发男主；此阶段【不显示】设定原文和定案按钮）──
+                  if (stage == 'asking' && questionGroups.isNotEmpty) ...[
+                    Text(
+                      '🎯 男主在了解需求（第 ${curQ + 1}/${questionGroups.length} 题'
+                      '${questionGroups[curQ].multi ? '·可多选' : '·单选'}）：'
+                      '${questionGroups.length > 1 ? '答完自动下一题' : ''}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF8A7A80),
+                      ),
                     ),
-                    const SizedBox(height: 6),
-                    for (final group in questionGroups) ...[
-                      if (group.question.isNotEmpty) ...[
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Text(
-                            '❓ ${group.question}',
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF6B5560),
+                    const SizedBox(height: 8),
+                    // 当前题目卡片
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF7EAF1),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFE8C9D8)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (questionGroups[curQ].question.isNotEmpty) ...[
+                            Text(
+                              '❓ ${questionGroups[curQ].question}'
+                              '${questionGroups[curQ].multi ? '（可多选）' : ''}',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF6B5560),
+                              ),
                             ),
+                            const SizedBox(height: 8),
+                          ],
+                          for (final opt in questionGroups[curQ].options)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: GestureDetector(
+                                onTap: busy
+                                    ? null
+                                    : () {
+                                        final q = questionGroups[curQ].question;
+                                        if (questionGroups[curQ].multi) {
+                                          // 多选：点=加入/取消，不跳题
+                                          setState(() {
+                                            final list = answers.putIfAbsent(
+                                              q,
+                                              () => [],
+                                            );
+                                            final i = list.indexWhere(
+                                              (a) =>
+                                                  a.startsWith('${opt.key}. '),
+                                            );
+                                            if (i >= 0) {
+                                              list.removeAt(i);
+                                            } else {
+                                              list.add(
+                                                '${opt.key}. ${opt.text}',
+                                              );
+                                            }
+                                          });
+                                        } else {
+                                          // 单选：点一个 → 记答案 → 自动跳下一题
+                                          answerQuestion(
+                                            q,
+                                            '${opt.key}. ${opt.text}',
+                                          );
+                                        }
+                                      },
+                                child: Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 9,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        answers[questionGroups[curQ].question]
+                                                ?.any(
+                                                  (a) => a.startsWith(
+                                                    '${opt.key}. ',
+                                                  ),
+                                                ) ==
+                                            true
+                                        ? const Color(0xFFE8C9D8)
+                                        : Colors.white,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color:
+                                          answers[questionGroups[curQ].question]
+                                                  ?.any(
+                                                    (a) => a.startsWith(
+                                                      '${opt.key}. ',
+                                                    ),
+                                                  ) ==
+                                              true
+                                          ? const Color(0xFFC896B4)
+                                          : const Color(0xFFE8C9D8),
+                                      width:
+                                          answers[questionGroups[curQ].question]
+                                                  ?.any(
+                                                    (a) => a.startsWith(
+                                                      '${opt.key}. ',
+                                                    ),
+                                                  ) ==
+                                              true
+                                          ? 1.5
+                                          : 1,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    '${opt.key}. ${opt.text}',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          // "自己写"入口（C 或单独的输入框）：AB 都不满意就打字
+                          if (!customOpen)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: GestureDetector(
+                                onTap: busy
+                                    ? null
+                                    : () => setState(() => customOpen = true),
+                                child: Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 8,
+                                    horizontal: 10,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF0E4EA),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: const Color(0xFFD8B8C8),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    '✏️ 我自己写（AB 都不满意就自己说）',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Color(0xFF8A5A72),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (customOpen) ...[
+                            const SizedBox(height: 6),
+                            TextField(
+                              controller: customCtrl,
+                              maxLines: 2,
+                              autofocus: true,
+                              decoration: InputDecoration(
+                                hintText: '写下你的想法…（写完点「✓ 答完这题」）',
+                                filled: true,
+                                fillColor: Colors.white,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide.none,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: GestureDetector(
+                                onTap: busy
+                                    ? null
+                                    : () {
+                                        final txt = customCtrl.text.trim();
+                                        if (txt.isEmpty) return;
+                                        answerQuestion(
+                                          questionGroups[curQ].question,
+                                          '我自己写：$txt',
+                                        );
+                                      },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFC896B4),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Text(
+                                    '✓ 答完这题',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // 进度点（小圆点表示题目位置）
+                    Row(
+                      children: [
+                        for (var i = 0; i < questionGroups.length; i++)
+                          Container(
+                            width: 8,
+                            height: 8,
+                            margin: const EdgeInsets.only(right: 4),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: i == curQ
+                                  ? const Color(0xFFC896B4)
+                                  : (answers.containsKey(
+                                              questionGroups[i].question,
+                                            ) &&
+                                            (answers[questionGroups[i]
+                                                    .question]!
+                                                .isNotEmpty)
+                                        ? const Color(0xFFE8C9D8)
+                                        : const Color(0xFFE0D4DA)),
+                            ),
+                          ),
+                        const SizedBox(width: 6),
+                        Text(
+                          answers.values.fold<int>(
+                                    0,
+                                    (sum, l) => sum + (l.isEmpty ? 0 : 1),
+                                  ) ==
+                                  questionGroups.length
+                              ? '✅ 全部答完，正在发给男主…'
+                              : '已答 ${answers.values.fold<int>(0, (sum, l) => sum + (l.isEmpty ? 0 : 1))}/${questionGroups.length} 题',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF8A7A80),
                           ),
                         ),
                       ],
-                      for (final opt in group.options)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: GestureDetector(
-                            onTap: busy
-                                ? null
-                                : () {
-                                    setState(() {
-                                      final i = pendingSelections.indexWhere(
-                                        (s) =>
-                                            s.question == group.question &&
-                                            s.key == opt.key,
-                                      );
-                                      if (i >= 0) {
-                                        pendingSelections.removeAt(i);
-                                      } else {
-                                        pendingSelections.add((
-                                          question: group.question,
-                                          key: opt.key,
-                                          text: opt.text,
-                                        ));
-                                      }
-                                    });
-                                  },
-                            child: Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
-                                color:
-                                    pendingSelections.any(
-                                      (s) =>
-                                          s.question == group.question &&
-                                          s.key == opt.key,
-                                    )
-                                    ? const Color(0xFFE8C9D8)
-                                    : const Color(0xFFF7EAF1),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color:
-                                      pendingSelections.any(
-                                        (s) =>
-                                            s.question == group.question &&
-                                            s.key == opt.key,
-                                      )
-                                      ? const Color(0xFFC896B4)
-                                      : const Color(0xFFE8C9D8),
-                                  width:
-                                      pendingSelections.any(
-                                        (s) =>
-                                            s.question == group.question &&
-                                            s.key == opt.key,
-                                      )
-                                      ? 1.5
-                                      : 1,
-                                ),
-                              ),
-                              child: Text(
-                                '${opt.key}. ${opt.text}',
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  height: 1.4,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      const SizedBox(height: 8),
-                    ],
-                    // 已攒的选项预览（8-07 16:1x）
-                    if (pendingSelections.isNotEmpty) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF0E4EA),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          '📌 已选（点「💬 发给他」一起发给男主）：\n'
-                          '${pendingSelections.map((s) => '${s.question.isEmpty ? '' : '【${s.question}】'}${s.key}. ${s.text}').join('\n')}',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            height: 1.4,
-                            color: Color(0xFF6B5560),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
+                    ),
                   ],
-                  // 方案版本区：男主出过几版一目了然，点编号回看/从这版继续，
-                  // ✕ 弃用改错的版（8-07 15:5x 用户：结合不用按钮，直接跟男主说
-                  // "第一版喜好不好，第二版喜好好"——他有版本段落索引，能自己判断）
-                  if (versions.length > 1) ...[
+                  // ── reviewing 阶段：方案版本卡片区（8-07 16:4x 用户：
+                  // 版本像卡片一样调出，点编号=调出该版全文（卡片式），
+                  // 方便跟男主说"喜欢 v2 的喜好"）──
+                  if (stage == 'reviewing' && versions.length > 1) ...[
                     const Text(
-                      '📚 男主方案版本：点编号=回看/从这版继续，✕=弃用（男主仍看得到）。想结合就说"第一版的XX好/不好，第二版的XX…"',
+                      '📚 男主方案版本：点编号=像卡片一样调出该版，✕=弃用（男主仍看得到）。跟男主说"第一版的XX好/不好，第二版的XX…"，他能查段落自己结合',
                       style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
                     ),
                     const SizedBox(height: 4),
@@ -4594,16 +4793,19 @@ class _ChatPageState extends State<ChatPage>
                                   ? const Color(0xFFC896B4)
                                   : const Color(0xFFF7EAF1),
                               borderRadius: BorderRadius.circular(10),
+                              border: currentV == ver.v
+                                  ? Border.all(
+                                      color: const Color(0xFF8A5A72),
+                                      width: 1.5,
+                                    )
+                                  : null,
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 GestureDetector(
                                   onTap: () {
-                                    ctrl.text = ver.text;
-                                    ctrl.selection = TextSelection.collapsed(
-                                      offset: ctrl.text.length,
-                                    );
+                                    // 调出该版全文（卡片式查看，不覆盖当前编辑）
                                     setState(() => currentV = ver.v);
                                   },
                                   child: Padding(
@@ -4648,58 +4850,80 @@ class _ChatPageState extends State<ChatPage>
                           ),
                       ],
                     ),
-                    // 当前选中版 diff（8-07 15:5x 用户：看得出每版改了什么）
-                    if (currentV > 1) ...[
-                      const SizedBox(height: 6),
-                      Builder(
-                        builder: (_) {
-                          final cur = versions.where((x) => x.v == currentV);
-                          if (cur.isEmpty) return const SizedBox.shrink();
-                          return Text(
-                            '📝 v$currentV 这版改了：\n${cur.first.diff}',
+                    // 当前查看的版本卡片（调出的全文）
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF7EAF1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE8C9D8)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '📋 正在查看 v$currentV'
+                            '${currentV > 1 ? '\n📝 这版改了：${versions.where((x) => x.v == currentV).first.diff}' : ''}',
                             style: const TextStyle(
                               fontSize: 12,
-                              color: Color(0xFF8A7A80),
+                              color: Color(0xFF8A5A72),
                               height: 1.4,
                             ),
-                          );
-                        },
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            versions.where((x) => x.v == currentV).first.text,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              height: 1.5,
+                              color: Color(0xFF4A3A42),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                     const SizedBox(height: 8),
                   ],
-                  const Text(
-                    '📄 设定全文（可以直接改；点「就用这版」= 按这个定案）：',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
-                  ),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: ctrl,
-                    maxLines: 8,
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
+                  // ── reviewing 阶段才显示设定全文（8-07 16:4x 用户：
+                  // 了解需求时不该看到原文；男主出方案后才能看/改/定案）──
+                  if (stage == 'reviewing') ...[
+                    Text(
+                      '📄 当前方案全文（可以直接改；点「就用这版」= 按这个定案）：',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF8A7A80),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: fbCtrl,
-                    maxLines: 2,
-                    decoration: InputDecoration(
-                      hintText:
-                          '跟男主说：哪里不对、想要什么…（选完选项/写完点「💬 发给他」；男主确认了解完会出最终版，才出现「就用这版」）',
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: ctrl,
+                      maxLines: 8,
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
                       ),
                     ),
-                  ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: fbCtrl,
+                      maxLines: 2,
+                      decoration: InputDecoration(
+                        hintText: '跟男主说：哪里不对、想要什么…（男主确认了解完会出最终版，才出现「就用这版」）',
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                  ],
                   if (busy) ...[
                     const SizedBox(height: 10),
                     const Row(
@@ -4732,21 +4956,11 @@ class _ChatPageState extends State<ChatPage>
                   style: TextStyle(color: Color(0xFF8A7A80)),
                 ),
               ),
-              if (!busy)
+              // reviewing 阶段：跟男主说话（哪里不对/想要什么/结合哪几版）
+              if (!busy && stage == 'reviewing')
                 TextButton(
                   onPressed: () async {
-                    // 8-07 16:1x 用户：攒的选项 + 自己打的字一起发给男主
-                    // （至少有一个才发）
-                    final buf = StringBuffer();
-                    for (final s in pendingSelections) {
-                      buf.writeln(
-                        '${s.question.isEmpty ? '' : '【${s.question}】'}'
-                        '我选 ${s.key}：${s.text}',
-                      );
-                    }
-                    final fb = fbCtrl.text.trim();
-                    if (fb.isNotEmpty) buf.writeln(fb);
-                    final msg = buf.toString().trim();
+                    final msg = fbCtrl.text.trim();
                     if (msg.isEmpty) return;
                     await sendToMale(msg);
                   },
@@ -4756,8 +4970,9 @@ class _ChatPageState extends State<ChatPage>
                   ),
                 ),
               // 8-07 16:1x 用户：只有男主出【最终方案】（确认了解完需求）
-              // 才显示「就用这版」；【新方案】=还在了解/迭代，不出现
-              if (!busy && maleHasFinal)
+              // 才显示「就用这版」；【新方案】=还在了解/迭代，不出现；
+              // 16:4x：asking 阶段（还在答题目）也不显示
+              if (!busy && stage == 'reviewing' && maleHasFinal)
                 FilledButton(
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFFC896B4),
@@ -4780,6 +4995,7 @@ class _ChatPageState extends State<ChatPage>
     final outFeedback = fbCtrl.text;
     ctrl.dispose();
     fbCtrl.dispose();
+    customCtrl.dispose();
     _dialogVersions = null;
     if (approved == null) return null;
     return (approved: approved, content: outContent, feedback: outFeedback);
@@ -4828,11 +5044,16 @@ class _ChatPageState extends State<ChatPage>
             '回应她（像平时聊天一样自然）：可以解释、追问细节、或查资料'
             '（recall_memory/query_diary/query_setting_history/query_record/'
             'query_setting_version/list_tools 可直接查，不用她审批）。'
-            '【连续问答】你可以一次问多个问题，每个问题带一组选项，格式：\n'
-            '【问题1】问题内容\n【选项】\nA. 选项内容\nB. 选项内容\nC. 其他/我自己说\n'
-            '【问题2】问题内容\n【选项】\nA. ...\n（要几个问题写几组，选项一般 2-3 个）\n'
-            '她会把所有问题的选项一起回复你（攒着一起发，别等她一条条点）。'
-            '收到她的选择后，你可以继续追问下一个问题，也可以给出修改后的方案：\n'
+            '【连续问答】你要了解需求时，一次问一个问题，格式：\n'
+            '【问题】问题内容（标注（单选）或（多选），不标默认单选）\n'
+            '【选项】\n'
+            'A. 选项内容\n'
+            'B. 选项内容\n'
+            '（选项 2-3 个，不用写 C，她可以自己写）\n'
+            '她答完当前题会自动到下一题（你一次只发一个问题，别一次堆多个；'
+            '等她全部答完，会一次性把答案发给你）。\n'
+            '单选：她只能选一个；多选：她可以选多个，也可以补充自己的想法。'
+            '她答完/补充完 → 你汇总需求出方案：\n'
             '——还在了解需求/可能还要改 → 最后单独一行写【新方案】然后写完整新内容（这不算定案，她不会点「就用这版」）；\n'
             '——确认她的需求都问清楚了、方案就是定稿 → 最后单独一行写【最终方案】然后写完整新内容（这时她才能点「就用这版」定案）。\n'
             '【结合请求】她说"第X版的XX好/不好"时：用 query_setting_version'
@@ -4840,7 +5061,7 @@ class _ChatPageState extends State<ChatPage>
             '把喜欢的段落组合成一份新方案（冲突的地方问她或取更合适的），'
             '最后按上面规则写【新方案】或【最终方案】。'
             '【别中途断流程】她没点「就用这版」之前，讨论都没结束——'
-            '她还在提需求/点选项，你就继续问或改，别急着定案收尾；'
+            '她还在提需求/答问题，你就继续问或改，别急着定案收尾；'
             '你只有在需求全部了解清楚、方案完整时才写【最终方案】。',
       );
       final msgs = <AIChatMessage>[

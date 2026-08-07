@@ -94,22 +94,53 @@ class MockAIProvider {
         .map((m) => m.content)
         .join('\n');
     if (systemText2.contains('设定修改会话')) {
-      // 8-07 16:1x 用户（推翻 15:5x 剧本）：流程是——
-      // ① 首轮问两个问题（两组选项）
-      // ② 用户攒着点选项 → 「💬 发给他」一起发 → 男主出 v1【新方案】
-      //    （【新方案】=还在了解需求，弹窗不显示「就用这版」）
-      // ③ 用户不满意，打字说"第一版喜好不好，想改成XXX"
-      //    → 男主调 query_setting_version 查段落原文 → 出 v2【最终方案】
-      //    （【最终方案】=男主确认了解完，才显示「就用这版」）
-      String lastUser2 = '';
-      for (final m in messages.reversed) {
-        if (m.role == 'user') {
-          lastUser2 = m.content;
-          break;
-        }
+      // 8-07 16:4x 用户（推翻 16:1x 剧本）：流程是——
+      // ① 先取需求：男主问问题（一次可发多题，UI 卡片化逐题展示，
+      //    单选/多选由男主标，C=用户自己写，全部答完自动发男主）
+      // ② 需求收集完 → 出第一版【新方案】（不显示「就用这版」）
+      // ③ 第一版不满意 → 用户再说需求 → 男主再问/直接改 → 出第二版…
+      //    直到男主确认了解完 → 【最终方案】→ 才出现定案按钮
+      // ④ update_setting 指令明确的单步修改（验收⑨⑩⑪）→ 男主直接出
+      //    【最终方案】（需求已明确，不用再问）
+      final userMsgs = messages.where((m) => m.role == 'user').toList();
+      final isFirst = userMsgs.length <= 1;
+      final lastUser2 = userMsgs.isEmpty ? '' : userMsgs.last.content;
+      if (isFirst && !lastUser2.contains('商量') && !lastUser2.contains('选项')) {
+        // ⑨⑩⑪：用户指令明确 → 男主直接确认最终方案（不覆盖编辑框内容）
+        AiModuleLog.log('模拟AI', '💬 设定会话（指令明确）→ 直接出最终方案');
+        return AIProviderResult(
+          text: '好，按你说的改好了，这是最终方案：\n【最终方案】',
+          providerName: '模拟AI',
+        );
       }
-      if (lastUser2.contains('结合') ||
-          lastUser2.contains('第') && lastUser2.contains('版')) {
+      if (isFirst) {
+        // ⑫ 首轮：问 2 题（单选身份 + 多选喜好），UI 会逐题展示
+        AiModuleLog.log('模拟AI', '💬 设定会话（先取需求）→ 问两个问题');
+        return AIProviderResult(
+          text:
+              '我理了一下，先问你两个问题（第 1 题单选，第 2 题可多选，'
+              '也可以自己写）：\n'
+              '【问题】（单选）身份部分想怎么写？\n'
+              '【选项】\n'
+              'A. 测试角色\n'
+              'B. 测试角色，温柔系\n'
+              '【问题】（多选）喜好部分呢？\n'
+              '【选项】\n'
+              'A. 测试喜好C\n'
+              'B. 测试喜好C，再加点细节',
+          providerName: '模拟AI',
+        );
+      }
+      if (lastUser2.contains('就用这版')) {
+        // 用户觉得当前版就行 → 男主确认需求了解完，出【最终方案】定稿
+        // （后面不带内容 = 编辑框保持当前方案不变，只是解锁定案按钮）
+        AiModuleLog.log('模拟AI', '💬 设定会话（用户说就用这版）→ 确认最终方案');
+        return AIProviderResult(
+          text: '好，那就按这版来，这是最终方案：\n【最终方案】',
+          providerName: '模拟AI',
+        );
+      }
+      if (lastUser2.contains('第') && lastUser2.contains('版')) {
         // 用户用嘴说"第一版喜好不好，想改XXX"→ 模拟男主先调
         // query_setting_version 查段落原文，再出最终方案
         AiModuleLog.log('模拟AI', '💬 设定会话（说话提修改）→ 模拟男主查段落原文');
@@ -128,42 +159,14 @@ class MockAIProvider {
           providerName: '模拟AI',
         );
       }
-      if (lastUser2.contains('就用这版')) {
-        // 用户觉得当前版就行 → 男主确认需求了解完，出【最终方案】定稿
-        // （后面不带内容 = 编辑框保持当前方案不变，只是解锁定案按钮）
-        AiModuleLog.log('模拟AI', '💬 设定会话（用户说就用这版）→ 模拟男主确认最终方案');
-        return AIProviderResult(
-          text: '好，那就按这版来，这是最终方案：\n【最终方案】',
-          providerName: '模拟AI',
-        );
-      }
-      if (lastUser2.contains('我选')) {
-        // 用户攒着把所有选项一起发（一条消息多个"我选"）→ 男主汇总出 v1
-        AiModuleLog.log('模拟AI', '💬 设定会话（收到攒的选项）→ 模拟男主汇总出 v1【新方案】');
-        return AIProviderResult(
-          text:
-              '好，我按你选的汇总了一下，这是第一版，你看看：\n'
-              '【新方案】\n'
-              '【身份】测试角色\n'
-              '【喜好】测试喜好C',
-          providerName: '模拟AI',
-        );
-      }
-      AiModuleLog.log('模拟AI', '💬 设定修改会话 → 模拟男主一次问两个问题');
+      // 收到答案（题目答完自动发）→ 汇总需求出第一版【新方案】
+      AiModuleLog.log('模拟AI', '💬 设定会话（收到答案）→ 汇总出第一版【新方案】');
       return AIProviderResult(
         text:
-            '我理了一下，有两个问题想先问你，每个给你几个方向，'
-            '你可以连着点，也可以自己说：\n'
-            '【问题1】身份部分想怎么写？\n'
-            '【选项】\n'
-            'A. 测试角色\n'
-            'B. 测试角色，温柔系\n'
-            'C. 其他/我自己说\n'
-            '【问题2】喜好部分呢？\n'
-            '【选项】\n'
-            'A. 测试喜好C\n'
-            'B. 测试喜好C，再加点细节\n'
-            'C. 其他/我自己说',
+            '好，我按你答的汇总了一下，这是第一版，你看看：\n'
+            '【新方案】\n'
+            '【身份】测试角色\n'
+            '【喜好】测试喜好C',
         providerName: '模拟AI',
       );
     }
