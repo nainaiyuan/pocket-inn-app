@@ -234,6 +234,12 @@ StructuredOutput parseStructuredOutput(String raw) {
                   caseSensitive: false),
               '',
             )
+            // 8-08 00:2x：标签形态兜底（模型自创 <tool_call>/<|im_start|>
+            // 半截标签全清；"<3" 数字开头不误伤）
+            .replaceAll(
+              RegExp(r'<(?:[a-zA-Z_/|\u4e00-\u9fa5][^>]*)>'),
+              '',
+            )
             .trim();
         if (t.isEmpty) continue;
         bubbles.add(BubblePart(BubbleKind.msg, [BubbleSpan(SpanKind.text, t)]));

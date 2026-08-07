@@ -560,6 +560,38 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
       ));
     }
 
+    // ── 第 1.54 层：标签形态剥离（8-08 00:2x 借鉴参考：输出给用户前
+    // 清所有 <…> 标签形态；<3 数字开头不误伤）──
+    {
+      final re = RegExp(r'<(?:[a-zA-Z_/|\u4e00-\u9fa5][^>]*)>');
+      String strip(String t) => t.replaceAll(re, '');
+      final cases = {
+        '<tool_call>hi</tool_call>': 'hi',
+        '<|im_start|>system<|im_end|>': 'system',
+        '<她笑了>': '',
+        '<3 这是爱': '<3 这是爱',
+        'a<b 比较': 'a<b 比较',
+        '他说<开心>的话': '他说的话',
+      };
+      var allOk = true;
+      final checks = <String>[];
+      cases.forEach((input, expected) {
+        final out = strip(input);
+        final ok = out == expected;
+        if (!ok) allOk = false;
+        checks.add('$input→"$out":${ok ? '✅' : '❌'}');
+      });
+      items.add(ButlerSelfTestItem(
+        message: '标签形态剥离',
+        expected: '模型自创 <…> 全清（tool_call/im_start/中文标签/闭合标签），<3 和 a<b 不误伤',
+        actual: checks.join(' '),
+        passed: allOk,
+        failedReason: allOk ? null : '某用例挂了（见 actual）',
+        guidance: '检查 chat_page._tagShapeRe / multi_bubble_parser bare 分支：'
+            '标签形态正则（< 后跟字母/下划线/中文/竖线/斜杠）',
+      ));
+    }
+
     // ── 第 1.55 层：一句话工具暗号（8-07 23:5x 用户："我按工具规定的格式
     // 写一句话，系统解析器一看句式就知道调哪个工具，对上就执行，对不上当普通聊天"）──
     {

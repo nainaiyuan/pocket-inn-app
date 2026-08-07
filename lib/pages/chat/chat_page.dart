@@ -3158,10 +3158,18 @@ class _ChatPageState extends State<ChatPage>
 
   /// 男主回复 → 用户可见文本（剥离工具块 + #指令 + 还原代号）。
   /// 8-03 18:2x：渐进显示用——每轮文本单独显示，不等全部跑完
+  /// 标签形态剥离（8-08 00:2x 借鉴参考：输出给用户前清所有 <…> 标签形态）。
+  /// 只认"< 后跟字母/下划线/中文/竖线"的标签形态（模型自创 <tool_call>、
+  /// <|im_start|>、半截 <invoke 都能清）；"<3"（数字开头）、"a<b" 不误伤。
+  /// 显示层兜底——JSON 化后男主正常输出已无标签，这是防"模型自创标签"漏网
+  static final RegExp _tagShapeRe = RegExp(r'<(?:[a-zA-Z_/|\u4e00-\u9fa5][^>]*)>');
+
   Future<String> _displayableText(String raw) async {
     var t = ToolIntentParser.stripToolBlocks(raw);
     // 8-07 21:2x：兜底剥 anthropic invoke XML（防任何路径漏网显示）
     t = stripAnthropicInvokeBlocks(t);
+    // 8-08 00:2x：标签形态兜底剥离（模型自创 <…> 全清，界面永远干净）
+    t = t.replaceAll(_tagShapeRe, '');
     t = ButlerCommandParser.instance.strip(t);
     try {
       final butler = ChatService.instance.butler;
