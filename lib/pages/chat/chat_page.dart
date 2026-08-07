@@ -61,8 +61,10 @@ class ChatPage extends StatefulWidget {
 
 enum Panel { left, center, right }
 
-class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin {
-  static const double _sideFrac = 0.85; // 8-06 00:24 用户：80% 还少点 → 85%（唯一比例来源，手势逻辑全走 _sideW getter 联动）
+class _ChatPageState extends State<ChatPage>
+    with SingleTickerProviderStateMixin {
+  static const double _sideFrac =
+      0.85; // 8-06 00:24 用户：80% 还少点 → 85%（唯一比例来源，手势逻辑全走 _sideW getter 联动）
   static const double _snapThr = 0.30;
   static const double _lockThr = 8.0;
   static const double _closeFactor = 2.5;
@@ -202,17 +204,27 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     if (!_dragging) return;
 
     double factor = 1.0;
-    final goingBack = (_startPanel == Panel.left && dx < 0) ||
-                      (_startPanel == Panel.right && dx > 0);
+    final goingBack =
+        (_startPanel == Panel.left && dx < 0) ||
+        (_startPanel == Panel.right && dx > 0);
     if (_startPanel != Panel.center && goingBack) {
       factor = _closeFactor;
     }
 
     double lo, hi;
     switch (_startPanel) {
-      case Panel.left:   lo = 0; hi = _sideW; break;
-      case Panel.right:  lo = -_sideW; hi = 0; break;
-      case Panel.center: lo = -_sideW; hi = _sideW; break;
+      case Panel.left:
+        lo = 0;
+        hi = _sideW;
+        break;
+      case Panel.right:
+        lo = -_sideW;
+        hi = 0;
+        break;
+      case Panel.center:
+        lo = -_sideW;
+        hi = _sideW;
+        break;
     }
 
     setState(() {
@@ -225,7 +237,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     if (_pointerId != e.pointer) return;
     _pointerId = -1;
 
-    if (!_dragging) { _horizLocked = false; setState(() {}); return; }
+    if (!_dragging) {
+      _horizLocked = false;
+      setState(() {});
+      return;
+    }
 
     _dragging = false;
     _horizLocked = false;
@@ -236,25 +252,32 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     switch (_startPanel) {
       case Panel.center:
         if (_offset.abs() < _sideW * _snapThr) {
-          target = 0; nextPanel = Panel.center;
+          target = 0;
+          nextPanel = Panel.center;
         } else if (_offset > 0) {
-          target = _sideW; nextPanel = Panel.left;
+          target = _sideW;
+          nextPanel = Panel.left;
         } else {
-          target = -_sideW; nextPanel = Panel.right;
+          target = -_sideW;
+          nextPanel = Panel.right;
         }
         break;
       case Panel.left:
         if (_offset < _sideW * (1 - _snapThr)) {
-          target = 0; nextPanel = Panel.center;
+          target = 0;
+          nextPanel = Panel.center;
         } else {
-          target = _sideW; nextPanel = Panel.left;
+          target = _sideW;
+          nextPanel = Panel.left;
         }
         break;
       case Panel.right:
         if (_offset > -_sideW * (1 - _snapThr)) {
-          target = 0; nextPanel = Panel.center;
+          target = 0;
+          nextPanel = Panel.center;
         } else {
-          target = -_sideW; nextPanel = Panel.right;
+          target = -_sideW;
+          nextPanel = Panel.right;
         }
         break;
     }
@@ -266,7 +289,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   // ---- 功能 ----
 
   void _togglePlus() {
-    if (_currentPanel != Panel.center) { setState(() { _currentPanel = Panel.center; }); _animateTo(0); return; }
+    if (_currentPanel != Panel.center) {
+      setState(() {
+        _currentPanel = Panel.center;
+      });
+      _animateTo(0);
+      return;
+    }
     setState(() => _showPlus = !_showPlus);
   }
 
@@ -285,7 +314,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final p = pid ?? _state.personaId ?? '';
     return AIProviderManager.testModeEnabled ||
         AIProviderManager.isMockId(
-            AIProviderManager.instance.lastProviderFor(p) ?? '');
+          AIProviderManager.instance.lastProviderFor(p) ?? '',
+        );
   }
 
   /// 设定存储的 persona key：测试模式下走测试空间（${pid}__test），
@@ -299,12 +329,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final pid = _state.personaId;
     if (pid == null || pid.isEmpty) return false;
     return AIProviderManager.isMockId(
-        AIProviderManager.instance.lastProviderFor(pid) ?? '');
+      AIProviderManager.instance.lastProviderFor(pid) ?? '',
+    );
   }
 
   /// 8-06 23:55 用户：流程停止条——长任务时强行让男主停止
   Widget _buildFlowStopBar() {
-    final pid = _state.personaId ??
+    final pid =
+        _state.personaId ??
         (_state.leadId == null ? '' : '${_state.leadId}_default');
     final summary = FlowStore.summary(pid) ?? '流程执行中';
     return Container(
@@ -342,7 +374,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 8-06 23:55 用户：停止按钮——流程 running → stopped，
   /// 把"停在哪 + 用户说了什么"作为【系统事件】给男主，它决定继续还是先回复
   Future<void> _stopFlow() async {
-    final pid = _state.personaId ??
+    final pid =
+        _state.personaId ??
         (_state.leadId == null ? '' : '${_state.leadId}_default');
     final flow = await FlowStore.get(pid);
     if (flow == null || !mounted) return;
@@ -350,13 +383,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final userText = pendingMsgs
         .map((e) => '[待#${e['id']}] ${e['text']}')
         .join('；');
-    final steps = (flow['steps'] as List?)?.map((e) => e.toString()).toList() ??
+    final steps =
+        (flow['steps'] as List?)?.map((e) => e.toString()).toList() ??
         <String>[];
     final cur = (flow['currentStep'] as num?)?.toInt() ?? 0;
     await FlowStore.stop(pid, userMessages: userText);
     if (mounted) setState(() {});
     final curStep = cur < steps.length ? steps[cur] : '';
-    final event = '你正在执行的流程被用户打断：目标「${flow['goal']}」，'
+    final event =
+        '你正在执行的流程被用户打断：目标「${flow['goal']}」，'
         '停在 ${cur + 1}/${steps.length} 步（$curStep）。'
         '她刚才发来的消息（管家收集的）：'
         '${userText.isEmpty ? '（没有新消息，她只是按了停止）' : userText}。'
@@ -366,10 +401,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 男主正在跑这轮（工具轮循环中）→ 排队，等它结束自动触发
       _pendingStopEvent = event;
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('已停止流程，等男主这轮结束就回应你'),
-          duration: Duration(seconds: 2),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('已停止流程，等男主这轮结束就回应你'),
+            duration: Duration(seconds: 2),
+          ),
+        );
       }
       return;
     }
@@ -378,7 +415,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   Future<void> _sendMsg(String t, {String? systemEvent}) async {
     // 8-07 14:03：测试空间设定初始化（首次进测试空间，复制真实设定副本）
-    final _tPid = _state.personaId ??
+    final _tPid =
+        _state.personaId ??
         (_state.leadId == null ? '' : '${_state.leadId}_default');
     if (_tPid.isNotEmpty && _useTestSpace(_tPid)) {
       await SettingVersionStore.ensureTestCopy(_tPid);
@@ -387,20 +425,26 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     // 放 _generating 前：男主工具轮循环（_generating=true）时消息也不丢。
     // 停止触发的生成（systemEvent 非空）不走收集。
     if (systemEvent == null) {
-      final flowPid = _state.personaId ??
+      final flowPid =
+          _state.personaId ??
           (_state.leadId == null ? '' : '${_state.leadId}_default');
       FlowStore.warm(flowPid);
       if (FlowStore.isRunning(flowPid)) {
         PendingQueueStore.enqueue(flowPid, t);
         if (mounted) {
-          _msgKey.currentState?.appendMessage(ChatMessage(
+          _msgKey.currentState?.appendMessage(
+            ChatMessage(
               id: DateTime.now().millisecondsSinceEpoch.toString(),
               text: t,
-              isMe: true));
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('男主正在执行流程，消息已收集（没打扰它）。想打断点 ⏹ 停止'),
-            duration: Duration(seconds: 2),
-          ));
+              isMe: true,
+            ),
+          );
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('男主正在执行流程，消息已收集（没打扰它）。想打断点 ⏹ 停止'),
+              duration: Duration(seconds: 2),
+            ),
+          );
         }
         return;
       }
@@ -410,10 +454,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     if (_generating) {
       DebugLogger.log('管家流程', '⏳ 男主正在忙（生成中），忽略新消息: $t');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('男主正在忙，等他回完再说…'),
-          duration: Duration(seconds: 2),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('男主正在忙，等他回完再说…'),
+            duration: Duration(seconds: 2),
+          ),
+        );
       }
       return;
     }
@@ -422,10 +468,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     // 本轮男主第一句话气泡 id 重置（工具气泡只挂本轮第一句话头上）
     _firstAiMsgId = null;
     // 8-06 23:55：停止触发的生成没有用户消息 → 显示系统提示气泡
-    _msgKey.currentState?.appendMessage(ChatMessage(
+    _msgKey.currentState?.appendMessage(
+      ChatMessage(
         id: userMsgId,
         text: systemEvent == null ? t : '⏸ 你按了停止，男主正在处理…',
-        isMe: true));
+        isMe: true,
+      ),
+    );
     final lid = _state.leadId;
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
@@ -445,7 +494,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     // 聊天页 UI 仍显示真实 persona（头像/名字/人设不变）
     // 8-07 14:03：测试模式开 → 无论 mock 还是真实 AI，数据都落测试空间
     final useTestSpace = _useTestSpace(personaId);
-    final chatPid = useTestSpace ? '${personaId}${AIProviderManager.mockTestSuffix}' : personaId;
+    final chatPid = useTestSpace
+        ? '${personaId}${AIProviderManager.mockTestSuffix}'
+        : personaId;
     // 会话空间切换（真实 ↔ 测试）：旧会话作废，重新建对应空间的
     if (_chatSessionId != null && _chatSessionIsMock != useTestSpace) {
       DebugLogger.log('管家流程', '🧪 会话空间切换（测试↔真实），旧会话作废');
@@ -489,10 +540,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       try {
         // 8-06 23:55：系统事件不跑管家管线（没有用户文本可分析）
         if (systemEvent == null) {
-        final pipeline = await ChatService.instance.runButlerPipeline(
-          userText: t,
-          characterId: chatPid,
-          characterName: personaName,
+          final pipeline = await ChatService.instance.runButlerPipeline(
+            userText: t,
+            characterId: chatPid,
+            characterName: personaName,
             // 37批：传真实会话 id → 每次新对话重新轮换代号（男主无法把代号绑定到人）
             sessionId: _chatSessionId ?? 'chat_page',
           );
@@ -501,9 +552,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           keywordAsk = pipeline.keywordAsk;
         }
       } catch (e) {
-          // 管家失败不阻断聊天，只记日志
-          DebugLogger.log('管家流程', '✖ 管家管线异常（不阻断聊天）: $e');
-        }
+        // 管家失败不阻断聊天，只记日志
+        DebugLogger.log('管家流程', '✖ 管家管线异常（不阻断聊天）: $e');
+      }
       // 获准记忆注入（异步检索记忆库，按类别/条数）
       final recallInjection = _pendingRecall != null
           ? await _buildRecallInjectionAsync(_pendingRecall!)
@@ -566,8 +617,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           result.text.trim().isNotEmpty) {
         final intent = ToolIntentParser.extract(result.text);
         if (intent != null && intent.isNotEmpty) {
-          DebugLogger.log('AI路由',
-              '🔧 管家解析到男主工具指令: ${intent.map((c) => c['name']).join('、')}');
+          DebugLogger.log(
+            'AI路由',
+            '🔧 管家解析到男主工具指令: ${intent.map((c) => c['name']).join('、')}',
+          );
           result = AIProviderResult(
             // 剥离 ⟨工具:…⟩ 块，用户只看到男主自然的话
             text: ToolIntentParser.stripToolBlocks(result.text),
@@ -592,15 +645,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       if (result.text.trim().isNotEmpty) {
         final firstText = await _displayableText(result.text);
         if (firstText.isNotEmpty) {
-          final firstMsgId =
-              '${DateTime.now().microsecondsSinceEpoch}_ai0';
+          final firstMsgId = '${DateTime.now().microsecondsSinceEpoch}_ai0';
           _firstAiMsgId = firstMsgId;
-          _msgKey.currentState?.appendMessage(ChatMessage(
-            id: firstMsgId,
-            text: firstText,
-            isMe: false,
-            thinkingChain: result.reasoningContent,
-          ));
+          _msgKey.currentState?.appendMessage(
+            ChatMessage(
+              id: firstMsgId,
+              text: firstText,
+              isMe: false,
+              thinkingChain: result.reasoningContent,
+            ),
+          );
           // 文字进入打字机播放 → "正在输出"由打字机播完时 endTyping 关闭
         } else {
           // 文本被剥离成空（纯指令/工具块）→ 本轮没有打字 → 关"正在输出"
@@ -626,7 +680,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       while (result.toolCalls != null && result.toolCalls!.isNotEmpty) {
         toolLoop++;
         toolExecuted = true;
-        DebugLogger.log('AI路由', '🔧 第 $toolLoop 轮：男主请求 ${result.toolCalls!.length} 个工具');
+        DebugLogger.log(
+          'AI路由',
+          '🔧 第 $toolLoop 轮：男主请求 ${result.toolCalls!.length} 个工具',
+        );
         // 8-03 17:24（用户指示：AI 需要什么给什么，研究 DeepSeek 原生调用）：
         // 工具轮双通道——
         // ① 原生 tool_calls（模型 API 返回，带 id）：原样回传 assistant
@@ -658,7 +715,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           final name = call['name']?.toString() ?? '';
           final args = (call['arguments'] as Map<String, dynamic>?) ?? {};
           _ToolResult toolResult;
-          DebugLogger.log('AI路由', '🔧 工具 $name 参数：${args.isEmpty ? '（空）' : args}');
+          DebugLogger.log(
+            'AI路由',
+            '🔧 工具 $name 参数：${args.isEmpty ? '（空）' : args}',
+          );
           if (name == 'record_relation') {
             toolResult = await _executeRelationTool(args);
           } else if (name == 'record_memory') {
@@ -683,14 +743,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                   if (s.isNotEmpty) words.add(s);
                 }
               } else if (kw is String) {
-                words.addAll(kw
-                    .split(RegExp(r'[,，、\s]+'))
-                    .where((w) => w.isNotEmpty));
+                words.addAll(
+                  kw.split(RegExp(r'[,，、\s]+')).where((w) => w.isNotEmpty),
+                );
               }
               if (words.isNotEmpty) {
                 ButlerPipelineResult.pendingKeywords.addAll(words);
-                DebugLogger.log('管家流程',
-                    '🎯 record_memory 关键词并入规律引擎: ${words.join('、')}');
+                DebugLogger.log(
+                  '管家流程',
+                  '🎯 record_memory 关键词并入规律引擎: ${words.join('、')}',
+                );
               }
             }
             // 8-03 06:37：男主写的完整句（content）原样保存 + 关键词落库
@@ -701,9 +763,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             final ok = await _approveToolCall(
               '记录',
               '「$content」\n\n类别：$category\n'
-              '关键词：${words.isEmpty ? '（无）' : words.join('、')}\n\n'
-              '要让他记住吗？',
-              personaId: personaId, toolKey: 'record_memory',
+                  '关键词：${words.isEmpty ? '（无）' : words.join('、')}\n\n'
+                  '要让他记住吗？',
+              personaId: personaId,
+              toolKey: 'record_memory',
             );
             if (!ok) {
               _appendToolBubble('❌ 你拒绝了记录「$content」');
@@ -721,8 +784,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             _appendToolBubble('正在查记忆：$query…');
             // 8-03 19:1x（用户要求：调工具要确认）：查记忆是读用户隐私，
             // 必须先问用户（和文本协议 #查记忆# 的 _approveRecall 一致）
-            final ok = await _approveToolCall('查记忆', '他想查关于「$query」的记忆，允许吗？',
-                personaId: personaId, toolKey: 'recall_memory');
+            final ok = await _approveToolCall(
+              '查记忆',
+              '他想查关于「$query」的记忆，允许吗？',
+              personaId: personaId,
+              toolKey: 'recall_memory',
+            );
             if (!ok) {
               _appendToolBubble('❌ 你拒绝了查「$query」');
               toolResult = _ToolResult(false, '用户拒绝：暂不查「$query」');
@@ -735,8 +802,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             final content = args['content']?.toString() ?? '';
             _appendToolBubble('男主想记住关于「$code」的事…');
             // 8-03 19:1x：写代号记忆也确认
-            final ok = await _approveToolCall('记住代号', '「$code」：$content\n\n要让他记住吗？',
-                personaId: personaId, toolKey: 'save_identity_memory');
+            final ok = await _approveToolCall(
+              '记住代号',
+              '「$code」：$content\n\n要让他记住吗？',
+              personaId: personaId,
+              toolKey: 'save_identity_memory',
+            );
             if (!ok) {
               _appendToolBubble('❌ 你拒绝了记住「$code」');
               toolResult = _ToolResult(false, '用户拒绝：暂不记住「$code」');
@@ -750,8 +821,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             // 8-03 19:35（用户实测反馈）：list_tools 也要确认——
             // 用户要求所有工具调用都先问他允不允许
             final ok = await _approveToolCall(
-                '查看工具清单', '他想看看自己现在有哪些能力可用，允许吗？',
-                personaId: personaId, toolKey: 'list_tools');
+              '查看工具清单',
+              '他想看看自己现在有哪些能力可用，允许吗？',
+              personaId: personaId,
+              toolKey: 'list_tools',
+            );
             if (!ok) {
               _appendToolBubble('❌ 你拒绝了查看工具清单');
               toolResult = _ToolResult(false, '用户拒绝：暂不查看工具清单');
@@ -761,8 +835,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           } else if (name == 'write_diary') {
             final content = args['content']?.toString() ?? '';
             _appendToolBubble('男主在写日记…');
-            final ok = await _approveToolCall('写日记', '「$content」\n\n要让他记下来吗？',
-                personaId: personaId, toolKey: 'write_diary');
+            final ok = await _approveToolCall(
+              '写日记',
+              '「$content」\n\n要让他记下来吗？',
+              personaId: personaId,
+              toolKey: 'write_diary',
+            );
             if (!ok) {
               _appendToolBubble('❌ 你拒绝了写日记');
               toolResult = _ToolResult(false, '用户拒绝：暂不写日记');
@@ -772,8 +850,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           } else if (name == 'query_diary') {
             final keyword = args['keyword']?.toString() ?? '';
             _appendToolBubble('男主在翻日记：$keyword…');
-            final ok = await _approveToolCall('翻日记', '他想查日记里关于「$keyword」的内容，允许吗？',
-                personaId: personaId, toolKey: 'query_diary');
+            final ok = await _approveToolCall(
+              '翻日记',
+              '他想查日记里关于「$keyword」的内容，允许吗？',
+              personaId: personaId,
+              toolKey: 'query_diary',
+            );
             if (!ok) {
               _appendToolBubble('❌ 你拒绝了翻日记');
               toolResult = _ToolResult(false, '用户拒绝：暂不翻日记');
@@ -790,7 +872,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             final ok = await _approveToolCall(
               '弹消息提醒',
               '他想给你弹 $msgCount 条消息（APP内顶部横幅，像发消息一样）。\n'
-              '允许吗？（批准后他可以在对话里申请这个能力免审批）',
+                  '允许吗？（批准后他可以在对话里申请这个能力免审批）',
               personaId: personaId,
               toolKey: 'notify_user',
             );
@@ -816,7 +898,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             final ok = await _approveToolCall(
               '设计时卡片',
               '他想给你设一个倒计时卡片（比如"去洗澡，40分钟后回来"）。\n'
-              '允许吗？（批准后他可以在对话里申请这个能力免审批）',
+                  '允许吗？（批准后他可以在对话里申请这个能力免审批）',
               personaId: personaId,
               toolKey: 'countdown_card',
             );
@@ -830,7 +912,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             // 8-06 13:53 用户：男主管理任务（撤销/调整/回应申请）——默认要审批
             final ok = await _approveToolCall(
               '管理任务',
-              '他想${args['action'] == 'cancel' ? '撤销' : args['action'] == 'reject' ? '回应' : '调整'}一个任务卡片，允许吗？',
+              '他想${args['action'] == 'cancel'
+                  ? '撤销'
+                  : args['action'] == 'reject'
+                  ? '回应'
+                  : '调整'}一个任务卡片，允许吗？',
               personaId: personaId,
               toolKey: 'manage_task',
             );
@@ -874,12 +960,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                   if (t.isNotEmpty) steps.add(t);
                 }
               } else if (stepsRaw is String) {
-                steps.addAll(stepsRaw
-                    .split(RegExp(r'\n+'))
-                    .where((st) => st.trim().isNotEmpty));
+                steps.addAll(
+                  stepsRaw
+                      .split(RegExp(r'\n+'))
+                      .where((st) => st.trim().isNotEmpty),
+                );
               }
-              toolResult =
-                  _ToolResult(true, await FlowStore.create(personaId, goal, steps));
+              toolResult = _ToolResult(
+                true,
+                await FlowStore.create(personaId, goal, steps),
+              );
             } else if (action == 'next') {
               toolResult = _ToolResult(true, await FlowStore.next(personaId));
             } else if (action == 'finish') {
@@ -889,8 +979,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             } else if (action == 'resume') {
               toolResult = _ToolResult(true, await FlowStore.resume(personaId));
             } else if (action == 'status') {
-              toolResult = _ToolResult(true,
-                  FlowStore.text(personaId) ?? '没有流程（create 先立）');
+              toolResult = _ToolResult(
+                true,
+                FlowStore.text(personaId) ?? '没有流程（create 先立）',
+              );
             } else if (action == 'update') {
               // 8-07 00:1x 用户：用户提了新要求 → 更新流程目标/步骤，从头执行
               final goal = args['goal']?.toString();
@@ -908,12 +1000,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                     .where((st) => st.trim().isNotEmpty)
                     .toList();
               }
-              toolResult = _ToolResult(true,
-                  await FlowStore.update(personaId, goal: goal, steps: steps));
+              toolResult = _ToolResult(
+                true,
+                await FlowStore.update(personaId, goal: goal, steps: steps),
+              );
             } else {
-              toolResult = const _ToolResult(false,
-                  'manage_flow 参数：action=create/next/finish/cancel/resume/status/update，'
-                  'create/update 要 goal+steps');
+              toolResult = const _ToolResult(
+                false,
+                'manage_flow 参数：action=create/next/finish/cancel/resume/status/update，'
+                'create/update 要 goal+steps',
+              );
             }
             // 流程状态变化 → 刷新停止条
             if (mounted) setState(() {});
@@ -926,8 +1022,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                 toolResult = _ToolResult(false, '没有「$name」这个工具');
               } else {
                 await FrequentToolsStore.add(personaId, name);
-                toolResult = _ToolResult(true,
-                    '已加入常用表：$name（每轮都会出现在【你常用的工具】）');
+                toolResult = _ToolResult(true, '已加入常用表：$name（每轮都会出现在【你常用的工具】）');
               }
             } else if (action == 'remove') {
               final ok = await FrequentToolsStore.remove(personaId, name);
@@ -936,11 +1031,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                   : _ToolResult(false, '常用表里没有「$name」');
             } else if (action == 'list') {
               final list = FrequentToolsStore.list(personaId);
-              toolResult = _ToolResult(true,
-                  list.isEmpty ? '常用表是空的（add 添加）' : '常用表：${list.join('、')}');
+              toolResult = _ToolResult(
+                true,
+                list.isEmpty ? '常用表是空的（add 添加）' : '常用表：${list.join('、')}',
+              );
             } else {
-              toolResult = const _ToolResult(false,
-                  'manage_frequent_tools 参数：action=add/remove/list，name=工具名');
+              toolResult = const _ToolResult(
+                false,
+                'manage_frequent_tools 参数：action=add/remove/list，name=工具名',
+              );
             }
           } else if (name == 'resolve_pending') {
             // 8-06 21:41 用户：回复标记也走工具（原生就是调工具的）
@@ -955,12 +1054,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               }
             }
             if (rIds.isEmpty) {
-              toolResult = const _ToolResult(false,
-                  'resolve_pending 参数不对：replied_ids 至少要有一个编号');
+              toolResult = const _ToolResult(
+                false,
+                'resolve_pending 参数不对：replied_ids 至少要有一个编号',
+              );
             } else {
               await PendingQueueStore.removeByIds(personaId, rIds);
-              toolResult =
-                  _ToolResult(true, '已标记回复：待#${rIds.join('、')}');
+              toolResult = _ToolResult(true, '已标记回复：待#${rIds.join('、')}');
             }
           } else if (name == 'continue_speaking') {
             // 8-06 21:36 用户：男主不等她继续说话——调"继续"工具，
@@ -974,37 +1074,51 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           if (name != 'continue_speaking' && name != 'resolve_pending') {
             _appendToolResultBubble(name, toolResult);
           }
-          DebugLogger.log('AI路由', '🔧 工具 $name 结果：${toolResult.text.length > 80 ? toolResult.text.substring(0, 80) + '…' : toolResult.text}');
+          DebugLogger.log(
+            'AI路由',
+            '🔧 工具 $name 结果：${toolResult.text.length > 80 ? toolResult.text.substring(0, 80) + '…' : toolResult.text}',
+          );
           // 8-04 17:0x（用户：上下文要留地方放工具，男主才知道做过什么；
           // 带时间戳+成败+原因，失败后才能继续调工具解决）：
           // 工具调用记录进上下文（stateless 全量带 → 男主看得到）
-          ContextManager.instance
-              .feedToolCall(personaId, name, toolResult.ok, toolResult.text);
+          ContextManager.instance.feedToolCall(
+            personaId,
+            name,
+            toolResult.ok,
+            toolResult.text,
+          );
           // 8-07 00:1x：审批拒绝系统事件化——拒绝结果同时收集，
           // 这轮工具执行完统一走【系统事件】通道（不是普通工具结果）
           if (!toolResult.ok && toolResult.text.startsWith('用户拒绝')) {
             rejectedTools.add(
-                '「$name」${toolResult.text.replaceFirst('用户拒绝：', '：')}');
+              '「$name」${toolResult.text.replaceFirst('用户拒绝：', '：')}',
+            );
           }
           // 8-06 21:36：continue/resolve_pending 结果不回填工具消息
-          final isContinue = name == 'continue_speaking' || name == 'resolve_pending';
+          final isContinue =
+              name == 'continue_speaking' || name == 'resolve_pending';
           if (!isContinue && nativeCalls.contains(call)) {
             // 原生：tool 消息必须用模型给的 id 配对（不能自己编 id）
             // 8-04 17:0x（用户：📄 里工具轮要简化成"成功/失败+一句话"）：
             // content 统一带【工具 名】+ ✅成功/❌失败 标记 —— 模型看得更清楚，
             // 📄 展示层也能解析出工具名和结果好坏
-            toolMessages.add(AIChatMessage(
-              role: 'tool',
-              // 8-06 00:51 用户：调用工具=需要审批；成功调用=审批通过。
-              // 工具消息在系统分区，天然不是用户说的话——不用额外解释
-              content: '【工具 $name】${toolResult.ok ? '✅成功（审批通过）' : '❌失败（审批未过）'}：${toolResult.text}',
-              toolCallId: call['id']?.toString() ?? 'call_${toolLoop}_$name',
-            ));
+            toolMessages.add(
+              AIChatMessage(
+                role: 'tool',
+                // 8-06 00:51 用户：调用工具=需要审批；成功调用=审批通过。
+                // 工具消息在系统分区，天然不是用户说的话——不用额外解释
+                content:
+                    '【工具 $name】${toolResult.ok ? '✅成功（审批通过）' : '❌失败（审批未过）'}：${toolResult.text}',
+                toolCallId: call['id']?.toString() ?? 'call_${toolLoop}_$name',
+              ),
+            );
           } else if (isContinue) {
             // continue（文本块格式）：不收集结果
           } else {
             // 文本块：结果收集，最后合并注入 user 消息
-            textToolResults.add('【工具 $name】${toolResult.ok ? '✅成功' : '❌失败'}：${toolResult.text}');
+            textToolResults.add(
+              '【工具 $name】${toolResult.ok ? '✅成功' : '❌失败'}：${toolResult.text}',
+            );
           }
           // 防死循环：同一工具连续调用 ≥3 次 → 停止本轮
           final n = (consecutiveToolCounts[name] ?? 0) + 1;
@@ -1013,7 +1127,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           if (name == 'continue_speaking') continueCount++;
           if (n >= 3 || (name == 'continue_speaking' && continueCount >= 3)) {
             loopExceeded = true;
-            DebugLogger.log('AI路由', '⚠️ 工具 $name 调用 $n 次（continue 累计 $continueCount），强制停止（防死循环）');
+            DebugLogger.log(
+              'AI路由',
+              '⚠️ 工具 $name 调用 $n 次（continue 累计 $continueCount），强制停止（防死循环）',
+            );
           }
         }
         if (loopExceeded) break;
@@ -1021,12 +1138,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         // 8-04 18:1x（用户：男主分不清用户话和工具结果）：明确标注
         // "这是工具返回结果，不是用户说的"——防止模型把结果当用户指令
         if (textToolResults.isNotEmpty) {
-          toolMessages.add(AIChatMessage(
-            role: 'user',
-            content: '【系统·工具执行结果】\n'
-                '${textToolResults.join('\n')}\n\n'
-                '基于结果自然地回复用户，不要再调用工具。',
-          ));
+          toolMessages.add(
+            AIChatMessage(
+              role: 'user',
+              content:
+                  '【系统·工具执行结果】\n'
+                  '${textToolResults.join('\n')}\n\n'
+                  '基于结果自然地回复用户，不要再调用工具。',
+            ),
+          );
         }
         // 8-03 18:27：工具轮生成也是男主打字阶段 → 显示"正在输出"
         ChatPresence.instance.beginTyping();
@@ -1047,12 +1167,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           // 8-03 18:2x：工具轮男主回复也立即追加显示（渐进，不等循环结束）
           final roundText = await _displayableText(result.text);
           if (roundText.isNotEmpty) {
-            _msgKey.currentState?.appendMessage(ChatMessage(
-              id: '${DateTime.now().microsecondsSinceEpoch}_ai$toolLoop',
-              text: roundText,
-              isMe: false,
-              thinkingChain: result.reasoningContent,
-            ));
+            _msgKey.currentState?.appendMessage(
+              ChatMessage(
+                id: '${DateTime.now().microsecondsSinceEpoch}_ai$toolLoop',
+                text: roundText,
+                isMe: false,
+                thinkingChain: result.reasoningContent,
+              ),
+            );
             // 打字机接管，"正在输出"由播完时 endTyping 关闭
           } else {
             ChatPresence.instance.endTyping();
@@ -1071,11 +1193,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           if (flowText != null && flowText.isNotEmpty) {
             flowInfo = '你正在执行流程：\n$flowText\n';
           }
-          final event = '你调用的工具被她拒绝了：${rejectedTools.join('；')}。\n'
+          final event =
+              '你调用的工具被她拒绝了：${rejectedTools.join('；')}。\n'
               '$flowInfo'
-              '${rejectedCount >= 3
-                  ? '她已经连续拒绝 3 次了，别再尝试这个方向，直接回复她。'
-                  : '请决定下一步：换方案 / 跳过这步 / 取消流程 / 先回复她。'}';
+              '${rejectedCount >= 3 ? '她已经连续拒绝 3 次了，别再尝试这个方向，直接回复她。' : '请决定下一步：换方案 / 跳过这步 / 取消流程 / 先回复她。'}';
           rejectedTools.clear();
           ChatPresence.instance.beginTyping();
           result = await _aiSvc.generateReply(
@@ -1092,12 +1213,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             replyTexts.add(result.text.trim());
             final eventText = await _displayableText(result.text);
             if (eventText.isNotEmpty) {
-              _msgKey.currentState?.appendMessage(ChatMessage(
-                id: '${DateTime.now().microsecondsSinceEpoch}_aiRej$rejectedCount',
-                text: eventText,
-                isMe: false,
-                thinkingChain: result.reasoningContent,
-              ));
+              _msgKey.currentState?.appendMessage(
+                ChatMessage(
+                  id: '${DateTime.now().microsecondsSinceEpoch}_aiRej$rejectedCount',
+                  text: eventText,
+                  isMe: false,
+                  thinkingChain: result.reasoningContent,
+                ),
+              );
             } else {
               ChatPresence.instance.endTyping();
             }
@@ -1107,7 +1230,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         }
       }
 
-  // 剥离 #keywords（仅管家可见）→ 显示/落库用干净文本
+      // 剥离 #keywords（仅管家可见）→ 显示/落库用干净文本
       var displayText = ButlerPipelineResult.extractKeywordsFromReply(
         replyTexts.join('\n'),
       );
@@ -1116,13 +1239,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       if (result.text.trim().isNotEmpty) {
         final removed = await PendingQueueStore.resolve(personaId, result.text);
         if (removed.isNotEmpty) {
-          DebugLogger.log('指令模块',
-              '📥 待回复已消除 待#${removed.join('、')}（男主回复带编号）');
+          DebugLogger.log('指令模块', '📥 待回复已消除 待#${removed.join('、')}（男主回复带编号）');
         }
       }
       // 指令模块：解析男主输出（#记录/#查记忆/#定时/#帮助/#model）→ 审批弹窗
-      final commands =
-          ButlerCommandParser.instance.parse(result.text.trim());
+      final commands = ButlerCommandParser.instance.parse(result.text.trim());
       // 静默执行：男主输出指令 → 先出工具气泡（🔧 正在…）→ 审批 → 男主干完活才说话
       for (final cmd in commands) {
         if (cmd.type == ButlerCommandParser.cmdRecord) {
@@ -1159,11 +1280,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 这里只落库不重复显示
       if (_chatSessionId != null && displayText.trim().isNotEmpty) {
         try {
-          final aiNode = await ChatDatabaseService.instance.appendAssistantMessage(
-            sessionId: _chatSessionId!,
-            parentMessageId: _chatLeafId,
-            text: displayText,
-          );
+          final aiNode = await ChatDatabaseService.instance
+              .appendAssistantMessage(
+                sessionId: _chatSessionId!,
+                parentMessageId: _chatLeafId,
+                text: displayText,
+              );
           _chatLeafId = aiNode.id;
         } catch (e) {
           DebugLogger.log('管家流程', '✖ 对话落库失败（男主回复）: $e');
@@ -1176,17 +1298,23 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 用户 8-03 02:26：男主空回复（无工具、无文本）不该弹红色报错。
       // 轻提示即可（重试 2 次都空 → AI 服务端偶发，不是功能坏了）
       if (displayText.trim().isEmpty && !toolExecuted && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('男主这次没有回复，再发一条试试'),
-          duration: Duration(seconds: 2),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('男主这次没有回复，再发一条试试'),
+            duration: Duration(seconds: 2),
+          ),
+        );
       }
       if (result.failedProviders.isNotEmpty) {
         // 自动切换发生了，告诉用户一声（不打断）
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('${result.failedProviders.join('、')} 不可用，已自动切换到 ${result.providerName ?? '下一个'}'),
-          duration: const Duration(seconds: 3),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${result.failedProviders.join('、')} 不可用，已自动切换到 ${result.providerName ?? '下一个'}',
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
       }
     } on AIProviderUnavailableException catch (e) {
       // 用户关了自动切换 → 弹窗，不偷偷换人
@@ -1198,10 +1326,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     } on Object catch (e) {
       DebugLogger.log('AI路由', '❌ 聊天请求失败: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('发送失败：$e'),
-          duration: const Duration(seconds: 3),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('发送失败：$e'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
       }
     } finally {
       // 生成锁释放（无论如何）
@@ -1258,9 +1388,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   /// 结束信号检测：用户说"睡了/晚安/睡觉/拜拜/下线…" → 该写当天日记了
   bool _isEndOfDaySignal(String text) {
-    return RegExp(
-      r'睡了|晚安|睡觉|拜拜|下线|去睡|要睡了|碎觉|不聊了|先这样',
-    ).hasMatch(text);
+    return RegExp(r'睡了|晚安|睡觉|拜拜|下线|去睡|要睡了|碎觉|不聊了|先这样').hasMatch(text);
   }
 
   /// 写当天日记（男主视角的一天总结）：
@@ -1281,7 +1409,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       }
       _dailyDiaryWrittenDate = dateKey;
       DebugLogger.log('指令模块', '📔 检测到结束信号，男主写当天日记…');
-      final diary = await _aiSvc.generateDailyDiary(personaId, personaName, raw);
+      final diary = await _aiSvc.generateDailyDiary(
+        personaId,
+        personaName,
+        raw,
+      );
       if (diary.isNotEmpty) {
         await ChatDatabaseService.instance.saveDiaryEntry(personaId, diary);
         DebugLogger.log('指令模块', '✅ 当天日记已写（${diary.length} 字）');
@@ -1292,7 +1424,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   /// 自动切换关闭时的弹窗：告诉用户当前 AI 不可用，让 ta 检查。
-  Future<void> _showAiUnavailableDialog(AIProviderUnavailableException e) async {
+  Future<void> _showAiUnavailableDialog(
+    AIProviderUnavailableException e,
+  ) async {
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -1335,7 +1469,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           e.tried.isEmpty
               ? '当前没有可用的 AI Provider。\n请去「管家 → AI 配置」检查或配置。'
               : '试了这些都不行：${e.tried.join('、')}\n\n'
-                  '请去「管家 → AI 配置」检查 Key / 地址。',
+                    '请去「管家 → AI 配置」检查 Key / 地址。',
           style: const TextStyle(fontSize: 13, height: 1.5),
         ),
         actions: [
@@ -1356,9 +1490,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   void _openAiConfig() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const AiConfigPage()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const AiConfigPage()));
   }
 
   /// 打开 AI 设置弹层（当前 AI / 自动切换 / 候选勾选）。
@@ -1394,8 +1528,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     if (pid.isEmpty) return;
     await SettingVersionStore.ensureTestCopy(pid);
     if (mounted) {
-      _appendToolBubble(
-          '🧪 一键测设定：真实 AI 通道测试开始（数据落测试空间，退出测试模式自动清空）');
+      _appendToolBubble('🧪 一键测设定：真实 AI 通道测试开始（数据落测试空间，退出测试模式自动清空）');
     }
     await _sendMsg(
       '【测试指令】现在测一下「设定修改」功能，请按步骤做：\n'
@@ -1425,10 +1558,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       context: context,
       builder: (dialogCtx) => AlertDialog(
         title: const Text('精简上下文·省 token'),
-        content: Text(isMock
-            ? '将当前对话压缩成摘要（原文→摘要区，带 #编号）。\n继续？'
-            : '将当前对话压缩成摘要（原文→摘要区，带 #编号）。\n'
-                '这是真实数据，压缩后原文不可恢复。\n继续？'),
+        content: Text(
+          isMock
+              ? '将当前对话压缩成摘要（原文→摘要区，带 #编号）。\n继续？'
+              : '将当前对话压缩成摘要（原文→摘要区，带 #编号）。\n'
+                    '这是真实数据，压缩后原文不可恢复。\n继续？',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogCtx, false),
@@ -1457,19 +1592,23 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     }
   }
 
-
   void _openWorld() {
     if (!_state.hasLead) return;
     final lid = _state.lead!.id;
     final pid = _state.persona?.id ?? '${lid}_default';
-    Navigator.push(context, PageRouteBuilder(
-      pageBuilder: (_, __, ___) => CharacterWorldPage(
-        lead: _state.lead!,
-        persona: _state.persona ?? Persona(id: pid, maleLeadId: lid, name: '默认'),
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) => CharacterWorldPage(
+          lead: _state.lead!,
+          persona:
+              _state.persona ?? Persona(id: pid, maleLeadId: lid, name: '默认'),
+        ),
+        transitionsBuilder: (_, a, __, c) =>
+            FadeTransition(opacity: a, child: c),
+        transitionDuration: const Duration(milliseconds: 300),
       ),
-      transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c),
-      transitionDuration: const Duration(milliseconds: 300),
-    ));
+    );
   }
 
   // 从加号菜单设置全局聊天背景（影响立绘下所有未单独设背景的 Persona）
@@ -1492,9 +1631,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 保存为立绘级别的背景文件
       String saved;
       if (file.bytes != null) {
-        saved = await _localStore.saveLeadBackgroundFromBytes(_state.leadId!, file.bytes!);
+        saved = await _localStore.saveLeadBackgroundFromBytes(
+          _state.leadId!,
+          file.bytes!,
+        );
       } else {
-        saved = await _localStore.saveLeadBackground(_state.leadId!, File(file.path!));
+        saved = await _localStore.saveLeadBackground(
+          _state.leadId!,
+          File(file.path!),
+        );
       }
       // 清 Flutter 图片缓存，强制背景重新解码
       imageCache.clear();
@@ -1505,7 +1650,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       _resetGestureState();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('背景设置失败：$e'), duration: const Duration(seconds: 2)),
+          SnackBar(
+            content: Text('背景设置失败：$e'),
+            duration: const Duration(seconds: 2),
+          ),
         );
       }
     }
@@ -1528,16 +1676,27 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
       String savedPath;
       if (file.bytes != null) {
-        savedPath = await _localStore.savePersonaAvatarFromBytes(_state.leadId!, _state.personaId!, file.bytes!);
+        savedPath = await _localStore.savePersonaAvatarFromBytes(
+          _state.leadId!,
+          _state.personaId!,
+          file.bytes!,
+        );
       } else {
-        savedPath = await _localStore.savePersonaAvatar(_state.leadId!, _state.personaId!, File(file.path!));
+        savedPath = await _localStore.savePersonaAvatar(
+          _state.leadId!,
+          _state.personaId!,
+          File(file.path!),
+        );
       }
       await _state.updateAvatar(savedPath);
     } catch (e) {
       _resetGestureState();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('头像设置失败：$e'), duration: const Duration(seconds: 2)),
+          SnackBar(
+            content: Text('头像设置失败：$e'),
+            duration: const Duration(seconds: 2),
+          ),
         );
       }
     }
@@ -1568,7 +1727,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             currentLead: _state.lead,
             currentPersona: _state.persona,
             onSelectPersona: (entry) => _selectPersona(entry.key, entry.value),
-            onOpenSettings: () { _currentPanel = Panel.right; _animateTo(-sideW); },
+            onOpenSettings: () {
+              _currentPanel = Panel.right;
+              _animateTo(-sideW);
+            },
             onSetBg: _pickBgImage,
             characterState: _state,
           ),
@@ -1585,24 +1747,29 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             child: SafeArea(
               child: Column(
                 children: [
-                  ChatTopBar(currentLead: _state.lead, currentPersona: _state.persona,
+                  ChatTopBar(
+                    currentLead: _state.lead,
+                    currentPersona: _state.persona,
                     onTapAvatar: _openWorld,
                     // 8-05 23:45：右上角设计感按钮 → 陪伴三页；
                     // 设定右页入口移到陪伴页的小齿轮（onOpenSettings）
                     onCompanionTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (_) => const CompanionPage(),
-                      ),
+                      MaterialPageRoute(builder: (_) => const CompanionPage()),
                     ),
                     onAiTap: _openAiSheet,
-                    onNameChanged: () { if (mounted) setState(() {}); }),
+                    onNameChanged: () {
+                      if (mounted) setState(() {});
+                    },
+                  ),
                   // 一键验收横幅（8-04 21:1x：自动切 AI 跑对话时显示进度/结论）
                   if (_acceptanceNote != null)
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                       color: const Color(0xFF7B6A8F).withValues(alpha: 0.12),
                       child: Row(
                         children: [
@@ -1616,8 +1783,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                               ),
                             )
                           else
-                            const Icon(Icons.rocket_launch,
-                                size: 14, color: Color(0xFF7B6A8F)),
+                            const Icon(
+                              Icons.rocket_launch,
+                              size: 14,
+                              color: Color(0xFF7B6A8F),
+                            ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
@@ -1642,15 +1812,26 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                             child: ClipRRect(
                               child: Stack(
                                 children: [
-                                  Image.file(_currentBg!, fit: BoxFit.cover,
+                                  Image.file(
+                                    _currentBg!,
+                                    fit: BoxFit.cover,
                                     width: screenW,
                                     height: MediaQuery.of(context).size.height,
-                                    key: ValueKey('bg_${_currentBg!.path}_${_currentBg!.lastModifiedSync().millisecondsSinceEpoch}'),
+                                    key: ValueKey(
+                                      'bg_${_currentBg!.path}_${_currentBg!.lastModifiedSync().millisecondsSinceEpoch}',
+                                    ),
                                   ),
                                   Positioned.fill(
                                     child: BackdropFilter(
-                                      filter: ui.ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-                                      child: Container(color: Colors.black.withValues(alpha: 0.08)),
+                                      filter: ui.ImageFilter.blur(
+                                        sigmaX: 6,
+                                        sigmaY: 6,
+                                      ),
+                                      child: Container(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.08,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -1660,13 +1841,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                         // 消息列表在背景之上
                         // 8-05 14:36：测试对话落测试空间的库（storagePersonaId），
                         // 历史加载也读测试空间（测试对话退出再进还在）
-                        ChatMessageArea(key: _msgKey, currentPersona: _state.persona,
+                        ChatMessageArea(
+                          key: _msgKey,
+                          currentPersona: _state.persona,
                           characterAvatarPath: _state.effectiveAvatarPath,
                           onAvatarTap: _openWorld,
                           storagePersonaId: _useTestSpace()
                               ? '${_state.personaId}${AIProviderManager.mockTestSuffix}'
                               : null,
-                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -1676,15 +1859,22 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                   // 话术栏是模拟AI测试工具 → 测试模式关时不显示
                   if (AIProviderManager.testModeEnabled) _buildScriptBar(),
                   // 8-05 16:36 用户：测试模式开着必须一眼看出 + 一键退出
-                  if (AIProviderManager.testModeEnabled)
-                    _buildTestModeBanner(),
+                  if (AIProviderManager.testModeEnabled) _buildTestModeBanner(),
                   // 8-06 23:55 用户：流程执行中显示"⏹ 停止"条——
                   // 长任务时用户可强行让男主停止，返回结果给它判断
-                  if (FlowStore.isRunning(_state.personaId ??
-                      (_state.leadId == null ? '' : '${_state.leadId}_default')))
+                  if (FlowStore.isRunning(
+                    _state.personaId ??
+                        (_state.leadId == null
+                            ? ''
+                            : '${_state.leadId}_default'),
+                  ))
                     _buildFlowStopBar(),
-                  ChatInputBar(onCameraTap: () {}, onVoiceTap: () {},
-                    onPlusTap: _togglePlus, onSendTap: _sendMsg),
+                  ChatInputBar(
+                    onCameraTap: () {},
+                    onVoiceTap: () {},
+                    onPlusTap: _togglePlus,
+                    onSendTap: _sendMsg,
+                  ),
                 ],
               ),
             ),
@@ -1714,7 +1904,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               _currentPanel = Panel.center;
               _animateTo(0);
               // 删除 Persona 后强制重建（左页/右页/中间页状态一致）
-              WidgetsBinding.instance.addPostFrameCallback((_) => setState(() {}));
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => setState(() {}),
+              );
             },
             onClearChat: () => _msgKey.currentState?.reloadMessages(),
             characterState: _state,
@@ -1735,79 +1927,105 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
         // ===== [+] 菜单 =====
         if (_showPlus)
-          Positioned.fill(child: PlusMenu(
-            onDismiss: () => setState(() => _showPlus = false),
-            onPickAvatar: _pickAvatarFromPlus,
-            onPickBg: _pickBgImage,
-          )),
+          Positioned.fill(
+            child: PlusMenu(
+              onDismiss: () => setState(() => _showPlus = false),
+              onPickAvatar: _pickAvatarFromPlus,
+              onPickBg: _pickBgImage,
+            ),
+          ),
 
         // ===== 🔁 让男主重新认识按钮（8-04 23:4x 用户）=====
         // 只带【已总结摘要+恢复包+当次未总结原文】（总结过的旧原文不重复扔），
         // 全量发给男主重新熟悉——不赌 AI 记没记住，错了手动救
         if (AIProviderManager.testModeEnabled)
           Positioned(
-            right: 106, top: MediaQuery.of(context).padding.top + 4,
+            right: 106,
+            top: MediaQuery.of(context).padding.top + 4,
             child: GestureDetector(
               onTap: _resyncContext,
               child: Container(
-                width: 28, height: 28,
+                width: 28,
+                height: 28,
                 decoration: BoxDecoration(
-                  color: Colors.black26, shape: BoxShape.circle,
-            ),
-              child: const Icon(Icons.sync, size: 15, color: Colors.white70),
+                  color: Colors.black26,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.sync, size: 15, color: Colors.white70),
+              ),
             ),
           ),
-        ),
 
         // ===== 🧪 模拟测试按钮（找bug工具，8-03 20:1x 用户要求）=====
         // 预设对话 + 手动写男主回复，走真实 feed/build/解析流程，
         // 看"发给模型的历史"里男主消息到底在不在
         if (AIProviderManager.testModeEnabled)
           Positioned(
-            right: 72, top: MediaQuery.of(context).padding.top + 4,
+            right: 72,
+            top: MediaQuery.of(context).padding.top + 4,
             child: GestureDetector(
               onTap: _showSimulation,
               child: Container(
-                width: 28, height: 28,
+                width: 28,
+                height: 28,
                 decoration: BoxDecoration(
-                  color: Colors.black26, shape: BoxShape.circle,
-            ),
-              child: const Icon(Icons.science_outlined, size: 15, color: Colors.white70),
+                  color: Colors.black26,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.science_outlined,
+                  size: 15,
+                  color: Colors.white70,
+                ),
+              ),
             ),
           ),
-        ),
 
         // ===== 📄 prompt 查看按钮（透明化：男主"知道什么"一目了然）=====
         if (AIProviderManager.testModeEnabled)
           Positioned(
-            right: 38, top: MediaQuery.of(context).padding.top + 4,
+            right: 38,
+            top: MediaQuery.of(context).padding.top + 4,
             child: GestureDetector(
               onTap: _showPromptDialog,
               child: Container(
-                width: 28, height: 28,
+                width: 28,
+                height: 28,
                 decoration: BoxDecoration(
-                  color: Colors.black26, shape: BoxShape.circle,
-            ),
-              child: const Icon(Icons.description_outlined, size: 15, color: Colors.white70),
+                  color: Colors.black26,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.description_outlined,
+                  size: 15,
+                  color: Colors.white70,
+                ),
+              ),
             ),
           ),
-        ),
 
         // ===== 调试日志按钮（右上角） =====
         if (AIProviderManager.testModeEnabled)
           Positioned(
-            right: 4, top: MediaQuery.of(context).padding.top + 4,
+            right: 4,
+            top: MediaQuery.of(context).padding.top + 4,
             child: GestureDetector(
               onTap: _showDebugLog,
               child: Container(
-                width: 28, height: 28,
+                width: 28,
+                height: 28,
                 decoration: BoxDecoration(
-                  color: Colors.black26, shape: BoxShape.circle,
-            ),
-              child: const Icon(Icons.bug_report, size: 16, color: Colors.white70),
+                  color: Colors.black26,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.bug_report,
+                  size: 16,
+                  color: Colors.white70,
+                ),
+              ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -1844,7 +2062,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       ),
       child: Row(
         children: [
-          const Icon(Icons.science_outlined, size: 15, color: Color(0xFF7B6A8F)),
+          const Icon(
+            Icons.science_outlined,
+            size: 15,
+            color: Color(0xFF7B6A8F),
+          ),
           const SizedBox(width: 6),
           const Expanded(
             child: Text(
@@ -1891,10 +2113,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             GestureDetector(
               onTap: () {
                 if (_generating) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('男主正在回复，稍等一下'),
-                    duration: Duration(seconds: 1),
-                  ));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('男主正在回复，稍等一下'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
                   return;
                 }
                 _sendMsg(p);
@@ -1905,12 +2129,18 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                 decoration: BoxDecoration(
                   color: const Color(0xFFF3E8EE),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xFFD9C3CE), width: 0.5),
+                  border: Border.all(
+                    color: const Color(0xFFD9C3CE),
+                    width: 0.5,
+                  ),
                 ),
                 child: Center(
                   child: Text(
                     p,
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF6A4A5A)),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF6A4A5A),
+                    ),
                   ),
                 ),
               ),
@@ -1959,8 +2189,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     sb.writeln('🧪 模拟对话测试（男主话=手动预设，独立上下文空间）');
     sb.writeln('══════════════════════════════════════');
 
-    Future<void> round(int n, String userText, String aiText,
-        {String note = ''}) async {
+    Future<void> round(
+      int n,
+      String userText,
+      String aiText, {
+      String note = '',
+    }) async {
       sb.writeln('\n──── 轮$n　用户：「$userText」────');
       if (note.isNotEmpty) sb.writeln('　⚙️ $note');
       // 1) generateReply 真实顺序：先组装历史（此刻不含本条用户消息）
@@ -1968,7 +2202,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       sb.writeln('▶ 发给模型的历史 ${hist.length} 条：');
       if (hist.isEmpty) sb.writeln('　（空）');
       for (final h in hist) {
-        sb.writeln('　[${h.role}] ${h.content.replaceAll(RegExp(r'\\s+'), ' ')}');
+        sb.writeln(
+          '　[${h.role}] ${h.content.replaceAll(RegExp(r'\\s+'), ' ')}',
+        );
       }
       // 2) feed 用户消息（真实）
       ContextManager.instance.feedUserMessage(pid, userText);
@@ -1986,14 +2222,20 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     }
 
     await round(1, '你好呀', '你好，今天过得怎么样？');
-    await round(2, '记住我喜欢喝美式咖啡', '好的，我记住了，你爱喝美式咖啡。',
-        note: '场景A：男主正常文本回复');
-    await round(3, '我之前说过喜欢什么吗', '我查查看。',
-        note: '场景B：男主只调工具没说话（真实=原生tool_calls无文本）→ 这轮男主话不进上下文');
-    await round(4, '那你查到了吗', '查到了，你说过喜欢猫。',
-        note: '场景C：关键验证——上一轮男主"我查查看"还在历史里吗？');
-    await round(5, '你都记得我什么呀', '记得你爱喝美式咖啡、喜欢猫。',
-        note: '场景D：男主话含中文意图词，验证解析');
+    await round(2, '记住我喜欢喝美式咖啡', '好的，我记住了，你爱喝美式咖啡。', note: '场景A：男主正常文本回复');
+    await round(
+      3,
+      '我之前说过喜欢什么吗',
+      '我查查看。',
+      note: '场景B：男主只调工具没说话（真实=原生tool_calls无文本）→ 这轮男主话不进上下文',
+    );
+    await round(
+      4,
+      '那你查到了吗',
+      '查到了，你说过喜欢猫。',
+      note: '场景C：关键验证——上一轮男主"我查查看"还在历史里吗？',
+    );
+    await round(5, '你都记得我什么呀', '记得你爱喝美式咖啡、喜欢猫。', note: '场景D：男主话含中文意图词，验证解析');
 
     sb.writeln('\n════════ 当前上下文全貌（peekRaw）════════');
     final rawAll = ContextManager.instance.peekRaw(pid);
@@ -2003,9 +2245,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final userCount = '用户：'.allMatches(raw).length;
     final aiCount = '男主：'.allMatches(raw).length;
     sb.writeln('上下文里 用户 $userCount 条 / 男主 $aiCount 条');
-    sb.writeln(aiCount >= userCount - 1
-        ? '✅ 男主消息正常进上下文（说明链路OK，问题在AI侧/工具轮）'
-        : '❌ 男主消息丢失（$aiCount 少于 ${userCount - 1}）→ 查 feedAssistantMessage 调用链');
+    sb.writeln(
+      aiCount >= userCount - 1
+          ? '✅ 男主消息正常进上下文（说明链路OK，问题在AI侧/工具轮）'
+          : '❌ 男主消息丢失（$aiCount 少于 ${userCount - 1}）→ 查 feedAssistantMessage 调用链',
+    );
 
     DebugLogger.log('模拟测试', sb.toString());
     if (!mounted) return;
@@ -2028,7 +2272,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           child: SingleChildScrollView(
             child: SelectableText(
               sb.toString(),
-              style: const TextStyle(color: Color(0xFF6A4A5A), fontSize: 12, height: 1.5),
+              style: const TextStyle(
+                color: Color(0xFF6A4A5A),
+                fontSize: 12,
+                height: 1.5,
+              ),
             ),
           ),
         ),
@@ -2100,8 +2348,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 聊天页没挂载（切走/后台）→ 只落库，回来从 DB 加载能看到
       // 8-05 14:36：测试对话落测试空间的库（${personaId}__mock__test）
       final isMock = _useTestSpace(personaId);
-      ChatStorageService()
-          .appendMessage(isMock ? '${personaId}${AIProviderManager.mockTestSuffix}' : personaId, msg);
+      ChatStorageService().appendMessage(
+        isMock ? '${personaId}${AIProviderManager.mockTestSuffix}' : personaId,
+        msg,
+      );
     }
   }
 
@@ -2130,18 +2380,22 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   Future<void> _runAcceptance() async {
     if (_accepting) return;
     if (_generating) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('男主正在忙，等他回完再验收…'),
-        duration: Duration(seconds: 2),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('男主正在忙，等他回完再验收…'),
+          duration: Duration(seconds: 2),
+        ),
+      );
       return;
     }
     final lid = _state.leadId;
     if (lid == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('先选一个男主再验收'),
-        duration: Duration(seconds: 2),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('先选一个男主再验收'),
+          duration: Duration(seconds: 2),
+        ),
+      );
       return;
     }
     final pid = _state.personaId ?? '${lid}_default';
@@ -2182,11 +2436,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
     /// 注入一条 📋 验收消息到聊天框（精简一行）
     void note(String text) {
-      _msgKey.currentState?.appendMessage(ChatMessage(
-        id: 'accept_${DateTime.now().millisecondsSinceEpoch}',
-        text: text,
-        isMe: false,
-      ));
+      _msgKey.currentState?.appendMessage(
+        ChatMessage(
+          id: 'accept_${DateTime.now().millisecondsSinceEpoch}',
+          text: text,
+          isMe: false,
+        ),
+      );
     }
 
     /// 发消息并等男主回完（含工具授权弹窗等待）
@@ -2228,8 +2484,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       await say('你好呀，我来验收啦。先记住：我喜欢蓝色，爱喝美式咖啡。');
       final rawA = ctx.peekRaw(testPid);
       final aOk = rawA.trim().isNotEmpty;
-      record('① AI A建立话题', aOk,
-          aOk ? null : '原文为空——用户消息没进上下文，后面全白搭');
+      record('① AI A建立话题', aOk, aOk ? null : '原文为空——用户消息没进上下文，后面全白搭');
       note('📋 ① ${aOk ? '✓' : '✗'} 原文 ${rawA.length} 字');
 
       // ── ② 切 AI B（无记忆·思考关）：验证切换后上下文不丢 ──
@@ -2238,8 +2493,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       await say('我刚才说我喜欢的颜色是什么？');
       final histB = ctx.buildHistoryMessages(testPid, modelHint: 'mock-1');
       final bOk = histB.isNotEmpty;
-      record('② 切换AI B后全量带历史', bOk,
-          bOk ? null : '历史为空——stateless 切换后没带上下文，男主会失忆');
+      record(
+        '② 切换AI B后全量带历史',
+        bOk,
+        bOk ? null : '历史为空——stateless 切换后没带上下文，男主会失忆',
+      );
       note('📋 ② ${bOk ? '✓' : '✗'} 切B后带${histB.length}条历史');
 
       // ── ③ 切 AI C（有记忆1h）：验证 stateful 切换全量带 ──
@@ -2252,9 +2510,14 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // stateful 判定看决策（C 是 stateful ✓），全量带看组装历史非空
       final histC = ctx.buildHistoryMessages(testPid, modelHint: 'mock-1');
       final cOk = d.stateful && histC.isNotEmpty;
-      record('③ stateful切换全量带', cOk,
-          cOk ? null : 'stateful=${d.stateful} 组装历史=${histC.length}条——'
-              '切到有记忆AI没全量带，男主失忆');
+      record(
+        '③ stateful切换全量带',
+        cOk,
+        cOk
+            ? null
+            : 'stateful=${d.stateful} 组装历史=${histC.length}条——'
+                  '切到有记忆AI没全量带，男主失忆',
+      );
       note('📋 ③ ${cOk ? '✓' : '✗'} stateful=${d.stateful} 组装${histC.length}条');
 
       // ── ④ AI C 连续使用：验证轻量 ──
@@ -2265,10 +2528,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       final dOk = d.stateful && !d.needRecover;
       // 8-05 20:0x（④ 反复失败）：失败原因带完整决策值——
       // switched/idleExpired/forceRecover 哪个 true 一目了然，直接定位
-      record('④ stateful连续轻量', dOk,
-          dOk ? null : '连续使用还全量带——浪费 token'
-              '(stateful=${d.stateful} switched=${d.switched} '
-              'idleExpired=${d.idleExpired} forceRecover=${d.forceRecover})');
+      record(
+        '④ stateful连续轻量',
+        dOk,
+        dOk
+            ? null
+            : '连续使用还全量带——浪费 token'
+                  '(stateful=${d.stateful} switched=${d.switched} '
+                  'idleExpired=${d.idleExpired} forceRecover=${d.forceRecover})',
+      );
       note('📋 ④ ${dOk ? '✓' : '✗'} 连续轻量=${!d.needRecover}');
 
       // ── ⑤ 切回 AI A（stateless）+ 调小窗口：token 满 → 男主总结 ──
@@ -2282,47 +2550,60 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       note('📋 ⑤ 切回 AI A：调小窗口，少量消息触发总结');
       manager.updateBuiltinMock(memoryMode: 'stateless'); // 防残留 stateful
       ContextTracker.instance.setWindow(testPid, 800); // 预算≈85字，短消息即触发
-      await say('我们今天还聊了散步、读书、做饭、旅行、听音乐，'
-          '这些话题我慢慢说给你听。');
-      await say('对了，我最近在学做菜，喜欢研究新菜谱，'
-          '周末还想去爬山，你觉得怎么样？');
+      await say(
+        '我们今天还聊了散步、读书、做饭、旅行、听音乐，'
+        '这些话题我慢慢说给你听。',
+      );
+      await say(
+        '对了，我最近在学做菜，喜欢研究新菜谱，'
+        '周末还想去爬山，你觉得怎么样？',
+      );
       final summaries = ctx.summariesFor(testPid);
       // 8-05 19:40（用户：本地AI测试走通，真实男主才稳）：
       // v2 总结必须走 save_summary 工具路径——摘要条目带（#1-#N）范围标记；
       // 只有内容没编号 = 走了文本兜底（男主没调工具），真实场景会不稳
-      final sumHasRange = summaries.any((x) =>
-          x.contains('（#') && x.contains('-#'));
+      final sumHasRange = summaries.any(
+        (x) => x.contains('（#') && x.contains('-#'),
+      );
       final sumOk = summaries.isNotEmpty && sumHasRange;
       if (!sumOk) {
         // 自诊断：失败原因直接带数据，弹窗复制发龙虾即可定位
         final budget = ctx.topicBudgetChars(testPid, modelHint: 'mock-1');
         final rawLen = ctx.debugRawLength(testPid);
         final st = svc.assembleDecision(testPid, toolRound: false).stateful;
-        DebugLogger.log('AI验收', '⑤自诊断: 预算=$budget 原文=$rawLen stateful=$st'
-            ' 摘要=${summaries.length}条 带编号=$sumHasRange');
+        DebugLogger.log(
+          'AI验收',
+          '⑤自诊断: 预算=$budget 原文=$rawLen stateful=$st'
+              ' 摘要=${summaries.length}条 带编号=$sumHasRange',
+        );
       }
-      record('⑤ token满男主调save_summary总结', sumOk,
-          sumOk
-              ? null
-              : '摘要${summaries.length}条，带编号=$sumHasRange'
+      record(
+        '⑤ token满男主调save_summary总结',
+        sumOk,
+        sumOk
+            ? null
+            : '摘要${summaries.length}条，带编号=$sumHasRange'
                   '（诊断:预算=${ctx.topicBudgetChars(testPid, modelHint: 'mock-1')}'
                   '字 原文=${ctx.debugRawLength(testPid)}字 '
                   'stateful=${svc.assembleDecision(testPid, toolRound: false).stateful}'
                   '——摘要没编号=走了文本兜底，男主没调 save_summary；'
-                  '日志看「上下文管理」有无"✂️ 原文攒够了"');
-      note('📋 ⑤ ${sumOk ? '✓' : '✗'} 摘要 ${summaries.length} 条'
-          ' 带编号=$sumHasRange');
+                  '日志看「上下文管理」有无"✂️ 原文攒够了"',
+      );
+      note(
+        '📋 ⑤ ${sumOk ? '✓' : '✗'} 摘要 ${summaries.length} 条'
+        ' 带编号=$sumHasRange',
+      );
 
       // ── ⑥ 切 AI E（无记忆·工具关）：验证总结后上下文不丢 ──
       await sw('builtin-mock-e', '⑥/⑧ AI E 无记忆·工具关 — 验证总结后不失忆');
       note('📋 ⑥ 切 AI E：验证总结后上下文不丢');
       await say('刚才我们聊了好多，你能总结一下都聊了什么吗？');
       final histE = ctx.buildHistoryMessages(testPid, modelHint: 'mock-1');
-      final hasSummary = histE.any((m) =>
-          m.role == 'system' && m.content.contains('男主摘要'));
+      final hasSummary = histE.any(
+        (m) => m.role == 'system' && m.content.contains('男主摘要'),
+      );
       final eOk = hasSummary;
-      record('⑥ 总结后切换带摘要', eOk,
-          eOk ? null : '切 E 后历史里没有【男主摘要】——总结丢了，男主失忆');
+      record('⑥ 总结后切换带摘要', eOk, eOk ? null : '切 E 后历史里没有【男主摘要】——总结丢了，男主失忆');
       note('📋 ⑥ ${eOk ? '✓' : '✗'} 含摘要=${hasSummary}');
 
       // ── ⑦ 切回 AI C（有记忆1h）：1h 快到之前 → 男主写三类存档 ──
@@ -2332,15 +2613,25 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       await sw('builtin-mock-c', '⑦/⑧ AI C 有记忆1h — 模拟空闲40分钟→沉淀');
       note('📋 ⑦ 切 AI C：模拟 40 分钟没聊 → 男主应写三类存档（摘要+恢复包）');
       await say('我们约好了周末去爬山，别忘啦。');
-      ctx.debugSetLastChatAt(testPid, DateTime.now().subtract(const Duration(minutes: 40)));
+      ctx.debugSetLastChatAt(
+        testPid,
+        DateTime.now().subtract(const Duration(minutes: 40)),
+      );
       await say('在吗？刚想到爬山的事，周末天气怎么样都去对吧？');
       final recovery7 = ctx.recoveryFor(testPid);
       final sum7 = ctx.summariesFor(testPid);
       final gOk = recovery7 != null && recovery7.isNotEmpty && sum7.isNotEmpty;
-      record('⑦ 空闲过半触发沉淀（恢复包+摘要）', gOk,
-          gOk ? null : '恢复包=${recovery7 == null ? '无' : '有'} 摘要=${sum7.length}条——'
-              '没触发沉淀。日志看「上下文管理」有没有"📝 空闲超时…趁 AI 还记得"');
-      note('📋 ⑦ ${gOk ? '✓' : '✗'} 恢复包=${recovery7 == null ? '无' : '有'} 摘要=${sum7.length}条');
+      record(
+        '⑦ 空闲过半触发沉淀（恢复包+摘要）',
+        gOk,
+        gOk
+            ? null
+            : '恢复包=${recovery7 == null ? '无' : '有'} 摘要=${sum7.length}条——'
+                  '没触发沉淀。日志看「上下文管理」有没有"📝 空闲超时…趁 AI 还记得"',
+      );
+      note(
+        '📋 ⑦ ${gOk ? '✓' : '✗'} 恢复包=${recovery7 == null ? '无' : '有'} 摘要=${sum7.length}条',
+      );
 
       // ── ⑧ 模拟超过 1h：下次聊 → 带恢复包+摘要接上 ──
       // 8-04 21:5x 修：assembleDecision 要在 say 前读（say 里 feed 会把
@@ -2348,79 +2639,117 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 看 say 前，组装结果看 say 后（恢复包在内存，与 lastChat 无关）
       await sw('builtin-mock-c', '⑧/⑧ 模拟超时1h → 带恢复包接上');
       note('📋 ⑧ 模拟超过 1 小时没聊 → 应判空闲超时，全量带恢复包');
-      ctx.debugSetLastChatAt(testPid, DateTime.now().subtract(const Duration(hours: 2)));
+      ctx.debugSetLastChatAt(
+        testPid,
+        DateTime.now().subtract(const Duration(hours: 2)),
+      );
       final dPre = svc.assembleDecision(testPid, toolRound: false);
       await say('我回来了，我们继续聊吧。');
       final histRec = ctx.buildHistoryMessages(testPid, modelHint: 'mock-1');
-      final hasRec = histRec.any((m) =>
-          m.role == 'system' && m.content.contains('恢复包'));
+      final hasRec = histRec.any(
+        (m) => m.role == 'system' && m.content.contains('恢复包'),
+      );
       final hOk = dPre.idleExpired && dPre.needRecover && hasRec;
-      record('⑧ 超时后带恢复包接上', hOk,
-          hOk ? null : '决策(idleExpired=${dPre.idleExpired} '
-              'needRecover=${dPre.needRecover}) 含恢复包=$hasRec——'
-              '超时后没带恢复包，男主失忆');
-      note('📋 ⑧ ${hOk ? '✓' : '✗'} idleExpired=${dPre.idleExpired} 含恢复包=$hasRec');
+      record(
+        '⑧ 超时后带恢复包接上',
+        hOk,
+        hOk
+            ? null
+            : '决策(idleExpired=${dPre.idleExpired} '
+                  'needRecover=${dPre.needRecover}) 含恢复包=$hasRec——'
+                  '超时后没带恢复包，男主失忆',
+      );
+      note(
+        '📋 ⑧ ${hOk ? '✓' : '✗'} idleExpired=${dPre.idleExpired} 含恢复包=$hasRec',
+      );
 
       // ── ⑨-⑫ 设定功能（8-07 14:12 用户：剧本覆盖设定段落化+多轮弹窗）──
       // 验收前：给测试空间写固定测试设定（段落化，断言用）
-      await SettingVersionStore.saveNewVersion(testPid, 'male',
-          '【身份】测试角色\n【喜好】测试喜好A', note: '验收剧本初始化');
+      await SettingVersionStore.saveNewVersion(
+        testPid,
+        'male',
+        '【身份】测试角色\n【喜好】测试喜好A',
+        note: '验收剧本初始化',
+      );
       // ⑨ 段落化 update：只改【喜好】段，其他段落不动（弹窗用户点同意）
       await sw('builtin-mock', '⑨/⑫ 设定·改一段（tag 定位）');
       _acceptingStep = '⑨/12 设定·只改【喜好】段（其他段不能动）';
-      note('📋 ⑨ 让男主用 update_setting 只改【喜好】段——弹窗弹出后点「同意并应用」');
-      await say('用 update_setting 工具，把男主设定里的【喜好】段改成"测试喜好B"，'
-          '只改这一段，别动其他段落。');
+      note('📋 ⑨ 让男主用 update_setting 只改【喜好】段——弹窗点「就用这版」');
+      await say(
+        '用 update_setting 工具，把男主设定里的【喜好】段改成"测试喜好B"，'
+        '只改这一段，别动其他段落。',
+      );
       final book9 = await SettingVersionStore.load(testPid);
       final male9 = book9.currentMale;
-      final i9 = male9.contains('测试喜好B') &&
+      final i9 =
+          male9.contains('测试喜好B') &&
           male9.contains('【身份】测试角色') &&
           !male9.contains('测试喜好A');
-      record('⑨ 设定update只改目标段', i9,
-          i9 ? null : '当前男主设定：$male9——段落没精准替换或误动了其他段');
-      note('📋 ⑨ ${i9 ? '✓' : '✗'} 喜好段已替换=${male9.contains('测试喜好B')}'
-          ' 身份段未动=${male9.contains('【身份】测试角色')}');
+      record(
+        '⑨ 设定update只改目标段',
+        i9,
+        i9 ? null : '当前男主设定：$male9——段落没精准替换或误动了其他段',
+      );
+      note(
+        '📋 ⑨ ${i9 ? '✓' : '✗'} 喜好段已替换=${male9.contains('测试喜好B')}'
+        ' 身份段未动=${male9.contains('【身份】测试角色')}',
+      );
 
       // ⑩ 段落化 add：新增一段
       await sw('builtin-mock', '⑩/⑫ 设定·新增一段');
       _acceptingStep = '⑩/12 设定·新增【测试段】';
-      note('📋 ⑩ 让男主用 update_setting 新增【测试段】——弹窗点「同意并应用」');
+      note('📋 ⑩ 让男主用 update_setting 新增【测试段】——弹窗点「就用这版」');
       await say('再用 update_setting 新增一段【测试段】，内容写"验收新增"，别动其他段落。');
       final book10 = await SettingVersionStore.load(testPid);
       final i10 = book10.currentMale.contains('【测试段】验收新增');
-      record('⑩ 设定add新增段', i10,
-          i10 ? null : '当前男主设定：${book10.currentMale}——新增段没成功');
+      record(
+        '⑩ 设定add新增段',
+        i10,
+        i10 ? null : '当前男主设定：${book10.currentMale}——新增段没成功',
+      );
       note('📋 ⑩ ${i10 ? '✓' : '✗'} 新增段=${i10}');
 
       // ⑪ 段落化 delete：删掉新增段
       await sw('builtin-mock', '⑪/⑫ 设定·删一段');
       _acceptingStep = '⑪/12 设定·删除【测试段】';
-      note('📋 ⑪ 让男主用 update_setting 删掉【测试段】——弹窗点「同意并应用」');
+      note('📋 ⑪ 让男主用 update_setting 删掉【测试段】——弹窗点「就用这版」');
       await say('再用 update_setting 把【测试段】删掉。');
       final book11 = await SettingVersionStore.load(testPid);
       final deleted = !book11.currentMale.contains('【测试段】');
       // ⑪ 依赖⑩：⑩ 没加成（add 失败）时"删不掉"不算 ⑪ 的锅，标记依赖
       final i11 = i10 ? deleted : true;
-      record('⑪ 设定delete删段', i11,
-          i11
-              ? (i10 ? null : '⑩ add 失败，⑪ 无段可删（依赖⑩，跳过判定）')
-              : '当前男主设定：${book11.currentMale}——删除段没成功');
-      note('📋 ⑪ ${i11 ? '✓' : '✗'} 测试段已删=${deleted}'
-          '${i10 ? '' : '（⑩失败，跳过判定）'}');
+      record(
+        '⑪ 设定delete删段',
+        i11,
+        i11
+            ? (i10 ? null : '⑩ add 失败，⑪ 无段可删（依赖⑩，跳过判定）')
+            : '当前男主设定：${book11.currentMale}——删除段没成功',
+      );
+      note(
+        '📋 ⑪ ${i11 ? '✓' : '✗'} 测试段已删=${deleted}'
+        '${i10 ? '' : '（⑩失败，跳过判定）'}',
+      );
 
       // ⑫ 多轮会话弹窗：弹窗里跟男主商量一轮再同意（用户手动：
       // 点「💬 发给他」写"改成测试喜好C" → 看男主回复自动填方案 → 同意）
       await sw('builtin-mock', '⑫/⑫ 设定·多轮会话弹窗');
       _acceptingStep = '⑫/12 设定·商量后改【喜好】为测试喜好C';
-      note('📋 ⑫ 改【喜好】——弹窗里先跟男主商量：点「💬 发给他」写'
-          '"改成测试喜好C吧"，看男主回复填进方案，再点「同意并应用」');
-      await say('用 update_setting 把【喜好】改成"测试喜好C"。'
-          '弹窗里我会先跟你商量，你正常回应我就行。',
-          waitLong: true);
+      note(
+        '📋 ⑫ 改【喜好】——弹窗里先跟男主商量：点「💬 发给他」写'
+        '"改成测试喜好C吧"，看男主回复填进方案，再点「就用这版」',
+      );
+      await say(
+        '用 update_setting 把【喜好】改成"测试喜好C"。'
+        '弹窗里我会先跟你商量，你正常回应我就行。',
+        waitLong: true,
+      );
       final book12 = await SettingVersionStore.load(testPid);
       final i12 = book12.currentMale.contains('测试喜好C');
-      record('⑫ 多轮会话后生效', i12,
-          i12 ? null : '当前男主设定：${book12.currentMale}——多轮商量后没生效');
+      record(
+        '⑫ 多轮会话后生效',
+        i12,
+        i12 ? null : '当前男主设定：${book12.currentMale}——多轮商量后没生效',
+      );
       note('📋 ⑫ ${i12 ? '✓' : '✗'} 商量后生效=${i12}');
 
       final pass = results.where((r) => r.ok).length;
@@ -2428,8 +2757,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       if (mounted) {
         setState(() => _acceptanceNote = '✅ 验收完成：$pass/$total 通过');
       }
-      DebugLogger.log('AI验收',
-          '■ 验收完成 $pass/$total：${results.map((r) => '${r.label}=${r.ok ? "✓" : "✗"}').join('；')}');
+      DebugLogger.log(
+        'AI验收',
+        '■ 验收完成 $pass/$total：${results.map((r) => '${r.label}=${r.ok ? "✓" : "✗"}').join('；')}',
+      );
       // 结束弹窗：哪里错了一目了然，可一键复制发给龙虾（8-04 21:2x 用户）
       if (mounted) {
         await _showAcceptanceResult(results);
@@ -2459,7 +2790,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   /// 验收结果弹窗：每步 ✓/✗ + 失败原因 + 一键复制（发给龙虾排查）
   Future<void> _showAcceptanceResult(
-      List<({String label, bool ok, String? reason})> results) async {
+    List<({String label, bool ok, String? reason})> results,
+  ) async {
     final pass = results.where((r) => r.ok).length;
     final total = results.length;
     final sb = StringBuffer('🚀 一键验收：$pass/$total 通过\n\n');
@@ -2482,10 +2814,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           TextButton.icon(
             onPressed: () {
               Clipboard.setData(ClipboardData(text: text));
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('已复制，粘贴发给龙虾即可'),
-                duration: Duration(seconds: 2),
-              ));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('已复制，粘贴发给龙虾即可'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
               Navigator.pop(ctx);
             },
             icon: const Icon(Icons.copy, size: 16),
@@ -2493,7 +2827,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFC896B4)),
+              backgroundColor: const Color(0xFFC896B4),
+            ),
             onPressed: () => Navigator.pop(ctx),
             child: const Text('关闭'),
           ),
@@ -2527,7 +2862,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   /// 工具执行完成/失败气泡（用户 8-03 01:57）：执行完必须给用户明确反馈。
   void _appendToolResultBubble(String toolName, _ToolResult r) {
-    _appendToolBubble('${r.ok ? '✅' : '❌'} $toolName ${r.ok ? '完成' : '失败'}：${r.text}');
+    _appendToolBubble(
+      '${r.ok ? '✅' : '❌'} $toolName ${r.ok ? '完成' : '失败'}：${r.text}',
+    );
   }
 
   /// 处理男主指令（#记录/#查记忆/#定时/#帮助/#model）→ 审批弹窗 → 反馈
@@ -2535,8 +2872,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     try {
       switch (cmd.type) {
         case ButlerCommandParser.cmdTimer:
-          _pendingFeedback =
-              '（用户说定时功能还在路上，先记下这个需求：${cmd.arg}）';
+          _pendingFeedback = '（用户说定时功能还在路上，先记下这个需求：${cmd.arg}）';
         case ButlerCommandParser.cmdHelp:
           _pendingFeedback = ButlerCommandParser.helpText;
         case ButlerCommandParser.cmdModel:
@@ -2544,8 +2880,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
           if (m != null) {
             final w = int.tryParse(m.group(2)!);
             if (w != null && w > 0) {
-              ContextTracker.instance
-                  .setWindow(_state.personaId ?? '', w);
+              ContextTracker.instance.setWindow(_state.personaId ?? '', w);
             }
           }
       }
@@ -2558,8 +2893,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   /// 8-03 19:1x（用户要求：调工具要确认）：原生工具轮通用确认弹窗。
   /// 有副作用/涉及用户隐私的工具执行前让用户点头（list_tools 无副作用不弹）。
   /// 用户拒绝 → 返回 false → 工具结果里带"用户拒绝"，男主自然应对，不卡流程。
-  Future<bool> _approveToolCall(String toolName, String description,
-      {String? personaId, String? toolKey}) async {
+  Future<bool> _approveToolCall(
+    String toolName,
+    String description, {
+    String? personaId,
+    String? toolKey,
+  }) async {
     if (!mounted) return true; // 页面已关闭不阻塞工具
     // 8-06 00:58 用户：工具免审批——用户批准过的工具直接执行（男主申请→用户同意）
     // toolKey = 工具英文名（与 schema/配置 key 对齐）；toolName = 弹窗显示名
@@ -2586,11 +2925,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('不允许', style: TextStyle(color: Color(0xFF8A7A80))),
+            child: const Text(
+              '不允许',
+              style: TextStyle(color: Color(0xFF8A7A80)),
+            ),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFC896B4)),
+              backgroundColor: const Color(0xFFC896B4),
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('允许'),
           ),
@@ -2627,7 +2970,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             child: const Text('不记', style: TextStyle(color: Color(0xFF8A7A80))),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFC896B4),
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('让他记住'),
           ),
@@ -2651,12 +2996,10 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         ]);
       }
       DebugLogger.log('指令模块', '✅ 用户确认记录: [$category] $body');
-      _pendingFeedback =
-          '（用户确认了你的记录请求：「$body」（$category），已经记下了）';
+      _pendingFeedback = '（用户确认了你的记录请求：「$body」（$category），已经记下了）';
     } else {
       DebugLogger.log('指令模块', '⛔ 用户拒绝记录: $body');
-      _pendingFeedback =
-          '（用户拒绝了你的记录请求：「$body」，你可以自然地问问为什么）';
+      _pendingFeedback = '（用户拒绝了你的记录请求：「$body」，你可以自然地问问为什么）';
     }
   }
 
@@ -2686,7 +3029,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         await _approveRecall('$query（$total条）');
       } else {
         // 多：等男主说想看几条
-        _pendingQuery = (query: query, category: isCategory ? query : '', total: total);
+        _pendingQuery = (
+          query: query,
+          category: isCategory ? query : '',
+          total: total,
+        );
         _pendingFeedback =
             '（查到了 $total 条关于「$query」的记忆。请告诉管家你想看几条，比如"看前5条"或"最近3条"；说"全部"就是都看）';
         _appendToolBubble('查到了 $total 条，你想看几条？');
@@ -2708,7 +3055,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     _pendingRecall = pq.query;
     _pendingRecallCategory = pq.category.isEmpty ? null : pq.category;
     _pendingRecallLimit = limit;
-    await _approveRecall('${pq.query}（${pq.total}条，${want == -1 ? '全部' : '看$limit条'}）');
+    await _approveRecall(
+      '${pq.query}（${pq.total}条，${want == -1 ? '全部' : '看$limit条'}）',
+    );
   }
 
   /// 查记忆授权：男主申请调记忆 → 用户允许/拒绝 → 反馈
@@ -2721,18 +3070,21 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('🔍 男主想翻你的记忆'),
         content: Text(
-          query.isEmpty
-              ? '他想看看你们之间的记忆，允许吗？'
-              : '他想查关于「$query」的记忆，允许吗？',
+          query.isEmpty ? '他想看看你们之间的记忆，允许吗？' : '他想查关于「$query」的记忆，允许吗？',
           style: const TextStyle(fontSize: 14, height: 1.5),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('不允许', style: TextStyle(color: Color(0xFF8A7A80))),
+            child: const Text(
+              '不允许',
+              style: TextStyle(color: Color(0xFF8A7A80)),
+            ),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFC896B4),
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('允许'),
           ),
@@ -2754,50 +3106,52 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   /// 工具执行：record_relation（8-07 01:13 用户：统一关系记录格式
-/// 谁→谁→什么＋原话＋时间＋归属，情绪/记忆/规律都这么记，织成关系网）
-Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
-  final subject = args['subject']?.toString().trim() ?? '';
-  final predicate = args['predicate']?.toString().trim() ?? '';
-  final object = args['object']?.toString().trim() ?? '';
-  final quote = args['quote']?.toString().trim() ?? '';
-  final time = args['time']?.toString().trim();
-  var category = args['category']?.toString().trim() ?? '';
-  if (subject.isEmpty || predicate.isEmpty || object.isEmpty) {
-    return const _ToolResult(
-        false, '关系不完整（需要 谁→谁→什么），请补齐再记');
+  /// 谁→谁→什么＋原话＋时间＋归属，情绪/记忆/规律都这么记，织成关系网）
+  Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
+    final subject = args['subject']?.toString().trim() ?? '';
+    final predicate = args['predicate']?.toString().trim() ?? '';
+    final object = args['object']?.toString().trim() ?? '';
+    final quote = args['quote']?.toString().trim() ?? '';
+    final time = args['time']?.toString().trim();
+    var category = args['category']?.toString().trim() ?? '';
+    if (subject.isEmpty || predicate.isEmpty || object.isEmpty) {
+      return const _ToolResult(false, '关系不完整（需要 谁→谁→什么），请补齐再记');
+    }
+    if (quote.isEmpty) {
+      return const _ToolResult(false, '缺少原话（quote），记录要带上她的原话');
+    }
+    if (category.isEmpty ||
+        !const ['记忆', '情绪', '规律', '行为'].contains(category)) {
+      category = '记忆';
+    }
+    try {
+      await StorageRegistry.instance.relations.save(
+        RelationRecord(
+          id: 'rel_${DateTime.now().millisecondsSinceEpoch}',
+          subject: subject,
+          predicate: predicate,
+          object: object,
+          quote: quote,
+          time: (time == null || time.isEmpty) ? null : time,
+          characterId: _state.personaId, // 归属当前男主；null=共同
+          category: category,
+        ),
+      );
+      // 通知关系图刷新（但ler_page 挂的是自己页面实例，需要全局通道）
+      RelationChangeNotifier.instance.notify();
+      DebugLogger.log('指令模块', '✅ 关系记录: $subject→$predicate→$object（$category）');
+      return _ToolResult(
+        true,
+        '已记关系：$subject → $predicate → $object'
+        '${time == null || time.isEmpty ? '' : '（$time）'}［$category］',
+      );
+    } catch (e) {
+      DebugLogger.log('指令模块', '⛔ 关系记录失败: $e');
+      return _ToolResult(false, '关系记录失败：$e');
+    }
   }
-  if (quote.isEmpty) {
-    return const _ToolResult(false, '缺少原话（quote），记录要带上她的原话');
-  }
-  if (category.isEmpty || !const ['记忆', '情绪', '规律', '行为'].contains(category)) {
-    category = '记忆';
-  }
-  try {
-    await StorageRegistry.instance.relations.save(RelationRecord(
-      id: 'rel_${DateTime.now().millisecondsSinceEpoch}',
-      subject: subject,
-      predicate: predicate,
-      object: object,
-      quote: quote,
-      time: (time == null || time.isEmpty) ? null : time,
-      characterId: _state.personaId, // 归属当前男主；null=共同
-      category: category,
-    ));
-    // 通知关系图刷新（但ler_page 挂的是自己页面实例，需要全局通道）
-    RelationChangeNotifier.instance.notify();
-    DebugLogger.log('指令模块', '✅ 关系记录: $subject→$predicate→$object（$category）');
-    return _ToolResult(
-      true,
-      '已记关系：$subject → $predicate → $object'
-      '${time == null || time.isEmpty ? '' : '（$time）'}［$category］',
-    );
-  } catch (e) {
-    DebugLogger.log('指令模块', '⛔ 关系记录失败: $e');
-    return _ToolResult(false, '关系记录失败：$e');
-  }
-}
 
-/// 工具执行：record_memory（弹窗确认 → 写记忆 → 返回结果给模型）
+  /// 工具执行：record_memory（弹窗确认 → 写记忆 → 返回结果给模型）
   Future<_ToolResult> _executeRecordTool(
     String category,
     String content, {
@@ -2814,7 +3168,9 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     }
     if (_chatSessionId != null) {
       // 8-03 06:41：男主写的完整句 + 关键词都落库
-      final parts = <String>['[${category.isEmpty ? '其他' : category}] $content'];
+      final parts = <String>[
+        '[${category.isEmpty ? '其他' : category}] $content',
+      ];
       if (keywords.isNotEmpty) parts.add('关键词：${keywords.join('、')}');
       await ChatDatabaseService.instance.insertMemoriesInTx([
         MemoryNode(
@@ -2827,7 +3183,10 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
           updatedAt: DateTime.now(),
         ),
       ]);
-      DebugLogger.log('指令模块', '✅ 工具记录确认: [${category.isEmpty ? '其他' : category}] $content');
+      DebugLogger.log(
+        '指令模块',
+        '✅ 工具记录确认: [${category.isEmpty ? '其他' : category}] $content',
+      );
       return _ToolResult(true, '已记录：[$category] $content');
     }
     DebugLogger.log('指令模块', '⛔ 工具记录失败: 会话未创建');
@@ -2864,8 +3223,10 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
         ? null
         : Duration(seconds: intervalSec.clamp(1, 300));
     final personaName = _state.personaName ?? '他';
-    _appendToolBubble('📬 男主弹了 ${messages.length} 条消息'
-        '${intervalSec == null ? '（自动间隔）' : '（间隔 ${intervalSec}s）'}');
+    _appendToolBubble(
+      '📬 男主弹了 ${messages.length} 条消息'
+      '${intervalSec == null ? '（自动间隔）' : '（间隔 ${intervalSec}s）'}',
+    );
     GlobalBannerService.instance.showBurst(
       title: personaName,
       messages: messages,
@@ -2888,13 +3249,21 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
           ),
         );
       }
-      DebugLogger.log('指令模块', '📬 notify_user：${messages.length} 条已注入上下文+落库（男主记得自己弹过什么）');
+      DebugLogger.log(
+        '指令模块',
+        '📬 notify_user：${messages.length} 条已注入上下文+落库（男主记得自己弹过什么）',
+      );
     }
-    DebugLogger.log('指令模块', '📬 notify_user：${messages.length} 条，间隔 ${intervalSec}s，${waitMin} 分钟后没回来就唤醒');
+    DebugLogger.log(
+      '指令模块',
+      '📬 notify_user：${messages.length} 条，间隔 ${intervalSec}s，${waitMin} 分钟后没回来就唤醒',
+    );
     // 8-06 21:26 用户：定时计划记进【定时任务】区（独立于便签，持久化）
     if (pid != null && pid.isNotEmpty) {
-      TimerPlanStore.add(pid,
-          '唤醒男主找她（${messages.length} 条消息，${waitMin} 分钟内没回来）');
+      TimerPlanStore.add(
+        pid,
+        '唤醒男主找她（${messages.length} 条消息，${waitMin} 分钟内没回来）',
+      );
     }
     // 超时唤醒：wait_minutes 内用户没回聊天页 → 管家唤醒男主再找用户
     _scheduleNotifyWakeUp(waitMin);
@@ -2904,9 +3273,12 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
   /// notify_user 超时唤醒：wait_minutes 后检查用户是否还在聊天页，
   /// 没在 → 管家唤醒男主（butlerWakeUp），男主再主动找用户。
   void _scheduleNotifyWakeUp(int waitMinutes) {
-    _scheduleWakeUp(waitMinutes, '她离开 $waitMinutes 分钟还没回来，'
-        '你再用 notify_user 弹消息叫她回来（或说一句想她的话）。'
-        '消息要自然、不催。');
+    _scheduleWakeUp(
+      waitMinutes,
+      '她离开 $waitMinutes 分钟还没回来，'
+      '你再用 notify_user 弹消息叫她回来（或说一句想她的话）。'
+      '消息要自然、不催。',
+    );
   }
 
   /// 工具执行：recall_memory（检索 → 弹窗授权 → 返回记忆给模型）
@@ -2919,7 +3291,8 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
       }
       final sessionId = _chatSessionId;
       if (sessionId == null) return const _ToolResult(false, '暂无记忆可查');
-      final isCategory = category.isNotEmpty &&
+      final isCategory =
+          category.isNotEmpty &&
           ButlerCommandParser.allCategories.contains(category);
       final memories = await ChatMemoryService.instance.searchMemories(
         sessionId,
@@ -2927,7 +3300,10 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
         keyword: isCategory ? null : (query.isEmpty ? category : query),
       );
       if (memories.isEmpty) {
-        return _ToolResult(false, '没有找到关于「${query.isEmpty ? category : query}」的记忆');
+        return _ToolResult(
+          false,
+          '没有找到关于「${query.isEmpty ? category : query}」的记忆',
+        );
       }
       if (!mounted) return const _ToolResult(false, '用户不在，查询未授权');
       // 8-03 22:0x（与记录双弹窗同批）：工具轮 502 行 _approveToolCall
@@ -2938,11 +3314,13 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
       final maskEnabled = butler != null && butler.config.maskLayerEnabled;
       final lines = memories
           .take(5)
-          .map((m) => m.content
-              .replaceFirst(RegExp(r'^\[(喜好|约定|日常|事实|其他)\]'), ''))
-          .map((c) => maskEnabled
-              ? butler.maskEngine.maskRealNames(c, sessionId)
-              : c)
+          .map(
+            (m) => m.content.replaceFirst(RegExp(r'^\[(喜好|约定|日常|事实|其他)\]'), ''),
+          )
+          .map(
+            (c) =>
+                maskEnabled ? butler.maskEngine.maskRealNames(c, sessionId) : c,
+          )
           .toList();
       return _ToolResult(true, '查到的记忆：\n- ${lines.join('\n- ')}');
     } catch (e) {
@@ -2953,7 +3331,10 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
 
   /// 工具执行：save_identity_memory（男主写代号人物记忆 → 待确认区，用户确认才生效）
   /// 37批：原生 function calling 替代 #A# 文本协议（DeepSeek 对文本协议不可靠）
-  Future<_ToolResult> _executeSaveIdentityMemoryTool(String code, String content) async {
+  Future<_ToolResult> _executeSaveIdentityMemoryTool(
+    String code,
+    String content,
+  ) async {
     if (code.trim().isEmpty || content.trim().isEmpty) {
       return const _ToolResult(false, '参数不完整：需要代号（code）和内容（content）');
     }
@@ -2978,8 +3359,11 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
       }
     }
     if (identityId == null) {
-      return _ToolResult(false, '无法识别代号「$code」——它不是当前对话里的代号。'
-          '不要追问它代表谁，当作没记住继续聊天即可。');
+      return _ToolResult(
+        false,
+        '无法识别代号「$code」——它不是当前对话里的代号。'
+        '不要追问它代表谁，当作没记住继续聊天即可。',
+      );
     }
     final String targetId = identityId!;
     await butler.maskEngine.identityStore?.addIdentityMemory(
@@ -2987,8 +3371,11 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
       content: content.trim(),
     );
     DebugLogger.log('假面层', '✅ 工具保存代号记忆: $code → $content');
-    return _ToolResult(true, '已把「$code」的事记下，等用户确认后生效。'
-        '确认前不要当作已记住的信息使用。');
+    return _ToolResult(
+      true,
+      '已把「$code」的事记下，等用户确认后生效。'
+      '确认前不要当作已记住的信息使用。',
+    );
   }
 
   /// 8-06 20:53 用户报 bug：男主反复 list_tools 没有工具记忆
@@ -3023,8 +3410,7 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
           return _ToolResult(false, '没有「$name」这个工具');
         }
         await FrequentToolsStore.add(pid, name);
-        return _ToolResult(true,
-            '已加入常用表：$name（之后每轮都会出现在【你常用的工具】）');
+        return _ToolResult(true, '已加入常用表：$name（之后每轮都会出现在【你常用的工具】）');
       }
       final ok = await FrequentToolsStore.remove(pid, name);
       return ok
@@ -3034,8 +3420,10 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     if (category.isNotEmpty) {
       final detail = ToolCatalog.categoryDetail(category);
       if (detail == null) {
-        return _ToolResult(false,
-            '没有「$category」这个分类（分类：${ToolCatalog.categories.keys.join('、')}）');
+        return _ToolResult(
+          false,
+          '没有「$category」这个分类（分类：${ToolCatalog.categories.keys.join('、')}）',
+        );
       }
       return _ToolResult(true, detail);
     }
@@ -3054,7 +3442,10 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     final personaId = _state.personaId ?? '';
     if (personaId.isEmpty) return const _ToolResult(false, '日记保存失败（缺少角色）');
     try {
-      await ChatDatabaseService.instance.saveDiaryEntry(personaId, content.trim());
+      await ChatDatabaseService.instance.saveDiaryEntry(
+        personaId,
+        content.trim(),
+      );
       DebugLogger.log('指令模块', '✅ 男主写日记（${content.length} 字）');
       return const _ToolResult(true, '已写进日记。以后想回忆这段，可以查日记。');
     } catch (e) {
@@ -3074,10 +3465,16 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
         limit: 8,
       );
       if (entries.isEmpty) {
-        return _ToolResult(false, '日记里没有找到关于「${keyword.isEmpty ? '最近' : keyword}」的记录。'
-            '不用勉强，自然继续聊天。');
+        return _ToolResult(
+          false,
+          '日记里没有找到关于「${keyword.isEmpty ? '最近' : keyword}」的记录。'
+          '不用勉强，自然继续聊天。',
+        );
       }
-      return _ToolResult(true, '日记里找到 ${entries.length} 条相关记录：\n- ${entries.join('\n- ')}');
+      return _ToolResult(
+        true,
+        '日记里找到 ${entries.length} 条相关记录：\n- ${entries.join('\n- ')}',
+      );
     } catch (e) {
       DebugLogger.log('指令模块', '✖ 查日记失败: $e');
       return const _ToolResult(false, '查日记出错了');
@@ -3088,7 +3485,9 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
   ///
   /// 8-06 00:58-01:00 用户：男主调申请工具 → 弹窗给用户「某某能力不需要审批」
   /// + 申请理由 → 用户同意/拒绝；男主可要求用户写原因 → 原因回复给男主。
-  Future<_ToolResult> _executeRequestPermission(Map<String, dynamic> args) async {
+  Future<_ToolResult> _executeRequestPermission(
+    Map<String, dynamic> args,
+  ) async {
     final personaId = _state.personaId ?? '';
     final toolName = args['tool_name']?.toString().trim() ?? '';
     if (toolName.isEmpty) {
@@ -3173,8 +3572,10 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
               ),
             ),
           ],
@@ -3185,7 +3586,9 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
             child: const Text('拒绝', style: TextStyle(color: Color(0xFF8A7A80))),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFC896B4),
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('同意'),
           ),
@@ -3246,8 +3649,10 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     final now = DateTime.now();
     final report = StringBuffer()
       ..writeln('🐛 Bug 报告')
-      ..writeln('时间：${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
-          '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}')
+      ..writeln(
+        '时间：${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
+      )
       ..writeln('问题：$desc');
     if (logs.lines.isNotEmpty) {
       report
@@ -3327,10 +3732,7 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
               Text(
                 '👆 报告可长按选中复制；也可以直接点下面按钮一键复制，'
                 '粘贴发给开发者（龙虾）修。',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: const Color(0xFF8A7A80),
-                ),
+                style: TextStyle(fontSize: 11, color: const Color(0xFF8A7A80)),
               ),
             ],
           ),
@@ -3338,10 +3740,15 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('知道了', style: TextStyle(color: Color(0xFF8A7A80))),
+            child: const Text(
+              '知道了',
+              style: TextStyle(color: Color(0xFF8A7A80)),
+            ),
           ),
           FilledButton.icon(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFC896B4),
+            ),
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: report));
               if (ctx.mounted) {
@@ -3387,7 +3794,8 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     final pid = _state.personaId ?? '';
     final personaName = _state.personaName ?? '他';
     _appendToolBubble(
-        '⏱ 男主发来互动卡片：$title${minutes != null ? '（$minutes 分钟）' : ''}');
+      '⏱ 男主发来互动卡片：$title${minutes != null ? '（$minutes 分钟）' : ''}',
+    );
     GlobalTimerCardService.instance.showCard(
       title: title,
       minutes: minutes,
@@ -3430,7 +3838,8 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
         }
         // 到期 → 系统给男主发判断指令（8-06 13:59 用户）：
         // 男主自己判断延期 / 撤销换一个，用 manage_task 操作
-        final expireTxt = '【系统】卡片「$title」时间到了，她还没回应/没完成。'
+        final expireTxt =
+            '【系统】卡片「$title」时间到了，她还没回应/没完成。'
             '你来判断：要不要延期（manage_task extend）、'
             '还是撤销换一个方式（manage_task cancel）？'
             '决定好了用 manage_task 处理，卡片和任务列表会同步。';
@@ -3450,7 +3859,8 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
       },
       onRequest: (reason) async {
         // 她提交了申请调整 → 进上下文+落库，男主自己判断（manage_task 回应）
-        final requestTxt = '她申请调整任务「$title」：$reason'
+        final requestTxt =
+            '她申请调整任务「$title」：$reason'
             '——你判断：撤销（manage_task cancel）/ 调整（extend 或 edit_title）/ '
             '拒绝（manage_task reject 并给她回复）。';
         DebugLogger.log('指令模块', '💬 任务申请：$requestTxt');
@@ -3476,16 +3886,19 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
       },
       onOpenList: () {
         if (!mounted) return;
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const TaskListPage()),
-        );
+        Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => const TaskListPage()));
       },
     );
-    return _ToolResult(true, '已发出互动卡片：$title'
-        '${minutes != null ? '（$minutes 分钟）' : '（无倒计时）'}'
-        '${category.isEmpty ? '' : '【分类：$category】'}'
-        '${allowRequest ? '（开放了申请调整入口）' : ''}'
-        '${options.isEmpty ? '（没填选项）' : '（含 ${options.length} 个选项）'}');
+    return _ToolResult(
+      true,
+      '已发出互动卡片：$title'
+      '${minutes != null ? '（$minutes 分钟）' : '（无倒计时）'}'
+      '${category.isEmpty ? '' : '【分类：$category】'}'
+      '${allowRequest ? '（开放了申请调整入口）' : ''}'
+      '${options.isEmpty ? '（没填选项）' : '（含 ${options.length} 个选项）'}',
+    );
   }
 
   /// 工具执行：manage_task（男主撤销/调整/回应申请）
@@ -3583,16 +3996,20 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     final action = ['update', 'delete', 'add', 'replace'].contains(actionRaw)
         ? actionRaw
         : 'update';
-    final tag = (args['tag']?.toString().trim() ?? '').replaceAll(RegExp(r'[【】]'), '');
+    final tag = (args['tag']?.toString().trim() ?? '').replaceAll(
+      RegExp(r'[【】]'),
+      '',
+    );
     final content = args['content']?.toString().trim() ?? '';
     final reason = args['reason']?.toString().trim() ?? '';
     final typeName = type == 'user' ? '用户设定' : '男主设定';
 
     if (action != 'delete' && content.isEmpty) {
       return _ToolResult(
-          false,
-          '更新设定失败：没写新内容'
-          '${action == 'replace' ? '（replace 要写完整全文）' : '（update/add 要写这一段的新内容）'}');
+        false,
+        '更新设定失败：没写新内容'
+        '${action == 'replace' ? '（replace 要写完整全文）' : '（update/add 要写这一段的新内容）'}',
+      );
     }
 
     // 读当前设定 → 段落操作（8-07：测试模式下读测试空间副本）
@@ -3614,16 +4031,17 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
           return const _ToolResult(false, '新增段落要写 tag（如 喜好）');
         }
         if (idx >= 0) {
-          return _ToolResult(
-              false, '【$tag】已经存在了，要改它用 action=update');
+          return _ToolResult(false, '【$tag】已经存在了，要改它用 action=update');
         }
         sections.add((tag: tag, body: content));
         newText = _sectionsToText(sections);
         opDesc = '新增段落【$tag】${reason.isEmpty ? '' : '：$reason'}';
       } else if (action == 'delete') {
         if (idx < 0) {
-          return _ToolResult(false,
-              '没找到【$tag】段落。当前段落：\n${_sectionsOutline(sections)}');
+          return _ToolResult(
+            false,
+            '没找到【$tag】段落。当前段落：\n${_sectionsOutline(sections)}',
+          );
         }
         final removed = sections.removeAt(idx);
         newText = _sectionsToText(sections);
@@ -3631,16 +4049,19 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
       } else {
         // update
         if (idx < 0) {
-          return _ToolResult(false,
-              '没找到【$tag】段落。当前段落：\n${_sectionsOutline(sections)}'
-              '（想整体整理用 action=replace；想加新段用 action=add）');
+          return _ToolResult(
+            false,
+            '没找到【$tag】段落。当前段落：\n${_sectionsOutline(sections)}'
+            '（想整体整理用 action=replace；想加新段用 action=add）',
+          );
         }
         final old = sections[idx].body;
         sections[idx] = (tag: tag, body: content);
         newText = _sectionsToText(sections);
         final brief = (String t) =>
             t.length > 30 ? '${t.substring(0, 30)}…' : t;
-        opDesc = '修改【$tag】：${brief(old)} → ${brief(content)}'
+        opDesc =
+            '修改【$tag】：${brief(old)} → ${brief(content)}'
             '${reason.isEmpty ? '' : '（$reason）'}';
       }
     }
@@ -3666,16 +4087,21 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
 
     // 批准 → 存为新版本 + 变更日志
     final finalContent = result.content.trim();
-    await SettingVersionStore.saveNewVersion(settingPid, type, finalContent,
-        note: reason.isEmpty ? null : reason);
+    await SettingVersionStore.saveNewVersion(
+      settingPid,
+      type,
+      finalContent,
+      note: reason.isEmpty ? null : reason,
+    );
     await SettingVersionStore.addChangelog(settingPid, type, opDesc);
     DebugLogger.log('指令模块', '📚 $typeName 已更新（$opDesc）');
     _appendToolBubble('📚 男主更新了$typeName：$opDesc（旧版已存进右页历史，可一键恢复）');
     return _ToolResult(
-        true,
-        '$typeName 已更新生效（$opDesc）。新版本已存好，旧版在右页历史里'
-        '（她可一键恢复）。当前段落结构：\n'
-        '${_sectionsOutline(_parseSettingSections(finalContent))}');
+      true,
+      '$typeName 已更新生效（$opDesc）。新版本已存好，旧版在右页历史里'
+      '（她可一键恢复）。当前段落结构：\n'
+      '${_sectionsOutline(_parseSettingSections(finalContent))}',
+    );
   }
 
   // ── 设定段落工具（8-07 用户：段落化+标签，男主精准修改省 token）──
@@ -3714,10 +4140,12 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     final buf = StringBuffer();
     for (var i = 0; i < sections.length; i++) {
       final sec = sections[i];
-      final preview =
-          sec.body.length > 20 ? '${sec.body.substring(0, 20)}…' : sec.body;
+      final preview = sec.body.length > 20
+          ? '${sec.body.substring(0, 20)}…'
+          : sec.body;
       buf.writeln(
-          '${i + 1}.${sec.tag.isEmpty ? '【未分段】' : '【${sec.tag}】'}$preview');
+        '${i + 1}.${sec.tag.isEmpty ? '【未分段】' : '【${sec.tag}】'}$preview',
+      );
     }
     return buf.toString().trim();
   }
@@ -3731,7 +4159,7 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
 
   /// 设定更新审批弹窗（8-06 18:12 用户：弹窗内迭代，不进聊天框）
   Future<({bool approved, String content, String feedback})?>
-      _showSettingApprovalDialog({
+  _showSettingApprovalDialog({
     required String typeName,
     required String content,
     required String reason,
@@ -3741,10 +4169,13 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     FocusManager.instance.primaryFocus?.unfocus();
     final ctrl = TextEditingController(text: content);
     final fbCtrl = TextEditingController();
-    var maleText =
-        reason.isEmpty ? '我想更新$typeName，你看看这样行不行。' : reason;
+    var maleText = reason.isEmpty ? '我想更新$typeName，你看看这样行不行。' : reason;
     var round = 1;
     var busy = false;
+    // 8-07 15:2x 用户：男主方案要打版本号，看得出改了几版、每版长啥样
+    // v1 = 男主最初方案；每次男主带【新方案】回复 → 追加新版本
+    final versions = <({int v, String text})>[(v: 1, text: content)];
+    var currentV = 1;
     // 会话记录（每轮：她说/男主说，给男主当上下文）
     final history = <String>[];
     final pid = _state.personaId ?? '';
@@ -3756,11 +4187,15 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setState) => AlertDialog(
           backgroundColor: const Color(0xFFFDF7F9),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           title: Text(
-              '📚 男主想更新$typeName'
-              '${testStep != null ? ' · 验收 $testStep' : ''}'
-              '${round > 1 ? '（第 $round 轮）' : ''}'),
+            '📚 男主想更新$typeName'
+            '${testStep != null ? ' · 验收 $testStep' : ''}'
+            ' · 方案 v$currentV/${versions.length}'
+            '${round > 1 ? '（第 $round 轮）' : ''}',
+          ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -3774,13 +4209,60 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    '💬 男主：$maleText',
+                    '💬 男主${round > 1 ? '（第 $round 轮）' : ''}：$maleText',
                     style: const TextStyle(fontSize: 13, height: 1.4),
                   ),
                 ),
                 const SizedBox(height: 10),
-                const Text('📄 新设定（你可以直接改，改完他下次看到）：',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80))),
+                // 方案版本区：男主出过几版一目了然，点版本号回看
+                if (versions.length > 1) ...[
+                  const Text(
+                    '📚 男主方案版本（点编号回看）：',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
+                  ),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 6,
+                    children: [
+                      for (final ver in versions)
+                        GestureDetector(
+                          onTap: () {
+                            ctrl.text = ver.text;
+                            setState(() => currentV = ver.v);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: currentV == ver.v
+                                  ? const Color(0xFFC896B4)
+                                  : const Color(0xFFF7EAF1),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              'v${ver.v}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: currentV == ver.v
+                                    ? Colors.white
+                                    : const Color(0xFF8A7A80),
+                                fontWeight: currentV == ver.v
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                const Text(
+                  '📄 设定全文（可以直接改；点「就用这版」= 按这个定案）：',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
+                ),
                 const SizedBox(height: 6),
                 TextField(
                   controller: ctrl,
@@ -3799,8 +4281,7 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
                   controller: fbCtrl,
                   maxLines: 2,
                   decoration: InputDecoration(
-                    hintText:
-                        '跟他说你的想法：哪里不对、想要什么…（说需求=还没定案）',
+                    hintText: '跟男主说：哪里不对、想要什么…他出下一版（说需求=还没定案）',
                     filled: true,
                     fillColor: Colors.white,
                     border: OutlineInputBorder(
@@ -3815,13 +4296,18 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2)),
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
                       SizedBox(width: 8),
-                      Text('男主正在回复…',
-                          style:
-                              TextStyle(fontSize: 12, color: Color(0xFF8A7A80))),
+                      Text(
+                        '男主正在回复…',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF8A7A80),
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -3831,8 +4317,10 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
           actions: [
             TextButton(
               onPressed: busy ? null : () => Navigator.pop(ctx, false),
-              child: const Text('放弃',
-                  style: TextStyle(color: Color(0xFF8A7A80))),
+              child: const Text(
+                '放弃',
+                style: TextStyle(color: Color(0xFF8A7A80)),
+              ),
             ),
             if (!busy)
               TextButton(
@@ -3858,12 +4346,10 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
                   // 或全文级（【新方案】+ 完整全文 → 整体替换）
                   final idx = reply.indexOf('【新方案】');
                   if (idx >= 0) {
-                    final rest =
-                        reply.substring(idx + '【新方案】'.length).trim();
+                    final rest = reply.substring(idx + '【新方案】'.length).trim();
                     if (rest.startsWith('【')) {
                       final secs = _parseSettingSections(ctrl.text);
-                      final m =
-                          RegExp(r'^【([^】]+)】([\s\S]*)').firstMatch(rest);
+                      final m = RegExp(r'^【([^】]+)】([\s\S]*)').firstMatch(rest);
                       if (m != null) {
                         final t = m.group(1)!.trim();
                         final b = m.group(2)!.trim();
@@ -3878,28 +4364,38 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
                     } else if (rest.isNotEmpty) {
                       ctrl.text = rest;
                     }
-                    ctrl.selection =
-                        TextSelection.collapsed(offset: ctrl.text.length);
+                    ctrl.selection = TextSelection.collapsed(
+                      offset: ctrl.text.length,
+                    );
                   }
                   setState(() {
                     maleText = reply;
                     round++;
                     busy = false;
+                    // 男主出了新方案 → 记为新版本（v2、v3…）
+                    final hasNew = versions.any((x) => x.text == ctrl.text);
+                    if (!hasNew && idx >= 0) {
+                      versions.add((v: versions.length + 1, text: ctrl.text));
+                      currentV = versions.length;
+                    }
                   });
                 },
-                child: const Text('💬 发给他',
-                    style: TextStyle(color: Color(0xFFC896B4))),
+                child: const Text(
+                  '💬 发给他·出下一版',
+                  style: TextStyle(color: Color(0xFFC896B4)),
+                ),
               ),
             if (!busy)
               FilledButton(
-                style:
-                    FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFC896B4),
+                ),
                 onPressed: () {
                   // 8-07 15:0x：防连点——先置 busy 再 pop，双击不会 pop 两次
                   setState(() => busy = true);
                   Navigator.pop(ctx, true);
                 },
-                child: const Text('✅ 同意并应用'),
+                child: const Text('✅ 就用这版'),
               ),
           ],
         ),
@@ -3907,11 +4403,7 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     );
     FocusManager.instance.primaryFocus?.unfocus();
     if (approved == null) return null;
-    return (
-      approved: approved,
-      content: ctrl.text,
-      feedback: fbCtrl.text,
-    );
+    return (approved: approved, content: ctrl.text, feedback: fbCtrl.text);
   }
 
   /// 设定会话内：男主回复（一次 AI 回合，可查只读信息；查了=流程没走完，继续）
@@ -3930,15 +4422,22 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
       final book = SettingVersionStore.cached(settingPid ?? personaId);
       final currentInfo = StringBuffer('当前男主设定：');
       currentInfo.writeln(
-          (book == null || book.currentMale.trim().isEmpty) ? '（空）' : book.currentMale);
+        (book == null || book.currentMale.trim().isEmpty)
+            ? '（空）'
+            : book.currentMale,
+      );
       currentInfo.write('当前用户设定：');
       currentInfo.write(
-          (book == null || book.currentUser.trim().isEmpty) ? '（空）' : book.currentUser);
+        (book == null || book.currentUser.trim().isEmpty)
+            ? '（空）'
+            : book.currentUser,
+      );
       final system = SystemTemplate.build(
         personaName: personaName,
         personaPrompt: personaPrompt,
         needsWindow: false,
-        taskState: '【设定修改会话】你在和她讨论「$typeName」的修改，还没定案。\n'
+        taskState:
+            '【设定修改会话】你在和她讨论「$typeName」的修改，还没定案。\n'
             '$currentInfo\n'
             '你刚才的方案：\n$draft\n'
             '你上一轮说：$maleLast\n'
@@ -3956,8 +4455,11 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
       ];
       // 只读工具白名单（男主在会话里查资料，不用她审批）
       final readOnly = AiChatService.butlerTools
-          .where((t) => _sessionReadOnlyTools.contains(
-              ((t['function'] as Map<String, dynamic>)['name'] as String?)))
+          .where(
+            (t) => _sessionReadOnlyTools.contains(
+              ((t['function'] as Map<String, dynamic>)['name'] as String?),
+            ),
+          )
           .toList();
       for (var i = 0; i < 3; i++) {
         final res = await AIProviderManager.instance.chat(
@@ -3995,12 +4497,16 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
 
   /// 设定会话内执行只读工具（免审批，用户在弹窗里全程可见）
   Future<String> _executeReadOnlySessionTool(
-      String name, Map<String, dynamic> args) async {
+    String name,
+    Map<String, dynamic> args,
+  ) async {
     _ToolResult r;
     switch (name) {
       case 'recall_memory':
         r = await _executeRecallTool(
-            args['query']?.toString() ?? '', args['category']?.toString() ?? '');
+          args['query']?.toString() ?? '',
+          args['category']?.toString() ?? '',
+        );
         break;
       case 'query_diary':
         r = await _executeQueryDiaryTool(args['keyword']?.toString() ?? '');
@@ -4022,7 +4528,8 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
 
   /// 工具执行：query_setting_history（男主查设定变更历史）
   Future<_ToolResult> _executeQuerySettingHistory(
-      Map<String, dynamic> args) async {
+    Map<String, dynamic> args,
+  ) async {
     final pid = _state.personaId ?? '';
     if (pid.isEmpty) return const _ToolResult(false, '查历史失败（缺少角色）');
     final limit = (args['limit'] as num?)?.toInt() ?? 10;
@@ -4035,7 +4542,8 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     final buf = StringBuffer('设定变更历史（共 ${book.changelog.length} 条）：\n');
     for (final e in log) {
       final t = e.time;
-      final ts = '${t.month.toString().padLeft(2, '0')}-'
+      final ts =
+          '${t.month.toString().padLeft(2, '0')}-'
           '${t.day.toString().padLeft(2, '0')} '
           '${t.hour.toString().padLeft(2, '0')}:'
           '${t.minute.toString().padLeft(2, '0')}';
@@ -4043,15 +4551,20 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     }
     // 附带当前版本信息
     buf.writeln();
-    buf.writeln('当前男主设定：${book.currentMale.isEmpty ? '（空）' : book.currentMale}');
-    buf.writeln('当前用户设定：${book.currentUser.isEmpty ? '（空）' : book.currentUser}');
+    buf.writeln(
+      '当前男主设定：${book.currentMale.isEmpty ? '（空）' : book.currentMale}',
+    );
+    buf.writeln(
+      '当前用户设定：${book.currentUser.isEmpty ? '（空）' : book.currentUser}',
+    );
     return _ToolResult(true, buf.toString());
   }
 
   /// 工具执行：query_record（男主查分类记录 / 候选分类路径）
   Future<_ToolResult> _executeQueryRecord(Map<String, dynamic> args) async {
     final tree = await RecordTreeStore.load();
-    final keywords = (args['keywords'] as List?)?.map((e) => e.toString()).toList() ?? [];
+    final keywords =
+        (args['keywords'] as List?)?.map((e) => e.toString()).toList() ?? [];
     final object = args['object']?.toString().trim() ?? '';
 
     final buf = StringBuffer();
@@ -4076,19 +4589,26 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
         buf.writeln('关键词 ${keywords.join('+')} 命中的记录：');
         for (final e in hits) {
           final path = RecordTreeStore.pathText(tree, e.nodeId);
-          buf.writeln('📂 $path'
-              '${e.summary != null && e.summary!.isNotEmpty ? '（${e.summary}）' : ''}');
+          buf.writeln(
+            '📂 $path'
+            '${e.summary != null && e.summary!.isNotEmpty ? '（${e.summary}）' : ''}',
+          );
           for (final n in e.notes) {
             final t = n.time;
-            final ts = '${t.month.toString().padLeft(2, '0')}-'
+            final ts =
+                '${t.month.toString().padLeft(2, '0')}-'
                 '${t.day.toString().padLeft(2, '0')} '
                 '${t.hour.toString().padLeft(2, '0')}:'
                 '${t.minute.toString().padLeft(2, '0')}';
-            buf.writeln('  · $ts ${n.text}'
-                '${n.source != null && n.source!.isNotEmpty ? '（${n.source}）' : ''}');
+            buf.writeln(
+              '  · $ts ${n.text}'
+              '${n.source != null && n.source!.isNotEmpty ? '（${n.source}）' : ''}',
+            );
           }
           if (e.keywordGroups.isNotEmpty) {
-            buf.writeln('  关键词组：${e.keywordGroups.map((g) => g.join('+')).join(' / ')}');
+            buf.writeln(
+              '  关键词组：${e.keywordGroups.map((g) => g.join('+')).join(' / ')}',
+            );
           }
         }
         buf.writeln('（同一分类下的记录是一家人，一起出来了）');
@@ -4102,8 +4622,11 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
         if (n.parentId != null) paths.add(RecordTreeStore.pathText(tree, n.id));
       }
       if (paths.isEmpty) {
-        return const _ToolResult(true, '没查到。现有分类也还没有——你可以 add_record 新建'
-            '（按 归属→关系→对象→类别 格式，如 ["用户","宠物"]）。');
+        return const _ToolResult(
+          true,
+          '没查到。现有分类也还没有——你可以 add_record 新建'
+          '（按 归属→关系→对象→类别 格式，如 ["用户","宠物"]）。',
+        );
       }
       buf.writeln('没查到匹配。现有分类：');
       for (final pt in paths.take(40)) {
@@ -4117,12 +4640,23 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
 
   /// 工具执行：add_record（男主自己记，挂分类下，免审批）
   Future<_ToolResult> _executeAddRecord(Map<String, dynamic> args) async {
-    final path = (args['path'] as List?)?.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList() ?? [];
+    final path =
+        (args['path'] as List?)
+            ?.map((e) => e.toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toList() ??
+        [];
     if (path.isEmpty) return const _ToolResult(false, '记录失败：没给分类路径');
     final text = args['text']?.toString().trim() ?? '';
     if (text.isEmpty) return const _ToolResult(false, '记录失败：没写原话');
-    final groups = (args['keyword_groups'] as List?)
-            ?.map((g) => (g as List).map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList())
+    final groups =
+        (args['keyword_groups'] as List?)
+            ?.map(
+              (g) => (g as List)
+                  .map((e) => e.toString().trim())
+                  .where((e) => e.isNotEmpty)
+                  .toList(),
+            )
             .where((g) => g.isNotEmpty)
             .toList() ??
         [];
@@ -4131,8 +4665,11 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     final tree = await RecordTreeStore.load();
     // 归属根校验：路径第一层必须是 用户/男主/其他
     if (path.first != '用户' && path.first != '男主' && path.first != '其他') {
-      return const _ToolResult(false, '记录失败：路径第一层必须是 用户/男主/其他 之一'
-          '（分清楚是谁的）');
+      return const _ToolResult(
+        false,
+        '记录失败：路径第一层必须是 用户/男主/其他 之一'
+        '（分清楚是谁的）',
+      );
     }
     final nodeName = path.last;
     final parentPath = path.sublist(0, path.length - 1);
@@ -4155,24 +4692,34 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
           entry.keywordGroups.add(g);
         }
       }
-      entry.notes.add(RecordNote(text: text, time: DateTime.now(), source: '男主记录'));
+      entry.notes.add(
+        RecordNote(text: text, time: DateTime.now(), source: '男主记录'),
+      );
       if (summary.isNotEmpty) entry.summary = summary;
     }
     await RecordTreeStore.save(tree);
     final pathText = RecordTreeStore.pathText(tree, node.id);
     DebugLogger.log('指令模块', '🌳 男主记了一条：$pathText');
-    return _ToolResult(true, '已记到「$pathText」'
-        '${entry.keywordGroups.isNotEmpty ? '，关键词组：${entry.keywordGroups.map((g) => g.join('+')).join(' / ')}' : ''}'
-        '。原话和以后同分类的句子都会合并在这里。');
+    return _ToolResult(
+      true,
+      '已记到「$pathText」'
+      '${entry.keywordGroups.isNotEmpty ? '，关键词组：${entry.keywordGroups.map((g) => g.join('+')).join(' / ')}' : ''}'
+      '。原话和以后同分类的句子都会合并在这里。',
+    );
   }
 
   /// 工具执行：manage_record_tree（改分类影响她 → 弹窗审批）
-  Future<_ToolResult> _executeManageRecordTree(Map<String, dynamic> args) async {
+  Future<_ToolResult> _executeManageRecordTree(
+    Map<String, dynamic> args,
+  ) async {
     final action = args['action']?.toString() ?? '';
     final nodeId = args['node_id']?.toString() ?? '';
     final name = args['name']?.toString().trim() ?? '';
-    final newParentPath = (args['new_parent_path'] as List?)
-            ?.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList() ??
+    final newParentPath =
+        (args['new_parent_path'] as List?)
+            ?.map((e) => e.toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toList() ??
         [];
 
     final tree = await RecordTreeStore.load();
@@ -4187,15 +4734,18 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
         desc = '把「${RecordTreeStore.pathText(tree, node.id)}」改名为「$name」';
         break;
       case 'move':
-        if (newParentPath.isEmpty) return const _ToolResult(false, '调整失败：没给新位置');
-        desc = '把「${RecordTreeStore.pathText(tree, node.id)}」挪到「${newParentPath.join('·')}」下面';
+        if (newParentPath.isEmpty)
+          return const _ToolResult(false, '调整失败：没给新位置');
+        desc =
+            '把「${RecordTreeStore.pathText(tree, node.id)}」挪到「${newParentPath.join('·')}」下面';
         break;
       case 'add_node':
         if (name.isEmpty) return const _ToolResult(false, '调整失败：没给新分类名');
         desc = '在「${RecordTreeStore.pathText(tree, node.id)}」下面加分类「$name」';
         break;
       case 'delete_node':
-        desc = '删除「${RecordTreeStore.pathText(tree, node.id)}」'
+        desc =
+            '删除「${RecordTreeStore.pathText(tree, node.id)}」'
             '（它下面的子分类和记录一起删）';
         break;
       default:
@@ -4224,15 +4774,22 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
         break;
       case 'move':
         final parent = tree.ensureNode(
-            newParentPath.sublist(0, newParentPath.length - 1),
-            newParentPath.last);
+          newParentPath.sublist(0, newParentPath.length - 1),
+          newParentPath.last,
+        );
         ok = tree.moveNode(nodeId, parent.id);
         if (!ok) {
           return const _ToolResult(false, '移动失败：不能挪到它自己的子树里');
         }
         break;
       case 'add_node':
-        tree.ensureNode([...RecordTreeStore.pathText(tree, node.id).split('·'), name].toList(), name);
+        tree.ensureNode(
+          [
+            ...RecordTreeStore.pathText(tree, node.id).split('·'),
+            name,
+          ].toList(),
+          name,
+        );
         ok = true;
         break;
       case 'delete_node':
@@ -4251,7 +4808,8 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
 
   /// 分类调整审批弹窗（8-06 19:19 用户：弹窗内对话迭代，改对才确认）
   Future<({bool approved, String feedback})?> _showRecordTreeConfirmDialog(
-      String description) async {
+    String description,
+  ) async {
     if (!mounted) return null;
     FocusManager.instance.primaryFocus?.unfocus();
     final fbCtrl = TextEditingController();
@@ -4301,7 +4859,9 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
             child: const Text('拒绝', style: TextStyle(color: Color(0xFF8A7A80))),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFC896B4),
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('同意'),
           ),
@@ -4327,8 +4887,11 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
             .toList();
         await WorkingPadStore.setAll(personaId, lines);
         DebugLogger.log('指令模块', '📋 便签整体更新（${lines.length} 行）');
-        return _ToolResult(true, '便签已更新（${lines.length} 行）。'
-            '${lines.isEmpty ? '已清空。' : '下一句对话你会带着它。'}');
+        return _ToolResult(
+          true,
+          '便签已更新（${lines.length} 行）。'
+          '${lines.isEmpty ? '已清空。' : '下一句对话你会带着它。'}',
+        );
       case 'append':
         final content = args['content']?.toString().trim() ?? '';
         if (content.isEmpty) return const _ToolResult(false, '便签没写内容');
@@ -4340,14 +4903,20 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
         final to = (args['to'] as num?)?.toInt();
         final n = await WorkingPadStore.remove(personaId, from, to);
         if (n == 0) {
-          return _ToolResult(false, '删除失败：便签没有第 $from 行'
-              '（先查一下现在有哪几行）');
+          return _ToolResult(
+            false,
+            '删除失败：便签没有第 $from 行'
+            '（先查一下现在有哪几行）',
+          );
         }
         DebugLogger.log('指令模块', '📋 便签删了 $n 行');
         return _ToolResult(true, '便签删了 $n 行（第 $from 行起）。');
       default:
-        return _ToolResult(false, '便签操作失败：未知动作 $action'
-            '（set/append/remove）');
+        return _ToolResult(
+          false,
+          '便签操作失败：未知动作 $action'
+          '（set/append/remove）',
+        );
     }
   }
 
@@ -4440,15 +5009,17 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
       final butler = ChatService.instance.butler;
       final maskEnabled = butler != null && butler.config.maskLayerEnabled;
       final lines = memories
-          .map((m) => m.content
-              .replaceFirst(RegExp(r'^\[(喜好|约定|日常|事实|其他)\]'), ''))
-          .map((c) => maskEnabled
-              ? butler.maskEngine.maskRealNames(c, sessionId)
-              : c)
+          .map(
+            (m) => m.content.replaceFirst(RegExp(r'^\[(喜好|约定|日常|事实|其他)\]'), ''),
+          )
+          .map(
+            (c) =>
+                maskEnabled ? butler.maskEngine.maskRealNames(c, sessionId) : c,
+          )
           .toList();
       return [
         '（用户允许你查看记忆。以下是关于「$query」的记忆，自然接住：\n'
-        '- ${lines.join('\n- ')}）',
+            '- ${lines.join('\n- ')}）',
       ];
     } catch (_) {
       return const [];
@@ -4544,14 +5115,17 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     final isCenter = index == 1;
     final panelOpen = _offset.abs() > _sideW * _snapThr;
     return Positioned(
-      left: left, top: 0,
-      width: width, bottom: 0,
+      left: left,
+      top: 0,
+      width: width,
+      bottom: 0,
       child: Container(
         color: color,
         child: (isCenter && panelOpen) ? IgnorePointer(child: child) : child,
       ),
     );
   }
+
   /// 当前 persona 的初始设定（用户写的人设），随每轮请求进 system
   String _currentPersonaPrompt() {
     try {
@@ -4565,29 +5139,34 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
           final male = book.currentMale.trim();
           final user = book.currentUser.trim();
           if (male.isNotEmpty) {
-            prompt += '\n\n【男主设定·当前版】（分段，改哪段用 update_setting 的 tag 定位）\n'
+            prompt +=
+                '\n\n【男主设定·当前版】（分段，改哪段用 update_setting 的 tag 定位）\n'
                 '${_formatSectionsNumbered(male)}';
           }
           if (user.isNotEmpty) {
-            prompt += '\n\n【用户设定·当前版】（分段，改哪段用 update_setting 的 tag 定位）\n'
+            prompt +=
+                '\n\n【用户设定·当前版】（分段，改哪段用 update_setting 的 tag 定位）\n'
                 '${_formatSectionsNumbered(user)}';
           }
           final summary = SettingVersionStore.summaryTextSync(_settingPid());
           if (summary.isNotEmpty) {
-            prompt += '\n\n【设定变更摘要·你的演变史】\n$summary'
+            prompt +=
+                '\n\n【设定变更摘要·你的演变史】\n$summary'
                 '（这些都是你经历过/主动做出的设定调整，顺着时间线你就能明白'
                 '自己为什么是现在这个样子。需要细节可以调 query_setting_history。）';
           }
           // 8-06 20:53 用户报 bug：男主反复 list_tools → 工具概览注入（男主天生知道）
           // 8-06 21:54 用户：不写全量清单——分类概览 + 常用表，细节自查
-          prompt += '\n\n${_toolListText()}'
+          prompt +=
+              '\n\n${_toolListText()}'
               '\n（连续测试/做事时：先把步骤立到便签（1. 2. 3.），'
               '再一条条执行过去；查到的结果自己决定留不留，重要的存便签，'
               '别重复查同一件事。）';
           // 8-06 21:12 用户：男主便签/当前任务模块——他自己维护，每轮注入
           final padText = WorkingPadStore.text(pid);
           if (padText != null) {
-            prompt += '\n\n【当前任务模块·你的便签】\n$padText'
+            prompt +=
+                '\n\n【当前任务模块·你的便签】\n$padText'
                 '\n（这是你自己维护的：查到的、干到一半的、还要用的都写在这。'
                 '自己判断留删——干完活的删、正文里已经有的删（上下文已有的优先），'
                 '不设限额，删的时候自己说行号范围。'
@@ -4596,11 +5175,13 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
           // 8-06 21:26 用户：定时任务独立区（跟便签分开——计划等触发，便签是正在干的活）
           final timerText = TimerPlanStore.waitingText(pid);
           if (timerText != null) {
-            prompt += '\n\n【定时任务】（你设的计划，到点会触发；'
+            prompt +=
+                '\n\n【定时任务】（你设的计划，到点会触发；'
                 '触发完/她明确不要了就从这里移除）\n$timerText';
           }
           // 8-06 18:41-19:21 用户：分类记录体系 —— 记录职责 + 现有分类概览
-          final recordDuty = '\n\n【你的记录职责】'
+          final recordDuty =
+              '\n\n【你的记录职责】'
               '观察她的喜好/习惯/家人/宠物/说过的话，发现值得记的：'
               '先调 query_record（给关键词组或对象名）查有没有，已有就不动；'
               '没有就调 add_record 记下来——按「归属→关系→对象→类别」格式选分类路径'
