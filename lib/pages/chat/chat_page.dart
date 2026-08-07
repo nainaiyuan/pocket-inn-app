@@ -13,6 +13,7 @@ import '../../services/setting_version_store.dart';
 import '../../services/record_tree_store.dart';
 import '../../services/working_pad_store.dart';
 import '../../services/flow_store.dart';
+import '../../services/tool_cache_store.dart';
 import '../../services/timer_plan_store.dart';
 import '../../services/pending_queue_store.dart';
 import '../../butler/memory/relation_record.dart';
@@ -103,6 +104,7 @@ class _ChatPageState extends State<ChatPage>
     DebugLogger.init();
     // 8-07 21:48 用户：日志增强——纯 Dart store 的日志钩子统一接 DebugLogger
     FlowStore.logSink = (t, m) => DebugLogger.log(t, m);
+    ToolCacheStore.logSink = (t, m) => DebugLogger.log(t, m);
     PendingQueueStore.logSink = (t, m) => DebugLogger.log(t, m);
     ToolIntentParser.logSink = (t, m) => DebugLogger.log(t, m);
     multiBubbleLogSink = (t, m) => DebugLogger.log(t, m);
@@ -485,6 +487,8 @@ class _ChatPageState extends State<ChatPage>
     // 8-06 21:00：工具结果记忆预热（prompt 注入同步读，这里先刷新缓存）
     // 8-06 21:12：便签（当前任务模块）预热
     WorkingPadStore.warm(personaId);
+    // 8-08 02:1x：工具工作缓存预热（男主干活中间数据，自管免审批）
+    ToolCacheStore.warm(personaId);
     // 8-06 21:26：定时任务计划预热
     TimerPlanStore.warm(personaId);
     // 8-06 21:36：待回复队列预热
@@ -737,7 +741,8 @@ class _ChatPageState extends State<ChatPage>
       // ① 本轮查询类工具累计 ≥3 强制停（不管交错）
       // ② 工具轮总轮数上限 6（防 query_logs→list_tools→query_logs 死循环）
       var queryToolCount = 0;
-      const maxToolRounds = 6;
+      // 8-08 02:1x 用户：干太快被卡 → 总轮数 6 → 10（防死循环仍保留）
+      const maxToolRounds = 10;
       while (result.toolCalls != null && result.toolCalls!.isNotEmpty) {
         toolLoop++;
         toolExecuted = true;
@@ -1018,6 +1023,10 @@ class _ChatPageState extends State<ChatPage>
             // 8-06 21:12 用户：男主自己的便签（当前任务模块），自己维护，免审批
             _appendToolBubble('📋 男主在整理自己的便签…');
             toolResult = await _executeManagePad(args);
+          } else if (name == 'manage_tool_cache') {
+            // 8-08 02:1x 用户：工具工作缓存——男主干活中间数据（自管免审批）
+            _appendToolBubble('🗃️ 男主在整理工具缓存…');
+            toolResult = await _executeManageToolCache(args);
           } else if (name == 'manage_flow') {
             // 8-06 23:55 用户：流程层——男主自管（免审批）
             // 长任务先立流程（goal+steps），一条条执行，做完 finish
@@ -1235,11 +1244,17 @@ class _ChatPageState extends State<ChatPage>
           var queryStop = false;
           if (queryTools.contains(name)) {
             queryToolCount++;
-            if (queryToolCount >= 3) {
+            if (queryToolCount >= 6) {
               queryStop = true;
               DebugLogger.log(
                 'AI路由',
                 '⚠️ 本轮查询类工具累计 $queryToolCount 次（$name），强制停止（防反复查）',
+              );
+            } else if (queryToolCount >= 3) {
+              // 8-08 02:1x 用户：干太快被卡 → 3 次只软提示不强制停
+              DebugLogger.log(
+                'AI路由',
+                '💡 查询类工具已 $queryToolCount 次（$name），软提示（不强制停）',
               );
             }
           }
@@ -1269,6 +1284,16 @@ class _ChatPageState extends State<ChatPage>
                   '基于结果自然地回复用户，不要再调用工具。',
             ),
           );
+        }
+        // 8-08 02:1x 用户：查询类 ≥3 只软提示——男主还在找东西时别硬卡，
+        // 提醒他直接说缺什么（≥6 才走 loopExceeded 强制停）
+        if (!loopExceeded && queryToolCount >= 3 && queryToolCount < 6) {
+          toolMessages.add(AIChatMessage(
+            role: 'user',
+            content: '【系统提示】你本轮已经查了 $queryToolCount 次资料了。'
+                '如果还在找什么，直接告诉她你需要什么（她可以补），'
+                '别一直反复查；查到就继续干活，不用停下来说话。',
+          ));
         }
         // 8-07 22:5x 用户：男主反复查工具卡死——触发防循环后必须明确告知
         // 男主"别再调了直接回复"，否则他不知道为什么停、下轮又调
@@ -1474,7 +1499,8 @@ class _ChatPageState extends State<ChatPage>
       DebugLogger.log('AI路由', '❌ 所有候选都失败: ${e.tried.join('、')}');
       await _showAllAiFailedDialog(e);
     } on Object catch (e) {
-      DebugLogger.log('AI路由', '❌ 聊天请求失败: $e');
+      // 8-08 02:1x：RangeError(start/end) 弹"发送失败"——堆栈落日志定位真凶
+      DebugLogger.log('AI路由', '❌ 聊天请求失败: $e\n${StackTrace.current}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1653,6 +1679,8 @@ class _ChatPageState extends State<ChatPage>
     // 8-06 21:00：工具结果记忆预热（prompt 注入同步读，这里先刷新缓存）
     // 8-06 21:12：便签（当前任务模块）预热
     WorkingPadStore.warm(personaId);
+    // 8-08 02:1x：工具工作缓存预热（男主干活中间数据，自管免审批）
+    ToolCacheStore.warm(personaId);
     // 8-06 21:26：定时任务计划预热
     TimerPlanStore.warm(personaId);
     // 8-06 21:36：待回复队列预热
@@ -6133,6 +6161,35 @@ class _ChatPageState extends State<ChatPage>
     }
   }
 
+  /// 工具执行：manage_tool_cache（工具工作缓存，男主自管免审批）
+  /// 8-08 02:1x 用户："留个位置给他工具使用的缓存，太多了就让他写进
+  /// 他的管记忆的地方让他整理"——干活中间数据放这，干完整理进记忆后 clear。
+  Future<_ToolResult> _executeManageToolCache(Map<String, dynamic> args) async {
+    final personaId = _state.personaId ?? '';
+    final action = args['action']?.toString() ?? '';
+    switch (action) {
+      case 'add':
+        final content = args['content']?.toString() ?? '';
+        final r = await ToolCacheStore.add(personaId, content);
+        return _ToolResult(true, r);
+      case 'clear':
+        final r = await ToolCacheStore.clear(personaId);
+        return _ToolResult(true, r);
+      case 'status':
+        final n = await ToolCacheStore.count(personaId);
+        final t = ToolCacheStore.text(personaId);
+        return _ToolResult(
+          true,
+          n == 0 ? '工具缓存是空的（add 记入）' : '工具缓存 $n 条：\n$t',
+        );
+      default:
+        return _ToolResult(
+          false,
+          'manage_tool_cache 参数：action=add（要 content）/clear/status',
+        );
+    }
+  }
+
   /// 通用超时唤醒：waitMinutes 后用户没回聊天页 → butlerWakeUp 唤醒男主
   /// （8-06 13:38 从 _scheduleNotifyWakeUp 泛化，notify_user / countdown_card 共用）
   void _scheduleWakeUp(int waitMinutes, String instruction) {
@@ -6190,6 +6247,7 @@ class _ChatPageState extends State<ChatPage>
       'add_record': '记记录',
       'manage_record_tree': '调分类',
       'manage_pad': '整理便签',
+      'manage_tool_cache': '整理工具缓存',
       'manage_flow': '流程',
       'continue_speaking': '继续说',
       'resolve_pending': '标记回复',
@@ -6384,6 +6442,14 @@ class _ChatPageState extends State<ChatPage>
                 '自己判断留删——干完活的删、正文里已经有的删（上下文已有的优先），'
                 '不设限额，删的时候自己说行号范围。'
                 '写摘要时自己清理。下一句对话你还知道有什么没干。）';
+          }
+          // 8-08 02:1x 用户：工具工作缓存（干活中间数据，短命；
+          // 干完把要长期用的整理进记录/便签后 clear——"别查完就丢"）
+          final cacheText = ToolCacheStore.text(pid);
+          if (cacheText.isNotEmpty) {
+            prompt += '\n\n【工具缓存】（你干活时的临时数据，查到的先放这；'
+                '干完活把要长期用的整理进记录/便签，然后 manage_tool_cache '
+                '动作=clear 清空——别每次醒来重新查）\n$cacheText';
           }
           // 8-06 21:26 用户：定时任务独立区（跟便签分开——计划等触发，便签是正在干的活）
           final timerText = TimerPlanStore.waitingText(pid);

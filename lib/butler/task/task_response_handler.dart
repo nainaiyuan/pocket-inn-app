@@ -91,7 +91,9 @@ class TaskResponseHandler {
       // 匹配 #keywords / #summary（带关键词）
       if (lower.startsWith('#keywords') || lower.startsWith('#summary')) {
         matchedTag = trimmed.split(RegExp(r'[\s,，]+')).first.toLowerCase();
-        final rest = trimmed.substring(trimmed.indexOf(' ')).trim();
+        // 8-08 02:1x：indexOf(' ') = -1 时 substring(-1) 崩溃（#keywords 无空格）
+        final sp = trimmed.indexOf(' ');
+        final rest = (sp >= 0 ? trimmed.substring(sp) : '').trim();
         keywords = rest
             .split(RegExp(r'[\s,，、]+'))
             .where((k) => k.isNotEmpty)
@@ -106,7 +108,8 @@ class TaskResponseHandler {
       }
       if (lower.startsWith('#same')) {
         matchedTag = '#same';
-        final rest = trimmed.substring(trimmed.indexOf(' ')).trim().toLowerCase();
+        final sp = trimmed.indexOf(' ');
+        final rest = (sp >= 0 ? trimmed.substring(sp) : '').trim().toLowerCase();
         keywords = rest == 'yes' || rest == '是' ? ['yes'] : ['no'];
         continue;
       }
