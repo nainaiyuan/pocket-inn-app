@@ -64,8 +64,6 @@ abstract class ToolFormatAdapter {
 /// 先剥 `<|IDSMLI|>` 等流式标记（变体容忍空格），再解析 invoke 块：
 /// `<invoke name="manage_flow"><parameter name="action">next</parameter></invoke>`
 /// 参数值支持 JSON 自动解码（数字/布尔/对象）。
-final RegExp _idsmliRe = RegExp(r'<\|?\s*IDSMLI\s*\|?>?', caseSensitive: false);
-
 final RegExp _invokeRe = RegExp(
     r'<invoke\s+name="([a-zA-Z_]+)"[^>]*>([\s\S]*?)</invoke>',
     caseSensitive: false);
@@ -485,21 +483,25 @@ class ToolFormatRegistry {
 
   /// 注册表：按顺序匹配，先到先得；最后一条是 OpenAI 兼容兜底
   static final List<ToolFormatEntry> _entries = [
+    // DeepSeek：OpenAI 兼容直通（原生 function calling + 思考模式工具调用，
+    // V3.2 起支持；工具轮 id 配对 + reasoning_content 原样回传由 chat_page
+    // 双通道处理——8-03 17:24 用户指示研究原生调用，不再绕文本协议）。
+    // ⚠️ 8-07 23:0x 用户："先适配 DeepSeek 原生"——DeepSeek 的 Anthropic
+    // 兼容端点（api.deepseek.com/anthropic）曾被 anthropic 规则（旧第一条）
+    // 抢先匹配 → 降级 text 协议 → invoke XML 污染。deepseek 规则必须最前。
     ToolFormatEntry(
-      match: (url) => url.contains('anthropic'),
+      match: (url) => url.contains('deepseek'),
+      adapter: const OpenAICompatAdapter(),
+    ),
+    ToolFormatEntry(
+      match: (url) =>
+          url.contains('anthropic') && !url.contains('deepseek'),
       adapter: const AnthropicAdapter(),
     ),
     ToolFormatEntry(
       match: (url) =>
           url.contains('generativelanguage') || url.contains('gemini'),
       adapter: const GeminiAdapter(),
-    ),
-    // DeepSeek：OpenAI 兼容直通（原生 function calling + 思考模式工具调用，
-    // V3.2 起支持；工具轮 id 配对 + reasoning_content 原样回传由 chat_page
-    // 双通道处理——8-03 17:24 用户指示研究原生调用，不再绕文本协议）
-    ToolFormatEntry(
-      match: (url) => url.contains('deepseek'),
-      adapter: const OpenAICompatAdapter(),
     ),
     // 兜底：OpenAI 兼容（通义/智谱/Kimi/豆包/火山/硅基/Groq/Ollama/
     // LM Studio/vLLM… 国内外绝大多数 API 与本地推理框架）

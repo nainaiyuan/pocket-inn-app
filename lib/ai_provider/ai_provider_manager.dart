@@ -1355,7 +1355,7 @@ class AIProviderManager {
         'AI路由',
         '📝 文本残留工具调用 ${textCalls.length} 个'
         '（${textCalls.map((c) => c['name']).join('、')}）'
-        '${finalToolCalls == null || finalToolCalls.isEmpty ? '→ 作为唯一调用执行' : '→ 原生已有，只剥不重复'}',
+        '${finalToolCalls.isEmpty ? '→ 作为唯一调用执行' : '→ 原生已有，只剥不重复'}',
       );
       finalText = adapter.stripToolBlocks(apiResult.text);
       // 自家 strip 没剥掉（如 openai 空实现）→ invoke XML 剥离兜底
@@ -1389,10 +1389,25 @@ class AIProviderManager {
   ResolvedApiConfig _resolve(AIProviderConfig config) => ResolvedApiConfig(
         id: config.id,
         name: config.name,
-        baseUrl: config.baseUrl,
+        // 8-07 23:0x 用户："先适配 DeepSeek 原生"——DeepSeek 的 Anthropic
+        // 兼容端点（/anthropic）归一化回 OpenAI 兼容主端点
+        // （https://api.deepseek.com/chat/completions），走原生 JSON tool_calls
+        baseUrl: normalizeDeepSeekBaseUrl(config.baseUrl),
         apiKey: config.apiKey,
         model: config.model,
       );
+
+  /// DeepSeek 的 Anthropic 兼容端点（api.deepseek.com/anthropic）归一化回
+  /// OpenAI 兼容主端点——注册表已把 deepseek 优先判为 OpenAI 兼容，
+  /// 路径也要对齐（否则请求发到 /anthropic/chat/completions 404）。
+  static String normalizeDeepSeekBaseUrl(String baseUrl) {
+    final url = baseUrl.trim().toLowerCase();
+    if (url.contains('deepseek') && url.contains('/anthropic')) {
+      final idx = baseUrl.toLowerCase().indexOf('/anthropic');
+      return baseUrl.substring(0, idx);
+    }
+    return baseUrl;
+  }
 
   List<AIProviderConfig> _sorted() {
     final list = List.of(_configs);
