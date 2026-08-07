@@ -200,12 +200,18 @@ class ContextManager {
     if (toolName.trim().isEmpty) return;
     final t = _topics.putIfAbsent(personaId, TopicState.new);
     final mark = ok ? '✅成功' : '❌失败';
+    // 8-07 22:4x 借鉴 OpenClaw 工具结果上下文保护（MAX_TOOL_RESULT_CONTEXT_SHARE）：
+    // 单条工具结果 >3000 字符截断（保头保尾），防 query_logs 等大结果撑爆上下文
+    var text = resultText;
+    if (text.length > 3000) {
+      text = '${text.substring(0, 1500)}\n…（中间 ${text.length - 3000} 字符已截断，完整结果见日志/DB）…\n${text.substring(text.length - 1500)}';
+    }
     t.raw.add(
         // 8-06 00:48 用户：男主分不清三类输入 → 工具记录标注"非她发言"
-        '工具 [${_ts(DateTime.now())}]：$toolName $mark（非她发言）：$resultText');
+        '工具 [${_ts(DateTime.now())}]：$toolName $mark（非她发言）：$text');
     // 原文镜像落库（role='工具'，restore 重建时从 created_at 补时间戳）
     unawaited(ChatStorageService()
-        .appendContextRaw(personaId, '工具', '$toolName $mark：$resultText'));
+        .appendContextRaw(personaId, '工具', '$toolName $mark：$text'));
   }
 
   // ---- 读取 / 组装 ----
