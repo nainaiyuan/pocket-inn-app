@@ -6,6 +6,7 @@ import '../../ai_provider/ai_provider_manager.dart';
 import '../../ai_provider/mock_ai_provider.dart';
 import '../../ai_provider/tool_format_adapter.dart';
 import '../../ai_provider/models.dart';
+import '../chat/services/multi_bubble_parser.dart';
 import '../../butler/tools/tool_intent_parser.dart';
 import '../../pages/chat/services/ai_chat_service.dart';
 import '../../pages/chat/services/context_manager.dart';
@@ -556,6 +557,65 @@ class _ButlerSelfTestPageState extends State<ButlerSelfTestPage> {
         passed: plainHit,
         failedReason: plainHit ? null : '普通文本被误判成工具调用',
         guidance: '检查 parseToolCallsFromText 是否只在标签/JSON 结构出现时触发',
+      ));
+    }
+
+    // ── 第 1.6 层：JSON 输出协议（8-07 23:3x 用户："按json的格式把我们的
+    // <…>包进去，AI应该都认JSON吧"）——男主输出 JSON 块，解析器双兼容 ──
+    {
+      var allOk = true;
+      final checks = <String>[];
+      void check(String label, bool ok, String actual) {
+        if (!ok) allOk = false;
+        checks.add('$label:${ok ? '✅' : '❌'}($actual)');
+      }
+
+      // ① 单对象 msg
+      final r1 = parseStructuredOutput('{"msg":"你好"}');
+      check('单对象msg', r1.bubbles.length == 1 &&
+          r1.bubbles.first.kind == BubbleKind.msg &&
+          r1.bubbles.first.text == '你好', '${r1.bubbles.length}块');
+      // ② reply+act+msg 全字段
+      final r2 = parseStructuredOutput(
+          '{"reply":"回#1","act":"他微微偏过头","msg":"好的"}');
+      check('全字段', r2.replyText.contains('回#1') &&
+          r2.bubbles.any((b) => b.kind == BubbleKind.act) &&
+          r2.bubbles.any((b) => b.kind == BubbleKind.msg), 
+          'reply=${r2.replyText} 气泡${r2.bubbles.length}');
+      // ③ 多对象多气泡
+      final r3 = parseStructuredOutput('{"msg":"第一句"} {"msg":"第二句"}');
+      check('多对象', r3.bubbles.length == 2 &&
+          r3.bubbles[0].text == '第一句' && r3.bubbles[1].text == '第二句',
+          '${r3.bubbles.length}块');
+      // ④ 数组
+      final r4 = parseStructuredOutput('[{"msg":"a"},{"act":"动作"}]');
+      check('数组', r4.bubbles.length == 2 &&
+          r4.bubbles[0].kind == BubbleKind.msg &&
+          r4.bubbles[1].kind == BubbleKind.act, '${r4.bubbles.length}块');
+      // ⑤ sys 静默不进气泡
+      final r5 = parseStructuredOutput('{"sys":"流程推进到第3步"}');
+      check('sys静默', r5.bubbles.isEmpty && r5.sysText.contains('第3步'),
+          '气泡${r5.bubbles.length} sys=${r5.sysText.length}字');
+      // ⑥ JSON 周围杂散文本 → 只出气泡
+      final r6 = parseStructuredOutput('思考一下{"msg":"结果"}完毕');
+      check('杂散文本', r6.bubbles.length == 1 && r6.bubbles.first.text == '结果',
+          '${r6.bubbles.length}块');
+      // ⑦ 旧标签仍兼容
+      final r7 = parseStructuredOutput('<reply>回#A</reply><act>动作</act><msg>话</msg>');
+      check('旧标签兼容', r7.bubbles.length == 2 && r7.replyText.contains('回#A'),
+          '${r7.bubbles.length}块 reply=${r7.replyText}');
+      // ⑧ hasFormat：纯文本 false / JSON true
+      check('hasFormat', !parseStructuredOutput('今天天气真好').hasFormat &&
+          parseStructuredOutput('{"msg":"hi"}').hasFormat,
+          '纯文本=${parseStructuredOutput('今天天气真好').hasFormat}');
+      items.add(ButlerSelfTestItem(
+        message: 'JSON 输出协议',
+        expected: 'JSON 块全能解析（msg/act/reply/sys/多对象/数组），旧标签兼容',
+        actual: checks.join(' '),
+        passed: allOk,
+        failedReason: allOk ? null : '某用例挂了（见 actual）',
+        guidance: '检查 multi_bubble_parser.parseStructuredOutput：JSON 提取 → '
+            '字段映射 → 旧标签兜底；reply/sys 不产生气泡',
       ));
     }
 

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 /// 多气泡解析器（8-07 用户设计定稿）
@@ -56,69 +57,8 @@ final RegExp _actInnerRe =
 /// 8-07 21:52 用户：日志增强——纯 Dart 解析器用钩子（Flutter 侧注入 DebugLogger）
 void Function(String tag, String msg)? multiBubbleLogSink;
 
-List<BubblePart> parseMultiBubbles(String raw) {
-  if (raw.trim().isEmpty) return const [];
-
-  // 收集所有标签块（带位置），按原文顺序合并
-  final blocks = <_Block>[];
-  for (final m in _msgRe.allMatches(raw)) {
-    blocks.add(_Block(m.start, m.end, _BlockKind.msg, m.group(1) ?? ''));
-  }
-  for (final m in _actRe.allMatches(raw)) {
-    blocks.add(_Block(m.start, m.end, _BlockKind.act, m.group(1) ?? ''));
-  }
-  blocks.sort((a, b) => a.start.compareTo(b.start));
-
-  // 合并：标签块 + 标签外的裸文本（兜底成 msg）
-  final merged = <_Block>[];
-  var cursor = 0;
-  for (final b in blocks) {
-    if (b.start > cursor) {
-      final bare = raw.substring(cursor, b.start);
-      if (bare.trim().isNotEmpty) {
-        merged.add(_Block(cursor, b.start, _BlockKind.bare, bare));
-      }
-    }
-    merged.add(b);
-    cursor = math.max(cursor, b.end);
-  }
-  if (cursor < raw.length) {
-    final bare = raw.substring(cursor);
-    if (bare.trim().isNotEmpty) {
-      merged.add(_Block(cursor, raw.length, _BlockKind.bare, bare));
-    }
-  }
-
-  // 转成 BubblePart
-  final result = <BubblePart>[];
-  for (final b in merged) {
-    switch (b.kind) {
-      case _BlockKind.msg:
-        final spans = _splitMsgSpans(b.content);
-        if (spans.isEmpty) continue; // 空标签丢弃
-        result.add(BubblePart(BubbleKind.msg, spans));
-      case _BlockKind.act:
-        final t = b.content.trim();
-        if (t.isEmpty) continue; // 空标签丢弃
-        result.add(BubblePart(BubbleKind.act, [BubbleSpan(SpanKind.act, t)]));
-      case _BlockKind.bare:
-        var t = b.content.trim();
-        if (t.isEmpty) continue;
-        // 8-07 22:5x 用户：气泡出现裸 '<'——男主输出未闭合标签（如
-        // "<msg>hi" 没写 </msg>）→ parser 当裸文本 → '<' 显示出来。
-        // 剥掉孤立/残留的已知标签（只认完整标签名，不会误伤 "<3" 之类）
-        t = t.replaceAll(
-          RegExp(r'</?(msg|act|reply|sys|flow|user|tool|quote)[^>]*>',
-              caseSensitive: false),
-          '',
-        ).trim();
-        if (t.isEmpty) continue;
-        result.add(BubblePart(BubbleKind.msg, [BubbleSpan(SpanKind.text, t)]));
-    }
-  }
-  multiBubbleLogSink?.call('多气泡', '🧩 解析 ${result.length} 块（${result.map((b) => b.kind.name).join('+')}）');
-  return result;
-}
+List<BubblePart> parseMultiBubbles(String raw) =>
+    parseStructuredOutput(raw).bubbles;
 
 /// msg 块内切 <act> → spans（话段 + 动作段按原文顺序）
 List<BubbleSpan> _splitMsgSpans(String content) {
@@ -140,7 +80,7 @@ List<BubbleSpan> _splitMsgSpans(String content) {
   return spans;
 }
 
-enum _BlockKind { msg, act, bare }
+enum _BlockKind { msg, act, bare, jsonObj, jsonArr, skip }
 
 class _Block {
   final int start;
@@ -148,4 +88,211 @@ class _Block {
   final _BlockKind kind;
   final String content;
   const _Block(this.start, this.end, this.kind, this.content);
+}
+
+// ============================================================
+// 8-07 23:3x JSON 化（用户："是不是应该按照json的格式把我们的<…>包进去，
+// AI应该都认JSON吧"）——男主输出协议升级：
+//   JSON 块（新）：{"msg":"话"} {"act":"动作"} {"reply":"回#1"} {"sys":"静默"}
+//     多气泡 = 多个 JSON 对象（可换行/空格分隔），或数组 [{"msg":"a"},{"msg":"b"}]
+//   HTML 标签（旧）：<msg>..</msg> <act>..</act> 等（双兼容保留，功能不退化）
+// 解析策略：JSON 优先（模型遵循度最高），旧标签兜底，裸文本永不丢。
+// ============================================================
+
+/// 结构化输出解析结果（JSON 化后的统一出口）
+class StructuredOutput {
+  /// 气泡列表（msg = 对话气泡 / act = 独立动作气泡；reply/sys 不产生气泡）
+  final List<BubblePart> bubbles;
+
+  /// 男主回复标注（JSON "reply" 字段值，如 "回#1、#A"；旧 <reply> 标签同收）
+  final String replyText;
+
+  /// 静默内容（JSON "sys" 字段值；旧 <sys> 标签同收）——不显示不落库
+  final String sysText;
+
+  /// 是否带结构化格式（JSON 块或标签块）——打回判断用
+  final bool hasFormat;
+
+  const StructuredOutput({
+    required this.bubbles,
+    required this.replyText,
+    required this.sysText,
+    required this.hasFormat,
+  });
+}
+
+final RegExp _jsonArrRe = RegExp(r'\[[\s\S]*?\]');
+final RegExp _jsonObjRe = RegExp(r'\{[\s\S]*?\}');
+final RegExp _replyTagRe =
+    RegExp(r'<reply>([\s\S]*?)</reply>', caseSensitive: false);
+final RegExp _sysTagRe = RegExp(r'<sys>([\s\S]*?)</sys>', caseSensitive: false);
+
+/// 统一解析男主原始输出 → 结构化结果（JSON 块 + 旧标签双兼容）
+StructuredOutput parseStructuredOutput(String raw) {
+  if (raw.trim().isEmpty) {
+    return const StructuredOutput(
+        bubbles: [], replyText: '', sysText: '', hasFormat: false);
+  }
+
+  final replyParts = <String>[];
+  final sysParts = <String>[];
+  final blocks = <_Block>[]; // 复用旧 _Block（kind: msg/act/bare + 新增 json）
+
+  // ① JSON 数组块（整体解析，内部对象不再单独匹配）
+  for (final m in _jsonArrRe.allMatches(raw)) {
+    blocks.add(_Block(m.start, m.end, _BlockKind.jsonArr, m.group(0) ?? ''));
+  }
+  // ② JSON 对象块（跳过落在数组内的）
+  for (final m in _jsonObjRe.allMatches(raw)) {
+    final insideArr = blocks.any((b) =>
+        b.kind == _BlockKind.jsonArr && m.start >= b.start && m.end <= b.end);
+    if (insideArr) continue;
+    blocks.add(_Block(m.start, m.end, _BlockKind.jsonObj, m.group(0) ?? ''));
+  }
+  // ③ 旧标签块（msg/act）
+  for (final m in _msgRe.allMatches(raw)) {
+    blocks.add(_Block(m.start, m.end, _BlockKind.msg, m.group(1) ?? ''));
+  }
+  for (final m in _actRe.allMatches(raw)) {
+    blocks.add(_Block(m.start, m.end, _BlockKind.act, m.group(1) ?? ''));
+  }
+  // ④ reply/sys 标签：只收集值，不产生气泡
+  for (final m in _replyTagRe.allMatches(raw)) {
+    final v = (m.group(1) ?? '').trim();
+    if (v.isNotEmpty) replyParts.add(v);
+    blocks.add(_Block(m.start, m.end, _BlockKind.skip, ''));
+  }
+  for (final m in _sysTagRe.allMatches(raw)) {
+    final v = (m.group(1) ?? '').trim();
+    if (v.isNotEmpty) sysParts.add(v);
+    blocks.add(_Block(m.start, m.end, _BlockKind.skip, ''));
+  }
+  blocks.sort((a, b) => a.start.compareTo(b.start));
+
+  // 合并：结构化块 + 块外裸文本（兜底成 msg，内容永不丢）
+  final merged = <_Block>[];
+  var cursor = 0;
+  for (final b in blocks) {
+    if (b.start > cursor) {
+      final bare = raw.substring(cursor, b.start);
+      if (bare.trim().isNotEmpty) {
+        merged.add(_Block(cursor, b.start, _BlockKind.bare, bare));
+      }
+    }
+    merged.add(b);
+    cursor = math.max(cursor, b.end);
+  }
+  if (cursor < raw.length) {
+    final bare = raw.substring(cursor);
+    if (bare.trim().isNotEmpty) {
+      merged.add(_Block(cursor, raw.length, _BlockKind.bare, bare));
+    }
+  }
+
+  // 转成气泡
+  final bubbles = <BubblePart>[];
+  var hasFormat = false;
+  for (final b in merged) {
+    switch (b.kind) {
+      case _BlockKind.jsonArr:
+        hasFormat = true;
+        final decoded = _tryDecode(b.content);
+        if (decoded is List) {
+          for (final item in decoded) {
+            if (item is Map<String, dynamic>) {
+              _jsonMapToBubbles(item, bubbles, replyParts, sysParts);
+            }
+          }
+        }
+      case _BlockKind.jsonObj:
+        hasFormat = true;
+        final decoded = _tryDecode(b.content);
+        if (decoded is Map<String, dynamic>) {
+          _jsonMapToBubbles(decoded, bubbles, replyParts, sysParts);
+        }
+      case _BlockKind.msg:
+        hasFormat = true;
+        final spans = _splitMsgSpans(b.content);
+        if (spans.isNotEmpty) {
+          bubbles.add(BubblePart(BubbleKind.msg, spans));
+        }
+      case _BlockKind.act:
+        hasFormat = true;
+        final t = b.content.trim();
+        if (t.isNotEmpty) {
+          bubbles.add(BubblePart(BubbleKind.act, [BubbleSpan(SpanKind.act, t)]));
+        }
+      case _BlockKind.skip:
+        hasFormat = true; // reply/sys 标签也算带格式
+      case _BlockKind.bare:
+        var t = b.content.trim();
+        if (t.isEmpty) continue;
+        // 剥孤立/残留的已知标签（只认完整标签名，不误伤 "<3"）
+        t = t
+            .replaceAll(
+              RegExp(r'</?(msg|act|reply|sys|flow|user|tool|quote)[^>]*>',
+                  caseSensitive: false),
+              '',
+            )
+            .trim();
+        if (t.isEmpty) continue;
+        bubbles.add(BubblePart(BubbleKind.msg, [BubbleSpan(SpanKind.text, t)]));
+    }
+  }
+
+  multiBubbleLogSink?.call(
+    '多气泡',
+    '🧩 解析 ${bubbles.length} 块'
+    '（${bubbles.map((b) => b.kind.name).join('+')}）'
+    '${hasFormat ? ' 带格式' : ' 纯文本'}'
+    '${replyParts.isEmpty ? '' : ' reply=${replyParts.join('、')}'}',
+  );
+  return StructuredOutput(
+    bubbles: bubbles,
+    replyText: replyParts.join('、'),
+    sysText: sysParts.join('\n'),
+    hasFormat: hasFormat,
+  );
+}
+
+/// JSON 对象 → 气泡/标注（按字段在对象里的出现顺序；reply/sys 只收集不显示）
+void _jsonMapToBubbles(
+  Map<String, dynamic> map,
+  List<BubblePart> bubbles,
+  List<String> replyParts,
+  List<String> sysParts,
+) {
+  for (final entry in map.entries) {
+    final key = entry.key.toLowerCase();
+    final value = entry.value;
+    switch (key) {
+      case 'msg':
+        final t = value?.toString() ?? '';
+        if (t.trim().isNotEmpty) {
+          bubbles.add(BubblePart(BubbleKind.msg, [
+            BubbleSpan(SpanKind.text, t),
+          ]));
+        }
+      case 'act':
+        final t = value?.toString() ?? '';
+        if (t.trim().isNotEmpty) {
+          bubbles.add(
+              BubblePart(BubbleKind.act, [BubbleSpan(SpanKind.act, t)]));
+        }
+      case 'reply':
+        final v = value?.toString() ?? '';
+        if (v.trim().isNotEmpty) replyParts.add(v.trim());
+      case 'sys':
+        final v = value?.toString() ?? '';
+        if (v.trim().isNotEmpty) sysParts.add(v.trim());
+    }
+  }
+}
+
+Object? _tryDecode(String text) {
+  try {
+    return jsonDecode(text);
+  } catch (_) {
+    return null;
+  }
 }

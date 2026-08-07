@@ -34,7 +34,6 @@ import '../../models/chat_memory.dart';
 import '../../services/chat_service.dart';
 import '../../services/butler_command.dart';
 import '../../butler/context/context_tracker.dart';
-import '../../butler/storage/storage_registry.dart';
 import 'services/context_manager.dart';
 import '../../services/local_storage_service.dart';
 import '../../models/chat_message.dart';
@@ -336,14 +335,6 @@ class _ChatPageState extends State<ChatPage>
   String _settingPid() {
     final pid = _state.personaId ?? '';
     return _useTestSpace(pid) ? '$pid${AIProviderManager.mockTestSuffix}' : pid;
-  }
-
-  bool _isCurrentMockChat() {
-    final pid = _state.personaId;
-    if (pid == null || pid.isEmpty) return false;
-    return AIProviderManager.isMockId(
-      AIProviderManager.instance.lastProviderFor(pid) ?? '',
-    );
   }
 
   /// 8-06 23:55 用户：流程停止条——长任务时强行让男主停止
@@ -667,10 +658,11 @@ class _ChatPageState extends State<ChatPage>
           if (_formatFailCount >= 3) {
             _formatFailCount = 0; // 熔断：第 3 次强制放行（按纯文本显示）
           } else {
-            final rewriteEvent = '你的回复没有按格式输出（缺少 <reply>/<msg>/<act> 标签），'
-                '已被打回，用户没看到。请按格式重写：'
-                '<reply>回#N</reply>（标注回哪条）+ <act>动作</act>（可选）'
-                '+ <msg>你说的话</msg>。标签小写不嵌套。';
+            final rewriteEvent = '你的回复没有按格式输出（缺少 JSON 块），'
+                '已被打回，用户没看到。请按格式重写（JSON 对象，每个占一行）：'
+                '{"reply":"回#N"}（标注回哪条，可省）'
+                '+ {"act":"动作/神态"}（可选）+ {"msg":"你说的话"}。'
+                '除 JSON 对象外不要输出任何其他文字；一次说多句 = 多个 {"msg":..} 对象。';
             DebugLogger.log('AI路由', '⛔ 男主无标签回复，打回重写（第 $_formatFailCount 次）');
             ChatPresence.instance.beginTyping();
             final rewritten = await _aiSvc.generateReply(
@@ -1361,12 +1353,21 @@ class _ChatPageState extends State<ChatPage>
       );
       // 8-07 19:15：剥 <msg>/<act>/<reply>/<sys> 标签 → 落库干净文本
       //（气泡显示用 spans 渲染，重载不显示标签壳；<sys> 是回管家静默块）
-      displayText = displayText
-          .replaceAll(
-            RegExp(r'</?msg>|</?act>|</?reply>|</?sys>', caseSensitive: false),
-            '',
-          )
-          .trim();
+      // 8-07 23:3x JSON 化：JSON 块同样剥壳（取 msg/act 值重建纯文本）
+      final parsedForDb = parseStructuredOutput(displayText);
+      if (parsedForDb.hasFormat) {
+        final bubbleTexts =
+            parsedForDb.bubbles.map((b) => b.text).where((t) => t.isNotEmpty);
+        displayText = bubbleTexts.join('\n').trim();
+      } else {
+        displayText = displayText
+            .replaceAll(
+              RegExp(r'</?msg>|</?act>|</?reply>|</?sys>',
+                  caseSensitive: false),
+              '',
+            )
+            .trim();
+      }
       // 8-06 21:36 用户：男主回复带编号 → 管家按标注消除待回复
       // （"回待#1、待#2"消除对应；"不回待#3"也消除=放下；没标注兜底消最老一条）
       if (result.text.trim().isNotEmpty) {
@@ -3007,8 +3008,9 @@ class _ChatPageState extends State<ChatPage>
   int _formatFailCount = 0;
 
   /// 8-07 19:15：男主回复是否带任何标签（<reply>/<msg>/<act>）
+  /// 8-07 23:3x：JSON 化——{"msg":..}/{"act":..}/{"reply":..}/{"sys":..} 也算带格式
   static bool _hasAnyTag(String text) =>
-      RegExp(r'<reply>|<msg>|<act>|<sys>', caseSensitive: false).hasMatch(text);
+      parseStructuredOutput(text).hasFormat;
 
   /// 8-07 19:15（用户设计）：男主回复 → 解析 <msg>/<act> → 逐条 append
   /// - msg 块 → 对话气泡（spans 混排：话正常 + 动作斜体淡色）
@@ -3022,18 +3024,10 @@ class _ChatPageState extends State<ChatPage>
     bool isFirst = false,
   }) async {
     final rows = <_BubbleRow>[];
-    // 剥 <reply> 标注（不显示）+ <sys> 回管家块（静默不显示不落库）
-    final clean = rawText
-        .replaceAll(
-          RegExp(r'<reply>[\s\S]*?</reply>', caseSensitive: false),
-          '',
-        )
-        .replaceAll(
-          RegExp(r'<sys>[\s\S]*?</sys>', caseSensitive: false),
-          '',
-        )
-        .trim();
-    final parts = parseMultiBubbles(clean);
+    // 8-07 23:3x JSON 化：parseStructuredOutput 统一解析（JSON 块 + 旧标签
+    // 双兼容）——reply 标注不显示、sys 静默不显示不落库，气泡只含 msg/act
+    final parsed = parseStructuredOutput(rawText);
+    final parts = parsed.bubbles;
     if (parts.isEmpty) return rows;
     String? firstMsgId;
     for (var i = 0; i < parts.length; i++) {
@@ -4912,12 +4906,14 @@ class _ChatPageState extends State<ChatPage>
                                 style: const TextStyle(fontSize: 11),
                               ),
                               onTap: () async {
+                                final sp = settingPid;
+                                if (sp == null) return;
                                 await SettingVersionStore.applyVersion(
-                                  settingPid!,
+                                  sp,
                                   v.id,
                                 );
                                 await SettingVersionStore.addChangelog(
-                                  settingPid!,
+                                  sp,
                                   settingType!,
                                   '弹窗内选用「$_dialogVersionLabel(v)」作为当前$typeName',
                                 );

@@ -175,6 +175,14 @@ class PendingQueueStore {
         repliedIds.add(v.toUpperCase());
       }
     }
+    // 8-07 23:3x JSON 化：{"reply":"回#1、#A"} 字段（新格式，男主回复必带）
+    for (final m
+        in RegExp(r'"reply"\s*:\s*"([^"]*)"').allMatches(reply)) {
+      final raw = (m.group(1) ?? '').replaceAll(r'\"', '"');
+      for (final n in RegExp(r'#(\d+|[A-Za-z])').allMatches(raw)) {
+        repliedIds.add(n.group(1)!.toUpperCase());
+      }
+    }
     // 旧格式兼容："回待#N" / "回复待#N" → 回
     for (final m in RegExp(r'回(?:复)?\s*待#(\d+|[A-Za-z])').allMatches(reply)) {
       repliedIds.add(m.group(1)!.toUpperCase());

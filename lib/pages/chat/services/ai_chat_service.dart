@@ -1199,20 +1199,20 @@ class AiChatService {
         AIChatMessage(
           role: 'system',
           content: '【待回复】（主对话她说的——一般要回，特殊情况可不回；'
-              '要消必须显式标注 <reply>回#N</reply>，一句话可回多条；'
+              '要消必须显式标注 {"reply":"回#N"}（JSON 字段），一句话可回多条；'
               '不回就挂着，她问起来你老实说）\n$pendingUser',
         ),
       if (inFlow && pendingUser != null)
         AIChatMessage(
           role: 'system',
           content: '【流程输入】（流程进行中她主对话说的——插进流程，'
-              '你判断继续流程还是重置；要回她也用 <reply> 标注消掉）\n$pendingUser',
+              '你判断继续流程还是重置；要回她也用 {"reply":"回#N"} 标注消掉）\n$pendingUser',
         ),
       if (pendingButler != null)
         AIChatMessage(
           role: 'system',
           content: '【系统消息】（管家/系统提醒——不用回，执行或判断即可；'
-              '觉得该让她知道才用 <msg> 转达）\n$pendingButler',
+              '觉得该让她知道才用 {"msg":"…"} 转达）\n$pendingButler',
         ),
       if (flowText != null && flowText.isNotEmpty)
         AIChatMessage(
