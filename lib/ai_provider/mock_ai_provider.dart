@@ -94,46 +94,20 @@ class MockAIProvider {
         .map((m) => m.content)
         .join('\n');
     if (systemText2.contains('设定修改会话')) {
-      // 8-07 16:4x 用户（推翻 16:1x 剧本）：流程是——
-      // ① 先取需求：男主问问题（一次可发多题，UI 卡片化逐题展示，
-      //    单选/多选由男主标，C=用户自己写，全部答完自动发男主）
-      // ② 需求收集完 → 出第一版【新方案】（不显示「就用这版」）
-      // ③ 第一版不满意 → 用户再说需求 → 男主再问/直接改 → 出第二版…
-      //    直到男主确认了解完 → 【最终方案】→ 才出现定案按钮
-      // ④ update_setting 指令明确的单步修改（验收⑨⑩⑪）→ 男主直接出
-      //    【最终方案】（需求已明确，不用再问）
+      // 8-07 17:0x 剧本定稿（依据=system 里的【验收剧本】testStep，
+      // 不再数消息条数——弹窗打开会自动触发第一轮，计数不可靠）：
+      // ⑨⑩⑪（改/加/删一段，指令明确）→ 弹窗自动第一轮直接出
+      //    【最终方案】（不带内容=编辑框保持工具算好的 newText 不变，
+      //    只解锁定案按钮）→ 用户点「就用这版」一键定案
+      // ⑫（多轮商量）→ ① 自动第一轮问 2 题卡片（单选身份/多选喜好）
+      //    → ② 用户答完自动发 → 出 v1【新方案】（无定案按钮）
+      //    → ③ 用户反馈"第一版喜好不好" → 查段落 → v2【最终方案】
+      // 通用：用户打字"就用这版" → 解锁按钮（不覆盖内容）
       final userMsgs = messages.where((m) => m.role == 'user').toList();
-      final isFirst = userMsgs.length <= 1;
       final lastUser2 = userMsgs.isEmpty ? '' : userMsgs.last.content;
-      if (isFirst && !lastUser2.contains('商量') && !lastUser2.contains('选项')) {
-        // ⑨⑩⑪：用户指令明确 → 男主直接确认最终方案（不覆盖编辑框内容）
-        AiModuleLog.log('模拟AI', '💬 设定会话（指令明确）→ 直接出最终方案');
-        return AIProviderResult(
-          text: '好，按你说的改好了，这是最终方案：\n【最终方案】',
-          providerName: '模拟AI',
-        );
-      }
-      if (isFirst) {
-        // ⑫ 首轮：问 2 题（单选身份 + 多选喜好），UI 会逐题展示
-        AiModuleLog.log('模拟AI', '💬 设定会话（先取需求）→ 问两个问题');
-        return AIProviderResult(
-          text:
-              '我理了一下，先问你两个问题（第 1 题单选，第 2 题可多选，'
-              '也可以自己写）：\n'
-              '【问题】（单选）身份部分想怎么写？\n'
-              '【选项】\n'
-              'A. 测试角色\n'
-              'B. 测试角色，温柔系\n'
-              '【问题】（多选）喜好部分呢？\n'
-              '【选项】\n'
-              'A. 测试喜好C\n'
-              'B. 测试喜好C，再加点细节',
-          providerName: '模拟AI',
-        );
-      }
+      final isMulti = systemText2.contains('多轮商量') || systemText2.contains('⑫');
       if (lastUser2.contains('就用这版')) {
         // 用户觉得当前版就行 → 男主确认需求了解完，出【最终方案】定稿
-        // （后面不带内容 = 编辑框保持当前方案不变，只是解锁定案按钮）
         AiModuleLog.log('模拟AI', '💬 设定会话（用户说就用这版）→ 确认最终方案');
         return AIProviderResult(
           text: '好，那就按这版来，这是最终方案：\n【最终方案】',
@@ -159,14 +133,40 @@ class MockAIProvider {
           providerName: '模拟AI',
         );
       }
-      // 收到答案（题目答完自动发）→ 汇总需求出第一版【新方案】
-      AiModuleLog.log('模拟AI', '💬 设定会话（收到答案）→ 汇总出第一版【新方案】');
+      if (isMulti) {
+        // ⑫：第 1 轮（弹窗自动触发"我想更新…"）→ 问 2 题卡片
+        if (!lastUser2.contains('【') || lastUser2.contains('我想更新')) {
+          AiModuleLog.log('模拟AI', '💬 设定会话（⑫首轮）→ 问两个卡片题');
+          return AIProviderResult(
+            text:
+                '我理了一下，先问你两个问题（第 1 题单选，第 2 题可多选，'
+                '也可以自己写）：\n'
+                '【问题】（单选）身份部分想怎么写？\n'
+                '【选项】\n'
+                'A. 测试角色\n'
+                'B. 测试角色，温柔系\n'
+                '【问题】（多选）喜好部分呢？\n'
+                '【选项】\n'
+                'A. 测试喜好C\n'
+                'B. 测试喜好C，再加点细节',
+            providerName: '模拟AI',
+          );
+        }
+        // 用户答完题（自动组装"【身份】A. 测试角色…"）→ 汇总出 v1【新方案】
+        AiModuleLog.log('模拟AI', '💬 设定会话（⑫收到答案）→ 汇总出 v1【新方案】');
+        return AIProviderResult(
+          text:
+              '好，我按你答的汇总了一下，这是第一版，你看看：\n'
+              '【新方案】\n'
+              '【身份】测试角色\n'
+              '【喜好】测试喜好C',
+          providerName: '模拟AI',
+        );
+      }
+      // ⑨⑩⑪：指令明确 → 男主直接确认最终方案（不覆盖编辑框内容）
+      AiModuleLog.log('模拟AI', '💬 设定会话（⑨⑩⑪指令明确）→ 直接出最终方案');
       return AIProviderResult(
-        text:
-            '好，我按你答的汇总了一下，这是第一版，你看看：\n'
-            '【新方案】\n'
-            '【身份】测试角色\n'
-            '【喜好】测试喜好C',
+        text: '好，按你说的改好了，这是最终方案：\n【最终方案】',
         providerName: '模拟AI',
       );
     }

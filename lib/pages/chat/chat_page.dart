@@ -2742,8 +2742,8 @@ class _ChatPageState extends State<ChatPage>
       await sw('builtin-mock', '⑫/⑫ 设定·多轮会话+版本管理');
       _acceptingStep = '⑫/12 设定·多轮商量+版本管理';
       note(
-        '📋 ⑫ 改【喜好】——弹窗里男主先问两道卡片题（一次只显示一题，'
-        '答完自动下一题）：\n'
+        '📋 ⑫ 改【喜好】——弹窗自动弹出，男主自动问两道卡片题'
+        '（一次只显示一题，答完自动下一题）：\n'
         '1️⃣ 第1题（单选）身份：点 A → 自动跳第2题；'
         '第2题（多选）喜好：点 A（可再点 B，或点「✏️ 我自己写」打字）'
         '→ 全部答完自动发给男主 → 男主出 v1【新方案】\n'
@@ -4338,6 +4338,9 @@ class _ChatPageState extends State<ChatPage>
     // 8-07 16:1x 用户：「就用这版」只在男主确认了解完需求、出【最终方案】
     // 后才出现；【新方案】=还在了解/迭代中，不显示（第一版第二版都不算数）
     var maleHasFinal = false;
+    // 8-07 17:0x 修复死锁：弹窗打开自动触发第一轮男主会话
+    // （否则 asking 阶段没题目没按钮，用户只能点放弃）
+    var autoStarted = false;
     // 会话记录（每轮：她说/男主说，给男主当上下文）
     final history = <String>[];
     final pid = _state.personaId ?? '';
@@ -4366,6 +4369,7 @@ class _ChatPageState extends State<ChatPage>
               versionIndex: versions.isNotEmpty
                   ? _buildVersionIndex(versions)
                   : null,
+              testStep: testStep,
             );
             history.add('男主说：$reply');
             // 8-07 16:1x：男主确认了解完需求出【最终方案】→ 才亮「就用这版」；
@@ -4494,6 +4498,14 @@ class _ChatPageState extends State<ChatPage>
                 currentV = versions.length;
               }
             });
+          }
+
+          // 8-07 17:0x 修复死锁：弹窗打开自动触发第一轮男主会话
+          // （只触发一次；男主回复带【问题】→ asking 出卡片题，
+          //   带【最终方案】→ reviewing 直接出定案按钮）
+          if (!autoStarted && !busy) {
+            autoStarted = true;
+            Future.microtask(() => sendToMale('我想更新$typeName：$reason'));
           }
 
           return AlertDialog(
@@ -5014,6 +5026,8 @@ class _ChatPageState extends State<ChatPage>
     // 8-07 15:5x 用户：不把版本全文塞给男主（他会混乱）——只给段落索引
     // （每版有哪些段+预览），他需要哪段用 query_setting_version 查原文
     String? versionIndex,
+    // 8-07 17:0x：验收步骤号（mock 判定剧本用；真实 AI 忽略）
+    String? testStep,
   }) async {
     try {
       final personaPrompt = _state.persona?.prompt ?? '';
@@ -5036,6 +5050,7 @@ class _ChatPageState extends State<ChatPage>
         needsWindow: false,
         taskState:
             '【设定修改会话】你在和她讨论「$typeName」的修改，还没定案。\n'
+            '${testStep != null && testStep.isNotEmpty ? '【验收剧本】$testStep\n' : ''}'
             '$currentInfo\n'
             '${versionIndex != null && versionIndex.isNotEmpty ? '【版本段落索引】（她可能说"第X版的XX好/不好"，这是每版的段落标签+预览；需要某段原文时用 query_setting_version 工具查，别凭预览猜）：\n$versionIndex\n' : ''}'
             '你刚才的方案：\n$draft\n'
