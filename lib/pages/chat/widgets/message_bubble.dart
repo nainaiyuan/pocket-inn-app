@@ -367,7 +367,11 @@ class _MessageBubbleState extends State<MessageBubble>
                         )
                       else
                         Text(
-                          _displayText,
+                          // 8-07 22:20 用户：气泡只有思考过程+空正文（DeepSeek
+                          // 空 content 场景）→ 显示占位，别留一块空白
+                          _displayText.trim().isEmpty
+                              ? '（他想了想，没说话）'
+                              : _displayText,
                           style: TextStyle(
                             fontSize: 15,
                             color: const Color(0xFF6A4A5A),
