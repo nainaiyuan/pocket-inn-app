@@ -3916,17 +3916,11 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
         personaName: personaName,
         personaPrompt: personaPrompt,
         needsWindow: false,
-        taskState: '【设定修改会话】你在和她讨论「$typeName」的修改，还没定案。
-'
-            '$currentInfo
-'
-            '你刚才的方案：
-$draft
-'
-            '你上一轮说：$maleLast
-'
-            '她本轮回复你：$userMsg
-'
+        taskState: '【设定修改会话】你在和她讨论「$typeName」的修改，还没定案。\n'
+            '$currentInfo\n'
+            '你刚才的方案：\n$draft\n'
+            '你上一轮说：$maleLast\n'
+            '她本轮回复你：$userMsg\n'
             '回应她（像平时聊天一样自然）：可以解释、追问细节、或查资料'
             '（recall_memory/query_diary/query_setting_history/query_record/'
             'list_tools 可直接查，不用她审批）。如果你要给出修改后的方案，'
