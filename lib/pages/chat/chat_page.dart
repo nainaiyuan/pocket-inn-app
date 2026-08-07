@@ -4649,7 +4649,7 @@ class _ChatPageState extends State<ChatPage>
                                 ),
                               ),
                             ),
-                          // "自己写"入口（C 或单独的输入框）：AB 都不满意就打字
+                          // "自己写"入口：选项都不满意就自己打字
                           if (!customOpen)
                             Padding(
                               padding: const EdgeInsets.only(top: 2),
@@ -4671,7 +4671,7 @@ class _ChatPageState extends State<ChatPage>
                                     ),
                                   ),
                                   child: const Text(
-                                    '✏️ 我自己写（AB 都不满意就自己说）',
+                                    '✏️ 我自己写（选项都不满意就自己说）',
                                     style: TextStyle(
                                       fontSize: 13,
                                       color: Color(0xFF8A5A72),
@@ -5049,7 +5049,8 @@ class _ChatPageState extends State<ChatPage>
             '【选项】\n'
             'A. 选项内容\n'
             'B. 选项内容\n'
-            '（选项 2-3 个，不用写 C，她可以自己写）\n'
+            '（选项数量你自己定：2-4 个都行，字母顺着排 A. B. C. D.…；'
+            '她也可以不选选项，自己打字补充）\n'
             '她答完当前题会自动到下一题（你一次只发一个问题，别一次堆多个；'
             '等她全部答完，会一次性把答案发给你）。\n'
             '单选：她只能选一个；多选：她可以选多个，也可以补充自己的想法。'
