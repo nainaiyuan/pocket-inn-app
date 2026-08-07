@@ -2678,7 +2678,9 @@ class _ChatPageState extends State<ChatPage>
       // ⑨ 段落化 update：只改【喜好】段，其他段落不动（弹窗用户点同意）
       await sw('builtin-mock', '⑨/⑫ 设定·改一段（tag 定位）');
       _acceptingStep = '⑨/12 设定·只改【喜好】段（其他段不能动）';
-      note('📋 ⑨ 让男主用 update_setting 只改【喜好】段——弹窗点「就用这版」');
+      note(
+        '📋 ⑨ 让男主用 update_setting 只改【喜好】段——弹窗里男主会先问问题，在下面打字「就用这版」发给他 → 出现定案按钮 → 点「就用这版」',
+      );
       await say(
         '用 update_setting 工具，把男主设定里的【喜好】段改成"测试喜好B"，'
         '只改这一段，别动其他段落。',
@@ -2702,7 +2704,7 @@ class _ChatPageState extends State<ChatPage>
       // ⑩ 段落化 add：新增一段
       await sw('builtin-mock', '⑩/⑫ 设定·新增一段');
       _acceptingStep = '⑩/12 设定·新增【测试段】';
-      note('📋 ⑩ 让男主用 update_setting 新增【测试段】——弹窗点「就用这版」');
+      note('📋 ⑩ 让男主用 update_setting 新增【测试段】——弹窗里同上：打字「就用这版」发给他 → 点定案按钮');
       await say('再用 update_setting 新增一段【测试段】，内容写"验收新增"，别动其他段落。');
       final book10 = await SettingVersionStore.load(testPid);
       final i10 = book10.currentMale.contains('【测试段】验收新增');
@@ -2716,7 +2718,7 @@ class _ChatPageState extends State<ChatPage>
       // ⑪ 段落化 delete：删掉新增段
       await sw('builtin-mock', '⑪/⑫ 设定·删一段');
       _acceptingStep = '⑪/12 设定·删除【测试段】';
-      note('📋 ⑪ 让男主用 update_setting 删掉【测试段】——弹窗点「就用这版」');
+      note('📋 ⑪ 让男主用 update_setting 删掉【测试段】——弹窗里同上：打字「就用这版」发给他 → 点定案按钮');
       await say('再用 update_setting 把【测试段】删掉。');
       final book11 = await SettingVersionStore.load(testPid);
       final deleted = !book11.currentMale.contains('【测试段】');
@@ -2735,19 +2737,23 @@ class _ChatPageState extends State<ChatPage>
       );
 
       // ⑫ 多轮会话弹窗 + 版本管理（用户手动：
-      // 点选项 A → v2；点选项 B → v3；在反馈框打字说
-      // "第一版喜好不好，第二版喜好好，结合一下" → 男主查段落 → 出 v4；
-      // 看版本区 diff；可 ✕ 弃用一版再继续 → 同意）
+      // 攒着点选项 A+A → 💬 发给他 → 男主出 v1【新方案】（此时没有
+      // 「就用这版」按钮=还在了解需求）→ 反馈框打字"第一版喜好不好，
+      // 喜好改具体点" → 男主查段落 → 出 v2【最终方案】（出现定案按钮）
+      // → 看版本区 diff → 就用这版）
       await sw('builtin-mock', '⑫/⑫ 设定·多轮会话+版本管理');
-      _acceptingStep = '⑫/12 设定·多轮商量+段落结合';
+      _acceptingStep = '⑫/12 设定·多轮商量+版本管理';
       note(
-        '📋 ⑫ 改【喜好】——弹窗里男主会先给两组选项：\n'
-        '1️⃣ 点选项 A → 男主出 v2（可看版本区「📝 v2 这版改了」）\n'
-        '2️⃣ 再点选项 B → 男主出 v3（加【备注】段）\n'
-        '3️⃣ 在下面反馈框打字："第一版喜好不好，第二版喜好好，结合一下"'
-        ' → 男主查段落 → 出合并版 v4\n'
-        '4️⃣ 可选：✕ 弃用某版，看男主下轮还记不记得它\n'
-        '5️⃣ 最后点「就用这版」定案（预期含 身份+喜好C）',
+        '📋 ⑫ 改【喜好】——弹窗里男主先问两组问题（选项）：\n'
+        '1️⃣ 点选项 A（身份）+ 选项 A（喜好）→ 两个都高亮=攒着，'
+        '点下方「💬 发给他」一起发 → 男主出 v1【新方案】\n'
+        '2️⃣ 注意：现在底部【没有】「就用这版」按钮——男主还在了解需求，'
+        '第一版不能定案（验证点1）\n'
+        '3️⃣ 在反馈框打字："第一版喜好不好，喜好写具体点" → 发给他'
+        ' → 男主查段落 → 出 v2【最终方案】\n'
+        '4️⃣ 这时底部出现「就用这版」（男主确认了解完了，验证点2）；'
+        '可看版本区「📝 v2 这版改了」\n'
+        '5️⃣ 点「就用这版」定案（预期含 身份+喜好C）',
       );
       await say(
         '用 update_setting 把【喜好】改成"测试喜好C"。'
@@ -4297,6 +4303,12 @@ class _ChatPageState extends State<ChatPage>
     // 男主回复带【问题N】+【选项】块 → 渲染成可点按钮组
     var questionGroups =
         <({String question, List<({String key, String text})> options})>[];
+    // 8-07 16:1x 用户：点选项先攒着（不立即发男主），选完/自己补充完
+    // 再点「💬 发给他」统一发——不然选都没选完就发出去没意义
+    final pendingSelections = <({String question, String key, String text})>[];
+    // 8-07 16:1x 用户：「就用这版」只在男主确认了解完需求、出【最终方案】
+    // 后才出现；【新方案】=还在了解/迭代中，不显示（第一版第二版都不算数）
+    var maleHasFinal = false;
     // 会话记录（每轮：她说/男主说，给男主当上下文）
     final history = <String>[];
     final pid = _state.personaId ?? '';
@@ -4322,12 +4334,15 @@ class _ChatPageState extends State<ChatPage>
               maleLast: maleText,
               userMsg: userMsg,
               history: history,
-              versionIndex: versions.length > 1
+              versionIndex: versions.isNotEmpty
                   ? _buildVersionIndex(versions)
                   : null,
             );
             history.add('男主说：$reply');
-            final idx = reply.indexOf('【新方案】');
+            // 8-07 16:1x：男主确认了解完需求出【最终方案】→ 才亮「就用这版」；
+            // 只出【新方案】=还在了解/迭代，按钮不出现
+            final finalIdx = reply.indexOf('【最终方案】');
+            final idx = finalIdx >= 0 ? finalIdx : reply.indexOf('【新方案】');
             if (idx >= 0) {
               final rest = reply.substring(idx + '【新方案】'.length).trim();
               if (rest.startsWith('【')) {
@@ -4355,6 +4370,9 @@ class _ChatPageState extends State<ChatPage>
               maleText = reply;
               round++;
               busy = false;
+              maleHasFinal = finalIdx >= 0;
+              // 发出去了 → 攒的选项清空
+              pendingSelections.clear();
               final hasNew = versions.any((x) => x.text == ctrl.text);
               if (!hasNew && idx >= 0) {
                 // 8-07 15:5x 用户：从旧版继续改 → 该版之后的版本自动作废
@@ -4440,11 +4458,12 @@ class _ChatPageState extends State<ChatPage>
                     ),
                   ),
                   const SizedBox(height: 10),
-                  // 选项区：男主问的问题（一组问题+一组选项），点一个回复他；
-                  // 可以连着点多个，也可以下面反驳；他出【新方案】才算定版
+                  // 选项区：男主问的问题（一组问题+一组选项），点一个先攒着
+                  // （高亮=已选，再点取消），选完点下方「💬 发给他」统一回复；
+                  // 也可以自己打字补充/反驳（8-07 16:1x 用户：别点一个发一个）
                   if (questionGroups.isNotEmpty) ...[
                     const Text(
-                      '🎯 男主在问你（点选项直接回复他，可以连着点；也可以自己在下面改/反驳）：',
+                      '🎯 男主在问你：点选项先攒着（可多选/再点取消），选完点下方「💬 发给他」一起回复；也可以自己在下面打字说想法',
                       style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
                     ),
                     const SizedBox(height: 6),
@@ -4469,11 +4488,22 @@ class _ChatPageState extends State<ChatPage>
                             onTap: busy
                                 ? null
                                 : () {
-                                    // 告诉男主选了哪个 → 他继续问/出正式版
-                                    sendToMale(
-                                      '${group.question.isEmpty ? '' : '【${group.question}】'}'
-                                      '我选 ${opt.key}：${opt.text}',
-                                    );
+                                    setState(() {
+                                      final i = pendingSelections.indexWhere(
+                                        (s) =>
+                                            s.question == group.question &&
+                                            s.key == opt.key,
+                                      );
+                                      if (i >= 0) {
+                                        pendingSelections.removeAt(i);
+                                      } else {
+                                        pendingSelections.add((
+                                          question: group.question,
+                                          key: opt.key,
+                                          text: opt.text,
+                                        ));
+                                      }
+                                    });
                                   },
                             child: Container(
                               width: double.infinity,
@@ -4482,10 +4512,32 @@ class _ChatPageState extends State<ChatPage>
                                 vertical: 8,
                               ),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFF7EAF1),
+                                color:
+                                    pendingSelections.any(
+                                      (s) =>
+                                          s.question == group.question &&
+                                          s.key == opt.key,
+                                    )
+                                    ? const Color(0xFFE8C9D8)
+                                    : const Color(0xFFF7EAF1),
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
-                                  color: const Color(0xFFE8C9D8),
+                                  color:
+                                      pendingSelections.any(
+                                        (s) =>
+                                            s.question == group.question &&
+                                            s.key == opt.key,
+                                      )
+                                      ? const Color(0xFFC896B4)
+                                      : const Color(0xFFE8C9D8),
+                                  width:
+                                      pendingSelections.any(
+                                        (s) =>
+                                            s.question == group.question &&
+                                            s.key == opt.key,
+                                      )
+                                      ? 1.5
+                                      : 1,
                                 ),
                               ),
                               child: Text(
@@ -4498,6 +4550,27 @@ class _ChatPageState extends State<ChatPage>
                             ),
                           ),
                         ),
+                      const SizedBox(height: 8),
+                    ],
+                    // 已攒的选项预览（8-07 16:1x）
+                    if (pendingSelections.isNotEmpty) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0E4EA),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '📌 已选（点「💬 发给他」一起发给男主）：\n'
+                          '${pendingSelections.map((s) => '${s.question.isEmpty ? '' : '【${s.question}】'}${s.key}. ${s.text}').join('\n')}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            height: 1.4,
+                            color: Color(0xFF6B5560),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 8),
                     ],
                   ],
@@ -4617,7 +4690,8 @@ class _ChatPageState extends State<ChatPage>
                     controller: fbCtrl,
                     maxLines: 2,
                     decoration: InputDecoration(
-                      hintText: '跟男主说：哪里不对、想要什么…他出下一版（说需求=还没定案）',
+                      hintText:
+                          '跟男主说：哪里不对、想要什么…（选完选项/写完点「💬 发给他」；男主确认了解完会出最终版，才出现「就用这版」）',
                       filled: true,
                       fillColor: Colors.white,
                       border: OutlineInputBorder(
@@ -4661,16 +4735,29 @@ class _ChatPageState extends State<ChatPage>
               if (!busy)
                 TextButton(
                   onPressed: () async {
-                    final msg = fbCtrl.text.trim();
+                    // 8-07 16:1x 用户：攒的选项 + 自己打的字一起发给男主
+                    // （至少有一个才发）
+                    final buf = StringBuffer();
+                    for (final s in pendingSelections) {
+                      buf.writeln(
+                        '${s.question.isEmpty ? '' : '【${s.question}】'}'
+                        '我选 ${s.key}：${s.text}',
+                      );
+                    }
+                    final fb = fbCtrl.text.trim();
+                    if (fb.isNotEmpty) buf.writeln(fb);
+                    final msg = buf.toString().trim();
                     if (msg.isEmpty) return;
                     await sendToMale(msg);
                   },
                   child: const Text(
-                    '💬 发给他·出下一版',
+                    '💬 发给他',
                     style: TextStyle(color: Color(0xFFC896B4)),
                   ),
                 ),
-              if (!busy)
+              // 8-07 16:1x 用户：只有男主出【最终方案】（确认了解完需求）
+              // 才显示「就用这版」；【新方案】=还在了解/迭代，不出现
+              if (!busy && maleHasFinal)
                 FilledButton(
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFFC896B4),
@@ -4744,14 +4831,17 @@ class _ChatPageState extends State<ChatPage>
             '【连续问答】你可以一次问多个问题，每个问题带一组选项，格式：\n'
             '【问题1】问题内容\n【选项】\nA. 选项内容\nB. 选项内容\nC. 其他/我自己说\n'
             '【问题2】问题内容\n【选项】\nA. ...\n（要几个问题写几组，选项一般 2-3 个）\n'
-            '她点选项或反驳后，你可以继续追问下一个问题，也可以给出修改后的方案'
-            '（最后单独一行写【新方案】然后写完整新内容）。'
+            '她会把所有问题的选项一起回复你（攒着一起发，别等她一条条点）。'
+            '收到她的选择后，你可以继续追问下一个问题，也可以给出修改后的方案：\n'
+            '——还在了解需求/可能还要改 → 最后单独一行写【新方案】然后写完整新内容（这不算定案，她不会点「就用这版」）；\n'
+            '——确认她的需求都问清楚了、方案就是定稿 → 最后单独一行写【最终方案】然后写完整新内容（这时她才能点「就用这版」定案）。\n'
             '【结合请求】她说"第X版的XX好/不好"时：用 query_setting_version'
             '查对应版本对应段落的原文，分清她喜欢哪版哪段、不喜欢哪版哪段，'
             '把喜欢的段落组合成一份新方案（冲突的地方问她或取更合适的），'
-            '最后单独一行写【新方案】然后写完整新内容。'
+            '最后按上面规则写【新方案】或【最终方案】。'
             '【别中途断流程】她没点「就用这版」之前，讨论都没结束——'
-            '她还在提需求/点选项，你就继续问或改，别急着定案收尾。',
+            '她还在提需求/点选项，你就继续问或改，别急着定案收尾；'
+            '你只有在需求全部了解清楚、方案完整时才写【最终方案】。',
       );
       final msgs = <AIChatMessage>[
         AIChatMessage(role: 'system', content: system),
@@ -4778,7 +4868,17 @@ class _ChatPageState extends State<ChatPage>
             final name = call['name']?.toString() ?? '';
             final args = (call['arguments'] as Map<String, dynamic>?) ?? {};
             final r = await _executeReadOnlySessionTool(name, args);
-            msgs.add(AIChatMessage(role: 'user', content: '【工具结果】$r'));
+            // 8-07 16:1x 修复：工具结果必须用 role:'tool' + 原 toolCallId 配对
+            // （跟主链路一致）——manager 靠 role=='tool' 判定工具轮，
+            // 之前用 user role 追加 → mock 的 _handleToolRound 永远不触发，
+            // 男主查段落的剧本走不通
+            msgs.add(
+              AIChatMessage(
+                role: 'tool',
+                content: '【工具 $name】$r',
+                toolCallId: call['id']?.toString() ?? 'call_${i}_$name',
+              ),
+            );
           }
           continue;
         }
