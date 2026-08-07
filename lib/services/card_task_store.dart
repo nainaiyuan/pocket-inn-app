@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/debug_logger.dart';
 
 /// 📋 卡片任务模型 + 存储（8-06 13:45-13:53 用户：任务系统 v2）
 ///
@@ -134,6 +135,7 @@ class CardTaskStore {
     await _ensure();
     _tasks.insert(0, task);
     await _persist();
+    DebugLogger.log('任务', '📇 新增「${task.title}」（${task.status}）');
   }
 
   Future<void> update(String id, void Function(CardTask) mutate) async {
@@ -151,12 +153,14 @@ class CardTaskStore {
     await _ensure();
     _tasks.removeWhere((t) => t.id == id);
     await _persist();
+    DebugLogger.log('任务', '🗑 删除任务 $id');
   }
 
   Future<void> removeDone() async {
     await _ensure();
     _tasks.removeWhere((t) => t.status != 'active');
     await _persist();
+    DebugLogger.log('任务', '🧹 清理已完成任务');
   }
 
   static String newId() => 'task_${DateTime.now().microsecondsSinceEpoch}';

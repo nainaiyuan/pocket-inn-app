@@ -53,6 +53,9 @@ final RegExp _actInnerRe =
 /// 解析男主回复 → 气泡列表
 ///
 /// 返回空列表 = 没有气泡（纯空白或只有标签壳）——调用方按"无标签"处理
+/// 8-07 21:52 用户：日志增强——纯 Dart 解析器用钩子（Flutter 侧注入 DebugLogger）
+void Function(String tag, String msg)? multiBubbleLogSink;
+
 List<BubblePart> parseMultiBubbles(String raw) {
   if (raw.trim().isEmpty) return const [];
 
@@ -104,6 +107,7 @@ List<BubblePart> parseMultiBubbles(String raw) {
         result.add(BubblePart(BubbleKind.msg, [BubbleSpan(SpanKind.text, t)]));
     }
   }
+  multiBubbleLogSink?.call('多气泡', '🧩 解析 ${result.length} 块（${result.map((b) => b.kind.name).join('+')}）');
   return result;
 }
 

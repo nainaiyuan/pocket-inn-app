@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/debug_logger.dart';
 
 /// 📋 男主便签 / 当前任务模块（8-06 21:12 用户设计）
 ///
@@ -64,6 +65,7 @@ class WorkingPadStore {
       cleaned.removeRange(_maxLines, cleaned.length);
     }
     await _save(personaId, cleaned);
+    DebugLogger.log('便签', '📝 便签更新 ${cleaned.length} 行');
   }
 
   /// 追加一行
@@ -72,6 +74,7 @@ class WorkingPadStore {
     ls.add(line.trim());
     if (ls.length > _maxLines) ls.removeRange(_maxLines, ls.length);
     await _save(personaId, ls);
+    DebugLogger.log('便签', '➕ ${line.length > 50 ? line.substring(0, 50) + '…' : line}');
   }
 
   /// 删第 from 行到第 to 行（1 起；to 可省略=只删 from）

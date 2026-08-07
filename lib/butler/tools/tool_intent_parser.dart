@@ -16,6 +16,9 @@ import 'dart:convert';
 /// 文本协议 AI 用 ⟨工具:⟩ 明确块即可（男主按格式写，不与对话冲突）。
 /// 纯聊天文本（无明确指令格式）→ 返回 null → 零副作用照常显示。
 class ToolIntentParser {
+  /// 8-07 21:52 用户：日志增强——纯 Dart 解析器用钩子（Flutter 侧注入 DebugLogger）
+  static void Function(String tag, String msg)? logSink;
+
   /// 已知工具名集合（宽松格式/JSON容错只认这些，防误抓）
   static final Set<String> _knownToolNames = {
     'record_memory',
@@ -41,8 +44,19 @@ class ToolIntentParser {
   static List<Map<String, dynamic>>? extract(String text) {
     if (text.trim().isEmpty) return null;
     final blocks = extractToolBlocks(text);
-    if (blocks != null && blocks.isNotEmpty) return blocks;
-    return extractJsonToolCalls(text);
+    if (blocks != null && blocks.isNotEmpty) {
+      logSink?.call('工具意图',
+          '🔧 识别 ${blocks.length} 个工具块（${blocks.map((b) => b['name']).join('、')}）');
+      return blocks;
+    }
+    final json = extractJsonToolCalls(text);
+    if (json != null && json.isNotEmpty) {
+      logSink?.call('工具意图',
+          '🔧 识别 ${json.length} 个 JSON 工具调用（${json.map((b) => b['name']).join('、')}）');
+      return json;
+    }
+    logSink?.call('工具意图', '❓ 无明确工具格式（文本含工具痕迹但识别不到）');
+    return null;
   }
 
   /// 疑似工具调用检测（8-04 18:34 用户设计）：

@@ -1170,6 +1170,14 @@ class AiChatService {
     // 流程结束自动回到【待回复】<user>（编号不变，不会丢）
     final inFlow = FlowStore.isActive(ctxPid) || FlowStore.settingDialogActive;
     final flowGoal = FlowStore.goalOf(ctxPid);
+    // 8-07 21:52 用户：状态块组装日志（男主自查"我这轮看到了什么"）
+    DebugLogger.log(
+      '状态块',
+      '📋 状态=${inFlow ? (flowGoal != null ? '走流程「$flowGoal」' : '设定弹窗中') : '正常对话'}'
+      ' 待回复=${pendingUser != null ? '${pendingUser.split('\n').length}条' : '无'}'
+      ' 流程输入=${inFlow && pendingUser != null ? '有' : '无'}'
+      ' 系统消息=${pendingButler != null ? '有' : '无'}',
+    );
     final statusBlocks = <AIChatMessage>[
       // 【当前情况】状态感知块（永远在，男主先看这个）
       AIChatMessage(

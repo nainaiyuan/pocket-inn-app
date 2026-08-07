@@ -105,6 +105,8 @@ class _ChatPageState extends State<ChatPage>
     // 8-07 21:48 用户：日志增强——纯 Dart store 的日志钩子统一接 DebugLogger
     FlowStore.logSink = (t, m) => DebugLogger.log(t, m);
     PendingQueueStore.logSink = (t, m) => DebugLogger.log(t, m);
+    ToolIntentParser.logSink = (t, m) => DebugLogger.log(t, m);
+    multiBubbleLogSink = (t, m) => DebugLogger.log(t, m);
     _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
@@ -5457,6 +5459,12 @@ class _ChatPageState extends State<ChatPage>
     String? testStep,
   }) async {
     try {
+      DebugLogger.log(
+        '弹窗会话',
+        '💬 问男主（$typeName）：draft ${draft.length}字，主对话摘要 '
+        '${PendingQueueStore.pendingUserText(personaId)?.length ?? 0} 字，'
+        '历史 ${history.length} 条，轮次${testStep ?? '-'}',
+      );
       final personaPrompt = _state.persona?.prompt ?? '';
       final book = SettingVersionStore.cached(settingPid ?? personaId);
       // 8-07 19:5x 用户：弹窗会话也带主对话情况摘要——男主在弹窗里

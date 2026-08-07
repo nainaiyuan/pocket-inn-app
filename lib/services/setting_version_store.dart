@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../ai_provider/ai_provider_manager.dart';
+import '../utils/debug_logger.dart';
 
 /// 📚 设定版本管理（8-06 17:46-18:24 用户）
 ///
@@ -128,6 +129,7 @@ class SettingVersionStore {
       if (v.type == type && v.isCurrent) v.content = content;
     }
     await _save(personaId, book);
+    DebugLogger.log('设定版本', '💾 当前版更新 $type（${content.length}字）');
   }
 
   /// 8-07 18:2x：覆盖某个历史版本的内容（弹确认后调用）
@@ -184,6 +186,7 @@ class SettingVersionStore {
     final book = await load(personaId);
     final v = book.pushVersion(type, content, note: note);
     await _save(personaId, book);
+    DebugLogger.log('设定版本', '🆕 存为新版本 ${v.id}（$type，${content.length}字）');
     return v;
   }
 
@@ -207,13 +210,17 @@ class SettingVersionStore {
     final book = await load(personaId);
     book.applyVersion(versionId);
     await _save(personaId, book);
+    DebugLogger.log('设定版本', '🔄 应用版本 $versionId');
   }
 
   /// 删除某个历史版本（当前版不可删；变更日志保留）
   static Future<bool> deleteVersion(String personaId, String versionId) async {
     final book = await load(personaId);
     final ok = book.deleteVersion(versionId);
-    if (ok) await _save(personaId, book);
+    if (ok) {
+      await _save(personaId, book);
+      DebugLogger.log('设定版本', '🗑 删除版本 $versionId');
+    }
     return ok;
   }
 
