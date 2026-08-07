@@ -23,6 +23,9 @@ Future<void> showAiProviderSheet({
   /// 8-04 21:1x 用户：一键验收 → 自动切换各模拟 AI 跑真实对话。
   /// 点「🚀 一键验收」→ 关弹层 → 回调聊天页跑验收流程（对话显示在聊天框）。
   Future<void> Function()? onAcceptance,
+  /// 8-07 14:03 用户：一键测设定 → 真实 AI 通道自动发测试指令，
+  /// 测设定段落化（update_setting tag 定位 + 多轮审批弹窗）。
+  Future<void> Function()? onTestSetting,
   /// 8-05 21:36 用户：假窗口满·手动触发总结（验证后拆）。
   /// 点「🧪 假窗口满」→ 关弹层 → 回调聊天页直接跑一遍总结流程。
   Future<void> Function()? onForceSummarize,
@@ -61,6 +64,7 @@ class _AiProviderSheetBody extends StatefulWidget {
     required this.colorScheme,
     required this.maxHeight,
     this.onAcceptance,
+    this.onTestSetting,
     this.onForceSummarize,
   });
 
@@ -69,6 +73,7 @@ class _AiProviderSheetBody extends StatefulWidget {
   final ColorScheme colorScheme;
   final double maxHeight;
   final Future<void> Function()? onAcceptance;
+  final Future<void> Function()? onTestSetting;
   final Future<void> Function()? onForceSummarize;
 
   @override
@@ -607,6 +612,23 @@ class _AiProviderSheetBodyState extends State<_AiProviderSheetBody> {
                     ),
                     icon: const Icon(Icons.rocket_launch, size: 18),
                     label: const Text('🚀 一键验收'),
+                  ),
+                // 8-07 14:03 用户：一键测设定（真实 AI 通道，测设定段落化）——
+                // 测试模式关 → 不显示
+                if (widget.onTestSetting != null &&
+                    AIProviderManager.testModeEnabled)
+                  FilledButton.icon(
+                    onPressed: () {
+                      final navigator = Navigator.of(context);
+                      final cb = widget.onTestSetting!;
+                      navigator.pop();
+                      unawaited(cb());
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D6B),
+                    ),
+                    icon: const Icon(Icons.edit_note, size: 18),
+                    label: const Text('🚀 一键测设定'),
                   ),
                 // 8-05 21:36 用户：假窗口满·手动触发总结 → 22:07 放开到
                 // 真实 AI 验证通过（真实 DeepSeek 走 save_summary 完整闭环）

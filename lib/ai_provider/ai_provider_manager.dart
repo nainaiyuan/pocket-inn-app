@@ -220,7 +220,10 @@ class AIProviderManager {
   /// → 继承真实 persona 的绑定/选择（测试模式下真实 persona 选的是 mock），
   /// 沉淀/总结等主动调 AI 也走 mock，绝不落到真实 API 花额度；
   /// 数据写入层（ContextManager/DB）仍用完整测试 key → 数据隔离。
-  static const String mockTestSuffix = '__mock__test';
+  // 8-07 14:03 用户：统一测试标签。mock 和真实 AI 测试共用同一个测试空间
+  // （${personaId}__test），退出测试模式时按标签一键删；真实数据零接触。
+  // 注：旧数据 __mock__test 结尾也是 __test，删除 LIKE '%__test' 可兼容。
+  static const String mockTestSuffix = '__test';
 
   String _stripMockTestSuffix(String? personaId) {
     if (personaId != null && personaId.endsWith(mockTestSuffix)) {

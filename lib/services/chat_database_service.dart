@@ -345,7 +345,7 @@ class ChatDatabaseService {
   /// 测试会话树（级联删消息/记忆）+ 摘要 + 恢复包 + 测试日记
   Future<void> clearMockTestData() async {
     final db = await _db;
-    const pattern = '%__mock__test';
+    const pattern = '%__test';  // 统一测试标签（兼容旧 __mock__test 结尾）
     await db.delete('chat_sessions',
         where: 'character_id LIKE ?', whereArgs: [pattern]);
     await db.delete('context_summaries',

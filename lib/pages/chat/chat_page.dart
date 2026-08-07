@@ -38,6 +38,7 @@ import '../../models/chat_message.dart';
 import '../../utils/debug_logger.dart';
 import '../ai_config_page.dart';
 import 'services/ai_chat_service.dart';
+import '../../butler/system_template.dart' show SystemTemplate;
 import 'state/chat_presence.dart';
 import 'state/current_character_state.dart';
 import 'widgets/ai_provider_sheet.dart';
@@ -277,6 +278,23 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   /// 8-05 14:32：当前聊天用的 AI 是不是内置模拟 AI（测试对话判定）
+  /// 8-07 14:03 用户：测试模式开 → 真实 AI 也走测试空间
+  /// （通道真实、数据隔离）。测试空间 key = ${personaId}__test，
+  /// 退出测试模式按标签一键删；真实数据零接触。
+  bool _useTestSpace([String? pid]) {
+    final p = pid ?? _state.personaId ?? '';
+    return AIProviderManager.testModeEnabled ||
+        AIProviderManager.isMockId(
+            AIProviderManager.instance.lastProviderFor(p) ?? '');
+  }
+
+  /// 设定存储的 persona key：测试模式下走测试空间（${pid}__test），
+  /// 男主在测试里改的设定是副本，退出测试模式即删，真实设定零接触。
+  String _settingPid() {
+    final pid = _state.personaId ?? '';
+    return _useTestSpace(pid) ? '$pid${AIProviderManager.mockTestSuffix}' : pid;
+  }
+
   bool _isCurrentMockChat() {
     final pid = _state.personaId;
     if (pid == null || pid.isEmpty) return false;
@@ -359,6 +377,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   Future<void> _sendMsg(String t, {String? systemEvent}) async {
+    // 8-07 14:03：测试空间设定初始化（首次进测试空间，复制真实设定副本）
+    final _tPid = _state.personaId ??
+        (_state.leadId == null ? '' : '${_state.leadId}_default');
+    if (_tPid.isNotEmpty && _useTestSpace(_tPid)) {
+      await SettingVersionStore.ensureTestCopy(_tPid);
+    }
     // 8-06 23:55 用户：流程执行中用户消息只收集不传（不打扰男主执行）。
     // 放 _generating 前：男主工具轮循环（_generating=true）时消息也不丢。
     // 停止触发的生成（systemEvent 非空）不走收集。
@@ -419,16 +443,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     // 模拟 AI 聊天时所有数据（会话/消息/记忆/情绪/上下文总结）落到
     // ${真实persona}__mock__test 这个测试 key，功能照常跑、数据不混；
     // 聊天页 UI 仍显示真实 persona（头像/名字/人设不变）
-    final isMockChat = AIProviderManager.isMockId(
-        AIProviderManager.instance.lastProviderFor(personaId) ?? '');
-    final chatPid = isMockChat ? '${personaId}${AIProviderManager.mockTestSuffix}' : personaId;
+    // 8-07 14:03：测试模式开 → 无论 mock 还是真实 AI，数据都落测试空间
+    final useTestSpace = _useTestSpace(personaId);
+    final chatPid = useTestSpace ? '${personaId}${AIProviderManager.mockTestSuffix}' : personaId;
     // 会话空间切换（真实 ↔ 测试）：旧会话作废，重新建对应空间的
-    if (_chatSessionId != null && _chatSessionIsMock != isMockChat) {
+    if (_chatSessionId != null && _chatSessionIsMock != useTestSpace) {
       DebugLogger.log('管家流程', '🧪 会话空间切换（测试↔真实），旧会话作废');
       _chatSessionId = null;
       _chatLeafId = null;
     }
-    _chatSessionIsMock = isMockChat;
+    _chatSessionIsMock = useTestSpace;
     // 男主正在被调用（同一男主连续对话 → 上下文延续）
     if (personaId.isNotEmpty) {
       ContextTracker.instance.touch(chatPid);
@@ -1358,6 +1382,28 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       personaName: personaName,
       onAcceptance: _runAcceptance,
       onForceSummarize: _forceSummarizeNow,
+      onTestSetting: _runTestSetting,
+    );
+  }
+
+  /// 8-07 14:03 用户：🚀 一键测设定——真实 AI 通道自动发测试指令，
+  /// 测「设定段落化」（update_setting 的 tag 定位 + 多轮审批弹窗）。
+  /// 数据落测试空间（${pid}__test），退出测试模式自动清空。
+  Future<void> _runTestSetting() async {
+    final pid = _state.personaId ?? '';
+    if (pid.isEmpty) return;
+    await SettingVersionStore.ensureTestCopy(pid);
+    if (mounted) {
+      _appendToolBubble(
+          '🧪 一键测设定：真实 AI 通道测试开始（数据落测试空间，退出测试模式自动清空）');
+    }
+    await _sendMsg(
+      '【测试指令】现在测一下「设定修改」功能，请按步骤做：\n'
+      '1. 用 update_setting 工具，给男主设定新增一段【测试标记】标签，'
+      '内容写"测试通过"（只加这一段，不要整体重写、不要动其他段落）；\n'
+      '2. 再用 query_setting_history 查一下，确认这次变更已记录；\n'
+      '3. 最后告诉我：你加了哪段、用的什么 action。\n'
+      '（审批弹窗正常发起即可，这是测试）',
     );
   }
 
@@ -1371,7 +1417,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
     if (lid == null) return;
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
-    final isMock = _isCurrentMockChat();
+    final isMock = _useTestSpace();
     final chatPid = isMock
         ? '${personaId}${AIProviderManager.mockTestSuffix}'
         : personaId;
@@ -1617,7 +1663,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                         ChatMessageArea(key: _msgKey, currentPersona: _state.persona,
                           characterAvatarPath: _state.effectiveAvatarPath,
                           onAvatarTap: _openWorld,
-                          storagePersonaId: _isCurrentMockChat()
+                          storagePersonaId: _useTestSpace()
                               ? '${_state.personaId}${AIProviderManager.mockTestSuffix}'
                               : null,
                           ),
@@ -2053,8 +2099,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     } else {
       // 聊天页没挂载（切走/后台）→ 只落库，回来从 DB 加载能看到
       // 8-05 14:36：测试对话落测试空间的库（${personaId}__mock__test）
-      final isMock = AIProviderManager.isMockId(
-          AIProviderManager.instance.lastProviderFor(personaId) ?? '');
+      final isMock = _useTestSpace(personaId);
       ChatStorageService()
           .appendMessage(isMock ? '${personaId}${AIProviderManager.mockTestSuffix}' : personaId, msg);
     }
@@ -2141,10 +2186,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     }
 
     /// 发消息并等男主回完（含工具授权弹窗等待）
-    Future<void> say(String t) async {
+    /// [waitLong]：多轮会话弹窗步骤用（用户要在弹窗里跟男主来回，给 8 分钟）
+    Future<void> say(String t, {bool waitLong = false}) async {
       await _sendMsg(t);
       var waited = 0;
-      while (_generating && waited < 240) {
+      final maxWait = waitLong ? 960 : 240;
+      while (_generating && waited < maxWait) {
         await Future.delayed(const Duration(milliseconds: 500));
         waited++;
       }
@@ -2309,6 +2356,59 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               'needRecover=${dPre.needRecover}) 含恢复包=$hasRec——'
               '超时后没带恢复包，男主失忆');
       note('📋 ⑧ ${hOk ? '✓' : '✗'} idleExpired=${dPre.idleExpired} 含恢复包=$hasRec');
+
+      // ── ⑨-⑫ 设定功能（8-07 14:12 用户：剧本覆盖设定段落化+多轮弹窗）──
+      // 验收前：给测试空间写固定测试设定（段落化，断言用）
+      await SettingVersionStore.saveNewVersion(testPid, 'male',
+          '【身份】测试角色\n【喜好】测试喜好A', note: '验收剧本初始化');
+      // ⑨ 段落化 update：只改【喜好】段，其他段落不动（弹窗用户点同意）
+      await sw('builtin-mock', '⑨/⑫ 设定·改一段（tag 定位）');
+      note('📋 ⑨ 让男主用 update_setting 只改【喜好】段——弹窗弹出后点「同意并应用」');
+      await say('用 update_setting 工具，把男主设定里的【喜好】段改成"测试喜好B"，'
+          '只改这一段，别动其他段落。');
+      final book9 = await SettingVersionStore.load(testPid);
+      final male9 = book9.currentMale;
+      final i9 = male9.contains('测试喜好B') &&
+          male9.contains('【身份】测试角色') &&
+          !male9.contains('测试喜好A');
+      record('⑨ 设定update只改目标段', i9,
+          i9 ? null : '当前男主设定：$male9——段落没精准替换或误动了其他段');
+      note('📋 ⑨ ${i9 ? '✓' : '✗'} 喜好段已替换=${male9.contains('测试喜好B')}'
+          ' 身份段未动=${male9.contains('【身份】测试角色')}');
+
+      // ⑩ 段落化 add：新增一段
+      await sw('builtin-mock', '⑩/⑫ 设定·新增一段');
+      note('📋 ⑩ 让男主用 update_setting 新增【测试段】——弹窗点「同意并应用」');
+      await say('再用 update_setting 新增一段【测试段】，内容写"验收新增"，别动其他段落。');
+      final book10 = await SettingVersionStore.load(testPid);
+      final i10 = book10.currentMale.contains('【测试段】验收新增');
+      record('⑩ 设定add新增段', i10,
+          i10 ? null : '当前男主设定：${book10.currentMale}——新增段没成功');
+      note('📋 ⑩ ${i10 ? '✓' : '✗'} 新增段=${i10}');
+
+      // ⑪ 段落化 delete：删掉新增段
+      await sw('builtin-mock', '⑪/⑫ 设定·删一段');
+      note('📋 ⑪ 让男主用 update_setting 删掉【测试段】——弹窗点「同意并应用」');
+      await say('再用 update_setting 把【测试段】删掉。');
+      final book11 = await SettingVersionStore.load(testPid);
+      final i11 = !book11.currentMale.contains('【测试段】');
+      record('⑪ 设定delete删段', i11,
+          i11 ? null : '当前男主设定：${book11.currentMale}——删除段没成功');
+      note('📋 ⑪ ${i11 ? '✓' : '✗'} 测试段已删=${i11}');
+
+      // ⑫ 多轮会话弹窗：弹窗里跟男主商量一轮再同意（用户手动：
+      // 点「💬 发给他」写"改成测试喜好C" → 看男主回复自动填方案 → 同意）
+      await sw('builtin-mock', '⑫/⑫ 设定·多轮会话弹窗');
+      note('📋 ⑫ 改【喜好】——弹窗里先跟男主商量：点「💬 发给他」写'
+          '"改成测试喜好C吧"，看男主回复填进方案，再点「同意并应用」');
+      await say('用 update_setting 把【喜好】改成"测试喜好C"。'
+          '弹窗里我会先跟你商量，你正常回应我就行。',
+          waitLong: true);
+      final book12 = await SettingVersionStore.load(testPid);
+      final i12 = book12.currentMale.contains('测试喜好C');
+      record('⑫ 多轮会话后生效', i12,
+          i12 ? null : '当前男主设定：${book12.currentMale}——多轮商量后没生效');
+      note('📋 ⑫ ${i12 ? '✓' : '✗'} 商量后生效=${i12}');
 
       final pass = results.where((r) => r.ok).length;
       final total = results.length;
@@ -3465,16 +3565,77 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     final pid = _state.personaId ?? '';
     if (pid.isEmpty) return const _ToolResult(false, '更新设定失败（缺少角色）');
     final type = args['setting_type']?.toString() == 'user' ? 'user' : 'male';
+    final actionRaw = args['action']?.toString().trim() ?? '';
+    final action = ['update', 'delete', 'add', 'replace'].contains(actionRaw)
+        ? actionRaw
+        : 'update';
+    final tag = (args['tag']?.toString().trim() ?? '').replaceAll(RegExp(r'[【】]'), '');
     final content = args['content']?.toString().trim() ?? '';
-    if (content.isEmpty) return const _ToolResult(false, '更新设定失败：没写新设定内容');
     final reason = args['reason']?.toString().trim() ?? '';
     final typeName = type == 'user' ? '用户设定' : '男主设定';
 
-    // 弹窗审批：显示新设定 + 理由 + 可编辑 + 拒绝时可写反馈
+    if (action != 'delete' && content.isEmpty) {
+      return _ToolResult(
+          false,
+          '更新设定失败：没写新内容'
+          '${action == 'replace' ? '（replace 要写完整全文）' : '（update/add 要写这一段的新内容）'}');
+    }
+
+    // 读当前设定 → 段落操作（8-07：测试模式下读测试空间副本）
+    final settingPid = _settingPid();
+    final book = await SettingVersionStore.load(settingPid);
+    final current = type == 'user' ? book.currentUser : book.currentMale;
+    String newText;
+    String opDesc;
+    if (action == 'replace') {
+      newText = content;
+      opDesc = '整体重写$typeName${reason.isEmpty ? '' : '：$reason'}';
+    } else {
+      final sections = _parseSettingSections(current);
+      final idx = tag.isEmpty
+          ? -1
+          : sections.indexWhere((sec) => sec.tag == tag);
+      if (action == 'add') {
+        if (tag.isEmpty) {
+          return const _ToolResult(false, '新增段落要写 tag（如 喜好）');
+        }
+        if (idx >= 0) {
+          return _ToolResult(
+              false, '【$tag】已经存在了，要改它用 action=update');
+        }
+        sections.add((tag: tag, body: content));
+        newText = _sectionsToText(sections);
+        opDesc = '新增段落【$tag】${reason.isEmpty ? '' : '：$reason'}';
+      } else if (action == 'delete') {
+        if (idx < 0) {
+          return _ToolResult(false,
+              '没找到【$tag】段落。当前段落：\n${_sectionsOutline(sections)}');
+        }
+        final removed = sections.removeAt(idx);
+        newText = _sectionsToText(sections);
+        opDesc = '删除段落【${removed.tag}】${reason.isEmpty ? '' : '：$reason'}';
+      } else {
+        // update
+        if (idx < 0) {
+          return _ToolResult(false,
+              '没找到【$tag】段落。当前段落：\n${_sectionsOutline(sections)}'
+              '（想整体整理用 action=replace；想加新段用 action=add）');
+        }
+        final old = sections[idx].body;
+        sections[idx] = (tag: tag, body: content);
+        newText = _sectionsToText(sections);
+        final brief = (String t) =>
+            t.length > 30 ? '${t.substring(0, 30)}…' : t;
+        opDesc = '修改【$tag】：${brief(old)} → ${brief(content)}'
+            '${reason.isEmpty ? '' : '（$reason）'}';
+      }
+    }
+
+    // 弹窗审批（多轮会话；编辑框显示全文，她可整体改）
     final result = await _showSettingApprovalDialog(
       typeName: typeName,
-      content: content,
-      reason: reason,
+      content: newText,
+      reason: opDesc,
     );
     if (result == null) {
       return _ToolResult(false, '她没回应设定更新（先别催，她可能在忙）');
@@ -3490,15 +3651,67 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
 
     // 批准 → 存为新版本 + 变更日志
     final finalContent = result.content.trim();
-    await SettingVersionStore.saveNewVersion(pid, type, finalContent,
+    await SettingVersionStore.saveNewVersion(settingPid, type, finalContent,
         note: reason.isEmpty ? null : reason);
-    final summary = '更新了$typeName'
-        '${reason.isEmpty ? '' : '：$reason'}';
-    await SettingVersionStore.addChangelog(pid, type, summary);
-    DebugLogger.log('指令模块', '📚 $typeName 已更新（新版本生效，旧版进历史）');
-    _appendToolBubble('📚 男主更新了$typeName（旧版已存进右页历史，可一键恢复）');
-    return _ToolResult(true, '$typeName 已更新生效。新版本已存好，旧版在右页历史里'
-        '（她可一键恢复）。你以后查 query_setting_history 能看到这次变更。');
+    await SettingVersionStore.addChangelog(settingPid, type, opDesc);
+    DebugLogger.log('指令模块', '📚 $typeName 已更新（$opDesc）');
+    _appendToolBubble('📚 男主更新了$typeName：$opDesc（旧版已存进右页历史，可一键恢复）');
+    return _ToolResult(
+        true,
+        '$typeName 已更新生效（$opDesc）。新版本已存好，旧版在右页历史里'
+        '（她可一键恢复）。当前段落结构：\n'
+        '${_sectionsOutline(_parseSettingSections(finalContent))}');
+  }
+
+  // ── 设定段落工具（8-07 用户：段落化+标签，男主精准修改省 token）──
+
+  /// 设定文本按【标签】切段；没有标签 → 整段一个（tag 空）
+  static List<({String tag, String body})> _parseSettingSections(String text) {
+    final reg = RegExp(r'【([^】]+)】([\s\S]*?)(?=【[^】]+】|$)');
+    final result = <({String tag, String body})>[];
+    for (final m in reg.allMatches(text)) {
+      final t = m.group(1)!.trim();
+      final b = m.group(2)!.trim();
+      if (t.isNotEmpty) result.add((tag: t, body: b));
+    }
+    if (result.isEmpty && text.trim().isNotEmpty) {
+      result.add((tag: '', body: text.trim()));
+    }
+    return result;
+  }
+
+  /// 段落列表 → 原文（无编号，用户可编辑的形式）
+  static String _sectionsToText(List<({String tag, String body})> sections) {
+    final buf = StringBuffer();
+    for (final sec in sections) {
+      if (sec.tag.isNotEmpty) {
+        buf.writeln('【${sec.tag}】${sec.body}');
+      } else {
+        buf.writeln(sec.body);
+      }
+    }
+    return buf.toString().trim();
+  }
+
+  /// 段落列表 → 编号大纲（提示男主当前有哪些段，定位用）
+  static String _sectionsOutline(List<({String tag, String body})> sections) {
+    if (sections.isEmpty) return '（空）';
+    final buf = StringBuffer();
+    for (var i = 0; i < sections.length; i++) {
+      final sec = sections[i];
+      final preview =
+          sec.body.length > 20 ? '${sec.body.substring(0, 20)}…' : sec.body;
+      buf.writeln(
+          '${i + 1}.${sec.tag.isEmpty ? '【未分段】' : '【${sec.tag}】'}$preview');
+    }
+    return buf.toString().trim();
+  }
+
+  /// 设定文本 → 编号显示（prompt 注入用）；没分段就原样
+  static String _formatSectionsNumbered(String text) {
+    final sections = _parseSettingSections(text);
+    if (sections.length == 1 && sections.first.tag.isEmpty) return text;
+    return _sectionsOutline(sections);
   }
 
   /// 设定更新审批弹窗（8-06 18:12 用户：弹窗内迭代，不进聊天框）
@@ -3512,18 +3725,29 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     FocusManager.instance.primaryFocus?.unfocus();
     final ctrl = TextEditingController(text: content);
     final fbCtrl = TextEditingController();
+    var maleText =
+        reason.isEmpty ? '我想更新$typeName，你看看这样行不行。' : reason;
+    var round = 1;
+    var busy = false;
+    // 会话记录（每轮：她说/男主说，给男主当上下文）
+    final history = <String>[];
+    final pid = _state.personaId ?? '';
+    final pName = _state.personaName ?? _state.lead?.name ?? '角色';
+
     final approved = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFFFDF7F9),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('📚 男主想更新$typeName'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (reason.isNotEmpty) ...[
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          backgroundColor: const Color(0xFFFDF7F9),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title:
+              Text('📚 男主想更新$typeName${round > 1 ? '（第 $round 轮）' : ''}'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(10),
@@ -3532,57 +3756,131 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    '💬 他的理由：$reason',
+                    '💬 男主：$maleText',
                     style: const TextStyle(fontSize: 13, height: 1.4),
                   ),
                 ),
                 const SizedBox(height: 10),
+                const Text('📄 新设定（你可以直接改，改完他下次看到）：',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80))),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: ctrl,
+                  maxLines: 8,
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: fbCtrl,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    hintText:
+                        '跟他说你的想法：哪里不对、想要什么…（说需求=还没定案）',
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+                if (busy) ...[
+                  const SizedBox(height: 10),
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2)),
+                      SizedBox(width: 8),
+                      Text('男主正在回复…',
+                          style:
+                              TextStyle(fontSize: 12, color: Color(0xFF8A7A80))),
+                    ],
+                  ),
+                ],
               ],
-              const Text(
-                '新设定（你可以直接改）：',
-                style: TextStyle(fontSize: 12, color: Color(0xFF8A7A80)),
-              ),
-              const SizedBox(height: 6),
-              TextField(
-                controller: ctrl,
-                maxLines: 8,
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: fbCtrl,
-                maxLines: 2,
-                decoration: InputDecoration(
-                  hintText: '不满意的话，写给他让他再改…（可不填）',
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: busy ? null : () => Navigator.pop(ctx, false),
+              child: const Text('放弃',
+                  style: TextStyle(color: Color(0xFF8A7A80))),
+            ),
+            if (!busy)
+              TextButton(
+                onPressed: () async {
+                  final msg = fbCtrl.text.trim();
+                  if (msg.isEmpty) return;
+                  fbCtrl.clear();
+                  setState(() => busy = true);
+                  history.add('她说：$msg');
+                  final reply = await _askMaleInSession(
+                    personaId: pid,
+                    settingPid: _settingPid(),
+                    personaName: pName,
+                    typeName: typeName,
+                    draft: ctrl.text,
+                    maleLast: maleText,
+                    userMsg: msg,
+                    history: history,
+                  );
+                  history.add('男主说：$reply');
+                  // 男主回复里带【新方案】→ 自动更新编辑框（她可再改）
+                  // 支持两种：段落级（【新方案】+【标签】+新内容 → 只替换该段）
+                  // 或全文级（【新方案】+ 完整全文 → 整体替换）
+                  final idx = reply.indexOf('【新方案】');
+                  if (idx >= 0) {
+                    final rest =
+                        reply.substring(idx + '【新方案】'.length).trim();
+                    if (rest.startsWith('【')) {
+                      final secs = _parseSettingSections(ctrl.text);
+                      final m =
+                          RegExp(r'^【([^】]+)】([\s\S]*)').firstMatch(rest);
+                      if (m != null) {
+                        final t = m.group(1)!.trim();
+                        final b = m.group(2)!.trim();
+                        final i = secs.indexWhere((x) => x.tag == t);
+                        if (i >= 0) {
+                          secs[i] = (tag: t, body: b);
+                        } else {
+                          secs.add((tag: t, body: b));
+                        }
+                        ctrl.text = _sectionsToText(secs);
+                      }
+                    } else if (rest.isNotEmpty) {
+                      ctrl.text = rest;
+                    }
+                    ctrl.selection =
+                        TextSelection.collapsed(offset: ctrl.text.length);
+                  }
+                  setState(() {
+                    maleText = reply;
+                    round++;
+                    busy = false;
+                  });
+                },
+                child: const Text('💬 发给他',
+                    style: TextStyle(color: Color(0xFFC896B4))),
+              ),
+            if (!busy)
+              FilledButton(
+                style:
+                    FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('✅ 同意并应用'),
+              ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('拒绝', style: TextStyle(color: Color(0xFF8A7A80))),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC896B4)),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('同意并应用'),
-          ),
-        ],
       ),
     );
     FocusManager.instance.primaryFocus?.unfocus();
@@ -3594,13 +3892,126 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
     );
   }
 
+  /// 设定会话内：男主回复（一次 AI 回合，可查只读信息；查了=流程没走完，继续）
+  Future<String> _askMaleInSession({
+    required String personaId,
+    String? settingPid,
+    required String personaName,
+    required String typeName,
+    required String draft,
+    required String maleLast,
+    required String userMsg,
+    required List<String> history,
+  }) async {
+    try {
+      final personaPrompt = _state.persona?.prompt ?? '';
+      final book = SettingVersionStore.cached(settingPid ?? personaId);
+      final currentInfo = StringBuffer('当前男主设定：');
+      currentInfo.writeln(
+          (book == null || book.currentMale.trim().isEmpty) ? '（空）' : book.currentMale);
+      currentInfo.write('当前用户设定：');
+      currentInfo.write(
+          (book == null || book.currentUser.trim().isEmpty) ? '（空）' : book.currentUser);
+      final system = SystemTemplate.build(
+        personaName: personaName,
+        personaPrompt: personaPrompt,
+        needsWindow: false,
+        taskState: '【设定修改会话】你在和她讨论「$typeName」的修改，还没定案。
+'
+            '$currentInfo
+'
+            '你刚才的方案：
+$draft
+'
+            '你上一轮说：$maleLast
+'
+            '她本轮回复你：$userMsg
+'
+            '回应她（像平时聊天一样自然）：可以解释、追问细节、或查资料'
+            '（recall_memory/query_diary/query_setting_history/query_record/'
+            'list_tools 可直接查，不用她审批）。如果你要给出修改后的方案，'
+            '最后单独一行写【新方案】然后写完整新内容（她看到会继续讨论）；'
+            '她还在提需求就别急着定案。',
+      );
+      final msgs = <AIChatMessage>[
+        AIChatMessage(role: 'system', content: system),
+        for (final h in history) AIChatMessage(role: 'user', content: h),
+        AIChatMessage(role: 'user', content: '【她本轮的话】$userMsg'),
+      ];
+      // 只读工具白名单（男主在会话里查资料，不用她审批）
+      final readOnly = AiChatService.butlerTools
+          .where((t) => _sessionReadOnlyTools.contains(
+              ((t['function'] as Map<String, dynamic>)['name'] as String?)))
+          .toList();
+      for (var i = 0; i < 3; i++) {
+        final res = await AIProviderManager.instance.chat(
+          personaId,
+          msgs,
+          tools: readOnly,
+        );
+        final calls = res.toolCalls;
+        if (calls != null && calls.isNotEmpty) {
+          for (final call in calls) {
+            final name = call['name']?.toString() ?? '';
+            final args = (call['arguments'] as Map<String, dynamic>?) ?? {};
+            final r = await _executeReadOnlySessionTool(name, args);
+            msgs.add(AIChatMessage(role: 'user', content: '【工具结果】$r'));
+          }
+          continue;
+        }
+        return res.text.trim().isEmpty ? '（我还在想，你继续说？）' : res.text.trim();
+      }
+      return '（我查了不少，先说到这——你继续说，我再改。）';
+    } catch (e) {
+      DebugLogger.log('设定会话', '❌ 男主回复失败：$e');
+      return '（我这边卡了一下…你再说一遍？）';
+    }
+  }
+
+  /// 设定会话内只读工具白名单
+  static const _sessionReadOnlyTools = {
+    'recall_memory',
+    'query_diary',
+    'query_setting_history',
+    'query_record',
+    'list_tools',
+  };
+
+  /// 设定会话内执行只读工具（免审批，用户在弹窗里全程可见）
+  Future<String> _executeReadOnlySessionTool(
+      String name, Map<String, dynamic> args) async {
+    _ToolResult r;
+    switch (name) {
+      case 'recall_memory':
+        r = await _executeRecallTool(
+            args['query']?.toString() ?? '', args['category']?.toString() ?? '');
+        break;
+      case 'query_diary':
+        r = await _executeQueryDiaryTool(args['keyword']?.toString() ?? '');
+        break;
+      case 'query_setting_history':
+        r = await _executeQuerySettingHistory(args);
+        break;
+      case 'query_record':
+        r = await _executeQueryRecord(args);
+        break;
+      case 'list_tools':
+        r = await _executeListToolsTool(args);
+        break;
+      default:
+        r = const _ToolResult(false, '这个工具在设定会话里不能用');
+    }
+    return '${r.ok ? '✅' : '❌'} ${r.message}';
+  }
+
   /// 工具执行：query_setting_history（男主查设定变更历史）
   Future<_ToolResult> _executeQuerySettingHistory(
       Map<String, dynamic> args) async {
     final pid = _state.personaId ?? '';
     if (pid.isEmpty) return const _ToolResult(false, '查历史失败（缺少角色）');
     final limit = (args['limit'] as num?)?.toInt() ?? 10;
-    final book = await SettingVersionStore.load(pid);
+    // 8-07：测试模式下查测试空间的设定历史
+    final book = await SettingVersionStore.load(_settingPid());
     final log = book.changelog.take(limit).toList();
     if (log.isEmpty) {
       return const _ToolResult(true, '还没有设定变更记录——你还没主动优化过设定。');
@@ -4133,17 +4544,19 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
       // （男主知道自己的演变史，不会"性情大变"却不知所以然）
       final pid = _state.personaId;
       if (pid != null && pid.isNotEmpty) {
-        final book = SettingVersionStore.cached(pid);
+        final book = SettingVersionStore.cached(_settingPid());
         if (book != null) {
           final male = book.currentMale.trim();
           final user = book.currentUser.trim();
           if (male.isNotEmpty) {
-            prompt += '\n\n【男主设定·当前版】\n$male';
+            prompt += '\n\n【男主设定·当前版】（分段，改哪段用 update_setting 的 tag 定位）\n'
+                '${_formatSectionsNumbered(male)}';
           }
           if (user.isNotEmpty) {
-            prompt += '\n\n【用户设定·当前版】\n$user';
+            prompt += '\n\n【用户设定·当前版】（分段，改哪段用 update_setting 的 tag 定位）\n'
+                '${_formatSectionsNumbered(user)}';
           }
-          final summary = SettingVersionStore.summaryTextSync(pid);
+          final summary = SettingVersionStore.summaryTextSync(_settingPid());
           if (summary.isNotEmpty) {
             prompt += '\n\n【设定变更摘要·你的演变史】\n$summary'
                 '（这些都是你经历过/主动做出的设定调整，顺着时间线你就能明白'

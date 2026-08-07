@@ -345,7 +345,7 @@ class ChatStorageService {
   Future<void> deleteMockTestData() async {
     try {
       final d = await db;
-      const pattern = '%__mock__test';
+      const pattern = '%__test';  // 统一测试标签（兼容旧 __mock__test 结尾）
       await d.delete('messages',
           where: 'persona_id LIKE ?', whereArgs: [pattern]);
       await d.delete('memories',

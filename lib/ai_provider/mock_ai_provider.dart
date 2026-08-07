@@ -85,6 +85,23 @@ class MockAIProvider {
       return _handleToolRound(messages);
     }
 
+    // 8-07 14:12（一键测设定剧本⑫）：设定修改多轮会话弹窗内男主回复——
+    // 模拟男主"商量后给出新方案"（【新方案】会被弹窗自动填进编辑框）
+    final systemText2 = messages
+        .where((m) => m.role == 'system')
+        .map((m) => m.content)
+        .join('\n');
+    if (systemText2.contains('设定修改会话')) {
+      AiModuleLog.log('模拟AI', '💬 设定修改会话 → 模拟男主商量后给新方案');
+      return AIProviderResult(
+        text: '好，我明白了。那就按你说的改成测试喜好C，你看这样行不行：\n'
+            '【新方案】\n'
+            '【身份】测试角色\n'
+            '【喜好】测试喜好C',
+        providerName: '模拟AI',
+      );
+    }
+
     // 管家内部指令模拟（8-04 21:5x 验收⑤⑦失败修复）：
     // _summarize / _generateAndStoreThree 是 generateReply 直调 chat 的
     // （不走工具轮），mock 必须扮演"会执行指令的男主"——
@@ -147,6 +164,38 @@ class MockAIProvider {
 
     // 非工具轮：按最后一条 user 消息内容触发脚本
     String lastUser = '';
+    // 8-07 14:12（一键测设定剧本⑨⑩⑪）：设定段落化——update_setting
+    // 新增/删/改三种操作（按剧本消息里的关键词区分）
+    if (lastUser.contains('update_setting') && lastUser.contains('新增')) {
+      return _toolCall('update_setting', {
+        'setting_type': 'male',
+        'action': 'add',
+        'tag': '测试段',
+        'content': '验收新增',
+        'reason': '验收剧本⑩：验证新增段落',
+      }, '模拟思考：用户让我新增设定段落，我用 update_setting add 加【测试段】。');
+    }
+    if (lastUser.contains('update_setting') && lastUser.contains('删')) {
+      return _toolCall('update_setting', {
+        'setting_type': 'male',
+        'action': 'delete',
+        'tag': '测试段',
+        'reason': '验收剧本⑪：验证删除段落',
+      }, '模拟思考：用户让我删掉设定段落，我用 update_setting delete 删【测试段】。');
+    }
+    if (lastUser.contains('update_setting')) {
+      return _toolCall('update_setting', {
+        'setting_type': 'male',
+        'action': 'update',
+        'tag': '喜好',
+        'content': '测试喜好B',
+        'reason': '验收剧本⑨：验证段落化精准修改',
+      }, '模拟思考：用户让我改设定，我用 update_setting 只改【喜好】这一段。');
+    }
+    if (lastUser.contains('query_setting_history')) {
+      return _toolCall('query_setting_history', {},
+          '模拟思考：用户让我查设定变更历史。');
+    }
     for (final m in messages.reversed) {
       if (m.role == 'user') {
         lastUser = m.content;

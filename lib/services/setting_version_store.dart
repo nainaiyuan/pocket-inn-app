@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../ai_provider/ai_provider_manager.dart';
 
 /// 📚 设定版本管理（8-06 17:46-18:24 用户）
 ///
@@ -22,6 +23,40 @@ class SettingVersionStore {
   static SettingBook? cached(String personaId) => _cache[personaId];
 
   static String _key(String personaId) => 'setting_versions_$personaId';
+
+  /// 8-07 14:03：测试空间设定初始化——首次进入测试空间时，
+  /// 从真实设定复制当前版（男主在测试里看到/改的是副本，退出测试模式即删）
+  static Future<void> ensureTestCopy(String realPid) async {
+    final testPid = '$realPid${AIProviderManager.mockTestSuffix}';
+    final test = await load(testPid);
+    if (test.currentMale.trim().isEmpty && test.currentUser.trim().isEmpty) {
+      final real = await load(realPid);
+      if (real.currentMale.trim().isNotEmpty) {
+        await saveNewVersion(testPid, male, real.currentMale,
+            note: '测试空间初始化（复制自真实设定）');
+      }
+      if (real.currentUser.trim().isNotEmpty) {
+        await saveNewVersion(testPid, user, real.currentUser,
+            note: '测试空间初始化（复制自真实设定）');
+      }
+    }
+  }
+
+  /// 8-07 14:03：按测试标签 __test 删除所有测试空间的设定版本
+  /// （退出测试模式/清空测试数据时调用；真实设定零接触）
+  static Future<void> deleteTestData() async {
+    final p = await SharedPreferences.getInstance();
+    final keys = p
+        .getKeys()
+        .where((k) =>
+            k.startsWith('setting_versions_') &&
+            k.endsWith(AIProviderManager.mockTestSuffix))
+        .toList();
+    for (final k in keys) {
+      await p.remove(k);
+      _cache.remove(k.substring('setting_versions_'.length));
+    }
+  }
 
   /// 单角色版本簿
   static Future<SettingBook> load(String personaId) async {

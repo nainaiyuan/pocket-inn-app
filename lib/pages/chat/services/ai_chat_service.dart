@@ -485,14 +485,19 @@ class AiChatService {
       'function': {
         'name': 'update_setting',
         'description':
-            '主动更新男主设定或用户设定（你觉得当前设定写得简陋/不适合她了，'
-            '想优化时用）。'
-            '会弹窗给她看你的新设定 + 理由，她可以手动修改后再确认'
-            '（必须她审批）。确认后新设定生效（覆盖当前版，旧版自动存进'
-            '右页版本历史，可一键恢复），并记一条变更日志——'
-            '以后每个"你"都能查到自己的设定演变史。'
-            '她拒绝/有意见时，按她的反馈改完再提交。'
-            '⚠️ 只改设定（prompt 里的角色设定/用户画像），不动聊天上下文和记忆。',
+            '维护两份档案（设定按【标签】分段，注入时带编号，你只改要动的那段，'
+            '别每次都输出全文浪费token）：'
+            '① 用户设定 = 她的档案（她是谁/性格/喜好/希望你怎么对她）——'
+            '她写的可能乱或不全，你观察总结后帮她整理补充；她后来改了以她为准。'
+            '② 男主设定 = 你的档案（你怎么说话/怎么对待她/你们怎么相处）——'
+            '你自己维护。'
+            '操作：update=改某段（默认，tag 定位+content 只写新段）/ '
+            'delete=删某段（tag）/ add=新增一段（tag+content）/ '
+            'replace=整体重写（content 写全文，设定没分段或要大改时用）。'
+            '每次改都会弹窗给她看 + 理由；确认后覆盖当前版，旧版自动存进'
+            '右页版本历史可一键恢复，并记一条变更日志。'
+            '她拒绝/有意见时，按她的反馈改完再提交，可以反复改直到她满意。'
+            '⚠️ 只改设定，不动聊天上下文和记忆。',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -501,16 +506,26 @@ class AiChatService {
               'enum': ['male', 'user'],
               'description': '改哪个：male=男主设定 / user=用户设定（她的画像）',
             },
+            'action': {
+              'type': 'string',
+              'enum': ['update', 'delete', 'add', 'replace'],
+              'description': 'update=改某段（默认）/ delete=删某段 / add=新增一段 / replace=整体重写全文',
+            },
+            'tag': {
+              'type': 'string',
+              'description': '段落标签（定位用，如 喜好、对待方式；不用写【】）。'
+                  '设定按【标签】分段，注入时带编号你能看到有哪些段',
+            },
             'content': {
               'type': 'string',
-              'description': '新设定全文（你组织的分类，自由写：身份/性格/关系/习惯…）',
+              'description': '新内容：update/add 只写这一段；replace 写完整全文',
             },
             'reason': {
               'type': 'string',
-              'description': '为什么改（弹窗里给她看）：如"初始设定太简陋，补充了她的生活习惯"',
+              'description': '为什么改（弹窗里给她看）：如"补充了她的生活习惯"',
             },
           },
-          'required': ['setting_type', 'content'],
+          'required': ['setting_type'],
         },
       },
     },

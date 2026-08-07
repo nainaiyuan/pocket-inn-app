@@ -8,6 +8,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../../services/setting_version_store.dart';
 
 import '../../ai_provider/ai_provider_manager.dart';
 import '../../ai_provider/mock_ai_provider.dart';
@@ -52,12 +53,12 @@ class _MockAiTestPageState extends State<MockAiTestPage> {
                   title: const Text('测试模式', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
                   subtitle: Text(
                     testMode
-                        ? '开：模拟 AI 出现在聊天页 AI 列表，可切换对话'
-                        : '关：模拟 AI 平时隐藏，不参与聊天（默认）',
+                        ? '开：测试空间生效——真实 AI 和模拟 AI 的对话都隔离存放，退出时一键清空'
+                        : '关：正常聊天（默认）；打开后真实 AI 也进测试空间',
                     style: TextStyle(fontSize: 11, color: Colors.grey.shade600, height: 1.4),
                   ),
                   value: testMode,
-                  onChanged: (v) => AIProviderManager.setTestModeEnabled(v),
+                  onChanged: (v) => _toggleTestMode(context, v),
                 ),
               ),
               const SizedBox(height: 4),
@@ -103,6 +104,54 @@ class _MockAiTestPageState extends State<MockAiTestPage> {
     );
   }
 
+  /// 8-07 14:03 用户：测试模式开关。开 = 直接开（真实 AI 也会进测试空间）；
+  /// 关 = 确认后按测试标签 __test 一键清空再退出（避免测试中途删数据破坏上下文）
+  Future<void> _toggleTestMode(BuildContext context, bool v) async {
+    if (v) {
+      AIProviderManager.setTestModeEnabled(true);
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('退出测试模式？'),
+        content: const Text(
+          '退出会清空所有"测试空间"数据（按测试标签 __test 删除）：\n'
+          '· 测试对话/消息\n· 测试记忆\n· 测试上下文存档\n· 测试日记\n\n'
+          '你的真实对话、记忆、日记完全不受影响。\n'
+          '（还想继续测就点"取消"留在测试模式）',
+          style: TextStyle(fontSize: 13, height: 1.6),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消（继续测）'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE65100),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('退出并清空'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    try {
+      await ChatStorageService().deleteMockTestData();
+      await ChatDatabaseService.instance.clearMockTestData();
+      await SettingVersionStore.deleteTestData();
+    } catch (_) {}
+    AIProviderManager.setTestModeEnabled(false);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('✅ 已退出测试模式，测试数据已清空（真实数据不受影响）'),
+        duration: Duration(seconds: 2),
+      ));
+    }
+  }
+
   /// 8-05 14:36：清空测试空间数据（带确认）
   Future<void> _confirmClearTestData(BuildContext context) async {
     final ok = await showDialog<bool>(
@@ -137,6 +186,7 @@ class _MockAiTestPageState extends State<MockAiTestPage> {
     try {
       await ChatStorageService().deleteMockTestData();
       await ChatDatabaseService.instance.clearMockTestData();
+      await SettingVersionStore.deleteTestData();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('✅ 测试数据已清空（真实数据不受影响）'),
