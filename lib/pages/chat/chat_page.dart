@@ -1211,7 +1211,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       ChatPresence.instance.resetTyping();
       // 作息规律：当天首次聊天 → 记开始时间（用户一般几点来找男主）
       // 8-05 14:36：测试对话不算用户行为（作息统计是用户维度，跳过）
-      if (personaId.isNotEmpty && !isMockChat) {
+      if (personaId.isNotEmpty && !_chatSessionIsMock) {
         unawaited(_recordChatStart());
       }
       // 用户 21:10：日记 = 男主每天结束（用户睡觉后）写的当天总结。
@@ -1220,7 +1220,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       // 21:13：同时记录"平均结束聊时间"（用户一般聊到几点睡）。
       // 8-05 14:36：测试对话写测试空间的日记（chatPid），不碰真实日记
       if (personaId.isNotEmpty && _isEndOfDaySignal(t)) {
-        if (!isMockChat) unawaited(_recordChatEnd());
+        if (!_chatSessionIsMock) unawaited(_recordChatEnd());
         unawaited(_writeDailyDiary(chatPid, personaName));
       }
     }
@@ -3995,7 +3995,7 @@ Future<_ToolResult> _executeRelationTool(Map<String, dynamic> args) async {
       default:
         r = const _ToolResult(false, '这个工具在设定会话里不能用');
     }
-    return '${r.ok ? '✅' : '❌'} ${r.message}';
+    return '${r.ok ? '✅' : '❌'} ${r.text}';
   }
 
   /// 工具执行：query_setting_history（男主查设定变更历史）
