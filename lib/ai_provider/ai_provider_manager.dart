@@ -1335,15 +1335,25 @@ class AIProviderManager {
       tools: translatedTools,
       cancellationToken: cancellationToken,
     );
-    // 文本协议：从回复文本解析 ⟨工具:…⟩ 块 → 内部统一 toolCalls，
-    // 并把块从文本里剥掉（用户只看到男主自然的话）
+    // 文本残留工具块处理（8-07 21:2x 用户实测：男主会在文本里写其他家原生
+    // 格式，如 anthropic 的 <invoke name="X">…</invoke>（流式带 <|IDSMLI|>
+    // 标记）。原生 tool_calls 已有时 = 双写残留（剥掉不显示，不重复执行）；
+    // 原生没有时 = 唯一调用来源（解析执行）。任何格式都处理。
     var finalText = apiResult.text;
     var finalToolCalls = apiResult.toolCalls;
-    if (adapter.formatId == 'text') {
-      final textCalls = adapter.parseToolCallsFromText(apiResult.text);
-      if (textCalls.isNotEmpty) {
-        finalToolCalls = [...?finalToolCalls, ...textCalls];
-        finalText = adapter.stripToolBlocks(apiResult.text);
+    final textCalls = <Map<String, dynamic>>[
+      ...adapter.parseToolCallsFromText(apiResult.text),
+      // invoke XML 兜底（自家解析没命中时，任何格式都试）
+      ...parseAnthropicInvokeCalls(apiResult.text),
+    ];
+    if (textCalls.isNotEmpty) {
+      if (finalToolCalls == null || finalToolCalls.isEmpty) {
+        finalToolCalls = textCalls;
+      }
+      finalText = adapter.stripToolBlocks(apiResult.text);
+      // 自家 strip 没剥掉（如 openai 空实现）→ invoke XML 剥离兜底
+      if (finalText == apiResult.text) {
+        finalText = stripAnthropicInvokeBlocks(apiResult.text);
       }
     }
     return AIProviderResult(

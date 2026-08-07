@@ -56,6 +56,60 @@ abstract class ToolFormatAdapter {
       messages;
 }
 
+/// 8-07 21:2x 用户实测：男主在文本里写 Anthropic 新版工具调用
+/// `<invoke name="X"><parameter name="Y">V</parameter></invoke>`（流式带
+/// `<|IDSMLI|>` 增量标记）。这是通用兜底：任何格式的模型都可能双写残留，
+/// 或把 invoke XML 当唯一调用方式。库级函数，所有 adapter 都能用。
+///
+/// 先剥 `<|IDSMLI|>` 等流式标记（变体容忍空格），再解析 invoke 块：
+/// `<invoke name="manage_flow"><parameter name="action">next</parameter></invoke>`
+/// 参数值支持 JSON 自动解码（数字/布尔/对象）。
+final RegExp _idsmliRe = RegExp(r'<\|?\s*IDSMLI\s*\|?>?', caseSensitive: false);
+
+final RegExp _invokeRe = RegExp(
+    r'<invoke\s+name="([a-zA-Z_]+)"[^>]*>([\s\S]*?)</invoke>',
+    caseSensitive: false);
+
+final RegExp _invokeParamRe = RegExp(
+    r'<parameter\s+name="([^"]+)">([\s\S]*?)</parameter>',
+    caseSensitive: false);
+
+/// 剥掉所有流式标记 + 工具调用区域（tool_calls…</tool_calls> 或裸 invoke 块）
+String stripAnthropicInvokeBlocks(String text) {
+  var t = text.replaceAll(_idsmliRe, '');
+  t = t.replaceAll(
+      RegExp(r'tool_calls[\s\S]*?</tool_calls>', caseSensitive: false), '');
+  t = t.replaceAll(_invokeRe, '');
+  return t.trim();
+}
+
+/// 从文本解析 Anthropic invoke 工具调用（剥标记后匹配）
+List<Map<String, dynamic>> parseAnthropicInvokeCalls(String text) {
+  final clean = text.replaceAll(_idsmliRe, '');
+  final result = <Map<String, dynamic>>[];
+  for (final m in _invokeRe.allMatches(clean)) {
+    final name = m.group(1) ?? '';
+    if (name.isEmpty) continue;
+    final body = m.group(2) ?? '';
+    final args = <String, dynamic>{};
+    for (final p in _invokeParamRe.allMatches(body)) {
+      final raw = (p.group(2) ?? '').trim();
+      args[p.group(1) ?? ''] = _tryJsonValue(raw) ?? raw;
+    }
+    result.add({'name': name, 'arguments': args});
+  }
+  return result;
+}
+
+dynamic _tryJsonValue(String raw) {
+  if (raw.isEmpty) return raw;
+  try {
+    return jsonDecode(raw);
+  } catch (_) {
+    return null;
+  }
+}
+
 /// OpenAI 兼容格式：内部格式即原生格式，直通
 class OpenAICompatAdapter extends ToolFormatAdapter {
   const OpenAICompatAdapter();
@@ -178,12 +232,14 @@ class AnthropicAdapter extends ToolFormatAdapter {
         'arguments': input is Map<String, dynamic> ? input : <String, dynamic>{},
       });
     }
+    // 8-07 21:2x：也认 invoke XML 格式（男主实测会写）
+    result.addAll(parseAnthropicInvokeCalls(text));
     return result;
   }
 
   @override
   String stripToolBlocks(String text) =>
-      text.replaceAll(_toolUseRe, '').trim();
+      stripAnthropicInvokeBlocks(text.replaceAll(_toolUseRe, ''));
 }
 
 /// Gemini 原生格式（未来接 Gemini API 用）

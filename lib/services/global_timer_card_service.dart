@@ -30,6 +30,9 @@ class GlobalTimerCardService {
   bool _allowRequest = false;
   String _taskId = '';
   List<CardOption> _options = const [];
+
+  /// 8-07 21:2x：用户点了哪个选项（UI 反馈：变灰+✓，不然点了没反应像"点不了"）
+  String? _picked;
   void Function(String label, String action, int? extendMinutes)? _onOption;
   VoidCallback? _onExpire;
   void Function(String reason)? _onRequest; // 用户提交申请理由
@@ -71,6 +74,7 @@ class GlobalTimerCardService {
     _category = category;
     _allowRequest = allowRequest;
     _options = options;
+    _picked = null;
     _onOption = onOption;
     _onExpire = onExpire;
     _onRequest = onRequest;
@@ -182,24 +186,32 @@ class GlobalTimerCardService {
   }
 
   /// 用户点了某个选项（由卡片 UI 调）
+  /// 8-07 21:2x：加 try-catch——回调异常不能让点击"无声无息"，
+  /// 卡片侧先给视觉反馈（勾选态），异常只记日志不崩
   void onOptionTap(CardOption opt) {
-    if (opt.action == 'extend' && opt.minutes != null) {
-      extend(opt.minutes!);
-    } else if (opt.action == 'finish') {
-      final cb = _onOption;
-      final label = opt.label;
+    try {
+      _picked = opt.label;
+      _entry?.markNeedsBuild();
+      if (opt.action == 'extend' && opt.minutes != null) {
+        extend(opt.minutes!);
+      } else if (opt.action == 'finish') {
+        final cb = _onOption;
+        final label = opt.label;
+        CardTaskStore.instance.update(_taskId, (t) {
+          t.status = 'done';
+          t.result = '她点了「$label」';
+        });
+        finish();
+        cb?.call(label, 'finish', null);
+        return;
+      }
       CardTaskStore.instance.update(_taskId, (t) {
-        t.status = 'done';
-        t.result = '她点了「$label」';
+        t.result = '她点了「${opt.label}」';
       });
-      finish();
-      cb?.call(label, 'finish', null);
-      return;
+      _onOption?.call(opt.label, opt.action, opt.minutes);
+    } catch (e) {
+      // 点击已生效（视觉上），回调失败不阻塞用户
     }
-    CardTaskStore.instance.update(_taskId, (t) {
-      t.result = '她点了「${opt.label}」';
-    });
-    _onOption?.call(opt.label, opt.action, opt.minutes);
   }
 
   /// 用户提交申请调整理由（由卡片 UI 调）
@@ -408,25 +420,46 @@ class _TimerCardWidgetState extends State<_TimerCardWidget> {
           if (svc._options.isNotEmpty) ...[
             const SizedBox(height: 10),
             for (final opt in svc._options) ...[
+              // 8-07 21:2x：已选 → 变灰 + ✓（点击有明确反馈）
               GestureDetector(
-                onTap: () => svc.onOptionTap(opt),
+                onTap: svc._picked == opt.label
+                    ? null
+                    : () => svc.onOptionTap(opt),
                 child: Container(
                   width: double.infinity,
                   margin: const EdgeInsets.only(bottom: 6),
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF7EAF1),
+                    color: svc._picked == opt.label
+                        ? const Color(0xFFE3D5E0)
+                        : const Color(0xFFF7EAF1),
                     borderRadius: BorderRadius.circular(12),
+                    border: svc._picked == opt.label
+                        ? Border.all(color: const Color(0xFFC896B4))
+                        : null,
                   ),
                   child: Text(
-                    opt.label,
-                    style: const TextStyle(
-                        fontSize: 13, color: Color(0xFF6A4A52)),
+                    svc._picked == opt.label ? '✓ ${opt.label}' : opt.label,
+                    style: TextStyle(
+                        fontSize: 13,
+                        color: svc._picked == opt.label
+                            ? const Color(0xFF8A7A80)
+                            : const Color(0xFF6A4A52)),
                   ),
                 ),
               ),
             ],
+            // 已选提示行（点击有反馈，男主那边也收到了）
+            if (svc._picked != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  '✅ 已选「${svc._picked}」，他收到啦',
+                  style: const TextStyle(
+                      fontSize: 11, color: Color(0xFF8A6A96)),
+                ),
+              ),
           ],
           // 底栏：完成 / 申请调整 / 任务列表
           const SizedBox(height: 4),

@@ -25,6 +25,7 @@ import 'companion_page.dart';
 import 'package:flutter/services.dart';
 import '../../ai_provider/ai_provider_manager.dart';
 import '../../ai_provider/models.dart';
+import '../../ai_provider/tool_format_adapter.dart';
 import '../../butler/tools/tool_intent_parser.dart';
 import '../../models/male_lead.dart';
 import '../../services/chat_database_service.dart';
@@ -3083,6 +3084,8 @@ class _ChatPageState extends State<ChatPage>
   /// 8-03 18:2x：渐进显示用——每轮文本单独显示，不等全部跑完
   Future<String> _displayableText(String raw) async {
     var t = ToolIntentParser.stripToolBlocks(raw);
+    // 8-07 21:2x：兜底剥 anthropic invoke XML（防任何路径漏网显示）
+    t = stripAnthropicInvokeBlocks(t);
     t = ButlerCommandParser.instance.strip(t);
     try {
       final butler = ChatService.instance.butler;
@@ -4019,13 +4022,16 @@ class _ChatPageState extends State<ChatPage>
     final remindOnExpire = args['remind_on_expire'] != false;
     final remindDelay = (args['remind_delay_minutes'] as num?)?.toInt() ?? 0;
     final wakeMin = (args['wake_minutes'] as num?)?.toInt() ?? 5;
-    // 选项解析
+    // 选项解析（8-07 21:2x：兼容男主传字符串数组 ["A. 选项一", "B. 选项二"]
+    // → 转成 message 选项按钮，否则用户看到文字点不了）
     final options = <CardOption>[];
     final rawOptions = args['options'];
     if (rawOptions is List) {
       for (final o in rawOptions) {
         if (o is Map) {
           options.add(CardOption.fromJson(Map<String, dynamic>.from(o)));
+        } else if (o is String && o.trim().isNotEmpty) {
+          options.add(CardOption(label: o.trim()));
         }
       }
     }
