@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -61,6 +63,7 @@ class _FixVerifyPageState extends State<FixVerifyPage> {
     }
     await _refreshAll();
     _runCases();
+    unawaited(_runFlowCases()); // ⑧ 流程状态机（异步，独立跑）
     if (mounted) setState(() {});
   }
 
@@ -263,6 +266,51 @@ class _FixVerifyPageState extends State<FixVerifyPage> {
     _caseResults
       ..clear()
       ..addAll(cases);
+    if (mounted) setState(() {});
+  }
+
+  // ---- ⑧ 流程状态机（8-08 19:0x：paused_by_user 插话暂挂）----
+  // 用独立测试 pid，跑完清理，不碰真实角色数据
+  Future<void> _runFlowCases() async {
+    const pid = '__verify_flow__';
+    final results = <Map<String, String>>[];
+    void add(String input, String expected, String actual) {
+      results.add({
+        'group': '⑧ 流程状态机',
+        'input': input,
+        'expected': expected,
+        'actual': actual,
+        'pass': actual == expected ? '✅' : '❌',
+      });
+    }
+
+    try {
+      await FlowStore.clear(pid);
+      // create → running
+      await FlowStore.create(pid, '测试流程', ['步骤A']);
+      add('create → isRunning', 'true', '${FlowStore.isRunning(pid)}');
+      // 插话暂挂
+      await FlowStore.pauseByUser(pid, userMessage: '插话测试');
+      final f1 = await FlowStore.get(pid);
+      add('pauseByUser → status', 'paused_by_user', '${f1?['status']}');
+      add('paused → isRunning', 'false', '${FlowStore.isRunning(pid)}');
+      add('paused → isActive', 'true', '${FlowStore.isActive(pid)}');
+      // 恢复
+      await FlowStore.resume(pid);
+      add('resume → isRunning', 'true', '${FlowStore.isRunning(pid)}');
+      // 取消
+      await FlowStore.cancel(pid);
+      add('cancel → isActive', 'false', '${FlowStore.isActive(pid)}');
+      // 已取消不能再 resume
+      final r2 = await FlowStore.resume(pid);
+      add('cancelled 再 resume → 拒绝', 'true', '${r2.contains('不在暂停状态')}');
+      // 清理
+      await FlowStore.clear(pid);
+      add('clear → get null', 'null', '${await FlowStore.get(pid)}');
+    } catch (e) {
+      add('执行异常', '无', '$e');
+    }
+    _caseResults.addAll(results);
     if (mounted) setState(() {});
   }
 

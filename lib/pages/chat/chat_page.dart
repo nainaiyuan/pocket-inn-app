@@ -585,11 +585,21 @@ class _ChatPageState extends State<ChatPage>
         pendingMsgs.map((e) => e['id'].toString()).toList(),
       );
     }
+    // 8-08 19:0x（GPT 18:59 + 用户 19:04 定稿）：插话 = 流程暂挂（paused_by_user）
+    // ——不是 stop，也不完全不暂停。checkpoint=currentStep 天然保存。
+    final hasFlow = await FlowStore.get(pid);
+    if (hasFlow != null) {
+      await FlowStore.pauseByUser(pid, userMessage: fullText);
+    }
     final event =
-        '用户想跟你说话（流程**不停止**，你回复她之后继续执行流程）：'
-        '她刚才发来的消息：$fullText。'
-        '**这一轮先回复她，不要调任何工具**——她着急，'
-        '先回完她，流程会自动继续（不用你手动管）。';
+        '用户想跟你说话（流程**已暂挂**，不是停止，你回完她之后判断）：'
+        '她刚才发来的消息：$fullText。\n'
+        '**这一轮先回复她，不要调任何工具**（插话轮管家会拦截工具调用）。\n'
+        '回完她之后，根据她的话判断流程怎么办：\n'
+        '· 她只是闲聊/没改需求 → 调 manage_flow resume 继续原流程；\n'
+        '· 她提了新需求/要查东西 → 调 manage_flow update 修改流程（加/改步骤）再继续；\n'
+        '· 她明确说"不要了/取消" → 才调 manage_flow cancel；\n'
+        '· 拿不准 → 默认 resume 继续原流程，**绝不因为她随便一句话就取消整个流程**。';
     if (_pendingInterruptEvent != null) {
       // 已有插话排队 → 合并（男主当前轮结束只推一次，内容带全）
       _pendingInterruptEvent = '$_pendingInterruptEvent\n她又发来：$text';
@@ -612,7 +622,7 @@ class _ChatPageState extends State<ChatPage>
         setState(() {});
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('已把你的话排上，男主这轮忙完就回你（流程继续）'),
+            content: Text('已把你的话排上，男主这轮忙完就回你（流程已暂挂）'),
             duration: Duration(seconds: 2),
           ),
         );
@@ -624,7 +634,7 @@ class _ChatPageState extends State<ChatPage>
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('已发给男主，他先回你，流程继续跑'),
+          content: Text('已发给男主，他先回你（流程已暂挂）'),
           duration: Duration(seconds: 2),
         ),
       );
@@ -801,10 +811,24 @@ class _ChatPageState extends State<ChatPage>
     // 续话提醒必须说清"这是系统自动提醒，不是用户消息"，男主才不会误解
     // 8-08 18:1x（GPT 意见）：改成"结束检查轮"——判断有没有必须继续的事，
     // 没有就输出退出标记 {"need_continue": false}（管家识别，不显示给她）
+    // 8-08 19:0x：流程被她插话暂挂 → 检查轮带判断任务（resume/update/cancel）
+    String pausedJudge = '';
+    final flowNow = await FlowStore.get(pid);
+    if (flowNow != null &&
+        (flowNow['status']?.toString() ?? '') == 'paused_by_user') {
+      pausedJudge = '当前流程被她插话暂挂了（她的话：'
+          '${flowNow['stoppedNote'] ?? ''}）。你判断：\n'
+          '· 她只是闲聊/没改需求 → 调 manage_flow resume 继续原流程；\n'
+          '· 她提了新需求/要查东西 → 调 manage_flow update 修改流程；\n'
+          '· 她明确说"不要了/取消" → 才调 manage_flow cancel；\n'
+          '· 拿不准 → 默认 resume 继续原流程，绝不乱取消。\n'
+          '判断完直接调工具，不用问她。\n';
+    }
     await _sendMsg(
       '',
       systemEvent: '【系统自动提醒——这不是用户消息，不用回复这条提醒本身】\n'
           '现在是"结束检查"：上一轮你已回复完，用户没有说话。\n'
+          '$pausedJudge'
           '请判断有没有必须继续的事：\n'
           '① 有未完成的话题，或刚才被打断没说完的回复？\n'
           '② 有正在运行的任务需要继续推进？\n'
@@ -1187,6 +1211,24 @@ class _ChatPageState extends State<ChatPage>
         var loopExceeded = false;
         for (final call in result.toolCalls!) {
           final name = call['name']?.toString() ?? '';
+          // 8-08 19:0x（GPT 18:59 + 用户 19:04 定稿）：插话轮禁工具——
+          // 机械拦截（原来只是提示，男主不听话会调）：不执行、直接回执给男主
+          if (_interruptRoundActive) {
+            DebugLogger.log(
+              '管家流程',
+              '🔒 插话轮禁工具：男主调 $name 被拦截（这轮只回用户）',
+            );
+            toolMessages.add(
+              AIChatMessage(
+                role: 'tool',
+                content: '【工具 $name】❌被管家拦截：插话轮禁止调用工具，'
+                    '这一轮只回复用户。她提的新需求先口头确认，'
+                    '回完后调 manage_flow resume/update/cancel 处理流程。',
+                toolCallId: call['id']?.toString() ?? 'call_${toolLoop}_$name',
+              ),
+            );
+            continue;
+          }
           // 8-08 14:0x（断点 C 根治）：男主工具参数常写中文 key（{动作: next}）
           // 工具只认英文 key（{action: next}）→ next 失败 → 任务卡死。
           // 模型行为不可控，解析层兜底：按工具名做中文→英文参数名归一化。
@@ -2223,7 +2265,7 @@ class _ChatPageState extends State<ChatPage>
           _sendMsg(
             '',
             systemEvent: pendingInterrupt,
-            bubbleText: '💬 你插话了，男主先回你（流程继续）…',
+            bubbleText: '💬 你插话了，男主先回你（流程已暂挂）…',
           ),
         );
       }
@@ -2256,8 +2298,10 @@ class _ChatPageState extends State<ChatPage>
             _sendMsg(
               '',
               systemEvent: '用户还在等你回复（你刚才只顾着调工具，没回她的话）。'
-                  '**这一轮只回复她，禁止调用任何工具**。她刚才说：$_interruptUserText。'
-                  '回完之后流程会自动继续，不用你操心。',
+                  '**这一轮只回复她，禁止调用任何工具**（管家会拦截）。她刚才说：$_interruptUserText。'
+                  '回完之后判断流程怎么办：她只是闲聊 → manage_flow resume 继续；'
+                  '她改需求 → manage_flow update；她说不要 → manage_flow cancel；'
+                  '拿不准 → 默认 resume，绝不乱取消。',
               bubbleText: '💬 男主先回你…',
             ),
           );
@@ -2266,6 +2310,12 @@ class _ChatPageState extends State<ChatPage>
       }
       // 男主已回（或兜底轮已注入过、男主仍没回 → 放弃干预，交给续跑机制）
       _interruptRoundActive = false;
+      // 8-08 19:0x（GPT + 用户定稿）：插话轮结束（男主已回）→ 流程若被
+      // 她插话暂挂（paused_by_user），立即唤醒检查轮让他判断 resume/update/
+      // cancel——不挂到用户下次说话（检查轮提示已带判断规则）
+      if (mounted) {
+        unawaited(_maybeAutoContinue(personaId, spoke: roundSpoke));
+      }
     }
   }
 

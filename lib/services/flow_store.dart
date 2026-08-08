@@ -11,6 +11,8 @@ import 'working_pad_store.dart';
 ///
 /// 状态机：running → (next 推进) → running … → finish(done) / cancel(cancelled)
 ///         running → stop(stopped) → resume(running) / finish / cancel
+///         running → 用户插话 pauseByUser(paused_by_user) → resume / update / cancel
+///           （8-08 19:0x：插话=暂挂≠stop；男主回完用户后判断继续/修改/取消）
 ///
 /// 8-08 15:2x 步骤状态机升级（设计文档三，GPT 10 问 3/4/5/8）：
 /// - steps 从字符串数组升级为对象数组：
@@ -122,12 +124,12 @@ class FlowStore {
   static Future<Map<String, dynamic>?> get(String personaId) =>
       _read(personaId);
 
-  /// 是否有正在跑的流程（running/stopped 都算"有流程"）
+  /// 是否有正在跑的流程（running/stopped/paused_by_user 都算"有流程"）
   static bool isActive(String personaId) {
     final f = _memCache;
     if (f == null || f.isEmpty) return false;
     final s = f['status']?.toString() ?? '';
-    return s == 'running' || s == 'stopped';
+    return s == 'running' || s == 'stopped' || s == 'paused_by_user';
   }
 
   /// 是否执行中（running：用户消息只收集不传）
@@ -426,11 +428,34 @@ class FlowStore {
     return '已停止：${f['goal']}';
   }
 
-  /// 被打断后继续：stopped → running
+  /// 用户插话 → 流程暂挂（8-08 19:0x，GPT 18:59 + 用户 19:04 定稿）。
+  /// 和 stop 的区别：
+  /// - stop（⏹按钮）= 用户明确停止，男主决定继续/收尾/取消；
+  /// - pauseByUser（插话）= 暂挂（checkpoint=currentStep 天然保存），
+  ///   男主回完用户后判断：resume（闲聊/没改需求）/ update（改了需求）/
+  ///   cancel（她明确说"不要了"）。拿不准默认 resume，绝不乱 cancel。
+  static Future<String> pauseByUser(String personaId,
+      {String? userMessage}) async {
+    final f = await _read(personaId);
+    if (f == null) return '没有流程';
+    if (f['status'] != 'running') {
+      return '流程不在执行中（${f['status']}），无需暂挂';
+    }
+    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
+    f['status'] = 'paused_by_user';
+    f['stoppedNote'] = userMessage ?? '';
+    await _write(personaId, f);
+    _log('流程', '⏸ pauseByUser 用户插话暂挂（checkpoint=第 ${cur + 1} 步）');
+    return '已暂挂：${f['goal']}（她插话了，你回完她后判断继续/修改/取消）';
+  }
+
+  /// 被打断后继续：stopped/paused_by_user → running
   static Future<String> resume(String personaId) async {
     final f = await _read(personaId);
     if (f == null) return '没有流程';
-    if (f['status'] != 'stopped') return '流程不在停止状态（${f['status']}）';
+    if (f['status'] != 'stopped' && f['status'] != 'paused_by_user') {
+      return '流程不在暂停状态（${f['status']}）';
+    }
     f['status'] = 'running';
     f['stoppedNote'] = '';
     await _write(personaId, f);
@@ -439,6 +464,9 @@ class FlowStore {
     final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
     return '继续流程：${f['goal']}，第 ${cur + 1} 步：${_stepName(steps[cur])}';
   }
+
+  /// 8-08 19:0x：测试清理（修复验证中心用例用）——删除指定人的流程
+  static Future<void> clear(String personaId) => _write(personaId, null);
 
   /// 步骤对象数组（旧字符串自动升级）
   static List<Map<String, dynamic>> _stepsOf(Map<String, dynamic> f) {
@@ -498,7 +526,7 @@ class FlowStore {
       final mark = st == 'done'
           ? '✅'
           : (st == 'running' || (i == cur && status == 'running')
-              ? '▶'
+              ? (status == 'paused_by_user' ? '⏸' : '▶')
               : '☐');
       var line = '$mark 第${i + 1}步 $name';
       if (st == 'done' && result.isNotEmpty) line += '（结果：$result）';
@@ -565,8 +593,16 @@ class FlowStore {
               : '☐');
       sb.writeln('$mark ${i + 1}. $name');
     }
-    if (status == 'stopped' && (f['stoppedNote']?.toString() ?? '').isNotEmpty) {
+    if ((status == 'stopped' || status == 'paused_by_user') &&
+        (f['stoppedNote']?.toString() ?? '').isNotEmpty) {
       sb.writeln('（她打断时说了：${f['stoppedNote']}）');
+    }
+    // 8-08 19:0x：插话暂挂 → 明确判断规则（用户 19:04：不能让男主乱取消）
+    if (status == 'paused_by_user') {
+      sb.writeln('（她插话暂挂了流程。你判断：她只是闲聊/没改需求 → manage_flow '
+          'resume 继续原流程；她提了新需求/要查东西 → manage_flow update 修改流程；'
+          '她明确说"不要了/取消" → 才 manage_flow cancel；拿不准 → 默认 resume，'
+          '绝不因为她随便一句话就取消整个流程）');
     }
     // 8-07 21:2x 用户：男主以为流程自动推进 → 明确告知要手动调 next
     // 8-08 15:2x：autoAdvance 默认开，next 主要给 ai_output/user_confirm 步骤
@@ -583,6 +619,8 @@ class FlowStore {
         return '执行中';
       case 'stopped':
         return '被她打断了，等她决定';
+      case 'paused_by_user':
+        return '她插话暂挂了，等你判断继续/修改/取消';
       case 'done':
         return '已完成';
       case 'cancelled':
