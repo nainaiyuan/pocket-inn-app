@@ -460,6 +460,7 @@ class _ChatPageState extends State<ChatPage>
     // 8-08 15:5x：停止 → 同时重置续话/插话状态
     _autoContinuePid = null;
     _autoContinueCount = 0;
+    _lastAutoContinueAt = null;
     _interruptRoundActive = false;
     _interruptFollowUpDone = false;
     DebugLogger.log(
@@ -514,6 +515,7 @@ class _ChatPageState extends State<ChatPage>
     // 用户说话了 → 重置男主续话计数
     _autoContinuePid = null;
     _autoContinueCount = 0;
+    _lastAutoContinueAt = null;
     // 8-08 15:5x：存下插话内容（插话轮男主没回 → 兜底轮带给她看）
     _interruptUserText = text;
     // 队列里可能还有旧收集消息（旧版/管家入队）→ 一起带上
@@ -652,6 +654,8 @@ class _ChatPageState extends State<ChatPage>
   ///   继续补充 / 做点事 / 结束这轮（结束=不唤醒，直到用户下次说话）
   /// - 男主这轮没说话 → 不唤醒（他不想说了）
   /// - 上限：用户消息之间最多 3 次（用户说话重置计数）
+  /// - 最小间隔 25 秒（8-08 17:2x 日志复盘：男主 70 秒被唤醒 6 次，
+  ///   每轮都去调工具/重写便签 → 用户看到"男主一直不停"）
   /// - 用户消息排队（男主忙时收集的）→ 优先回用户（相当于自动插话）
   /// - 流程场景不经过这里（走 _maybeAutoResume，任务驱动）
   Future<void> _maybeAutoContinue(String pid, {required bool spoke}) async {
@@ -689,6 +693,19 @@ class _ChatPageState extends State<ChatPage>
     if (!spoke) {
       _autoContinuePid = null;
       _autoContinueCount = 0;
+      _lastAutoContinueAt = null;
+      return;
+    }
+    // ②' 续话最小间隔 25 秒（8-08 17:2x 日志复盘：防"续话→调工具→再续话"风暴）。
+    // 用户刚说话（_lastAutoContinueAt 为 null）不限制——第一轮续话立即允许
+    final now = DateTime.now();
+    if (_lastAutoContinueAt != null &&
+        now.difference(_lastAutoContinueAt!) <
+            const Duration(seconds: 25)) {
+      DebugLogger.log(
+        '管家流程',
+        '🔕 续话跳过（距上次 ${now.difference(_lastAutoContinueAt!).inSeconds}s < 25s，防唤醒风暴）',
+      );
       return;
     }
     // ③ 上限 3 次（用户没说话）
@@ -699,10 +716,12 @@ class _ChatPageState extends State<ChatPage>
     if (_autoContinueCount >= 3) {
       _autoContinuePid = null;
       _autoContinueCount = 0;
+      _lastAutoContinueAt = null;
       DebugLogger.log('管家流程', '🔔 男主续话已达 3 次上限，停止（等用户说话）');
       return;
     }
     _autoContinueCount++;
+    _lastAutoContinueAt = now;
     DebugLogger.log(
       '管家流程',
       '🔔 男主续话 #$_autoContinueCount（用户没说话，唤醒男主判断要不要继续说）',
@@ -715,7 +734,9 @@ class _ChatPageState extends State<ChatPage>
           '上一轮你已经回复完毕，用户没有说话。'
           '你可以：① 主动再补充一句、或者做点事（比如查资料、记记忆）；'
           '② 如果没什么要说的，就回复一句自然的结束语（比如"好啦，先这样～"）'
-          '——系统检测到你说完就不再自动提醒，直到用户下次说话。',
+          '——系统检测到你说完就不再自动提醒，直到用户下次说话。'
+          '注意：刚做完的事不用再调工具确认（比如流程已结束就别重复 finish），'
+          '没有新事做就直接说结束语。',
       silentBubble: true,
     );
   }
@@ -759,6 +780,7 @@ class _ChatPageState extends State<ChatPage>
     if (systemEvent == null && t.trim().isNotEmpty) {
       _autoContinuePid = null;
       _autoContinueCount = 0;
+      _lastAutoContinueAt = null;
     }
     // 8-08 15:5x：本轮男主输出信息（finally 用——判断"男主这轮说了话没"、
     // 续话/插话检查的数据源）。注意作用域：try 外声明，try/finally 都能读。
@@ -3178,6 +3200,7 @@ class _ChatPageState extends State<ChatPage>
   // 8-08 15:5x（用户需求：男主回复后自动唤醒判断要不要继续说，最多 3 次；
   // 用户说话重置；流程场景走 _maybeAutoResume 不受此限）
   int _autoContinueCount = 0; // 用户消息之间男主主动续话次数
+  DateTime? _lastAutoContinueAt; // 8-08 17:2x：上次续话时间（最小间隔 25s 防风暴）
   String? _autoContinuePid;
 
   /// 8-04 21:1x：一键验收进行中（自动切 AI 跑真实对话）

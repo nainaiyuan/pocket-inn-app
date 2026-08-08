@@ -363,9 +363,14 @@ class FlowStore {
 
   /// 流程完成（8-07 19:5x：完成时流程要点自动沉淀进便签——
   /// 男主流程结束不能忘了流程里需要记住的东西）
+  /// 8-08 17:2x（日志复盘：男主 70 秒内重复调 finish 3 次）：幂等防御——
+  /// 已结束的流程重复 finish 直接告知，不再重复沉淀便签
   static Future<String> finish(String personaId) async {
     final f = await _read(personaId);
     if (f == null) return '没有流程';
+    if (f['status'] == 'done' || f['status'] == 'cancelled') {
+      return '流程已经结束（${f['status'] == 'done' ? '已完成' : '已取消'}），无需重复 finish';
+    }
     final steps = _stepsOf(f);
     f['status'] = 'done';
     f['stoppedNote'] = '';
