@@ -79,6 +79,7 @@ class _ChatPageState extends State<ChatPage>
   double _offset = 0;
   Panel _currentPanel = Panel.center;
   Timer? _notifyWakeTimer; // 8-06 notify_user 超时唤醒
+  Timer? _flowBarTimer; // 8-08 16:2x 流程条 2 秒轮询刷新（弹窗/底部进度同步）
 
   /// 设定审批弹窗内的版本快照（8-07 15:5x 用户：男主用 query_setting_version
   /// 按需查某版某段原文，不把全文塞给他）；弹窗关闭时置空
@@ -115,6 +116,19 @@ class _ChatPageState extends State<ChatPage>
       duration: const Duration(milliseconds: 300),
     )..addListener(_onAnimTick);
     _state.addListener(_onStateChanged);
+    // 8-08 16:2x（用户反馈：弹窗显示流程 4-8，底部条还是 1-8）：
+    // 底部流程条是 build 快照不刷新 → 2 秒轮询刷新（仅流程 running 时有效）
+    _flowBarTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (!mounted) return;
+      final pid =
+          _state.personaId ??
+          (_state.leadId == null ? '' : '${_state.leadId}_default');
+      if (pid.isEmpty || !FlowStore.isRunning(pid)) return;
+      // get 会刷新内存缓存（warm 的 _load 是异步的，直接读 _memCache 可能旧）
+      FlowStore.get(pid).then((_) {
+        if (mounted) setState(() {});
+      });
+    });
     _load();
   }
 
@@ -381,6 +395,7 @@ class _ChatPageState extends State<ChatPage>
   }
 
   /// 8-06 23:55 用户：流程停止条——长任务时强行让男主停止
+  /// 8-08 16:2x（用户定稿）：去掉 💬 插话按钮（直接发送=插话），只留 ⏹ 停止
   Widget _buildFlowStopBar() {
     final pid =
         _state.personaId ??
@@ -402,19 +417,6 @@ class _ChatPageState extends State<ChatPage>
                 color: Color(0xFF5A4A6A),
                 fontWeight: FontWeight.w500,
               ),
-            ),
-          ),
-          TextButton(
-            onPressed: _pendingInterruptEvent != null ? null : _interruptFlow,
-            style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFF3E7B5A),
-              disabledForegroundColor: const Color(0xFF3E7B5A).withValues(alpha: 0.45),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              minimumSize: const Size(0, 32),
-            ),
-            child: Text(
-              _pendingInterruptEvent != null ? '💬 已推送…' : '💬 插话',
-              style: const TextStyle(fontSize: 12),
             ),
           ),
           TextButton(
@@ -493,92 +495,79 @@ class _ChatPageState extends State<ChatPage>
   /// 💬 插话要读输入框内容：打字 → 点插话 = 像发送一样直接发出去
   final _inputCtrl = TextEditingController();
 
-  /// 8-08 14:1x（用户需求）：💬 插话——流程**保持 running**，
-  /// 把男主工作时收集到的用户消息推给男主：先回复用户，再继续干活。
+  /// 8-08 16:2x（用户定稿："工作的时候直接发出去，不用单独插话按钮"）：
+  /// 男主忙时用户直接发消息 = 插话：上屏 + 推给男主（先回用户再继续干活）。
   /// 与 ⏹ 停止（彻底停）区分：插话只是"优先回复"，任务不打断。
   /// 男主回复完 → 检查点⑤ → 自动续跑继续任务（断点 D 已修复，正好衔接）。
-  Future<void> _interruptFlow() async {
-    final pid =
-        _state.personaId ??
-        (_state.leadId == null ? '' : '${_state.leadId}_default');
-    // 8-08 14:5x（用户反馈：反复点插话冒出很多气泡）：已有插话排队 →
-    // 不重复排队（男主这轮结束只推一次），防重复推送
-    if (_pendingInterruptEvent != null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('插话已排队，男主这轮忙完就回你（不用再点）'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
-      return;
+  Future<void> _interruptSend(String text, String pid) async {
+    // 上屏：像发送一样，用户看到自己的话发出去了（输入框 ChatInputBar 已清）
+    if (mounted) {
+      _msgKey.currentState?.appendMessage(
+        ChatMessage(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          text: text,
+          isMe: true,
+        ),
+      );
     }
+    // 用户说话了 → 重置男主续话计数
+    _autoContinuePid = null;
+    _autoContinueCount = 0;
+    // 8-08 15:5x：存下插话内容（插话轮男主没回 → 兜底轮带给她看）
+    _interruptUserText = text;
+    // 队列里可能还有旧收集消息（旧版/管家入队）→ 一起带上
+    var fullText = text;
     final pendingMsgs = PendingQueueStore.list(pid);
-    var userText = pendingMsgs
-        .map((e) => '[待#${e['id']}] ${e['text']}')
-        .join('；');
-    if (userText.isEmpty) {
-      // 8-08 15:1x（用户："我想要像发送一样直接发出去"）：
-      // 队列空但输入框有字 → 输入框内容直接作为插话消息（一步到位）
-      final draft = _inputCtrl.text.trim();
-      if (draft.isNotEmpty) {
-        userText = draft;
-        _inputCtrl.clear();
-        // 上屏：像发送一样，用户看到自己的话发出去了
-        _msgKey.currentState?.appendMessage(
-          ChatMessage(
-            id: DateTime.now().millisecondsSinceEpoch.toString(),
-            text: draft,
-            isMe: true,
-          ),
-        );
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('没有可推送的消息——在输入框打字后点插话，或先发消息再点插话'),
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
-        return;
-      }
-    }
-    // 清队列：这些消息马上推给男主，不再挂"待回复"
-    final pushedCount = pendingMsgs.isEmpty ? 1 : pendingMsgs.length;
     if (pendingMsgs.isNotEmpty) {
+      final extra = pendingMsgs
+          .map((e) => '[待#${e['id']}] ${e['text']}')
+          .join('；');
+      fullText = '$text（另外还有：$extra）';
       await PendingQueueStore.removeByIds(
         pid,
         pendingMsgs.map((e) => e['id'].toString()).toList(),
       );
     }
-    // 8-08 15:5x：存下插话内容（插话轮男主没回 → 兜底轮带给她看）
-    _interruptUserText = userText;
     final event =
         '用户想跟你说话（流程**不停止**，你回复她之后继续执行流程）：'
-        '她刚才发来的消息：$userText。'
+        '她刚才发来的消息：$fullText。'
         '**这一轮先回复她，不要调任何工具**——她着急，'
         '先回完她，流程会自动继续（不用你手动管）。';
-    DebugLogger.log('管家流程', '💬 插话：把 $pushedCount 条收集消息推给男主（流程保持 running）');
-    if (_generating) {
-      // 男主正在跑这轮（工具轮循环中）→ 排队，等它结束自动触发
-      _pendingInterruptEvent = event;
+    if (_pendingInterruptEvent != null) {
+      // 已有插话排队 → 合并（男主当前轮结束只推一次，内容带全）
+      _pendingInterruptEvent = '$_pendingInterruptEvent\n她又发来：$text';
+      DebugLogger.log('管家流程', '💬 插话排队中，合并新消息: $text');
       if (mounted) {
-        setState(() {}); // 插话按钮变"已推送…"（禁用）
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('已推送 $pushedCount 条消息，男主这轮忙完就回你（流程继续）'),
+          const SnackBar(
+            content: Text('男主正在忙，已把你的话排上，他回完就说'),
             duration: Duration(seconds: 2),
           ),
         );
       }
       return;
     }
+    if (_generating) {
+      // 男主正在跑这轮（工具轮循环中）→ 排队，等它结束自动触发
+      _pendingInterruptEvent = event;
+      DebugLogger.log('管家流程', '💬 男主忙，插话排队（当前轮结束推）: $text');
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('已把你的话排上，男主这轮忙完就回你（流程继续）'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+    // 男主空闲但流程 running（等审批等）→ 直接触发插话轮
+    DebugLogger.log('管家流程', '💬 男主空闲，直接推插话: $text');
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('已推送 $pushedCount 条消息，男主先回你，流程继续跑'),
+        const SnackBar(
+          content: Text('已发给男主，他先回你，流程继续跑'),
           duration: Duration(seconds: 2),
         ),
       );
@@ -586,7 +575,7 @@ class _ChatPageState extends State<ChatPage>
     await _sendMsg(
       '',
       systemEvent: event,
-      bubbleText: '💬 你插话了，男主先回你（流程继续）…',
+      bubbleText: '💬 男主先回你…',
     );
   }
 
@@ -717,13 +706,15 @@ class _ChatPageState extends State<ChatPage>
       '管家流程',
       '🔔 男主续话 #$_autoContinueCount（用户没说话，唤醒男主判断要不要继续说）',
     );
-    // silentBubble：不显示系统气泡，男主直接说话（用户只看到他主动续话）
+    // 8-08 16:2x（用户反馈：男主"为什么发空消息给我"）：
+    // 续话提醒必须说清"这是系统自动提醒，不是用户消息"，男主才不会误解
     await _sendMsg(
       '',
-      systemEvent: '用户没有说话。你可以：'
-          '① 补充一句刚才没说完的；② 做点事（调工具，比如查资料/记记忆）；'
-          '③ 没什么要说的就**直接回复"（这轮结束）"之类的话**——'
-          '系统检测到你不再说话就会停止自动唤醒，直到用户下次说话。',
+      systemEvent: '【系统自动提醒——这不是用户消息，不用回复这条提醒本身】\n'
+          '上一轮你已经回复完毕，用户没有说话。'
+          '你可以：① 主动再补充一句、或者做点事（比如查资料、记记忆）；'
+          '② 如果没什么要说的，就回复一句自然的结束语（比如"好啦，先这样～"）'
+          '——系统检测到你说完就不再自动提醒，直到用户下次说话。',
       silentBubble: true,
     );
   }
@@ -741,60 +732,25 @@ class _ChatPageState extends State<ChatPage>
     if (_tPid.isNotEmpty && _useTestSpace(_tPid)) {
       await SettingVersionStore.ensureTestCopy(_tPid);
     }
-    // 8-06 23:55 用户：流程执行中用户消息只收集不传（不打扰男主执行）。
-    // 放 _generating 前：男主工具轮循环（_generating=true）时消息也不丢。
-    // 停止触发的生成（systemEvent 非空）不走收集。
-    if (systemEvent == null) {
+    // 8-08 16:2x（用户定稿："工作的时候直接发出去，不用单独插话按钮"）：
+    // 男主忙（生成中/流程执行中）→ 用户直接发消息 = 插话：
+    // 上屏 + 推给男主（先回用户再继续干活），不再默默收集。
+    // 停止触发的生成（systemEvent 非空）不走插话。
+    if (systemEvent == null && t.trim().isNotEmpty) {
       final flowPid =
           _state.personaId ??
           (_state.leadId == null ? '' : '${_state.leadId}_default');
       FlowStore.warm(flowPid);
-      if (FlowStore.isRunning(flowPid)) {
-        PendingQueueStore.enqueue(flowPid, t);
-        if (mounted) {
-          _msgKey.currentState?.appendMessage(
-            ChatMessage(
-              id: DateTime.now().millisecondsSinceEpoch.toString(),
-              text: t,
-              isMe: true,
-            ),
-          );
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('男主正在执行流程，消息已收集。想让他先回你点 💬 插话；想彻底停点 ⏹ 停止'),
-              duration: Duration(seconds: 3),
-            ),
-          );
-        }
+      final busy = _generating || FlowStore.isRunning(flowPid);
+      if (busy) {
+        await _interruptSend(t, flowPid);
         return;
       }
     }
     // 8-03 18:2x（用户反馈"男主说完话再说话他不理人"）：生成锁——
     // 男主生成中（含工具轮）新消息直接忽略并提示，防并发上下文混乱
-    // 8-08 15:5x（用户反馈修复）：不再忽略——收集进待回复队列，上屏，
-    // 男主这轮结束自动回（_maybeAutoContinue ① 优先处理），消息不丢
+    // 8-08 16:2x：不再忽略也不再收集——上面已统一走 _interruptSend（直接发=插话）
     if (_generating) {
-      if (systemEvent == null && t.trim().isNotEmpty && _tPid.isNotEmpty) {
-        PendingQueueStore.enqueue(_tPid, t);
-        _autoContinuePid = null;
-        _autoContinueCount = 0;
-        DebugLogger.log('管家流程', '⏳ 男主正在忙，收集用户消息（不丢）: $t');
-        if (mounted) {
-          _msgKey.currentState?.appendMessage(
-            ChatMessage(
-              id: DateTime.now().millisecondsSinceEpoch.toString(),
-              text: t,
-              isMe: true,
-            ),
-          );
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('男主正在忙，已记下你的话，他回完就说'),
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
-      }
       return;
     }
     _generating = true;
@@ -1073,9 +1029,7 @@ class _ChatPageState extends State<ChatPage>
       // 只有"主调用直接空 + 无工具"才需要轻提示用户
       var toolExecuted = false;
       var toolLoop = 0;
-      // 8-08 01:2x 用户（管家编排）：工具轮男主中间文本攒这里，流程结束
-      // 统一呈现（男主最后生成的完整回复已包含全部内容，攒的仅作日志/兜底）
-      final _toolRoundTexts = <String>[];
+      // 8-08 16:2x：中间文本攒起逻辑已删除（男主说了话立即显示，见工具轮分支）
       final consecutiveToolCounts = <String, int>{};
       // 8-06 21:36：continue 累计计数（交错调用也能防无限"继续说"）
       var continueCount = 0;
@@ -1851,38 +1805,21 @@ class _ChatPageState extends State<ChatPage>
           storagePersonaId: chatPid,
         );
         if (result.text.trim().isNotEmpty) {
-          // 8-08 01:2x 用户（管家编排）：工具轮男主文本分两类——
-          // ① 中间文本（toolCalls 非空，还要继续调工具）→ 攒起不显示
-          //    （根治"做一个给一个"：渐进显示 → 管家批量执行 → 最后统一）
-          // ② 最终回复（toolCalls 空，不再调工具）→ 立即显示（男主最后
-          //    基于全部结果一次性说的话，正是用户要的"统一呈现"）
-          final isFinalReply =
-              result.toolCalls == null || result.toolCalls!.isEmpty;
-          if (isFinalReply) {
-            replyTexts.add(result.text.trim());
-            final roundText = await _displayableText(result.text);
-            if (roundText.isNotEmpty) {
-              dbRows.addAll(await _appendMaleReply(
-                result.text,
-                thinkingChain: result.reasoningContent,
-              ));
-            } else {
-              ChatPresence.instance.endTyping();
-            }
+          // 8-08 01:2x 用户（管家编排）：工具轮男主文本——
+          // 8-08 16:2x 用户反馈："说了很多话还在回复模型，好奇怪"：
+          // 中间文本攒起 → 用户只看到思考气泡，以为男主卡住。
+          // 改成：男主说了话就立即显示（含工具轮中间文本）——
+          // 正常情况下 system_template 要求男主"请求工具时不输出文本"，
+          // 所以工具轮中间文本很少；万一模型不听话说了话，显示出来
+          // 也比攒起来让用户以为卡住强。工具结果仍由管家批量回传。
+          replyTexts.add(result.text.trim());
+          final roundText = await _displayableText(result.text);
+          if (roundText.isNotEmpty) {
+            dbRows.addAll(await _appendMaleReply(
+              result.text,
+              thinkingChain: result.reasoningContent,
+            ));
           } else {
-            _toolRoundTexts.add(result.text.trim());
-            // 8-08 02:2x 用户：完全没看见思维链——中间文本攒起但
-            // thinkingChain 照常显示（思考气泡，text 空只显思维链）
-            if (result.reasoningContent?.trim().isNotEmpty == true) {
-              _msgKey.currentState?.appendMessage(ChatMessage(
-                id: '${DateTime.now().microsecondsSinceEpoch}_think_$toolLoop',
-                text: '',
-                isMe: false,
-                thinkingChain: result.reasoningContent,
-              ));
-            }
-            DebugLogger.log('AI路由', '🗜️ 工具轮中间文本攒起（第 $toolLoop 轮，'
-                '${result.text.length} 字，思维链已显示，文本最后统一呈现）');
             ChatPresence.instance.endTyping();
           }
         } else {
@@ -2552,6 +2489,7 @@ class _ChatPageState extends State<ChatPage>
     _anim.removeListener(_onAnimTick);
     _anim.dispose();
     _notifyWakeTimer?.cancel(); // 8-06 notify_user 超时唤醒
+    _flowBarTimer?.cancel(); // 8-08 16:2x 流程条轮询
     _inputCtrl.dispose(); // 8-08 15:1x：外部输入框 controller
     super.dispose();
   }
