@@ -364,13 +364,17 @@ class _ChatPageState extends State<ChatPage>
             ),
           ),
           TextButton(
-            onPressed: _interruptFlow,
+            onPressed: _pendingInterruptEvent != null ? null : _interruptFlow,
             style: TextButton.styleFrom(
               foregroundColor: const Color(0xFF3E7B5A),
+              disabledForegroundColor: const Color(0xFF3E7B5A).withValues(alpha: 0.45),
               padding: const EdgeInsets.symmetric(horizontal: 8),
               minimumSize: const Size(0, 32),
             ),
-            child: const Text('💬 插话', style: TextStyle(fontSize: 12)),
+            child: Text(
+              _pendingInterruptEvent != null ? '💬 已推送…' : '💬 插话',
+              style: const TextStyle(fontSize: 12),
+            ),
           ),
           TextButton(
             onPressed: _stopFlow,
@@ -447,6 +451,19 @@ class _ChatPageState extends State<ChatPage>
     final pid =
         _state.personaId ??
         (_state.leadId == null ? '' : '${_state.leadId}_default');
+    // 8-08 14:5x（用户反馈：反复点插话冒出很多气泡）：已有插话排队 →
+    // 不重复排队（男主这轮结束只推一次），防重复推送
+    if (_pendingInterruptEvent != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('插话已排队，男主这轮忙完就回你（不用再点）'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
     final pendingMsgs = PendingQueueStore.list(pid);
     final userText = pendingMsgs
         .map((e) => '[待#${e['id']}] ${e['text']}')
@@ -463,6 +480,7 @@ class _ChatPageState extends State<ChatPage>
       return;
     }
     // 清队列：这些消息马上推给男主，不再挂"待回复"
+    final pushedCount = pendingMsgs.length;
     await PendingQueueStore.removeByIds(
       pid,
       pendingMsgs.map((e) => e['id'].toString()).toList(),
@@ -471,14 +489,15 @@ class _ChatPageState extends State<ChatPage>
         '用户想跟你说话（流程**不停止**，你回复她之后继续执行流程）：'
         '她刚才发来的消息：$userText。'
         '先回复她（她着急），然后回到流程继续干活（别重新规划，接着当前步骤做）。';
-    DebugLogger.log('管家流程', '💬 插话：把 ${pendingMsgs.length} 条收集消息推给男主（流程保持 running）');
+    DebugLogger.log('管家流程', '💬 插话：把 $pushedCount 条收集消息推给男主（流程保持 running）');
     if (_generating) {
       // 男主正在跑这轮（工具轮循环中）→ 排队，等它结束自动触发
       _pendingInterruptEvent = event;
       if (mounted) {
+        setState(() {}); // 插话按钮变"已推送…"（禁用）
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('已把消息推给男主，他这轮忙完就回你（流程继续）'),
+          SnackBar(
+            content: Text('已推送 $pushedCount 条消息，男主这轮忙完就回你（流程继续）'),
             duration: Duration(seconds: 2),
           ),
         );
@@ -487,8 +506,8 @@ class _ChatPageState extends State<ChatPage>
     }
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('已把消息推给男主，他先回你，流程继续跑'),
+        SnackBar(
+          content: Text('已推送 $pushedCount 条消息，男主先回你，流程继续跑'),
           duration: Duration(seconds: 2),
         ),
       );
@@ -1752,6 +1771,7 @@ class _ChatPageState extends State<ChatPage>
     if (pendingInterrupt != null) {
       _pendingInterruptEvent = null;
       if (mounted) {
+        setState(() {}); // 插话按钮恢复"💬 插话"
         unawaited(
           _sendMsg(
             '',
