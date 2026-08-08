@@ -21,13 +21,17 @@ enum SpanKind { text, act }
 /// 8-08 21:3x（用户：男主气泡输出"工具:query_tool_formats关键词=notify_user"）：
 /// DeepSeek 把工具调用文本化泄漏进回复（工具:名 关键词=值）——整行剥掉。
 /// 只认行首"工具:"+工具名特征，不误伤"这个工具:xxx 很好用"（行首非工具:）。
-/// 供 bare 块解析和 chat_page _displayableText（渐进显示）共用。
+/// 8-08 22:2x（用户：思考链里"工具:弹窗通知内容-测试弹窗通知！"）：工具名
+/// 支持中文（弹窗通知/发计时卡片），参数前缀支持 内容/关键词/参数 + =或:或-
+/// （DeepSeek 文本化格式多样）。'工具:list_tools' 纯暗号也剥（显示层，
+/// 执行走 ToolIntentParser，不受影响）；'工具:锤子 敲一下'（名后自然话）不剥。
+/// 供 bare 块解析、chat_page _displayableText（渐进显示）、思考链落库共用。
 String stripToolTextLines(String t) {
   final lines = t.split('\n').where((ln) {
     final s = ln.trim();
     if (s.isEmpty) return false;
     return !RegExp(
-      r'^工具[:：]\s*[\w_]+(\s*(关键词|参数)[:：]\s*[^\s，。；;]+)?\s*$',
+      r'^工具[:：]\s*[\w\u4e00-\u9fa5]+(\s*(内容|关键词|参数)[:：=]?.*)?$',
     ).hasMatch(s);
   }).join('\n').trim();
   return lines;
@@ -185,19 +189,24 @@ StructuredOutput parseStructuredOutput(String raw) {
   blocks.sort((a, b) => a.start.compareTo(b.start));
 
   // 合并：结构化块 + 块外裸文本（兜底成 msg，内容永不丢）
+  // 8-08 22:2x（自检"JSON 周围杂散文本"失败）：有结构化块时块外裸文本
+  // 是杂散（"思考一下{...}完毕"的"思考一下/完毕"）→ 丢弃；纯文本
+  //（无任何结构化块）才兜底成 msg。旧标签 reply/sys 是 skip 块不算结构化。
+  final hasStructured =
+      blocks.any((b) => b.kind != _BlockKind.bare && b.kind != _BlockKind.skip);
   final merged = <_Block>[];
   var cursor = 0;
   for (final b in blocks) {
     if (b.start > cursor) {
       final bare = raw.substring(cursor, b.start);
-      if (bare.trim().isNotEmpty) {
+      if (bare.trim().isNotEmpty && !hasStructured) {
         merged.add(_Block(cursor, b.start, _BlockKind.bare, bare));
       }
     }
     merged.add(b);
     cursor = math.max(cursor, b.end);
   }
-  if (cursor < raw.length) {
+  if (cursor < raw.length && !hasStructured) {
     final bare = raw.substring(cursor);
     if (bare.trim().isNotEmpty) {
       merged.add(_Block(cursor, raw.length, _BlockKind.bare, bare));

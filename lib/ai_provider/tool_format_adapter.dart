@@ -54,6 +54,61 @@ abstract class ToolFormatAdapter {
   /// tool_calls + 工具结果注入 user 消息，8-03 06:54）
   List<AIChatMessage> translateToolRound(List<AIChatMessage> messages) =>
       messages;
+
+  /// 8-08 22:1x（自检：嵌套 JSON 被非贪婪正则截断到第一个 `}`）：
+  /// 从文本提取"包含 startNeedle 的完整括号平衡 JSON 对象"。
+  /// 例：{"type":"tool_use","input":{"a":1}} —— 非贪婪正则会在
+  /// 内层 "a":1} 处截断导致 jsonDecode 失败；本函数扫到括号归零为止。
+  static List<String> extractBalancedJsonObjects(
+      String text, String startNeedle) {
+    final result = <String>[];
+    var idx = 0;
+    while (true) {
+      final hit = text.indexOf(startNeedle, idx);
+      if (hit < 0) break;
+      // 从 needle 往前找包裹它的 {
+      var braceStart = hit;
+      while (braceStart > 0 && text[braceStart] != '{') {
+        braceStart--;
+      }
+      if (text[braceStart] != '{') {
+        idx = hit + 1;
+        continue;
+      }
+      var depth = 0;
+      var i = braceStart;
+      var inStr = false;
+      var esc = false;
+      var closed = false;
+      for (; i < text.length; i++) {
+        final ch = text[i];
+        if (inStr) {
+          if (esc) {
+            esc = false;
+          } else if (ch == r'\') {
+            esc = true;
+          } else if (ch == '"') {
+            inStr = false;
+          }
+          continue;
+        }
+        if (ch == '"') {
+          inStr = true;
+        } else if (ch == '{') {
+          depth++;
+        } else if (ch == '}') {
+          depth--;
+          if (depth == 0) {
+            result.add(text.substring(braceStart, i + 1));
+            closed = true;
+            break;
+          }
+        }
+      }
+      idx = (closed ? i : hit) + 1;
+    }
+    return result;
+  }
 }
 
 /// 8-07 21:2x 用户实测：男主在文本里写 Anthropic 新版工具调用
@@ -178,6 +233,32 @@ class OpenAICompatAdapter extends ToolFormatAdapter {
     }
     return result;
   }
+
+  /// 8-08 22:1x（自检"openai JSON 文本 ✗"）：OpenAI 兼容模型在文本里写
+  /// `{"name":"xxx","arguments":{...}}`（JSON 文本化工具调用）也认——
+  /// 统一适配 = 多格式都识别执行，不按名字猜格式。排除 type=tool_use
+  /// （那是 Anthropic 格式，归 AnthropicAdapter 管，避免双识别）。
+  @override
+  List<Map<String, dynamic>> parseToolCallsFromText(String text) {
+    final result = <Map<String, dynamic>>[];
+    for (final jsonStr
+        in ToolFormatAdapter.extractBalancedJsonObjects(text, '"name"')) {
+      try {
+        final decoded = jsonDecode(jsonStr);
+        if (decoded is! Map<String, dynamic>) continue;
+        if (decoded['type'] == 'tool_use') continue;
+        final name = decoded['name']?.toString() ?? '';
+        if (name.isEmpty) continue;
+        final args = decoded['arguments'];
+        result.add({
+          'name': name,
+          'arguments':
+              args is Map<String, dynamic> ? args : <String, dynamic>{},
+        });
+      } catch (_) {}
+    }
+    return result;
+  }
 }
 
 /// Anthropic 原生格式（未来接 Claude 原生 API 用）
@@ -231,24 +312,25 @@ class AnthropicAdapter extends ToolFormatAdapter {
 
   /// 文本解析（8-07 19:15 用户：允许 AI 在文本里写其他家原生格式，管家识别执行）：
   /// 识别 `{"type":"tool_use","name":...,"input":{...}}` JSON 或 `<tool_use>…</tool_use>` 块
-  static final RegExp _toolUseRe = RegExp(
-      r'<tool_use>([\s\S]*?)</tool_use>|\{"type"\s*:\s*"tool_use"[\s\S]*?\}',
-      caseSensitive: false);
+  /// 8-08 22:1x（自检"tool_use JSON ✗"）：JSON 分支从非贪婪正则改成
+  /// 括号平衡提取——嵌套 input 对象不再被截断到第一个 `}`
+  static final RegExp _toolUseBlockRe =
+      RegExp(r'<tool_use>([\s\S]*?)</tool_use>', caseSensitive: false);
 
   @override
   List<Map<String, dynamic>> parseToolCallsFromText(String text) {
     final result = <Map<String, dynamic>>[];
-    for (final m in _toolUseRe.allMatches(text)) {
-      final raw = (m.group(1) ?? m.group(0) ?? '').trim();
+    for (final m in _toolUseBlockRe.allMatches(text)) {
+      final raw = (m.group(1) ?? '').trim();
       Map<String, dynamic>? obj;
       try {
         final decoded = jsonDecode(raw);
         if (decoded is Map<String, dynamic>) obj = decoded;
       } catch (_) {}
       // 也兼容 <tool_use> 里直接写 {"name":...,"input":...}（无 type 字段）
-      if (obj == null && m.group(1) != null) {
+      if (obj == null) {
         try {
-          final decoded = jsonDecode(m.group(1)!.trim());
+          final decoded = jsonDecode(raw);
           if (decoded is Map<String, dynamic>) obj = decoded;
         } catch (_) {}
       }
@@ -260,6 +342,22 @@ class AnthropicAdapter extends ToolFormatAdapter {
         'arguments': input is Map<String, dynamic> ? input : <String, dynamic>{},
       });
     }
+    // JSON 形态：括号平衡提取（支持嵌套 input）
+    for (final jsonStr
+        in ToolFormatAdapter.extractBalancedJsonObjects(text, '"tool_use"')) {
+      try {
+        final decoded = jsonDecode(jsonStr);
+        if (decoded is! Map<String, dynamic>) continue;
+        final name = decoded['name']?.toString() ?? '';
+        if (name.isEmpty) continue;
+        final input = decoded['input'];
+        result.add({
+          'name': name,
+          'arguments':
+              input is Map<String, dynamic> ? input : <String, dynamic>{},
+        });
+      } catch (_) {}
+    }
     // 8-07 21:2x：也认 invoke XML 格式（男主实测会写）
     result.addAll(parseAnthropicInvokeCalls(text));
     return result;
@@ -267,7 +365,7 @@ class AnthropicAdapter extends ToolFormatAdapter {
 
   @override
   String stripToolBlocks(String text) =>
-      stripAnthropicInvokeBlocks(text.replaceAll(_toolUseRe, ''));
+      stripAnthropicInvokeBlocks(text.replaceAll(_toolUseBlockRe, ''));
 }
 
 /// Gemini 原生格式（未来接 Gemini API 用）
@@ -316,16 +414,14 @@ class GeminiAdapter extends ToolFormatAdapter {
 
   /// 文本解析（8-07 19:15 用户：允许 AI 在文本里写 Gemini 原生格式，管家识别执行）：
   /// 识别 `{"functionCall":{"name":...,"args":{...}}}` JSON
-  static final RegExp _functionCallRe = RegExp(
-      r'\{"functionCall"\s*:\s*\{[\s\S]*?\}\}',
-      caseSensitive: false);
-
+  /// 8-08 22:1x（自检）：括号平衡提取，防嵌套 args 截断
   @override
   List<Map<String, dynamic>> parseToolCallsFromText(String text) {
     final result = <Map<String, dynamic>>[];
-    for (final m in _functionCallRe.allMatches(text)) {
+    for (final jsonStr
+        in ToolFormatAdapter.extractBalancedJsonObjects(text, '"functionCall"')) {
       try {
-        final decoded = jsonDecode(m.group(0)!);
+        final decoded = jsonDecode(jsonStr);
         if (decoded is! Map<String, dynamic>) continue;
         final fc = decoded['functionCall'];
         if (fc is! Map<String, dynamic>) continue;
@@ -342,7 +438,7 @@ class GeminiAdapter extends ToolFormatAdapter {
 
   @override
   String stripToolBlocks(String text) =>
-      text.replaceAll(_functionCallRe, '').trim();
+      text.replaceAll(RegExp(r'\{"functionCall"[\s\S]*?\}\}'), '').trim();
 }
 
 /// 文本协议兜底（本地不支持原生 function calling 的模型，用户 19:42 确认）

@@ -3902,6 +3902,14 @@ class _ChatPageState extends State<ChatPage>
     bool isFirst = false,
   }) async {
     final rows = <_BubbleRow>[];
+    // 8-08 22:2x（用户：思考过程折叠区里显示"工具:弹窗通知内容-测试弹窗通知！"）：
+    // reasoning 原文可能带文本化工具调用行（中文工具名 + 内容= 格式）——
+    // 落库前剥掉，折叠区不再露工具行（剥行正则已支持中文名/内容=格式）
+    String? cleanThinking;
+    if (thinkingChain != null && thinkingChain.trim().isNotEmpty) {
+      cleanThinking = stripToolTextLines(thinkingChain);
+      if (cleanThinking.isEmpty) cleanThinking = null;
+    }
     // 8-07 23:3x JSON 化：parseStructuredOutput 统一解析（JSON 块 + 旧标签
     // 双兼容）——reply 标注不显示、sys 静默不显示不落库，气泡只含 msg/act
     final parsed = parseStructuredOutput(rawText);
@@ -3929,7 +3937,7 @@ class _ChatPageState extends State<ChatPage>
               ? part.spans
               : null,
           // 思考链只挂第一条 msg 气泡
-          thinkingChain: i == 0 ? thinkingChain : null,
+          thinkingChain: i == 0 ? cleanThinking : null,
         );
         _msgKey.currentState?.appendMessage(msg);
         rows.add(_BubbleRow(

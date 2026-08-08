@@ -295,50 +295,57 @@ class _MessageBubbleState extends State<MessageBubble>
               // 用户消息（右对齐）：已读在气泡左侧（男主那一侧）
               if (message.isMe) _ReadTag(message: message),
               // 气泡
+              // 8-08 22:1x（用户：气泡没有宽度截断，怼到用户那边，平板够长
+              // 另一条消息都看不见了）：Flexible(loose) 允许子撑满整行剩余宽
+              // → 平板面板宽时气泡全宽。加 LayoutBuilder 按行宽 *0.72 限宽
+              // （微信风格，留出对面空间，超出换行），头像/已读不受影响
               Flexible(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: message.isMe
-                        ? const Color(0xFFE8A0B8).withValues(alpha: 0.15)
-                        : Colors.white.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.only(
-                      // 分组：组首顶角大 + 头像侧尾巴，中间小圆角，组尾底角收尾
-                      // 头像在男主左侧（BL 是尾巴侧）/ 用户右侧（BR 是尾巴侧）
-                      topLeft: widget.isGrouped && !widget.isGroupStart
-                          ? const Radius.circular(6)
-                          : const Radius.circular(18),
-                      topRight: widget.isGrouped && !widget.isGroupStart
-                          ? const Radius.circular(6)
-                          : const Radius.circular(18),
-                      bottomLeft: message.isMe
-                          ? const Radius.circular(18) // 用户左侧恒 18
-                          : widget.isGrouped
-                          ? widget.isGroupStart
-                                ? Radius
-                                      .zero // 组首尾巴指向头像
-                                : widget.isGroupEnd
-                                ? const Radius.circular(18)
-                                : const Radius.circular(6)
-                          : Radius.zero,
-                      bottomRight: message.isMe
-                          ? widget.isGrouped
+                child: LayoutBuilder(
+                  builder: (ctx, cons) {
+                    final bubbleMaxW = cons.maxWidth * 0.72;
+                    return ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: bubbleMaxW),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: message.isMe
+                              ? const Color(0xFFE8A0B8).withValues(alpha: 0.15)
+                              : Colors.white.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.only(
+                            // 分组：组首顶角大 + 头像侧尾巴，中间小圆角，组尾底角收尾
+                            // 头像在男主左侧（BL 是尾巴侧）/ 用户右侧（BR 是尾巴侧）
+                            topLeft: widget.isGrouped && !widget.isGroupStart
+                                ? const Radius.circular(6)
+                                : const Radius.circular(18),
+                            topRight: widget.isGrouped && !widget.isGroupStart
+                                ? const Radius.circular(6)
+                                : const Radius.circular(18),
+                            bottomLeft: message.isMe
+                                ? const Radius.circular(18) // 用户左侧恒 18
+                                : widget.isGrouped
                                 ? widget.isGroupStart
-                                      ? Radius
-                                            .zero // 组首尾巴指向头像
+                                      ? Radius.zero // 组首尾巴指向头像
                                       : widget.isGroupEnd
-                                      ? const Radius.circular(18)
-                                      : const Radius.circular(6)
-                                : Radius.zero
-                          : const Radius.circular(18), // 男主右侧恒 18
-                    ),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.4),
-                    ),
-                  ),
+                                          ? const Radius.circular(18)
+                                          : const Radius.circular(6)
+                                : Radius.zero,
+                            bottomRight: message.isMe
+                                ? widget.isGrouped
+                                      ? widget.isGroupStart
+                                            ? Radius.zero // 组首尾巴指向头像
+                                            : widget.isGroupEnd
+                                                ? const Radius.circular(18)
+                                                : const Radius.circular(6)
+                                      : Radius.zero
+                                : const Radius.circular(18), // 男主右侧恒 18
+                          ),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.4),
+                          ),
+                        ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -441,9 +448,12 @@ class _MessageBubbleState extends State<MessageBubble>
                     ],
                   ),
                 ),
-              ),
-              // 男主消息（左对齐）：已读在气泡右侧（用户那一侧）
-              if (!message.isMe) _ReadTag(message: message),
+              );
+            },
+          ),
+        ),
+        // 男主消息（左对齐）：已读在气泡右侧（用户那一侧）
+        if (!message.isMe) _ReadTag(message: message),
               if (message.isMe && (!widget.isGrouped || widget.isGroupStart)) ...[
                 const SizedBox(width: 8),
                 _Avatar(isUser: true),

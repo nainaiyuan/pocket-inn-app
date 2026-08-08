@@ -141,13 +141,18 @@ class ToolIntentParser {
   /// 简单兜底（简单到几乎不会写错）；精确工具名 + 键=值 结构，防误触发。
   /// 例：工具:manage_flow 动作=next → manage_flow{action:next}
   ///    工具:list_tools               → list_tools{}
+  /// 8-08 22:2x（自检"男主说(方括号/⟨未闭合/工具名散落)应提示 却执行"）：
+  /// 收紧边界——① 前面不能被 [ ⟨ 【 或字母数字包着（[工具:list_tools] 是
+  /// 宽松变体痕迹，不是暗号）② 工具名后只吃 键=值 序列，残留自然话
+  /// （'工具:list_tools 帮我看看'）整体不匹配 → 走 detectSuspicious 提示
   static final RegExp _sentenceRe = RegExp(
-      r'工具\s*[:：]\s*([a-zA-Z_]+)([\s\S]*?)(?=工具\s*[:：]|$)');
+      r'(?<![a-zA-Z0-9_⟨\[【])工具\s*[:：]\s*([a-zA-Z_]+)'
+      r'((?:\s+\S+?=\S+)*\s*)(?=工具\s*[:：]|$)');
   /// 8-08 18:4x（修复验证中心 ⑤ 失败）：剥离用收紧版——
   /// 只匹配"工具:名 [键=值]*"调用本身（含调用后空白），不吞后面的自然话
   /// （旧 _sentenceRe 的 group2 懒匹配到句尾，把"我们继续"也吞了）。
   static final RegExp _sentenceCallRe = RegExp(
-      r'工具\s*[:：]\s*([a-zA-Z_]+)((?:\s+\S+?=\S+)*\s*)');
+      r'(?<![a-zA-Z0-9_⟨\[【])工具\s*[:：]\s*([a-zA-Z_]+)((?:\s+\S+?=\S+)*\s*)');
   static final RegExp _kvRe = RegExp(r'(\S+?)=(\S+)');
 
   /// 中文参数键 → 工具参数名（男主是中文模型，写"动作=next"很自然；
