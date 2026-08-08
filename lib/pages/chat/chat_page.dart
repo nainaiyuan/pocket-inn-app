@@ -14,6 +14,8 @@ import '../../services/record_tree_store.dart';
 import '../../services/working_pad_store.dart';
 import '../../services/flow_store.dart';
 import '../../services/tool_cache_store.dart';
+import '../../services/tool_manual_store.dart';
+import '../../services/tool_test_store.dart';
 import '../../services/timer_plan_store.dart';
 import '../../services/pending_queue_store.dart';
 import '../../butler/memory/relation_record.dart';
@@ -136,6 +138,45 @@ class _ChatPageState extends State<ChatPage>
     await _state.tryAutoSelect();
     await DebugLogger.log('CHAT', '_load done, hasLead=${_state.hasLead}');
     if (mounted) setState(() {});
+    // 8-08 15:2x（设计 7.5，GPT 10 问 6 定案：APP 重启 = 保存状态+恢复运行+
+    // 用户进入 APP 时继续，不做后台常驻）：上次任务未完成 → 提示并自动续跑
+    _checkRestartResume();
+  }
+
+  /// APP 重启恢复：FlowStore 持久化了 running 任务 → 用户进 APP 时
+  /// 提示"上次任务未完成"并自动续跑（silent 默认，男主自己干完）
+  Future<void> _checkRestartResume() async {
+    try {
+      final pid = _state.personaId ??
+          (_state.leadId == null ? '' : '${_state.leadId}_default');
+      if (pid.isEmpty) return;
+      FlowStore.warm(pid);
+      if (!FlowStore.isRunning(pid)) return;
+      final flow = await FlowStore.get(pid);
+      final steps = (flow?['steps'] as List?)?.length ?? 0;
+      final cur = ((flow?['currentStep'] as num?)?.toInt() ?? 0) + 1;
+      if (steps == 0) return;
+      DebugLogger.log(
+        '管家流程',
+        '🔔 APP 重启恢复：上次任务未完成（「${flow?['goal']}」第 $cur/$steps 步），'
+        '自动续跑（用户进入 APP）',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '上次任务未完成（「${flow?['goal']}」第 $cur/$steps 步），男主继续干活…',
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+      // 自动续跑（等用户稍作停留，让 UI 先渲染完）
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      if (mounted) await _maybeAutoResume(pid);
+    } catch (e) {
+      DebugLogger.log('管家流程', '⚠️ APP 重启恢复检查失败: $e');
+    }
   }
 
   // ---- 手势 ----
@@ -589,10 +630,14 @@ class _ChatPageState extends State<ChatPage>
       '管家流程',
       '🔔 自动续跑 #$_autoResumeRounds（任务 running，男主继续执行第 ${cur + 1}/$steps 步）',
     );
-    final stepText =
-        (flow['steps'] as List?) != null && cur < (flow['steps'] as List).length
-            ? (flow['steps'] as List)[cur].toString()
-            : '';
+    final rawStep = (flow['steps'] as List?) != null &&
+            cur < (flow['steps'] as List).length
+        ? (flow['steps'] as List)[cur]
+        : null;
+    // 8-08 15:2x：steps 对象化后取 name（旧字符串数组直接 toString）
+    final stepText = rawStep is Map
+        ? (rawStep['name']?.toString() ?? rawStep.toString())
+        : (rawStep?.toString() ?? '');
     await _sendMsg(
       '',
       systemEvent: '任务还没完成，继续执行（用户没发新消息，这是自动续跑）：'
@@ -679,6 +724,9 @@ class _ChatPageState extends State<ChatPage>
     WorkingPadStore.warm(personaId);
     // 8-08 02:1x：工具工作缓存预热（男主干活中间数据，自管免审批）
     ToolCacheStore.warm(personaId);
+    // 8-08 15:2x：工具手册 + 测试任务预热
+    ToolManualStore.warm(personaId);
+    ToolTestStore.warm(personaId);
     // 8-06 21:26：定时任务计划预热
     TimerPlanStore.warm(personaId);
     // 8-06 21:36：待回复队列预热
@@ -1230,11 +1278,16 @@ class _ChatPageState extends State<ChatPage>
             if (action == 'create') {
               final goal = args['goal']?.toString() ?? '';
               final stepsRaw = args['steps'];
-              final steps = <String>[];
+              // 8-08 15:2x：steps 支持字符串或对象 {name, doneType, doneCondition}
+              final steps = <dynamic>[];
               if (stepsRaw is List) {
                 for (final st in stepsRaw) {
-                  final t = st.toString().trim();
-                  if (t.isNotEmpty) steps.add(t);
+                  if (st is Map) {
+                    steps.add(st);
+                  } else {
+                    final t = st.toString().trim();
+                    if (t.isNotEmpty) steps.add(t);
+                  }
                 }
               } else if (stepsRaw is String) {
                 steps.addAll(
@@ -1248,7 +1301,17 @@ class _ChatPageState extends State<ChatPage>
                 await FlowStore.create(personaId, goal, steps),
               );
             } else if (action == 'next') {
-              toolResult = _ToolResult(true, await FlowStore.next(personaId));
+              // 8-08 15:2x（GPT 10 问 4 定案：结构化提交，不从文本抽取）：
+              // ai_output/user_confirm 步骤 next 时带 result（+可选 summary/next_action）
+              toolResult = _ToolResult(
+                true,
+                await FlowStore.next(
+                  personaId,
+                  result: args['result']?.toString(),
+                  summary: args['summary']?.toString(),
+                  nextAction: args['next_action']?.toString(),
+                ),
+              );
             } else if (action == 'finish') {
               toolResult = _ToolResult(true, await FlowStore.finish(personaId));
             } else if (action == 'cancel') {
@@ -1264,12 +1327,16 @@ class _ChatPageState extends State<ChatPage>
               // 8-07 00:1x 用户：用户提了新要求 → 更新流程目标/步骤，从头执行
               final goal = args['goal']?.toString();
               final stepsRaw = args['steps'];
-              List<String>? steps;
+              List<dynamic>? steps;
               if (stepsRaw is List) {
-                steps = <String>[];
+                steps = <dynamic>[];
                 for (final st in stepsRaw) {
-                  final t = st.toString().trim();
-                  if (t.isNotEmpty) steps.add(t);
+                  if (st is Map) {
+                    steps.add(st);
+                  } else {
+                    final t = st.toString().trim();
+                    if (t.isNotEmpty) steps.add(t);
+                  }
                 }
               } else if (stepsRaw is String) {
                 steps = stepsRaw
@@ -1292,6 +1359,107 @@ class _ChatPageState extends State<ChatPage>
             }
             // 流程状态变化 → 刷新停止条
             if (mounted) setState(() {});
+          } else if (name == 'manage_tool_manual') {
+            // 8-08 15:2x（设计文档四，GPT 10 问 2）：工具使用手册——男主自管免审批
+            // 格式/示例/坑记进手册，下次不重新试格式
+            _appendToolBubble('📖 男主在整理工具手册…');
+            final action = args['action']?.toString() ?? '';
+            final tName = args['tool']?.toString() ?? '';
+            if (action == 'add' || action == 'update') {
+              toolResult = _ToolResult(
+                true,
+                await ToolManualStore.save(
+                  personaId,
+                  tName,
+                  usage: args['usage']?.toString(),
+                  format: args['format']?.toString(),
+                  example: args['example']?.toString(),
+                  note: args['note']?.toString(),
+                ),
+              );
+            } else if (action == 'get') {
+              toolResult = _ToolResult(
+                true,
+                await ToolManualStore.get(personaId, tName),
+              );
+            } else if (action == 'list') {
+              toolResult = _ToolResult(
+                true,
+                await ToolManualStore.list(personaId),
+              );
+            } else if (action == 'remove') {
+              toolResult = _ToolResult(
+                true,
+                await ToolManualStore.remove(personaId, tName),
+              );
+            } else {
+              toolResult = const _ToolResult(
+                false,
+                'manage_tool_manual 参数：action=add/update/get/list/remove，'
+                'tool=工具英文名；add 可带 usage/format/example/note。'
+                '示例：{"action":"add","tool":"search_web","format":"{\\"query\\":\\"关键词\\"}"}',
+              );
+            }
+          } else if (name == 'manage_tool_test') {
+            // 8-08 15:2x（设计文档八，GPT 10 问 10）：工具测试任务管理器——男主自管免审批
+            // 管家维护 checklist，男主每轮只面对"当前要测的工具"一个对象
+            _appendToolBubble('🧪 男主在管理工具测试任务…');
+            final action = args['action']?.toString() ?? '';
+            if (action == 'start') {
+              final toolsRaw = args['tools'];
+              final tools = <String>[];
+              if (toolsRaw is List) {
+                for (final t in toolsRaw) {
+                  final s = t.toString().trim();
+                  if (s.isNotEmpty) tools.add(s);
+                }
+              } else if (toolsRaw is String) {
+                tools.addAll(toolsRaw
+                    .split(RegExp(r'[,，\n]+'))
+                    .where((t) => t.trim().isNotEmpty));
+              }
+              // 自动立流程（goal=测试工具），checklist 由 ToolTestStore 维护
+              if (!FlowStore.isRunning(personaId)) {
+                await FlowStore.create(personaId, '测试所有工具',
+                    ['逐个测试工具并记录结果', '汇总测试结果给用户']);
+              }
+              toolResult = _ToolResult(
+                true,
+                await ToolTestStore.start(personaId, tools),
+              );
+              if (mounted) setState(() {});
+            } else if (action == 'report') {
+              final tName = args['name']?.toString() ?? '';
+              final ok = args['ok'] == true ||
+                  args['ok']?.toString() == 'true' ||
+                  args['ok']?.toString() == '成功';
+              toolResult = _ToolResult(
+                true,
+                await ToolTestStore.report(
+                  personaId,
+                  tName,
+                  ok: ok,
+                  bug: args['bug']?.toString(),
+                ),
+              );
+            } else if (action == 'status') {
+              toolResult = _ToolResult(
+                true,
+                await ToolTestStore.status(personaId),
+              );
+            } else if (action == 'abort') {
+              toolResult = _ToolResult(
+                true,
+                await ToolTestStore.abort(personaId),
+              );
+            } else {
+              toolResult = const _ToolResult(
+                false,
+                'manage_tool_test 参数：action=start/report/status/abort。'
+                'start 带 tools 列表；report 带 name+ok(+bug)。'
+                '示例：{"action":"report","name":"search_web","ok":true}',
+              );
+            }
           } else if (name == 'manage_frequent_tools') {
             // 8-06 21:54 用户：常用工具表维护（男主自己的，免审批）
             final action = args['action']?.toString() ?? '';
@@ -1389,6 +1557,17 @@ class _ChatPageState extends State<ChatPage>
             toolResult.ok,
             toolResult.text,
           );
+          // 8-08 15:2x（步骤状态机）：工具使用记录进 FlowStore 当前步
+          // toolsUsed（完成条件判定 + 任务清单"本步已用工具"数据源）
+          final briefForStep = toolResult.text.trim();
+          await FlowStore.recordToolUse(
+            personaId,
+            name,
+            ok: toolResult.ok,
+            brief: briefForStep.length > 60
+                ? '${briefForStep.substring(0, 60)}…'
+                : briefForStep,
+          );
           // 8-08 02:2x 用户：男主查完不记一直查 → 查询结果自动进工具缓存
           // （下次直接看【工具缓存】别重复查；缓存有预算，超了男主整理）
           if (toolResult.ok && kQueryToolNames.contains(name)) {
@@ -1467,6 +1646,28 @@ class _ChatPageState extends State<ChatPage>
               '⚠️ 工具 $name 调用 $n 次（continue 累计 $continueCount，'
               '查询类累计 $queryToolCount），强制停止（防死循环）',
             );
+          }
+        }
+        // 8-08 15:2x（GPT 10 问 5 定案：autoAdvance 默认开，严格判定）：
+        // 每轮工具执行完，管家检查当前步完成条件（tool_result：有成功工具；
+        // ai_output/user_confirm：有结构化 result），明确满足才自动推进。
+        // 推进提示注入下一轮，男主不用手动 next（产出/确认类仍要手动带 result）
+        if (!loopExceeded) {
+          final advanceMsg = await FlowStore.autoAdvance(personaId);
+          if (advanceMsg != null) {
+            DebugLogger.log('管家流程', '▶ autoAdvance：$advanceMsg');
+            if (advanceMsg == '__ALL_DONE__') {
+              toolMessages.add(AIChatMessage(
+                role: 'user',
+                content: '【系统事件】所有步骤都已完成 ✅。'
+                    '现在调 manage_flow finish 收尾，然后给用户汇总结果。',
+              ));
+            } else {
+              toolMessages.add(AIChatMessage(
+                role: 'user',
+                content: '【系统事件】$advanceMsg。继续执行新步骤，别回头重复。',
+              ));
+            }
           }
         }
         // 8-07 22:5x：不再这里提前 break——loopExceeded 时也要先注入
@@ -1707,7 +1908,17 @@ class _ChatPageState extends State<ChatPage>
       await _showAiUnavailableDialog(e);
     } on AIAllProvidersFailedException catch (e) {
       DebugLogger.log('AI路由', '❌ 所有候选都失败: ${e.tried.join('、')}');
-      await _showAllAiFailedDialog(e);
+      // 8-08 15:2x（设计九）：不直接弹窗——注入系统事件走一轮，男主
+      // 跟用户解释（上限 1 次；再次失败弹窗兜底）
+      if (!_providerErrorInjected && mounted) {
+        _providerErrorInjected = true;
+        _pendingProviderErrorEvent =
+            '你刚才这轮对话/工具调用失败了（原因：${e.tried.join('、')} 都不可用）。'
+            '你可以：① 重试一次；② 直接告诉用户"现在做不到，原因…"，别假装成功。';
+      } else {
+        _providerErrorInjected = false;
+        await _showAllAiFailedDialog(e);
+      }
     } on Object catch (e) {
       // 8-08 02:1x：RangeError(start/end) 弹"发送失败"——堆栈落日志定位真凶
       DebugLogger.log('AI路由', '❌ 聊天请求失败: $e\n${StackTrace.current}');
@@ -1799,6 +2010,20 @@ class _ChatPageState extends State<ChatPage>
             '',
             systemEvent: pendingInterrupt,
             bubbleText: '💬 你插话了，男主先回你（流程继续）…',
+          ),
+        );
+      }
+    }
+    // 8-08 15:2x（设计九）：AI 全失败事件排队——这轮结束注入，男主解释
+    final pendingProviderError = _pendingProviderErrorEvent;
+    if (pendingProviderError != null) {
+      _pendingProviderErrorEvent = null;
+      if (mounted) {
+        unawaited(
+          _sendMsg(
+            '',
+            systemEvent: pendingProviderError,
+            bubbleText: '⚠️ AI 服务暂时不可用，男主正在处理…',
           ),
         );
       }
@@ -1948,6 +2173,9 @@ class _ChatPageState extends State<ChatPage>
     WorkingPadStore.warm(personaId);
     // 8-08 02:1x：工具工作缓存预热（男主干活中间数据，自管免审批）
     ToolCacheStore.warm(personaId);
+    // 8-08 15:2x：工具手册 + 测试任务预热
+    ToolManualStore.warm(personaId);
+    ToolTestStore.warm(personaId);
     // 8-06 21:26：定时任务计划预热
     TimerPlanStore.warm(personaId);
     // 8-06 21:36：待回复队列预热
@@ -2824,6 +3052,11 @@ class _ChatPageState extends State<ChatPage>
   // 8-08 14:1x（用户需求）：插话事件排队——男主跑工具轮时用户点「💬 插话」，
   // 等这轮结束把收集的消息推给男主（流程保持 running，回复完继续干活）
   String? _pendingInterruptEvent;
+
+  // 8-08 15:2x（设计九，GPT：Provider 挂掉时男主会说话解释，不直接弹窗）：
+  // AI 全失败 → 排队注入系统事件让男主解释（上限 1 次，再次失败弹窗兜底）
+  String? _pendingProviderErrorEvent;
+  bool _providerErrorInjected = false;
 
   /// 8-04 21:1x：一键验收进行中（自动切 AI 跑真实对话）
   bool _accepting = false;
@@ -3863,6 +4096,16 @@ class _ChatPageState extends State<ChatPage>
       'manage_tool_cache': {
         '动作': 'action', '操作': 'action',
         '工具': 'tool', '结果': 'result',
+      },
+      'manage_tool_manual': {
+        '动作': 'action', '操作': 'action',
+        '工具': 'tool', '名字': 'tool', '名称': 'tool',
+        '用途': 'usage', '格式': 'format', '示例': 'example', '注意': 'note',
+      },
+      'manage_tool_test': {
+        '动作': 'action', '操作': 'action',
+        '工具': 'tools', '列表': 'tools', '名字': 'name', '名称': 'name',
+        '成功': 'ok', '通过': 'ok', '问题': 'bug', '缺陷': 'bug',
       },
       'write_diary': {
         '内容': 'content', '日期': 'date',

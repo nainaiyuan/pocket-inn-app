@@ -41,6 +41,8 @@ class ToolCatalog {
     '自管理': {
       'manage_pad': '整理便签（当前任务模块，你自己维护）',
       'manage_flow': '立流程（长任务先立计划 1.2.3.，一条条执行）',
+      'manage_tool_manual': '工具使用手册（格式/示例/坑，add/get/list/remove）',
+      'manage_tool_test': '工具测试任务（start/report/status/abort，管家维护清单）',
       'continue_speaking': '继续说（不等她回，自动再生成一轮）',
       'resolve_pending': '标记待回复处理结果（回了的编号）',
       'manage_frequent_tools': '维护常用工具表（add/remove/list）',

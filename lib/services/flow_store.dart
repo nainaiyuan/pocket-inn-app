@@ -12,7 +12,17 @@ import 'working_pad_store.dart';
 /// 状态机：running → (next 推进) → running … → finish(done) / cancel(cancelled)
 ///         running → stop(stopped) → resume(running) / finish / cancel
 ///
-/// 男主自管（免审批），管家只做存储，不做任何判断。
+/// 8-08 15:2x 步骤状态机升级（设计文档三，GPT 10 问 3/4/5/8）：
+/// - steps 从字符串数组升级为对象数组：
+///   {name, status: pending|running|done|failed, result, doneType, doneCondition,
+///    summary, nextAction, toolsUsed: {toolName: {count, ok, brief, at}}}
+/// - 旧数据（字符串数组）读取时自动升级，写回保持新格式
+/// - next/finish 管家机械校验当前步完成条件（doneType 三类型），不满足不推进
+/// - ai_output / user_confirm 步骤：男主结构化提交 result 才算完成（不从文本抽取）
+/// - autoAdvance：工具轮结束管家检查当前步完成条件，明确满足才自动推进
+/// - taskList()：目标对照清单（✅已完成/☐未完成/本步已用工具），注入状态块
+///
+/// 男主自管（免审批），管家只做存储和机械校验，不做语义判断。
 class FlowStore {
   /// 8-07 21:48 用户：日志增强（男主 query_logs 自查流程问题）。
   /// 纯 Dart 库不直接依赖 DebugLogger（Flutter），用可注入钩子——
@@ -55,13 +65,39 @@ class FlowStore {
       final p = await SharedPreferences.getInstance();
       final raw = p.getString(_key(personaId));
       if (raw != null && raw.isNotEmpty) {
-        _memCache = jsonDecode(raw) as Map<String, dynamic>;
+        final parsed = jsonDecode(raw) as Map<String, dynamic>;
+        // 8-08 15:2x：旧数据（字符串 steps）读取时升级为对象
+        _upgradeSteps(parsed);
+        _memCache = parsed;
       } else {
         _memCache = null;
       }
     } catch (e) {
       _memCache = null;
     }
+  }
+
+  /// 旧数据兼容：字符串数组 steps → 对象数组（status 按 currentStep 推断）
+  static void _upgradeSteps(Map<String, dynamic> f) {
+    final raw = f['steps'];
+    if (raw is! List || raw.isEmpty) return;
+    final first = raw.first;
+    if (first is Map) return; // 已是对象
+    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
+    final steps = <Map<String, dynamic>>[];
+    for (var i = 0; i < raw.length; i++) {
+      steps.add({
+        'name': raw[i].toString(),
+        'status': i < cur
+            ? 'done'
+            : (i == cur ? 'running' : 'pending'),
+        'result': null,
+        'doneType': 'tool_result',
+        'doneCondition': null,
+        'toolsUsed': <String, dynamic>{},
+      });
+    }
+    f['steps'] = steps;
   }
 
   static Future<Map<String, dynamic>?> _read(String personaId) async {
@@ -100,14 +136,44 @@ class FlowStore {
     return f != null && (f['status']?.toString() ?? '') == 'running';
   }
 
+  /// 步骤对象化：String → {name, doneType: tool_result}；
+  /// Map → {name: 必填, doneType/doneCondition 可选}
+  static Map<String, dynamic> _stepFrom(dynamic s) {
+    if (s is Map) {
+      final name = (s['name'] ?? s['text'] ?? '').toString().trim();
+      final doneType = ['tool_result', 'ai_output', 'user_confirm']
+              .contains(s['doneType'])
+          ? s['doneType'].toString()
+          : 'tool_result';
+      return {
+        'name': name,
+        'status': 'pending',
+        'result': null,
+        'doneType': doneType,
+        'doneCondition': s['doneCondition']?.toString().trim(),
+        'toolsUsed': <String, dynamic>{},
+      };
+    }
+    return {
+      'name': s.toString().trim(),
+      'status': 'pending',
+      'result': null,
+      'doneType': 'tool_result',
+      'doneCondition': null,
+      'toolsUsed': <String, dynamic>{},
+    };
+  }
+
   /// 立流程：{goal, steps: [..]} → running，currentStep=0
-  static Future<String> create(String personaId, String goal, List<String> steps) async {
+  /// steps 元素：字符串步骤名，或 {name, doneType, doneCondition} 对象
+  static Future<String> create(
+      String personaId, String goal, List<dynamic> steps) async {
     if (personaId.isEmpty) return '参数错误';
     if (goal.trim().isEmpty) return 'goal 不能为空';
-    final clean = <String>[];
+    final clean = <Map<String, dynamic>>[];
     for (final s in steps) {
-      final t = s.trim();
-      if (t.isNotEmpty) clean.add(t);
+      final step = _stepFrom(s);
+      if (step['name'].toString().isNotEmpty) clean.add(step);
     }
     if (clean.isEmpty) return 'steps 至少要一步';
     final flow = <String, dynamic>{
@@ -119,52 +185,180 @@ class FlowStore {
       'stoppedNote': '',
       'createdAt': DateTime.now().toIso8601String(),
     };
+    flow['steps'][0]['status'] = 'running';
     await _write(personaId, flow);
-    _log('流程', '📋 create 「$goal」${clean.length}步');
+    _log('流程', '📋 create 「$goal」${clean.length}步（步骤对象化）');
     return '流程已立：$goal（${clean.length} 步，从第 1 步开始）';
   }
 
   /// 8-07 00:1x 用户：用户提了新要求 → 男主更新流程（改目标/步骤），从头执行
   static Future<String> update(String personaId,
-      {String? goal, List<String>? steps}) async {
+      {String? goal, List<dynamic>? steps}) async {
     final f = await _read(personaId);
     if (f == null) return '没有流程（create 先立）';
     if (goal != null && goal.trim().isNotEmpty) {
       f['goal'] = goal.trim();
     }
     if (steps != null) {
-      final clean = <String>[];
+      final clean = <Map<String, dynamic>>[];
       for (final s in steps) {
-        final t = s.trim();
-        if (t.isNotEmpty) clean.add(t);
+        final step = _stepFrom(s);
+        if (step['name'].toString().isNotEmpty) clean.add(step);
       }
       if (clean.isEmpty) return 'steps 至少要一步';
       f['steps'] = clean;
     }
     f['currentStep'] = 0;
+    final steps2 = _stepsOf(f);
+    if (steps2.isNotEmpty) steps2[0]['status'] = 'running';
     // 暂停/取消中更新 → 回到执行中
     if (f['status'] == 'stopped' || f['status'] == 'cancelled') {
       f['status'] = 'running';
     }
     f['stoppedNote'] = '';
     await _write(personaId, f);
-    return '流程已更新：${f['goal']}（${_stepsOf(f).length} 步，从头开始）';
+    return '流程已更新：${f['goal']}（${steps2.length} 步，从头开始）';
   }
 
-  /// 完成当前步，推进到下一步；已是最后一步则提示 finish
-  static Future<String> next(String personaId) async {
+  /// 记录工具使用（每执行一个工具自动调，8-08 15:2x）
+  /// 写进当前步 toolsUsed[toolName] = {count, ok, brief, at}
+  static Future<void> recordToolUse(String personaId, String toolName,
+      {required bool ok, String? brief}) async {
+    if (personaId.isEmpty || toolName.isEmpty) return;
+    final f = await _read(personaId);
+    if (f == null || f['status'] != 'running') return;
+    final steps = _stepsOf(f);
+    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
+    if (cur < 0 || cur >= steps.length) return;
+    final step = steps[cur];
+    final toolsUsed = (step['toolsUsed'] as Map?) ?? <String, dynamic>{};
+    final prev = (toolsUsed[toolName] as Map?) ?? <String, dynamic>{};
+    toolsUsed[toolName] = {
+      'count': ((prev['count'] as num?)?.toInt() ?? 0) + 1,
+      'ok': ok,
+      'brief': brief ?? (prev['brief']?.toString() ?? ''),
+      'at': DateTime.now().toIso8601String(),
+    };
+    step['toolsUsed'] = toolsUsed;
+    await _write(personaId, f);
+  }
+
+  /// 机械判定某步是否满足完成条件（doneType 三类型，GPT 13:20 定案）
+  /// 返回 (是否完成, 未完成原因)
+  static (bool, String) _checkStepDone(Map<String, dynamic> step) {
+    final doneType = (step['doneType'] ?? 'tool_result').toString();
+    final toolsUsed = (step['toolsUsed'] as Map?) ?? <String, dynamic>{};
+    final hasOkTool = toolsUsed.values.any(
+        (v) => v is Map && v['ok'] == true);
+    final result = (step['result'] ?? '').toString().trim();
+    switch (doneType) {
+      case 'ai_output':
+        if (result.isEmpty) {
+          return (
+            false,
+            '该步是产出类型（ai_output），需提交产出：manage_flow next 时带 '
+                '{"result":"这一步的产出"}(+可选 summary/next_action)'
+          );
+        }
+        return (true, '');
+      case 'user_confirm':
+        if (result.isEmpty) {
+          return (
+            false,
+            '该步需要用户确认（user_confirm），需提交确认结果：manage_flow next 时带 '
+                '{"result":"用户确认内容"}'
+          );
+        }
+        return (true, '');
+      case 'tool_result':
+      default:
+        if (!hasOkTool) {
+          return (false, '该步还没成功执行任何工具（工具结果需成功才算完成）');
+        }
+        return (true, '');
+    }
+  }
+
+  /// 当前步是否满足完成条件（同步读缓存，工具轮结束后 autoAdvance 用）
+  static (bool, String) checkCurrentDone(String personaId) {
+    final f = _memCache;
+    if (f == null || f['status'] != 'running') return (false, '流程不在执行中');
+    final steps = _stepsOf(f);
+    if (steps.isEmpty) return (false, '没有步骤');
+    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
+    if (cur < 0 || cur >= steps.length) return (false, '步骤索引越界');
+    return _checkStepDone(steps[cur]);
+  }
+
+  /// 完成当前步，推进到下一步（8-08 15:2x：带机械校验 + 结构化提交）
+  /// [result]/[summary]/[nextAction]：ai_output/user_confirm 步骤的结构化提交
+  /// （GPT 13:20 定案：不从文本抽取，男主显式提交）
+  static Future<String> next(String personaId,
+      {String? result, String? summary, String? nextAction}) async {
     final f = await _read(personaId);
     if (f == null) return '没有流程（create 先立）';
     if (f['status'] != 'running') return '流程当前不在执行中（${f['status']}）';
     final steps = _stepsOf(f);
+    if (steps.isEmpty) return '没有步骤';
     final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
+    if (cur < 0 || cur >= steps.length) return '步骤索引越界';
+    final step = steps[cur];
+    // 结构化提交：result 先存入（即使校验不过也不丢）
+    if (result != null && result.trim().isNotEmpty) {
+      step['result'] = result.trim();
+    }
+    if (summary != null && summary.trim().isNotEmpty) {
+      step['summary'] = summary.trim();
+    }
+    if (nextAction != null && nextAction.trim().isNotEmpty) {
+      step['nextAction'] = nextAction.trim();
+    }
+    // 机械校验
+    final (ok, reason) = _checkStepDone(step);
+    if (!ok) {
+      await _write(personaId, f);
+      return '第 ${cur + 1} 步还没完成：$reason。别跳过——先完成这步再 next；'
+          '如果步骤设计不合理可 update 调整。';
+    }
+    step['status'] = 'done';
     if (cur + 1 >= steps.length) {
-      return '已是最后一步（${cur + 1}/${steps.length}），调 finish 结束流程';
+      f['currentStep'] = cur + 1;
+      await _write(personaId, f);
+      return '第 ${cur + 1} 步完成（最后一步），调 finish 结束流程';
     }
     f['currentStep'] = cur + 1;
+    steps[cur + 1]['status'] = 'running';
     await _write(personaId, f);
-    _log('流程', '▶ next 第${cur + 1}→${cur + 2}步');
-    return '第 ${cur + 1} 步完成，现在第 ${cur + 2} 步：${steps[cur + 1]}';
+    _log('流程', '▶ next 第${cur + 1}→${cur + 2}步（${_stepName(step)}→${_stepName(steps[cur + 1])}）');
+    return '第 ${cur + 1} 步完成 ✅，现在第 ${cur + 2} 步：${_stepName(steps[cur + 1])}';
+  }
+
+  /// autoAdvance（GPT 13:20 定案：默认开，严格判定）：
+  /// 工具轮结束后管家检查当前步完成条件，只在明确满足时自动推进。
+  /// 返回 null=没推进；'__ALL_DONE__'=全部完成（等男主 finish）；
+  /// 其他=推进提示文本（注入下一轮）。
+  static Future<String?> autoAdvance(String personaId) async {
+    final f = await _read(personaId);
+    if (f == null || f['status'] != 'running') return null;
+    final steps = _stepsOf(f);
+    if (steps.isEmpty) return null;
+    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
+    if (cur < 0 || cur >= steps.length) return null;
+    final (ok, _) = _checkStepDone(steps[cur]);
+    if (!ok) return null;
+    steps[cur]['status'] = 'done';
+    if (cur + 1 >= steps.length) {
+      f['currentStep'] = cur + 1;
+      await _write(personaId, f);
+      _log('流程', '▶ autoAdvance：全部步骤完成（等 finish）');
+      return '__ALL_DONE__';
+    }
+    f['currentStep'] = cur + 1;
+    steps[cur + 1]['status'] = 'running';
+    await _write(personaId, f);
+    _log('流程', '▶ autoAdvance 第${cur + 1}→${cur + 2}步（${_stepName(steps[cur + 1])}）');
+    return '第 ${cur + 1} 步完成 ✅（自动推进），现在第 ${cur + 2} 步：'
+        '${_stepName(steps[cur + 1])}';
   }
 
   /// 流程完成（8-07 19:5x：完成时流程要点自动沉淀进便签——
@@ -232,16 +426,36 @@ class FlowStore {
     _log('流程', '▶ resume 继续流程');
     final steps = _stepsOf(f);
     final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
-    return '继续流程：${f['goal']}，第 ${cur + 1} 步：${steps[cur]}';
+    return '继续流程：${f['goal']}，第 ${cur + 1} 步：${_stepName(steps[cur])}';
   }
 
-  static List<String> _stepsOf(Map<String, dynamic> f) {
+  /// 步骤对象数组（旧字符串自动升级）
+  static List<Map<String, dynamic>> _stepsOf(Map<String, dynamic> f) {
     final raw = f['steps'];
     if (raw is List) {
-      return raw.map((e) => e.toString()).toList();
+      final out = <Map<String, dynamic>>[];
+      for (final e in raw) {
+        if (e is Map) {
+          out.add(Map<String, dynamic>.from(e));
+        } else {
+          out.add({
+            'name': e.toString(),
+            'status': 'pending',
+            'result': null,
+            'doneType': 'tool_result',
+            'doneCondition': null,
+            'toolsUsed': <String, dynamic>{},
+          });
+        }
+      }
+      if (out.isNotEmpty) f['steps'] = out; // 升级写回
+      return out;
     }
-    return <String>[];
+    return <Map<String, dynamic>>[];
   }
+
+  static String _stepName(Map<String, dynamic> s) =>
+      (s['name'] ?? '').toString();
 
   /// 简版摘要（UI 停止条用）：'「goal」第 2/5 步'；无流程返回 null
   static String? summary(String personaId) {
@@ -254,7 +468,70 @@ class FlowStore {
     return '「$goal」第 ${cur + 1}/${steps.length} 步';
   }
 
-  /// 注入文本（每轮 prompt）：有流程才返回
+  /// 目标对照清单（设计六，GPT 13:20 定案：管家机械生成，不靠 LLM 记忆）：
+  /// 目标 + ✅已完成/▶当前/☐未完成 + 本步已用工具 + 完成条件
+  static String? taskList(String personaId) {
+    final f = _memCache;
+    if (f == null || f.isEmpty) return null;
+    final status = f['status']?.toString() ?? '';
+    final steps = _stepsOf(f);
+    if (steps.isEmpty) return null;
+    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
+    final sb = StringBuffer();
+    sb.writeln('初始目标：${f['goal']}');
+    for (var i = 0; i < steps.length; i++) {
+      final s = steps[i];
+      final st = s['status']?.toString() ?? 'pending';
+      final name = _stepName(s);
+      final result = (s['result'] ?? '').toString().trim();
+      final mark = st == 'done'
+          ? '✅'
+          : (st == 'running' || (i == cur && status == 'running')
+              ? '▶'
+              : '☐');
+      var line = '$mark 第${i + 1}步 $name';
+      if (st == 'done' && result.isNotEmpty) line += '（结果：$result）';
+      sb.writeln(line);
+    }
+    // 本步已用工具（state_hint 数据源）
+    if (cur >= 0 && cur < steps.length) {
+      final step = steps[cur];
+      final toolsUsed = (step['toolsUsed'] as Map?) ?? <String, dynamic>{};
+      if (toolsUsed.isNotEmpty) {
+        sb.writeln('本步已用工具：');
+        toolsUsed.forEach((name, v) {
+          final info = v is Map ? v : const <String, dynamic>{};
+          final count = info['count']?.toString() ?? '?';
+          final ok = info['ok'] == true ? '✅' : '❌';
+          final brief = (info['brief'] ?? '').toString();
+          sb.writeln('  $ok $name ×$count${brief.isNotEmpty ? '（$brief）' : ''}');
+        });
+      }
+      final cond = (step['doneCondition'] ?? '').toString().trim();
+      final doneType = (step['doneType'] ?? 'tool_result').toString();
+      if (cond.isNotEmpty) {
+        sb.writeln('本步完成条件：$cond');
+      } else {
+        final condText = doneType == 'ai_output'
+            ? '提交产出（next 时带 result）'
+            : doneType == 'user_confirm'
+                ? '用户确认（next 时带 result）'
+                : '成功执行工具';
+        sb.writeln('本步完成条件：$condText');
+      }
+    }
+    // 目标对照提示（机械）
+    final allDone = steps.every((s) => s['status'] == 'done');
+    if (allDone && status == 'running') {
+      sb.writeln('对照检查：所有步骤已完成 → 调 finish 收尾');
+    } else if (status == 'running') {
+      sb.writeln('对照检查：目标是否已实现？未实现就继续干（基于已有结果推进）；'
+          '已实现就调 finish 收尾');
+    }
+    return sb.toString();
+  }
+
+  /// 注入文本（每轮 prompt，状态块【当前流程】用）：有流程才返回
   static String? text(String personaId) {
     final f = _memCache;
     if (f == null || f.isEmpty) return null;
@@ -267,20 +544,24 @@ class FlowStore {
     sb.writeln('目标：${f['goal']}');
     sb.writeln('状态：${_statusText(status)}');
     for (var i = 0; i < steps.length; i++) {
-      final mark = i < curIdx
+      final s = steps[i];
+      final st = s['status']?.toString() ?? 'pending';
+      final name = _stepName(s);
+      final mark = st == 'done'
           ? '✅'
-          : (i == curIdx
+          : (st == 'running' || i == curIdx
               ? (status == 'running' ? '▶ 正在做' : '⏸ 停在这')
               : '☐');
-      sb.writeln('$mark ${i + 1}. ${steps[i]}');
+      sb.writeln('$mark ${i + 1}. $name');
     }
     if (status == 'stopped' && (f['stoppedNote']?.toString() ?? '').isNotEmpty) {
       sb.writeln('（她打断时说了：${f['stoppedNote']}）');
     }
     // 8-07 21:2x 用户：男主以为流程自动推进 → 明确告知要手动调 next
+    // 8-08 15:2x：autoAdvance 默认开，next 主要给 ai_output/user_confirm 步骤
     if (status == 'running' || status == 'stopped') {
-      sb.writeln('（每完成一步调 manage_flow next 推进，会收到"第N步完成，'
-          '现在第N+1步"的反馈；全部做完调 finish；中途要停调 cancel）');
+      sb.writeln('（工具类步骤工具成功会自动推进；产出/确认类步骤调 manage_flow next '
+          '并带 result 提交；全部做完调 finish；中途要停调 cancel）');
     }
     return sb.toString();
   }

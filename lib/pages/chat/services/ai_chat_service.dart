@@ -15,6 +15,8 @@ import '../../../services/chat_service.dart';
 import '../../../utils/debug_logger.dart';
 import '../../../services/pending_queue_store.dart';
 import '../../../services/flow_store.dart';
+import '../../../services/tool_manual_store.dart';
+import '../../../services/tool_test_store.dart';
 
 /// 聊天页的 AI 门面 —— 走 AIProviderManager（男主级路由 + 故障切换）。
 ///
@@ -1188,6 +1190,14 @@ class AiChatService {
       ' 流程输入=${inFlow && pendingUser != null ? '有' : '无'}'
       ' 系统消息=${pendingButler != null ? '有' : '无'}',
     );
+    // 8-08 15:2x（设计文档六，GPT 10 问 3 定案）：目标对照清单——
+    // 管家机械生成（✅已完成/☐未完成/本步已用工具/完成条件），不靠 LLM 记忆
+    final taskListText = FlowStore.taskList(ctxPid);
+    // 8-08 15:2x（设计文档四，GPT 10 问 2）：工具手册注入（上下文预算，精简）
+    // 男主查一次格式就记住，不用反复试
+    final manualText = ToolManualStore.text(ctxPid);
+    // 8-08 15:2x（设计文档八）：工具测试任务块（进度/当前测什么）
+    final testBlock = ToolTestStore.block(ctxPid);
     final statusBlocks = <AIChatMessage>[
       // 【当前情况】状态感知块（永远在，男主先看这个）
       AIChatMessage(
@@ -1225,11 +1235,27 @@ class AiChatService {
         AIChatMessage(
           role: 'system',
           content: '【当前流程】（你自己立的流程，管家只负责存和执行；'
-              '**流程不会自动推进**——每完成一步必须调 manage_flow next '
-              '（会收到"第N步完成，现在第N+1步"反馈，那才算推进了）；'
+              '**工具类步骤工具成功会自动推进**；产出/确认类步骤调 manage_flow next '
+              '并带 result 提交（会收到"第N步完成，现在第N+1步"反馈，那才算推进了）；'
               '全部做完调 finish；中途要停调 cancel）\n$flowText'
               '\n（执行中她发来的消息管家会收集，不用管，专注执行；'
               '被她打断会收到【系统事件】，你决定继续还是先回复她）',
+        ),
+      if (taskListText != null && taskListText.isNotEmpty)
+        AIChatMessage(
+          role: 'system',
+          content: '【任务清单】（管家机械生成的目标对照——哪个做了哪个没做，'
+              '对照检查别空转）\n$taskListText',
+        ),
+      if (testBlock.isNotEmpty)
+        AIChatMessage(
+          role: 'system',
+          content: '$testBlock',
+        ),
+      if (manualText.isNotEmpty)
+        AIChatMessage(
+          role: 'system',
+          content: '【工具使用手册】（你记的格式/坑，查这个别再反复试）\n$manualText',
         ),
       if (prView.replied.isNotEmpty)
         AIChatMessage(
