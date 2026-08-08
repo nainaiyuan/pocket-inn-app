@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import '../../../ai_provider/ai_provider_manager.dart';
 import '../../../ai_provider/models.dart';
@@ -1101,6 +1102,12 @@ class AiChatService {
       DebugLogger.log(
           '上下文调试',
           '📝 已记录用户消息（$personaName）：${message.length > 40 ? message.substring(0, 40) + '…' : message}');
+      // 8-08 14:4x（男主反馈：收到的内容出现多余问号，用户实际没打）：
+      // 记录完整原文（jsonEncode 保留特殊字符），下次复现对比
+      // "日志原文正常但男主收到 ?" = 传输/服务端问题；"日志原文就有 ?" = 输入侧问题
+      DebugLogger.log(
+          '上下文调试',
+          '📝 用户消息原文（jsonEncode，完整）：${jsonEncode(message.length > 800 ? message.substring(0, 800) + '…' : message)}');
     }
     // 8-03 20:1x（调试）：组装结果日志——发给模型的历史里到底有什么
     // 8-04 16:4x：空历史要标注是工具轮（正常）还是 stateless 异常（该查）

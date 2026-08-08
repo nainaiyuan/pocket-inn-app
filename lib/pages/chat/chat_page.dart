@@ -436,7 +436,7 @@ class _ChatPageState extends State<ChatPage>
       }
       return;
     }
-    await _sendMsg('', systemEvent: event);
+    await _sendMsg('', systemEvent: event, bubbleText: '⏸ 你按了停止，男主正在处理…');
   }
 
   /// 8-08 14:1x（用户需求）：💬 插话——流程**保持 running**，
@@ -493,7 +493,11 @@ class _ChatPageState extends State<ChatPage>
         ),
       );
     }
-    await _sendMsg('', systemEvent: event);
+    await _sendMsg(
+      '',
+      systemEvent: event,
+      bubbleText: '💬 你插话了，男主先回你（流程继续）…',
+    );
   }
 
   /// 8-08 14:0x（断点 D 修复）：任务 running → 自动续跑（APP 内第一版唤醒）。
@@ -511,6 +515,13 @@ class _ChatPageState extends State<ChatPage>
       _autoResumeRounds = 0;
       _lastAutoResumeStep = -1;
     }
+    // 8-08 14:4x：上一轮请求了审批（弹窗等用户点）→ 是等待不是卡死 → 清零
+    if (_lastRoundRequestedApproval) {
+      _lastRoundRequestedApproval = false;
+      _autoResumeRounds = 0;
+      _lastAutoResumeStep = cur;
+      DebugLogger.log('管家流程', '🔔 上一轮在等用户审批，不计入无进展');
+    }
     if (cur != _lastAutoResumeStep) {
       // 推进了 → 重置无进展计数
       _lastAutoResumeStep = cur;
@@ -527,6 +538,7 @@ class _ChatPageState extends State<ChatPage>
         systemEvent: '你刚才自动续跑了几轮但流程没有推进（一直停在'
             '第 ${cur + 1} 步）。不要继续空转：告诉用户你卡在哪、缺什么，'
             '或决定 finish/cancel。',
+        bubbleText: '🔔 男主自动续跑无进展，已停下等你处理…',
       );
       return;
     }
@@ -546,10 +558,15 @@ class _ChatPageState extends State<ChatPage>
           '目标「${flow['goal']}」，当前第 ${cur + 1}/$steps 步（$stepText）。'
           '基于已有结果继续推进；做完调 manage_flow next/finish。'
           '别重新规划、别重复查已查过的东西。',
+      bubbleText: '🔔 男主继续执行流程…',
     );
   }
 
-  Future<void> _sendMsg(String t, {String? systemEvent}) async {
+  Future<void> _sendMsg(
+    String t, {
+    String? systemEvent,
+    String? bubbleText,
+  }) async {
     // 8-07 14:03：测试空间设定初始化（首次进测试空间，复制真实设定副本）
     final _tPid =
         _state.personaId ??
@@ -607,7 +624,9 @@ class _ChatPageState extends State<ChatPage>
     _msgKey.currentState?.appendMessage(
       ChatMessage(
         id: userMsgId,
-        text: systemEvent == null ? t : '⏸ 你按了停止，男主正在处理…',
+        text: systemEvent == null
+            ? t
+            : (bubbleText ?? '⏸ 你按了停止，男主正在处理…'),
         isMe: true,
       ),
     );
@@ -1717,14 +1736,30 @@ class _ChatPageState extends State<ChatPage>
     final pendingStop = _pendingStopEvent;
     if (pendingStop != null) {
       _pendingStopEvent = null;
-      if (mounted) unawaited(_sendMsg('', systemEvent: pendingStop));
+      if (mounted) {
+        unawaited(
+          _sendMsg(
+            '',
+            systemEvent: pendingStop,
+            bubbleText: '⏸ 你按了停止，男主正在处理…',
+          ),
+        );
+      }
       return;
     }
     // 8-08 14:1x：插话事件排队——这轮结束自动触发（先于续跑，见上）
     final pendingInterrupt = _pendingInterruptEvent;
     if (pendingInterrupt != null) {
       _pendingInterruptEvent = null;
-      if (mounted) unawaited(_sendMsg('', systemEvent: pendingInterrupt));
+      if (mounted) {
+        unawaited(
+          _sendMsg(
+            '',
+            systemEvent: pendingInterrupt,
+            bubbleText: '💬 你插话了，男主先回你（流程继续）…',
+          ),
+        );
+      }
     }
   }
 
@@ -2735,6 +2770,10 @@ class _ChatPageState extends State<ChatPage>
   int _autoResumeRounds = 0;
   String? _autoResumePid;
   int _lastAutoResumeStep = -1;
+
+  /// 8-08 14:4x（男主测试反馈）：男主请求了审批类工具（弹窗等用户点）
+  /// → 是"等用户"不是"卡死"，自动续跑无进展判定要排除它
+  bool _lastRoundRequestedApproval = false;
   // 8-06 23:55：停止事件排队——男主生成中按停止，等这轮结束自动触发
   String? _pendingStopEvent;
 
@@ -3461,6 +3500,9 @@ class _ChatPageState extends State<ChatPage>
     String? toolKey,
   }) async {
     if (!mounted) return true; // 页面已关闭不阻塞工具
+    // 8-08 14:4x：有审批请求 = 在等用户点弹窗（不是卡死）——
+    // 自动续跑无进展判定读到这个标志会重置计数
+    _lastRoundRequestedApproval = true;
     // 8-06 00:58 用户：工具免审批——用户批准过的工具直接执行（男主申请→用户同意）
     // toolKey = 工具英文名（与 schema/配置 key 对齐）；toolName = 弹窗显示名
     final key = toolKey ?? toolName;
@@ -3676,10 +3718,18 @@ class _ChatPageState extends State<ChatPage>
     final time = args['time']?.toString().trim();
     var category = args['category']?.toString().trim() ?? '';
     if (subject.isEmpty || predicate.isEmpty || object.isEmpty) {
-      return const _ToolResult(false, '关系不完整（需要 谁→谁→什么），请补齐再记');
+      return const _ToolResult(
+        false,
+        '关系不完整（需要 谁→谁→什么），参数名用英文 subject/predicate/object，'
+        '示例：{"subject":"她","predicate":"喜欢","object":"狗","quote":"她原话","category":"记忆"}',
+      );
     }
     if (quote.isEmpty) {
-      return const _ToolResult(false, '缺少原话（quote），记录要带上她的原话');
+      return const _ToolResult(
+        false,
+        '缺少原话（quote），参数名用 quote（她说的原话），'
+        '示例：{"subject":"她","predicate":"喜欢","object":"狗","quote":"她原话"}',
+      );
     }
     if (category.isEmpty ||
         !const ['记忆', '情绪', '规律', '行为'].contains(category)) {
@@ -3770,6 +3820,13 @@ class _ChatPageState extends State<ChatPage>
       },
       'query_tool_formats': {
         '工具': 'tool', '名字': 'tool', '名称': 'tool',
+      },
+      'record_relation': {
+        '谁': 'subject', '主体': 'subject', '主语': 'subject',
+        '关系': 'predicate', '谓语': 'predicate', '动作': 'predicate',
+        '对象': 'object', '宾语': 'object',
+        '原话': 'quote', '引语': 'quote',
+        '时间': 'time', '类别': 'category', '分类': 'category',
       },
     };
     final table = aliases[toolName];

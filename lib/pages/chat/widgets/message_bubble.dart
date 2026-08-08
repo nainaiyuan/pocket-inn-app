@@ -140,7 +140,12 @@ class _MessageBubbleState extends State<MessageBubble>
 
   String get _displayText {
     if (_visibleChars >= 0) {
-      return widget.message.text.substring(0, _visibleChars);
+      final text = widget.message.text;
+      // 8-08 14:4x（RangeError 0..36:60 根治）：打字机播放中消息文本被
+      // 重建/变短（多气泡重组、流式替换）时 _visibleChars 会超过新文本长度
+      // → substring 越界崩。超过就显示全文（clamp 兜底）。
+      if (_visibleChars >= text.length) return text;
+      return text.substring(0, _visibleChars);
     }
     return widget.message.text;
   }
