@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:pocket_inn/models/chat_message.dart';
+import 'package:pocket_inn/pages/chat/widgets/tool_group_card.dart';
 import 'package:pocket_inn/services/flow_store.dart';
 
 /// 8-08 19:4x 回归测试：BUG-1/2/3/4 + paused_by_user 状态机。
@@ -95,5 +97,51 @@ void main() {
     final r = await FlowStore.next(pid, result: '没工具也提交');
     expect(r.contains('还没成功执行任何工具'), isTrue);
     expect(r.contains('ai_output'), isTrue); // 提示男主可改产出类型
+  });
+
+  // ── 8-08 20:2x 工具卡聚合（GPT 定稿规则）──
+  ChatMessage toolMsg(String text) =>
+      ChatMessage(id: 't_$text', text: '[tool] $text', isMe: false);
+
+  test('聚合：连续 tool 合并成 1 个卡', () {
+    final out = groupToolMessages([
+      toolMsg('正在查记忆…'),
+      toolMsg('✅ 查到 3 条'),
+      toolMsg('正在写便签…'),
+    ]);
+    expect(out.whereType<ToolGroupData>().length, 1);
+    expect(out.whereType<ToolGroupData>().first.msgs.length, 3);
+  });
+
+  test('聚合：用户消息切断（不跨用户消息）', () {
+    final out = groupToolMessages([
+      toolMsg('正在查记忆…'),
+      ChatMessage(id: 'u1', text: '用户插话', isMe: true),
+      toolMsg('正在写便签…'),
+    ]);
+    expect(out.whereType<ToolGroupData>().length, 2);
+  });
+
+  test('聚合：act 动作气泡切断（不并入工具卡）', () {
+    final out = groupToolMessages([
+      toolMsg('正在查记忆…'),
+      ChatMessage(id: 'a1', text: '[act] 他微微一笑', isMe: false),
+      toolMsg('正在写便签…'),
+    ]);
+    expect(out.whereType<ToolGroupData>().length, 2);
+  });
+
+  test('聚合：男主文本回复切断', () {
+    final out = groupToolMessages([
+      ChatMessage(id: 'm1', text: '男主说话', isMe: false),
+      toolMsg('正在查记忆…'),
+      toolMsg('✅ 完成'),
+    ]);
+    expect(out.whereType<ToolGroupData>().length, 1);
+    expect(out.whereType<ToolGroupData>().first.msgs.length, 2);
+  });
+
+  test('聚合：空列表 → 0', () {
+    expect(groupToolMessages([]), isEmpty);
   });
 }

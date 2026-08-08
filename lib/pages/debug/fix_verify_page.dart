@@ -12,7 +12,9 @@ import '../../services/tool_manual_store.dart';
 import '../../services/tool_test_store.dart';
 import '../../utils/debug_logger.dart';
 import '../../butler/tools/tool_intent_parser.dart';
+import '../../models/chat_message.dart';
 import '../chat/state/current_character_state.dart';
+import '../chat/widgets/tool_group_card.dart';
 
 /// 🛠 修复验证中心（8-08 16:3x 用户要求："每一个东西都要留一个测 bug 的"）
 ///
@@ -330,6 +332,40 @@ class _FixVerifyPageState extends State<FixVerifyPage> {
       add('新任务 next 收尾 → done', 'done', '${(await FlowStore.get(pid))?['status']}');
       // 清理
       await FlowStore.clear(pid);
+      // ── 8-08 20:2x ⑨ 工具卡聚合（用户+GPT 定稿：连续 [tool] 合并，
+      // 遇用户消息/男主文本回复/[act] 切断）──
+      ChatMessage toolMsg(String text) =>
+          ChatMessage(id: 't_$text', text: '[tool] $text', isMe: false);
+      final agg1 = groupToolMessages([
+        toolMsg('正在查记忆…'),
+        toolMsg('✅ 查到 3 条'),
+        toolMsg('正在写便签…'),
+      ]);
+      add('⑨ 连续3条tool → 1个卡(3条)', '1/3',
+          '${agg1.whereType<ToolGroupData>().length}/'
+          '${agg1.whereType<ToolGroupData>().first.msgs.length}');
+      final agg2 = groupToolMessages([
+        toolMsg('正在查记忆…'),
+        ChatMessage(id: 'u1', text: '用户插话', isMe: true),
+        toolMsg('正在写便签…'),
+      ]);
+      add('⑨ 用户消息切断 → 2个卡', '2', '${agg2.whereType<ToolGroupData>().length}');
+      final agg3 = groupToolMessages([
+        toolMsg('正在查记忆…'),
+        ChatMessage(id: 'a1', text: '[act] 他微微一笑', isMe: false),
+        toolMsg('正在写便签…'),
+      ]);
+      add('⑨ act切断 → 2个卡', '2', '${agg3.whereType<ToolGroupData>().length}');
+      final agg4 = groupToolMessages([
+        ChatMessage(id: 'm1', text: '男主说话', isMe: false),
+        toolMsg('正在查记忆…'),
+        toolMsg('✅ 完成'),
+      ]);
+      add('⑨ 文本在前工具在后 → 1个卡', '1/2',
+          '${agg4.whereType<ToolGroupData>().length}/'
+          '${agg4.whereType<ToolGroupData>().first.msgs.length}');
+      final agg5 = groupToolMessages([]);
+      add('⑨ 空列表 → 0', '0', '${agg5.length}');
     } catch (e) {
       add('执行异常', '无', '$e');
     }

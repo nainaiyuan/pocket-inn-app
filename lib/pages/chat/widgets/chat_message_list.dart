@@ -5,6 +5,7 @@ import '../../../models/user_setting.dart';
 import '../../../services/chat_character_resolver.dart';
 import '../../../widgets/scroll_float_button.dart';
 import 'message_bubble.dart';
+import 'tool_group_card.dart';
 
 /// 聊天消息列表（含滚动浮动按钮）。
 ///
@@ -60,6 +61,9 @@ class ChatMessageList extends StatelessWidget {
     if (visibleMessages.isEmpty) {
       return const Center(child: Text('这段聊天还没有消息'));
     }
+    // 8-08 20:1x（用户+GPT 定稿）：展示层聚合——连续 [tool] 消息
+    // 聚成工具卡（折叠一行/展开原样），纯展示层，不改库。聚合一次复用。
+    final items = groupToolMessages(visibleMessages);
     return Stack(
       children: [
         ListView.builder(
@@ -67,10 +71,22 @@ class ChatMessageList extends StatelessWidget {
           controller: scrollController,
           reverse: true,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          itemCount: visibleMessages.length,
+          itemCount: items.length,
           itemBuilder: (context, index) {
-            final messageIndex = visibleMessages.length - 1 - index;
-            final msg = visibleMessages[messageIndex];
+            final item = items[items.length - 1 - index];
+            // 工具卡：整段一个折叠卡片
+            if (item is ToolGroupData) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: ToolGroupCard(
+                  key: ValueKey(item.msgs.first.id),
+                  group: item,
+                  inputTapRegionGroupId: inputTapRegionGroupId,
+                ),
+              );
+            }
+            final msg = item as ChatMessage;
+            final messageIndex = visibleMessages.indexOf(msg);
             final isLastMessage = messageIndex == visibleMessages.length - 1;
             final isLastUserMessageWithoutReply = isLastMessage && msg.isMe;
             final isLastCharacterMessage = isLastMessage && !msg.isMe;
