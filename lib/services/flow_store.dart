@@ -211,15 +211,24 @@ class FlowStore {
       f['steps'] = clean;
     }
     f['currentStep'] = 0;
-    final steps2 = _stepsOf(f);
-    if (steps2.isNotEmpty) steps2[0]['status'] = 'running';
-    // 暂停/取消中更新 → 回到执行中
-    if (f['status'] == 'stopped' || f['status'] == 'cancelled') {
+    // 8-08 19:4x（BUG-3）：直接改 f['steps'][0]——原来 steps2 是 _stepsOf 的
+    // 拷贝，改了不写回，第 1 步状态重置无效（显示 ☐ 而非 ▶）
+    final realSteps = f['steps'] as List?;
+    if (realSteps != null && realSteps.isNotEmpty) {
+      final first = realSteps[0];
+      if (first is Map) first['status'] = 'running';
+    }
+    // 暂停/取消/已完成中更新 → 回到执行中（8-08 19:4x BUG-4：
+    // 原来漏了 done——流程完成后男主再 update 加新需求 → 永远卡死）
+    if (f['status'] == 'stopped' ||
+        f['status'] == 'cancelled' ||
+        f['status'] == 'done' ||
+        f['status'] == 'paused_by_user') {
       f['status'] = 'running';
     }
     f['stoppedNote'] = '';
     await _write(personaId, f);
-    return '流程已更新：${f['goal']}（${steps2.length} 步，从头开始）';
+    return '流程已更新：${f['goal']}（${(realSteps ?? []).length} 步，从头开始）';
   }
 
   /// 记录工具使用（每执行一个工具自动调，8-08 15:2x）
@@ -275,7 +284,14 @@ class FlowStore {
       case 'tool_result':
       default:
         if (!hasOkTool) {
-          return (false, '该步还没成功执行任何工具（工具结果需成功才算完成）');
+          // 8-08 19:4x（男主建议：功能推进/人工产出分开认）：
+          // 卡住的步骤如果是纯产出型，提示男主改类型，别硬卡
+          return (
+            false,
+            '该步还没成功执行任何工具（工具结果需成功才算完成）。'
+                '如果这步其实不需要调工具（纯汇总/告知/产出），'
+                '用 update 把该步改成 ai_output 类型，next 带 result 即可'
+          );
         }
         return (true, '');
     }
@@ -325,8 +341,15 @@ class FlowStore {
     step['status'] = 'done';
     if (cur + 1 >= steps.length) {
       f['currentStep'] = cur + 1;
+      // 8-08 19:4x（用户：停止框不消失；BUG-1）：next() 最后一步也自动收尾
+      // ——和 autoAdvance 对齐，不再等男主手动 finish（8-08 18:4x 只修了
+      // autoAdvance 路径，漏了 next() 路径）
+      f['status'] = 'done';
+      f['stoppedNote'] = '';
       await _write(personaId, f);
-      return '第 ${cur + 1} 步完成（最后一步），调 finish 结束流程';
+      _log('流程', '✅ next 最后一步完成，流程自动收尾（done，不再等手动 finish）');
+      await _sinkToPad(personaId, f, done: true);
+      return '第 ${cur + 1} 步完成（最后一步），流程已自动收尾 ✅';
     }
     f['currentStep'] = cur + 1;
     steps[cur + 1]['status'] = 'running';
@@ -504,6 +527,12 @@ class FlowStore {
     if (steps.isEmpty) return null;
     final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
     final goal = f['goal']?.toString() ?? '';
+    final status = f['status']?.toString() ?? '';
+    // 8-08 19:4x（BUG-2：用户看到"第 10/9 步"）：完成态保护——
+    // 流程完成时 currentStep == steps.length，不再显示越界进度
+    if (status == 'done' || status == 'cancelled' || cur >= steps.length) {
+      return '「$goal」已完成（${steps.length} 步全部走完）';
+    }
     return '「$goal」第 ${cur + 1}/${steps.length} 步';
   }
 

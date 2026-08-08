@@ -3749,7 +3749,8 @@ class _ChatPageState extends State<ChatPage>
       note(
         '📋 ⑫ 改【喜好】——弹窗自动弹出，男主自动问两道卡片题'
         '（一次只显示一题，答完自动下一题）：\n'
-        '1️⃣ 第1题（单选）身份：点 A → 自动跳第2题；'
+        '1️⃣ 第1题（单选）身份：点 A 勾选（再点取消）→ 点「✓ 答完这题，'
+        '下一题」；'
         '第2题（多选）喜好：点 A、B 勾选（可再点取消）→ 点「✓ 答完了，'
         '发给他」→ 自动发给男主 → 男主出 v1【新方案】\n'
         '2️⃣ 注意：底部【没有】「就用这版」按钮——男主还在了解需求，'
@@ -5983,14 +5984,15 @@ class _ChatPageState extends State<ChatPage>
                     ),
                   ),
                   const SizedBox(height: 10),
-                  // ── asking 阶段：问答卡片（8-07 16:4x 用户：一次只弹一题，
-                  // 单选点一个自动跳下一题，多选可点多个+C自己写；全部答完
-                  // 自动发男主；此阶段【不显示】设定原文和定案按钮）──
+                  // ── asking 阶段：问答卡片（8-07 16:4x 用户：一次只弹一题；
+                  // 8-08 19:4x 用户：单选/多选统一——点选项=勾选，点
+                  // 「✓ 答完这题」才跳下一题/发送；此阶段【不显示】设定原文
+                  // 和定案按钮）──
                   if (stage == 'asking' && questionGroups.isNotEmpty) ...[
                     Text(
                       '🎯 男主在了解需求（第 ${curQ + 1}/${questionGroups.length} 题'
                       '${questionGroups[curQ].multi ? '·可多选' : '·单选'}）：'
-                      '${questionGroups.length > 1 ? '答完自动下一题' : ''}',
+                      '${questionGroups.length > 1 ? '点「✓ 答完这题」进下一题' : ''}',
                       style: const TextStyle(
                         fontSize: 12,
                         color: Color(0xFF8A7A80),
@@ -6049,11 +6051,26 @@ class _ChatPageState extends State<ChatPage>
                                             }
                                           });
                                         } else {
-                                          // 单选：点一个 → 记答案 → 自动跳下一题
-                                          answerQuestion(
-                                            q,
-                                            '${opt.key}. ${opt.text}',
-                                          );
+                                          // 8-08 19:4x（用户：单选多选统一）：
+                                          // 单选点选项 = 勾选（再点同项=取消），
+                                          // 不跳题——点「✓ 答完这题」才发送
+                                          setState(() {
+                                            final list = answers.putIfAbsent(
+                                              q,
+                                              () => [],
+                                            );
+                                            final already = list.any(
+                                              (a) => a.startsWith(
+                                                '${opt.key}. ',
+                                              ),
+                                            );
+                                            list.clear();
+                                            if (!already) {
+                                              list.add(
+                                                '${opt.key}. ${opt.text}',
+                                              );
+                                            }
+                                          });
                                         }
                                       },
                                 child: Container(
@@ -6190,9 +6207,10 @@ class _ChatPageState extends State<ChatPage>
                           ],
                           // 8-07 17:2x 修复：多选点选项只是勾选（可继续选多个），
                           // 不会自动发送——选够了点「✓ 答完这题」才跳题/发送
-                          if (questionGroups[curQ].multi &&
-                              (answers[questionGroups[curQ].question] ?? [])
-                                  .isNotEmpty) ...[
+                          // 8-08 19:4x（用户）：单选也统一——点选项=勾选，
+                          // 有答案就显示「✓ 答完这题」，点了才跳题/发送
+                          if ((answers[questionGroups[curQ].question] ?? [])
+                              .isNotEmpty) ...[
                             const SizedBox(height: 6),
                             Align(
                               alignment: Alignment.centerRight,

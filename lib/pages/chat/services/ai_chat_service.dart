@@ -682,6 +682,13 @@ class AiChatService {
             '/next（当前步完成，推进下一步）/finish（全部完成）/'
             'cancel（取消）/resume（被她打断后继续）/status（看当前流程）/'
             'update（她提了新要求 → 更新 goal/steps 从头执行）。'
+            '步骤写法：steps 每项可以是字符串，或对象 {"name":"步骤名",'
+            '"doneType":"tool_result|ai_output|user_confirm"}。'
+            '⚠️ 完成方式分开认（8-08 19:4x 你提的建议）：'
+            '**需要先调功能成功的步骤 → tool_result**（默认）；'
+            '**不需要调功能、你直接产出/汇总/告知的步骤 → ai_output**'
+            '（next 时带 result 提交，不会卡"没调工具"）；'
+            '需要她拍板的步骤 → user_confirm。'
             '⚠️ 你自己的流程，不需要她审批。'
             '流程执行中她发来的消息会被管家收集，你不用管，专注执行；'
             '被她打断会收到系统事件，告诉你停在哪一步、她说了什么，'
@@ -1046,7 +1053,12 @@ class AiChatService {
       _contextRestored.add(ctxPid);
       await ContextManager.instance.restore(ctxPid, sessionId, modelHint: _modelHintFor(personaId));
     }
-    final needsWindow = !ContextTracker.instance.windowConfirmed(ctxPid);
+    final needsWindow = false; // 8-08 19:4x：对话里永不要求男主报 #model（管家探测替代）
+    // 8-08 19:4x（用户：#model 不该在用户对话里问）：首次对话前管家自己
+    // 探测窗口——查表/裸调一次，不阻塞、不打扰用户对话
+    if (!ContextTracker.instance.windowConfirmed(ctxPid)) {
+      unawaited(_ensureWindowProbed(personaId, ctxPid));
+    }
     final stateful = decision.stateful;
     // 8-04 16:4x（用户："切换AI第一次必须全量带，否则AI不知道发生了什么"）：
     // 记录上次给这个 persona 组装上下文的 provider；切换/首次 → 本次恢复全量
@@ -1503,6 +1515,57 @@ class AiChatService {
     return result;
   }
 
+  /// 8-08 19:4x（用户：#model 不该在用户对话里问，管家自己问）：
+  /// 管家探测上下文窗口——按模型名查内置表，查不到就发一条系统级
+  /// 探测消息（不显示给用户、不进角色上下文）。只探测一次；
+  /// 失败不阻塞（ContextManager 有 fallbackWindow 兜底）。
+  final Set<String> _windowProbed = {};
+
+  Future<void> _ensureWindowProbed(String personaId, String ctxPid) async {
+    if (_windowProbed.contains(ctxPid)) return;
+    _windowProbed.add(ctxPid);
+    if (ContextTracker.instance.windowConfirmed(ctxPid)) return;
+    // 1) 按模型名查内置表（零成本，主流模型都覆盖）
+    final name = _currentModelName(personaId);
+    final w = ContextTracker.instance.windowByModelHint(name);
+    if (w > 0) {
+      ContextTracker.instance.setWindow(ctxPid, w);
+      DebugLogger.log(
+          '上下文', '🔎 管家探测：模型名 $name → 内置表 $w token');
+      return;
+    }
+    // 2) 发一条系统级探测消息（只问窗口，一次，10s 超时）
+    try {
+      final res = await AIProviderManager.instance.chat(
+        personaId,
+        const [
+          AIChatMessage(
+            role: 'system',
+            content: '你是系统工具。请只回复一行：#model 你的模型名 上下文Token数'
+                '（例如：#model deepseek-chat 65536）。不要输出任何其他内容。',
+          ),
+          AIChatMessage(role: 'user', content: '探测上下文窗口'),
+        ],
+        tools: null,
+      ).timeout(const Duration(seconds: 10));
+      final m = RegExp(r'#model\s+(\S+)\s+(\d+)', caseSensitive: false)
+          .firstMatch(res.text);
+      if (m != null) {
+        final w2 = int.tryParse(m.group(2)!);
+        if (w2 != null && w2 >= 4096 && w2 <= 1048576) {
+          ContextTracker.instance.setWindow(ctxPid, w2);
+          DebugLogger.log(
+              '上下文', '🎯 管家探测成功：${m.group(1)} 窗口 $w2 token');
+          return;
+        }
+      }
+      DebugLogger.log('上下文',
+          '⚠️ 管家探测：AI 没回标准 #model（${res.text.trim().length} 字），保持 0 用兜底窗口');
+    } on Object catch (e) {
+      DebugLogger.log('上下文', '⚠️ 管家探测失败（不阻塞，用兜底窗口）: $e');
+    }
+  }
+
   /// 当前 persona 用的 Provider 是否"真正按 stateful 走"。
   /// 用户 21:36：stateful 但没确定刷新周期（refreshHours=null）→
   /// 不确定就先按 stateless（每次全量带），提醒用户之后修改。
@@ -1666,7 +1729,7 @@ class AiChatService {
         _contextRestored.add(personaId);
         await ContextManager.instance.restore(personaId, sessionId, modelHint: _modelHintFor(personaId));
       }
-      final needsWindow = !ContextTracker.instance.windowConfirmed(personaId);
+      final needsWindow = false; // 8-08 19:4x：对话里永不要求男主报 #model（管家探测替代）
       final systemPrompt = SystemTemplate.build(
         personaName: personaName,
         personaPrompt: personaPrompt,
@@ -1983,7 +2046,7 @@ class AiChatService {
           .logButlerAction(personaId, '总结·写日记存档', '✅完成');
     }
     // ② C 自动拼（用户 19:19：窗口满 C 自动拼，男主不需要复述）
-    final needsWindow = !ContextTracker.instance.windowConfirmed(personaId);
+    final needsWindow = false; // 8-08 19:4x：对话里永不要求男主报 #model（管家探测替代）
     final c = SystemTemplate.build(
       personaName: personaName,
       personaPrompt: personaPrompt,

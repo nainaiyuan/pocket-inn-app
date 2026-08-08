@@ -307,6 +307,29 @@ class _FixVerifyPageState extends State<FixVerifyPage> {
       // 清理
       await FlowStore.clear(pid);
       add('clear → get null', 'null', '${await FlowStore.get(pid)}');
+      // ── 8-08 19:4x 新用例（BUG-1/2/4 回归）──
+      // BUG-1：next() 最后一步自动收尾（不再卡 running → 停止框消失）
+      // 用 ai_output 类型步骤（产出类型，next 带 result 即完成，不需要工具）
+      await FlowStore.create(pid, '收尾测试', [
+        {'name': '步骤A', 'doneType': 'ai_output'},
+        {'name': '步骤B', 'doneType': 'ai_output'},
+      ]);
+      await FlowStore.next(pid, result: 'A 的产出'); // 步骤A 完成
+      await FlowStore.next(pid, result: 'B 的产出'); // 最后一步 → 自动 done
+      add('next 最后一步 → status', 'done', '${(await FlowStore.get(pid))?['status']}');
+      // BUG-2：summary 完成态不再显示"第 3/2 步"越界
+      final sm = FlowStore.summary(pid);
+      add('summary 完成态不越界', '已完成', '${sm?.contains('已完成') ?? false}');
+      // BUG-4：done 后 update → 回 running（新任务能跑）
+      await FlowStore.update(pid, goal: '新任务', steps: [
+        {'name': '步骤C', 'doneType': 'ai_output'},
+      ]);
+      add('done 后 update → running', 'true', '${FlowStore.isRunning(pid)}');
+      // BUG-1 完整链路收尾
+      await FlowStore.next(pid, result: 'C 的产出');
+      add('新任务 next 收尾 → done', 'done', '${(await FlowStore.get(pid))?['status']}');
+      // 清理
+      await FlowStore.clear(pid);
     } catch (e) {
       add('执行异常', '无', '$e');
     }
