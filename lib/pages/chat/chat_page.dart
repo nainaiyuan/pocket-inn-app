@@ -1810,8 +1810,11 @@ class _ChatPageState extends State<ChatPage>
             personaId,
             name,
             ok: toolResult.ok,
-            brief: briefForStep.length > 60
-                ? '${briefForStep.substring(0, 60)}…'
+            // 8-08 23:5x（GPT 参考 Tool Memory/Scratchpad）：结果摘要放宽
+            // 到 120 字——男主从【当前流程】/【工具使用历史】直接看到
+            // 结果，不用反复查（60 字经常截掉关键信息）
+            brief: briefForStep.length > 120
+                ? '${briefForStep.substring(0, 120)}…'
                 : briefForStep,
           );
           // 8-08 02:2x 用户：男主查完不记一直查 → 查询结果自动进工具缓存

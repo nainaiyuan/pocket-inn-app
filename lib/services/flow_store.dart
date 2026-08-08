@@ -298,6 +298,10 @@ class FlowStore {
 
   /// 记录工具使用（每执行一个工具自动调，8-08 15:2x）
   /// 写进当前步 toolsUsed[toolName] = {count, ok, brief, at}
+  /// 8-08 23:5x（GPT 参考 Agent Scratchpad）：同时自动更新当前步
+  /// scratch = {tried:[工具名累积], got:最近成功摘要, excluded:[失败排除项]}——
+  /// 男主醒来/下一轮从【当前流程】就知道查过什么、得到什么、排除什么，
+  /// 不用重新查一遍（"始终记不住"的根治）。
   static Future<void> recordToolUse(String personaId, String toolName,
       {required bool ok, String? brief}) async {
     if (personaId.isEmpty || toolName.isEmpty) return;
@@ -316,6 +320,24 @@ class FlowStore {
       'at': DateTime.now().toIso8601String(),
     };
     step['toolsUsed'] = toolsUsed;
+    // Scratchpad：已尝试（去重累积）/ 已得到（最近成功摘要）/ 已排除（失败项）
+    final scratch = (step['scratch'] as Map?) ?? <String, dynamic>{};
+    final tried = (scratch['tried'] as List?)?.cast<String>() ?? <String>[];
+    if (!tried.contains(toolName)) tried.add(toolName);
+    scratch['tried'] = tried;
+    if (ok && brief != null && brief.trim().isNotEmpty) {
+      scratch['got'] = brief.trim();
+    }
+    if (!ok) {
+      final excluded =
+          (scratch['excluded'] as List?)?.cast<String>() ?? <String>[];
+      final exLine = (brief != null && brief.trim().isNotEmpty)
+          ? '$toolName（${brief.trim()}）'
+          : toolName;
+      if (!excluded.contains(exLine)) excluded.add(exLine);
+      scratch['excluded'] = excluded;
+    }
+    step['scratch'] = scratch;
     await _write(personaId, f);
   }
 
@@ -594,6 +616,26 @@ class FlowStore {
   static String _stepName(Map<String, dynamic> s) =>
       (s['name'] ?? '').toString();
 
+  /// 当前步最近一次工具使用 (工具名, brief)——按 at 时间戳取最新
+  static (String, String)? _lastToolUseOf(Map<String, dynamic> step) {
+    final toolsUsed = (step['toolsUsed'] as Map?) ?? <String, dynamic>{};
+    String? bestName;
+    String? bestBrief;
+    String? bestAt;
+    toolsUsed.forEach((name, v) {
+      if (v is Map) {
+        final at = (v['at'] ?? '').toString();
+        if (bestAt == null || at.compareTo(bestAt!) > 0) {
+          bestAt = at;
+          bestName = name;
+          bestBrief = (v['brief'] ?? '').toString().trim();
+        }
+      }
+    });
+    if (bestName == null) return null;
+    return (bestName!, bestBrief ?? '');
+  }
+
   /// 简版摘要（UI 停止条用）：'「goal」第 2/5 步'；无流程返回 null
   static String? summary(String personaId) {
     final f = _memCache;
@@ -696,6 +738,30 @@ class FlowStore {
               ? (status == 'running' ? '▶ 正在做' : '⏸ 停在这')
               : '☐');
       sb.writeln('$mark ${i + 1}. $name');
+    }
+    // 8-08 23:5x（GPT 参考 CURRENT_TASK + Agent Scratchpad）：当前步
+    // 刚得到的结果摘要 + 工作笔记——男主下轮/醒来直接看到查过什么、
+    // 得到什么、排除什么，不用重新查（"反复查工具"根治的一部分）
+    if (cur >= 0 && cur < steps.length) {
+      final step = steps[cur];
+      final lastUse = _lastToolUseOf(step);
+      if (lastUse != null && lastUse.$2.isNotEmpty) {
+        sb.writeln('刚得到结果：${lastUse.$1} → ${lastUse.$2}');
+      }
+      final scratch = step['scratch'];
+      if (scratch is Map) {
+        final tried =
+            (scratch['tried'] as List?)?.cast<String>() ?? const <String>[];
+        final got = (scratch['got'] ?? '').toString().trim();
+        final excluded =
+            (scratch['excluded'] as List?)?.cast<String>() ?? const <String>[];
+        if (tried.isNotEmpty || got.isNotEmpty || excluded.isNotEmpty) {
+          sb.writeln('【工作笔记】'
+              '${tried.isNotEmpty ? '已尝试：${tried.join('、')}；' : ''}'
+              '${got.isNotEmpty ? '已得到：$got；' : ''}'
+              '${excluded.isNotEmpty ? '已排除：${excluded.join('；')}' : ''}');
+        }
+      }
     }
     if ((status == 'stopped' || status == 'paused_by_user') &&
         (f['stoppedNote']?.toString() ?? '').isNotEmpty) {

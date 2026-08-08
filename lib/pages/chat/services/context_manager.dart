@@ -430,7 +430,9 @@ class ContextManager {
   /// '工具 [17:04]：query_diary ❌失败：未找到相关日记'
   ///   → '- [17:04] query_diary ❌失败：未找到相关日记'
   /// '工具 [17:02]：record_memory ✅成功：已记录…'
-  ///   → '- [17:02] record_memory ✅成功'（成功只报状态，记了什么看互动历史）
+  ///   → '- [17:02] record_memory ✅成功：已记录…'（8-08 23:5x GPT 参考
+  ///   Tool Memory：成功也带结果摘要——男主不用反复查才知道结果；
+  ///   完整结果按需用 query_logs 查，摘要 ~100 字控制预算）
   static String _toolHistoryLine(String rawLine) {
     final first = rawLine.split('\n').first;
     final m = RegExp(r'^工具 (\[[^\]]+\])：(.+?) (✅成功|❌失败)')
@@ -441,11 +443,27 @@ class ContextManager {
     final ts = m.group(1)!;
     final name = m.group(2)!.trim();
     final status = m.group(3)!;
-    if (status == '✅成功') return '- $ts $name ✅成功';
+    if (status == '✅成功') {
+      final summary = _toolResultSummary(rawLine);
+      return summary.isEmpty
+          ? '- $ts $name ✅成功'
+          : '- $ts $name ✅成功：$summary';
+    }
     final reason = first.contains('❌失败：')
         ? first.split('❌失败：').last.trim()
         : '';
     return reason.isEmpty ? '- $ts $name ❌失败' : '- $ts $name ❌失败：$reason';
+  }
+
+  /// 工具结果摘要（成功时给男主看）：取「（非她发言）：」之后的内容，
+  /// 去换行、截 ~100 字；没有结果文本返回空串（不硬拼摘要）。
+  static String _toolResultSummary(String rawLine) {
+    final idx = rawLine.indexOf('（非她发言）：');
+    if (idx < 0) return '';
+    var s = rawLine.substring(idx + '（非她发言）：'.length).trim();
+    s = s.replaceAll(RegExp(r'\s+'), ' ');
+    if (s.isEmpty) return '';
+    return s.length > 100 ? '${s.substring(0, 100)}…' : s;
   }
 
   /// 去掉行前缀（'用户 [17:05]：xxx' / '用户：xxx'）
