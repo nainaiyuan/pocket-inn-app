@@ -443,6 +443,10 @@ class _ChatPageState extends State<ChatPage>
     await _sendMsg('', systemEvent: event, bubbleText: '⏸ 你按了停止，男主正在处理…');
   }
 
+  /// 8-08 15:1x：输入框 controller（外部传入 ChatInputBar）——
+  /// 💬 插话要读输入框内容：打字 → 点插话 = 像发送一样直接发出去
+  final _inputCtrl = TextEditingController();
+
   /// 8-08 14:1x（用户需求）：💬 插话——流程**保持 running**，
   /// 把男主工作时收集到的用户消息推给男主：先回复用户，再继续干活。
   /// 与 ⏹ 停止（彻底停）区分：插话只是"优先回复"，任务不打断。
@@ -465,26 +469,44 @@ class _ChatPageState extends State<ChatPage>
       return;
     }
     final pendingMsgs = PendingQueueStore.list(pid);
-    final userText = pendingMsgs
+    var userText = pendingMsgs
         .map((e) => '[待#${e['id']}] ${e['text']}')
         .join('；');
     if (userText.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('没有收集到消息——男主工作时你发的消息会自动收集，点这个推给他'),
-            duration: Duration(seconds: 2),
+      // 8-08 15:1x（用户："我想要像发送一样直接发出去"）：
+      // 队列空但输入框有字 → 输入框内容直接作为插话消息（一步到位）
+      final draft = _inputCtrl.text.trim();
+      if (draft.isNotEmpty) {
+        userText = draft;
+        _inputCtrl.clear();
+        // 上屏：像发送一样，用户看到自己的话发出去了
+        _msgKey.currentState?.appendMessage(
+          ChatMessage(
+            id: DateTime.now().millisecondsSinceEpoch.toString(),
+            text: draft,
+            isMe: true,
           ),
         );
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('没有可推送的消息——在输入框打字后点插话，或先发消息再点插话'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+        return;
       }
-      return;
     }
     // 清队列：这些消息马上推给男主，不再挂"待回复"
-    final pushedCount = pendingMsgs.length;
-    await PendingQueueStore.removeByIds(
-      pid,
-      pendingMsgs.map((e) => e['id'].toString()).toList(),
-    );
+    final pushedCount = pendingMsgs.isEmpty ? 1 : pendingMsgs.length;
+    if (pendingMsgs.isNotEmpty) {
+      await PendingQueueStore.removeByIds(
+        pid,
+        pendingMsgs.map((e) => e['id'].toString()).toList(),
+      );
+    }
     final event =
         '用户想跟你说话（流程**不停止**，你回复她之后继续执行流程）：'
         '她刚才发来的消息：$userText。'
@@ -2130,6 +2152,7 @@ class _ChatPageState extends State<ChatPage>
     _anim.removeListener(_onAnimTick);
     _anim.dispose();
     _notifyWakeTimer?.cancel(); // 8-06 notify_user 超时唤醒
+    _inputCtrl.dispose(); // 8-08 15:1x：外部输入框 controller
     super.dispose();
   }
 
@@ -2293,6 +2316,7 @@ class _ChatPageState extends State<ChatPage>
                   ))
                     _buildFlowStopBar(),
                   ChatInputBar(
+                    externalCtrl: _inputCtrl,
                     onCameraTap: () {},
                     onVoiceTap: () {},
                     onPlusTap: _togglePlus,
@@ -3534,13 +3558,27 @@ class _ChatPageState extends State<ChatPage>
     }
     // 8-04 15:0x（用户报：点确认后"立刻唤醒下面的输入框"）：
     // 弹窗前先收焦点收键盘，弹窗关闭后输入框不会自动弹键盘
+    // 8-08 15:1x（用户："弹窗永远都是查工具，以为男主卡住"）：
+    // 弹窗标题带流程步骤上下文（第几步/共几步），用户知道这是流程的一部分
+    var stepCtx = '';
+    try {
+      final fpid = personaId ?? '';
+      if (fpid.isNotEmpty) {
+        final flow = await FlowStore.get(fpid);
+        if (flow != null && flow['status'] == 'running') {
+          final cur = (flow['currentStep'] as num?)?.toInt() ?? 0;
+          final total = (flow['steps'] as List?)?.length ?? 0;
+          if (total > 0) stepCtx = ' [流程第${cur + 1}/$total步]';
+        }
+      }
+    } catch (_) {}
     FocusManager.instance.primaryFocus?.unfocus();
     final approved = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFFFDF7F9),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('🔧 男主想$toolName'),
+        title: Text('🔧$stepCtx 男主想$toolName'),
         content: Text(
           description,
           style: const TextStyle(fontSize: 14, height: 1.5),

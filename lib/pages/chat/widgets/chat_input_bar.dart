@@ -9,12 +9,17 @@ class ChatInputBar extends StatefulWidget {
   final VoidCallback onPlusTap;
   final ValueChanged<String> onSendTap;
 
+  /// 8-08 15:1x：外部传入的输入框 controller（插话按钮要读输入框内容，
+  /// 支持"打字→点插话=直接发出去"）。null 时内部自建。
+  final TextEditingController? externalCtrl;
+
   const ChatInputBar({
     super.key,
     required this.onCameraTap,
     required this.onVoiceTap,
     required this.onPlusTap,
     required this.onSendTap,
+    this.externalCtrl,
   });
 
   @override
@@ -22,7 +27,8 @@ class ChatInputBar extends StatefulWidget {
 }
 
 class _ChatInputBarState extends State<ChatInputBar> {
-  final _ctrl = TextEditingController();
+  late final TextEditingController _ctrl =
+      widget.externalCtrl ?? TextEditingController();
   bool _hasText = false;
 
   @override
@@ -36,7 +42,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    // 外部传入的 controller 由外部（chat_page）负责 dispose
+    if (widget.externalCtrl == null) _ctrl.dispose();
     super.dispose();
   }
 
