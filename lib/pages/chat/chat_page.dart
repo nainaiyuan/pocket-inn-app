@@ -364,6 +364,15 @@ class _ChatPageState extends State<ChatPage>
             ),
           ),
           TextButton(
+            onPressed: _interruptFlow,
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF3E7B5A),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 32),
+            ),
+            child: const Text('💬 插话', style: TextStyle(fontSize: 12)),
+          ),
+          TextButton(
             onPressed: _stopFlow,
             style: TextButton.styleFrom(
               foregroundColor: const Color(0xFFB04A5A),
@@ -426,6 +435,63 @@ class _ChatPageState extends State<ChatPage>
         );
       }
       return;
+    }
+    await _sendMsg('', systemEvent: event);
+  }
+
+  /// 8-08 14:1x（用户需求）：💬 插话——流程**保持 running**，
+  /// 把男主工作时收集到的用户消息推给男主：先回复用户，再继续干活。
+  /// 与 ⏹ 停止（彻底停）区分：插话只是"优先回复"，任务不打断。
+  /// 男主回复完 → 检查点⑤ → 自动续跑继续任务（断点 D 已修复，正好衔接）。
+  Future<void> _interruptFlow() async {
+    final pid =
+        _state.personaId ??
+        (_state.leadId == null ? '' : '${_state.leadId}_default');
+    final pendingMsgs = PendingQueueStore.list(pid);
+    final userText = pendingMsgs
+        .map((e) => '[待#${e['id']}] ${e['text']}')
+        .join('；');
+    if (userText.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('没有收集到消息——男主工作时你发的消息会自动收集，点这个推给他'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+    // 清队列：这些消息马上推给男主，不再挂"待回复"
+    await PendingQueueStore.removeByIds(
+      pid,
+      pendingMsgs.map((e) => e['id'].toString()).toList(),
+    );
+    final event =
+        '用户想跟你说话（流程**不停止**，你回复她之后继续执行流程）：'
+        '她刚才发来的消息：$userText。'
+        '先回复她（她着急），然后回到流程继续干活（别重新规划，接着当前步骤做）。';
+    DebugLogger.log('管家流程', '💬 插话：把 ${pendingMsgs.length} 条收集消息推给男主（流程保持 running）');
+    if (_generating) {
+      // 男主正在跑这轮（工具轮循环中）→ 排队，等它结束自动触发
+      _pendingInterruptEvent = event;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('已把消息推给男主，他这轮忙完就回你（流程继续）'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('已把消息推给男主，他先回你，流程继续跑'),
+          duration: Duration(seconds: 2),
+        ),
+      );
     }
     await _sendMsg('', systemEvent: event);
   }
@@ -511,8 +577,8 @@ class _ChatPageState extends State<ChatPage>
           );
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('男主正在执行流程，消息已收集（没打扰它）。想打断点 ⏹ 停止'),
-              duration: Duration(seconds: 2),
+              content: Text('男主正在执行流程，消息已收集。想让他先回你点 💬 插话；想彻底停点 ⏹ 停止'),
+              duration: Duration(seconds: 3),
             ),
           );
         }
@@ -1633,7 +1699,12 @@ class _ChatPageState extends State<ChatPage>
             );
             // 8-08 14:0x（断点 D 修复）：任务 running → 自动续跑，
             // 男主自己把活干完，不用用户再发消息。无进展 3 轮自动停。
-            unawaited(_maybeAutoResume(personaId));
+            // 有插话排队 → 不续跑，让插话先（用户着急，先回用户再干活）
+            if (_pendingInterruptEvent == null) {
+              unawaited(_maybeAutoResume(personaId));
+            } else {
+              DebugLogger.log('管家流程', '💬 有插话排队，跳过自动续跑（先回用户）');
+            }
           } else {
             DebugLogger.log('管家流程', '⏰ 检查点⑤：本轮结束，任务非 running（无需唤醒）');
           }
@@ -1647,6 +1718,13 @@ class _ChatPageState extends State<ChatPage>
     if (pendingStop != null) {
       _pendingStopEvent = null;
       if (mounted) unawaited(_sendMsg('', systemEvent: pendingStop));
+      return;
+    }
+    // 8-08 14:1x：插话事件排队——这轮结束自动触发（先于续跑，见上）
+    final pendingInterrupt = _pendingInterruptEvent;
+    if (pendingInterrupt != null) {
+      _pendingInterruptEvent = null;
+      if (mounted) unawaited(_sendMsg('', systemEvent: pendingInterrupt));
     }
   }
 
@@ -2659,6 +2737,10 @@ class _ChatPageState extends State<ChatPage>
   int _lastAutoResumeStep = -1;
   // 8-06 23:55：停止事件排队——男主生成中按停止，等这轮结束自动触发
   String? _pendingStopEvent;
+
+  // 8-08 14:1x（用户需求）：插话事件排队——男主跑工具轮时用户点「💬 插话」，
+  // 等这轮结束把收集的消息推给男主（流程保持 running，回复完继续干活）
+  String? _pendingInterruptEvent;
 
   /// 8-04 21:1x：一键验收进行中（自动切 AI 跑真实对话）
   bool _accepting = false;
