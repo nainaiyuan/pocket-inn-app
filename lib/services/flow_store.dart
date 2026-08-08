@@ -265,6 +265,37 @@ class FlowStore {
     return '流程已更新：${f['goal']}（${(realSteps ?? []).length} 步，从头开始）';
   }
 
+  /// 8-08 21:5x（GPT10问第7条 state_hint 专区，GPT 13:20 定稿 3.4）：
+  /// 工具重复软提示——从本步 toolsUsed 机械生成（count≥2 才提示），
+  /// 放进状态块【状态提示】区（state_hint），不放工具结果/系统事件里。
+  /// 防模型误认提示为工具内容；也是"男主反复查格式"的温和提醒。
+  static String stateHint(String personaId) {
+    final f = _memCache;
+    if (f == null || f['status'] != 'running') return '';
+    final steps = _stepsOf(f);
+    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
+    if (cur < 0 || cur >= steps.length) return '';
+    final step = steps[cur];
+    final toolsUsed = (step['toolsUsed'] as Map?) ?? <String, dynamic>{};
+    if (toolsUsed.isEmpty) return '';
+    final sb = StringBuffer();
+    toolsUsed.forEach((name, v) {
+      final info = v is Map ? v : const <String, dynamic>{};
+      final count = (info['count'] as num?)?.toInt() ?? 1;
+      if (count < 2) return; // 只提示重复调用
+      final ok = info['ok'] == true ? '✅' : '❌';
+      final brief = (info['brief'] ?? '').toString();
+      sb.writeln(
+        '[state_hint] 本步（第 ${cur + 1} 步：${_stepName(step)}）'
+        '已调用过 $name $count 次，上次结果：$ok'
+        '${brief.isNotEmpty ? '（$brief）' : ''}。'
+        '如是有意再查（换参数/补信息）请继续；'
+        '否则建议先看【工具使用手册】/【任务清单】，别空转。',
+      );
+    });
+    return sb.toString().trim();
+  }
+
   /// 记录工具使用（每执行一个工具自动调，8-08 15:2x）
   /// 写进当前步 toolsUsed[toolName] = {count, ok, brief, at}
   static Future<void> recordToolUse(String personaId, String toolName,

@@ -1200,6 +1200,9 @@ class _ChatPageState extends State<ChatPage>
         // 8-07 00:1x：用户拒绝收集——拒绝不走普通工具结果（男主会无视），
         // 这轮工具执行完走【系统事件】通道强制男主决策
         final rejectedTools = <String>[];
+        // 8-08 21:5x（GPT10问第7条 state_hint 专区）：本轮软提示累积
+        //（查询类≥3/连续拒绝≥2）→ 状态块【状态提示】注入，不混 toolMessages
+        final toolRoundHints = <String>[];
         final toolMessages = <AIChatMessage>[
           if (nativeCalls.isNotEmpty)
             AIChatMessage(
@@ -1911,13 +1914,12 @@ class _ChatPageState extends State<ChatPage>
         }
         // 8-08 02:1x 用户：查询类 ≥3 只软提示——男主还在找东西时别硬卡，
         // 提醒他直接说缺什么（≥6 才走 loopExceeded 强制停）
+        // 8-08 21:5x（GPT10问第7条）：软提示走 state_hint 专区（状态块
+        // 【状态提示】），不再混 role:'user' 事件消息
         if (!loopExceeded && queryToolCount >= 3 && queryToolCount < 6) {
-          toolMessages.add(AIChatMessage(
-            role: 'user',
-            content: '【系统提示】你本轮已经查了 $queryToolCount 次资料了。'
-                '如果还在找什么，直接告诉她你需要什么（她可以补），'
-                '别一直反复查；查到就继续干活，不用停下来说话。',
-          ));
+          toolRoundHints.add('本轮已查了 $queryToolCount 次资料。'
+              '如果还在找什么，直接告诉她你需要什么（她可以补），'
+              '别一直反复查；查到就继续干活，不用停下来说话。');
         }
         // 8-07 22:5x 用户：男主反复查工具卡死——触发防循环后必须明确告知
         // 男主"别再调了直接回复"，否则他不知道为什么停、下轮又调
@@ -1946,6 +1948,8 @@ class _ChatPageState extends State<ChatPage>
           // 8-06 21:12 用户 bug：第一轮男主已回过话 → 工具轮别再带旧话（防回复两句）
           userAlreadyReplied: result.text.trim().isNotEmpty,
           toolMessages: toolMessages,
+          // 8-08 21:5x（GPT10问第7条）：软提示走状态块【状态提示】区
+          stateHints: toolRoundHints,
           sessionId: _chatSessionId,
           storagePersonaId: chatPid,
         );
@@ -1974,16 +1978,14 @@ class _ChatPageState extends State<ChatPage>
         // 8-08 01:2x 用户（管家编排）：审批拒绝【不打断流程】——拒绝结果
         // 已作为普通工具结果回传男主（"用户拒绝：X"），流程走完统一说；
         // 只保留连续拒绝计数（≥2 下一轮注入提示，男主别再试同一方向）
+        // 8-08 21:5x（GPT10问第7条）：软提示走 state_hint 专区
         if (rejectedTools.isNotEmpty) {
           rejectedCount++;
           if (rejectedCount >= 2) {
-            toolMessages.add(AIChatMessage(
-              role: 'user',
-              content: '【系统事件】她已连续拒绝你 ${rejectedCount} 次'
-                  '（${rejectedTools.join('；')}），别再尝试这个方向——'
-                  '走完当前流程就直接回复她。',
-            ));
-            DebugLogger.log('AI路由', '⛔ 连续拒绝 ${rejectedCount} 次，注入停止提示');
+            toolRoundHints.add('她已连续拒绝你 ${rejectedCount} 次'
+                '（${rejectedTools.join('；')}），别再尝试这个方向——'
+                '走完当前流程就直接回复她。');
+            DebugLogger.log('AI路由', '⛔ 连续拒绝 ${rejectedCount} 次，注入 state_hint 提示');
           }
           rejectedTools.clear();
         }

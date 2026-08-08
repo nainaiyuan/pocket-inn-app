@@ -963,6 +963,9 @@ class AiChatService {
     // 走独立通道，不混进用户消息流（不进 feed、不进待回复队列）。
     // 男主看到的是"系统状态变化"，不是"她发的话"。
     String? systemEvent,
+    // 8-08 21:5x（GPT10问第7条 state_hint 专区）：本轮软提示列表
+    // （查询类≥3/连续拒绝≥2 等）——进状态块【状态提示】区，不混工具结果
+    List<String>? stateHints,
   }) async {
     final manager = AIProviderManager.instance;
     if (!manager.hasUsable(personaId)) {
@@ -1210,6 +1213,12 @@ class AiChatService {
     final manualText = ToolManualStore.text(ctxPid);
     // 8-08 15:2x（设计文档八）：工具测试任务块（进度/当前测什么）
     final testBlock = ToolTestStore.block(ctxPid);
+    // 8-08 21:5x（GPT10问第7条 state_hint 专区）：软提示统一进状态块——
+    // 工具重复（FlowStore.stateHint，机械生成）+ 本轮软提示（查询类≥3/连续
+    // 拒绝≥2，chat_page 累积传入）。区分 tool_result=工具真实返回 vs
+    // state_hint=管家提示，防模型误认提示为工具内容。
+    final flowHint = FlowStore.stateHint(ctxPid);
+    final extraHints = (stateHints ?? const <String>[]).join('\n');
     final statusBlocks = <AIChatMessage>[
       // 【当前情况】状态感知块（永远在，男主先看这个）
       AIChatMessage(
@@ -1258,6 +1267,13 @@ class AiChatService {
           role: 'system',
           content: '【任务清单】（管家机械生成的目标对照——哪个做了哪个没做，'
               '对照检查别空转）\n$taskListText',
+        ),
+      if (flowHint.isNotEmpty || extraHints.isNotEmpty)
+        AIChatMessage(
+          role: 'system',
+          content: '【状态提示】（管家软提示——不是工具结果，供你参考判断；'
+              '觉得该让她知道才用 {"msg":"…"} 转达，不用回复这条）\n'
+              '${flowHint.isNotEmpty ? '$flowHint\n' : ''}$extraHints',
         ),
       if (testBlock.isNotEmpty)
         AIChatMessage(

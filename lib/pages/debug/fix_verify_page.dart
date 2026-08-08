@@ -403,6 +403,19 @@ class _FixVerifyPageState extends State<FixVerifyPage> {
       // 清理自愈测试数据
       await prefs.remove('flow___heal1__');
       await prefs.remove('flow___heal2__');
+      // ── 8-08 21:5x GPT10问第7条：state_hint 专区（工具重复软提示）──
+      final pid2 = '__verify_hint__';
+      await FlowStore.create(pid2, 'state_hint 测试', [
+        {'name': '第一步', 'doneType': 'tool_result'},
+      ]);
+      await FlowStore.recordToolUse(pid2, 'query_tool_formats', ok: true);
+      final hint1 = FlowStore.stateHint(pid2);
+      add('state_hint 调用1次 → 空', '空', hint1.isEmpty ? '空' : hint1);
+      await FlowStore.recordToolUse(pid2, 'query_tool_formats', ok: true);
+      final hint2 = FlowStore.stateHint(pid2);
+      add('state_hint 调用2次 → 含提示', 'true',
+          '${hint2.contains('[state_hint]') && hint2.contains('2 次')}');
+      await FlowStore.clear(pid2);
     } catch (e) {
       add('执行异常', '无', '$e');
     }
