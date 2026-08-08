@@ -195,7 +195,11 @@ class _FixVerifyPageState extends State<FixVerifyPage> {
     // ⑤ 工具块剥离
     const blockCases = <(String, String)>[
       ('好的 工具:manage_flow 动作=next 我们继续', '好的 我们继续'),
-      ('<tool>record_memory 内容=她喜欢狗</tool>收到', '收到'),
+      // 8-08 18:4x：用例改用现行协议（⟨工具:⟩⟨/工具⟩ 严格块）；
+      // 旧的 <tool>…</tool> 不是协议格式（男主写这个会被标签剥离兜底清壳）
+      ('好的 ⟨工具:record_memory⟩{"内容":"她喜欢狗"}⟨/工具⟩收到', '好的 收到'),
+      ('工具:list_tools 然后我等你', '然后我等你'), // 无参数暗号 + 后面自然话
+      ('工具:还不错 这个不错', '工具:还不错 这个不错'), // 非英文工具名不剥
     ];
     for (final (input, expected) in blockCases) {
       final actual = ToolIntentParser.stripToolBlocks(input).trim();

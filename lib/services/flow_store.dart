@@ -335,8 +335,11 @@ class FlowStore {
 
   /// autoAdvance（GPT 13:20 定案：默认开，严格判定）：
   /// 工具轮结束后管家检查当前步完成条件，只在明确满足时自动推进。
-  /// 返回 null=没推进；'__ALL_DONE__'=全部完成（等男主 finish）；
-  /// 其他=推进提示文本（注入下一轮）。
+  /// 返回 null=没推进；'__ALL_DONE__'=全部完成；其他=推进提示文本（注入下一轮）。
+  /// 8-08 18:4x（用户反馈："执行完流程，页面上的'男主正在执行流程'不消失，
+  /// 还要手动停"）：最后一步完成时直接 status=done 自动收尾——
+  /// 流程做完就是做完，不再等男主手动 finish（它的 finish 轮还老撞错）。
+  /// finish 幂等兜底：之后男主再调 finish 返回"已结束"提示，不重复沉淀。
   static Future<String?> autoAdvance(String personaId) async {
     final f = await _read(personaId);
     if (f == null || f['status'] != 'running') return null;
@@ -349,8 +352,11 @@ class FlowStore {
     steps[cur]['status'] = 'done';
     if (cur + 1 >= steps.length) {
       f['currentStep'] = cur + 1;
+      f['status'] = 'done'; // 8-08 18:4x：全部步骤完成 = 流程自动收尾
+      f['stoppedNote'] = '';
       await _write(personaId, f);
-      _log('流程', '▶ autoAdvance：全部步骤完成（等 finish）');
+      _log('流程', '✅ autoAdvance：全部步骤完成，流程自动收尾（done，不再等手动 finish）');
+      await _sinkToPad(personaId, f, done: true);
       return '__ALL_DONE__';
     }
     f['currentStep'] = cur + 1;

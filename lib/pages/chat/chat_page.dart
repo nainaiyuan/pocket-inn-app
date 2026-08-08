@@ -2101,9 +2101,11 @@ class _ChatPageState extends State<ChatPage>
         _providerErrorInjected = false;
         await _showAllAiFailedDialog(e);
       }
-    } on Object catch (e) {
+    } on Object catch (e, s) {
       // 8-08 02:1x：RangeError(start/end) 弹"发送失败"——堆栈落日志定位真凶
-      DebugLogger.log('AI路由', '❌ 聊天请求失败: $e\n${StackTrace.current}');
+      // 8-08 18:4x（用户日志：RangeError 84..88:113 / 0..54:108，真凶被截断）：
+      // 必须用 catch 的 s（抛出位置栈），StackTrace.current 是 catch 位置没用
+      DebugLogger.log('AI路由', '❌ 聊天请求失败: $e\n$s');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

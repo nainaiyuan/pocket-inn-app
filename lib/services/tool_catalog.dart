@@ -35,7 +35,7 @@ class ToolCatalog {
       'manage_record_tree': '调分类（改名/挪动/删除，必须她审批）',
     },
     '排查反馈': {
-      'query_logs': '查系统日志（排查问题用）',
+      'query_logs': '查日志（查系统日志，排查问题用）',
       'report_bug': '报 bug 给她',
     },
     '自管理': {

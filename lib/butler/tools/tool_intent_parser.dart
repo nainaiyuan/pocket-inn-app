@@ -143,6 +143,11 @@ class ToolIntentParser {
   ///    工具:list_tools               → list_tools{}
   static final RegExp _sentenceRe = RegExp(
       r'工具\s*[:：]\s*([a-zA-Z_]+)([\s\S]*?)(?=工具\s*[:：]|$)');
+  /// 8-08 18:4x（修复验证中心 ⑤ 失败）：剥离用收紧版——
+  /// 只匹配"工具:名 [键=值]*"调用本身（含调用后空白），不吞后面的自然话
+  /// （旧 _sentenceRe 的 group2 懒匹配到句尾，把"我们继续"也吞了）。
+  static final RegExp _sentenceCallRe = RegExp(
+      r'工具\s*[:：]\s*([a-zA-Z_]+)((?:\s+\S+?=\S+)*\s*)');
   static final RegExp _kvRe = RegExp(r'(\S+?)=(\S+)');
 
   /// 中文参数键 → 工具参数名（男主是中文模型，写"动作=next"很自然；
@@ -174,14 +179,19 @@ class ToolIntentParser {
   /// 从回复文本里剥离 ⟨工具:…⟩ 块 + 一句话暗号（用户只看到男主自然的话）
   static String stripToolBlocks(String text) {
     var t = text.replaceAll(_toolBlock, '').trim();
-    // 剥句式暗号（只剥已知工具名的整句；"工具:还不错"无已知名不剥）
-    for (final m in _sentenceRe.allMatches(t)) {
+    // 剥句式暗号：只剥已知工具名的"工具:名 [键=值]*"调用部分，
+    // 调用后面的自然话保留（8-08 18:4x：旧实现把"我们继续"也吞了）。
+    // 用游标重建，避免 replaceRange 后偏移失效。
+    final sb = StringBuffer();
+    var cursor = 0;
+    for (final m in _sentenceCallRe.allMatches(t)) {
       final name = m.group(1) ?? '';
-      if (_knownToolNames.contains(name)) {
-        t = t.replaceRange(m.start, m.end, '');
-      }
+      if (!_knownToolNames.contains(name)) continue; // 防误触发
+      sb.write(t.substring(cursor, m.start));
+      cursor = m.end;
     }
-    return t.trim();
+    sb.write(t.substring(cursor));
+    return sb.toString().trim();
   }
 
   /// 从文本里提取 JSON 工具调用指令
