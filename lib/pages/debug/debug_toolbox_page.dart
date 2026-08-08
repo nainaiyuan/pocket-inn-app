@@ -8,6 +8,7 @@ import '../butler/butler_skill_library_page.dart';
 import '../chat/gesture_test_page.dart';
 import '../chat/widgets/debug_log_sheet.dart';
 import 'chat_storage_self_test_page.dart';
+import 'fix_verify_page.dart';
 import 'mock_ai_test_page.dart';
 
 /// 🧰 调试工具箱 —— 所有"测 bug 工具"的集中入口（2026-08-04 用户要求）。
@@ -73,6 +74,13 @@ class DebugToolboxPage extends StatelessWidget {
               title: '聊天记录自检',
               subtitle: '对话落库/加载/persona 归属/完整内容收录（8-04 用户报"退出后对话全没了"）',
               page: const ChatStorageSelfTestPage(),
+            ),
+            _Entry(
+              icon: Icons.verified_outlined,
+              iconColor: const Color(0xFF7FA8D8),
+              title: '🛠 修复验证中心',
+              subtitle: '8-08 全部修复点的自动用例 + 男主实时状态 + 一键复制结果',
+              page: const FixVerifyPage(),
             ),
           ]),
           _section('系统', [

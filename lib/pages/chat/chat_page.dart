@@ -22,6 +22,7 @@ import '../../butler/memory/relation_record.dart';
 import '../../butler/storage/storage_registry.dart';
 import '../../services/relation_change_notifier.dart';
 import '../../services/tool_catalog.dart';
+import '../../services/parse_utils.dart';
 import 'widgets/task_list_page.dart';
 import '../../data/bug_knowledge_base.dart';
 import 'companion_page.dart';
@@ -3828,14 +3829,14 @@ class _ChatPageState extends State<ChatPage>
   /// 只认"< 后跟字母/下划线/中文/竖线"的标签形态（模型自创 <tool_call>、
   /// <|im_start|>、半截 <invoke 都能清）；"<3"（数字开头）、"a<b" 不误伤。
   /// 显示层兜底——JSON 化后男主正常输出已无标签，这是防"模型自创标签"漏网
-  static final RegExp _tagShapeRe = RegExp(r'<(?:[a-zA-Z_/|\u4e00-\u9fa5][^>]*)>');
+  /// 8-08 16:3x：正则/剥离实现移到 services/parse_utils.dart（自测页复用）
 
   Future<String> _displayableText(String raw) async {
     var t = ToolIntentParser.stripToolBlocks(raw);
     // 8-07 21:2x：兜底剥 anthropic invoke XML（防任何路径漏网显示）
     t = stripAnthropicInvokeBlocks(t);
     // 8-08 00:2x：标签形态兜底剥离（模型自创 <…> 全清，界面永远干净）
-    t = t.replaceAll(_tagShapeRe, '');
+    t = stripTagShapes(t);
     t = ButlerCommandParser.instance.strip(t);
     try {
       final butler = ChatService.instance.butler;
@@ -4898,43 +4899,12 @@ class _ChatPageState extends State<ChatPage>
   /// 男主填选项（延长/结束/纯消息）；逾期后男主可选要不要弹窗问/多久弹窗/多久唤醒。
   /// 8-08 15:5x（用户反馈）：时长解析——支持带单位
   /// （"30分钟"/"1小时"/"2小时30分钟"/"90"/30），解析不了返回 null
-  int? _parseMinutesArg(dynamic v) {
-    if (v == null) return null;
-    if (v is num) return v.toInt();
-    final s = v.toString().trim().toLowerCase();
-    if (s.isEmpty) return null;
-    final pureNum = RegExp(r'^(\d+)$').firstMatch(s);
-    if (pureNum != null) return int.parse(pureNum.group(1)!); // 纯数字=分钟
-    final hm = RegExp(r'^(\d+)\s*(小时|时|h)\s*(\d+)\s*(分钟|分|min|mins?)$')
-        .firstMatch(s);
-    if (hm != null) {
-      return int.parse(hm.group(1)!) * 60 + int.parse(hm.group(3)!);
-    }
-    final h = RegExp(r'^(\d+(?:\.\d+)?)\s*(小时|时|h)$').firstMatch(s);
-    if (h != null) return (double.parse(h.group(1)!) * 60).round();
-    final m = RegExp(r'^(\d+(?:\.\d+)?)\s*(分钟|分|min|mins?)$').firstMatch(s);
-    if (m != null) return double.parse(m.group(1)!).round();
-    final sec = RegExp(r'^(\d+)\s*(秒|s)$').firstMatch(s);
-    if (sec != null) return (int.parse(sec.group(1)!) / 60).ceil();
-    return null;
-  }
+  /// 8-08 16:3x：实现移到 services/parse_utils.dart（修复验证中心要复用），
+  /// 这里只做转发，逻辑只有一份
+  int? _parseMinutesArg(dynamic v) => parseMinutesArg(v);
 
   /// 8-08 15:5x：秒数解析（interval_seconds 用，"4秒"/"2分钟"/30）
-  int? _parseSecondsArg(dynamic v) {
-    if (v == null) return null;
-    if (v is num) return v.toInt();
-    final s = v.toString().trim().toLowerCase();
-    if (s.isEmpty) return null;
-    final pureNum = RegExp(r'^(\d+)$').firstMatch(s);
-    if (pureNum != null) return int.parse(pureNum.group(1)!); // 纯数字=秒
-    final sec = RegExp(r'^(\d+)\s*(秒|s)$').firstMatch(s);
-    if (sec != null) return int.parse(sec.group(1)!);
-    final m = RegExp(r'^(\d+(?:\.\d+)?)\s*(分钟|分|min|mins?)$').firstMatch(s);
-    if (m != null) return (double.parse(m.group(1)!) * 60).round();
-    final h = RegExp(r'^(\d+(?:\.\d+)?)\s*(小时|时|h)$').firstMatch(s);
-    if (h != null) return (double.parse(h.group(1)!) * 3600).round();
-    return null;
-  }
+  int? _parseSecondsArg(dynamic v) => parseSecondsArg(v);
 
   Future<_ToolResult> _executeCountdownCard(Map<String, dynamic> args) async {
     final minutes = _parseMinutesArg(args['minutes']); // null = 纯选择卡片
