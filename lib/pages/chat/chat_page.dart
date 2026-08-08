@@ -462,7 +462,6 @@ class _ChatPageState extends State<ChatPage>
       _autoContinuePid = null;
       _autoContinueCount = 0;
       _lastAutoContinueAt = null;
-      _lastContinueText = null;
       _interruptRoundActive = false;
       _interruptFollowUpDone = false;
       DebugLogger.log('管家流程', '⏸ 用户按停止（无流程）：停止男主自动续话，等他说话');
@@ -512,7 +511,6 @@ class _ChatPageState extends State<ChatPage>
     _autoContinuePid = null;
     _autoContinueCount = 0;
     _lastAutoContinueAt = null;
-    _lastContinueText = null;
     _interruptRoundActive = false;
     _interruptFollowUpDone = false;
     DebugLogger.log(
@@ -568,7 +566,6 @@ class _ChatPageState extends State<ChatPage>
     _autoContinuePid = null;
     _autoContinueCount = 0;
     _lastAutoContinueAt = null;
-    _lastContinueText = null;
     _stopRequested = false; // 插话 = 用户主动说话，停止状态解除
     // 8-08 15:5x：存下插话内容（插话轮男主没回 → 兜底轮带给她看）
     _interruptUserText = text;
@@ -636,106 +633,12 @@ class _ChatPageState extends State<ChatPage>
     );
   }
 
-  /// 8-08 17:4x（用户："我只是说话让它停止，它听不懂"）：
-  /// 用户消息里的停止意图识别——说"停/别说了/别管了/够了/晚安"等
-  /// = 按⏹停止：停续话/停续跑/停自动唤醒。
-  /// 实现移到 services/parse_utils.dart（修复验证中心要复用），这里一行转发
-  bool _isStopIntent(String text) => isStopIntent(text);
-
-  /// 8-08 17:4x（用户："就不要去回复管家的唤醒"）：说话停止 = 按⏹停止。
-  /// 停止续话/续跑/自动唤醒（男主回一句就安静），有流程则暂停流程。
-  Future<void> _verbalStop(String text) async {
-    final pid =
-        _state.personaId ??
-        (_state.leadId == null ? '' : '${_state.leadId}_default');
-    // 上屏：用户看到自己的话发出去了（输入框 ChatInputBar 已清）
-    if (mounted) {
-      _msgKey.currentState?.appendMessage(
-        ChatMessage(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          text: text,
-          isMe: true,
-        ),
-      );
-    }
-    // 停止状态：检查点⑤不再续话/续跑；用户下次正常发消息解除
-    _stopRequested = true;
-    _autoContinuePid = null;
-    _autoContinueCount = 0;
-    _lastAutoContinueAt = null;
-    _lastContinueText = null;
-    _autoResumePid = null;
-    _autoResumeRounds = 0;
-    _lastAutoResumeStep = -1;
-    _interruptRoundActive = false;
-    _interruptFollowUpDone = false;
-    DebugLogger.log('管家流程', '⏸ 用户说话停止（"$text"）——停止续话/续跑/自动唤醒');
-    if (mounted) setState(() {});
-
-    final flow = await FlowStore.get(pid);
-    final hasRunningFlow = flow != null && flow['status'] == 'running';
-    String stopEvent;
-    if (hasRunningFlow) {
-      final steps = (flow['steps'] as List?)
-              ?.map((e) => e.toString())
-              .toList() ??
-          <String>[];
-      final cur = (flow['currentStep'] as num?)?.toInt() ?? 0;
-      await FlowStore.stop(pid, userMessages: text);
-      final curStep = cur < steps.length ? steps[cur] : '';
-      stopEvent = '你正在执行的流程被用户打断：目标「${flow['goal']}」，'
-          '停在 ${cur + 1}/${steps.length} 步（$curStep）。'
-          '她刚才说："$text"。'
-          '请简短回应她（一两句），然后安静等她指示——不要自动继续执行，'
-          '不要重复调用工具确认。想继续时她会说，或你可以调 manage_flow resume。';
-    } else {
-      stopEvent = '用户说："$text"。她让你停下来。'
-          '简短回应她一句（比如"好，不说了"），然后安静等她下次发消息：'
-          '不要自动续话、不要调工具、不要重复刚才的总结。';
-    }
-    if (_generating) {
-      // 男主正在跑 → 排队，这轮结束自动触发
-      //（检查点⑤看到 _pendingStopEvent 非空 → 不续话不续跑）
-      _pendingStopEvent = _pendingStopEvent == null
-          ? stopEvent
-          : '$_pendingStopEvent\n（她追加说："$text"）';
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('已让他停下，这轮说完就安静'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
-      return;
-    }
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('已让他停下，不再自动说话'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-    }
-    // silentBubble：她的原话已上屏，不再叠"正在处理"系统气泡，男主直接回
-    await _sendMsg('', systemEvent: stopEvent, silentBubble: true);
-  }
-
-  /// 8-08 17:4x：复读判定——实现移到 services/parse_utils.dart（自测页复用）
-  bool _isRepeatText(String a, String b) => isRepeatText(a, b);
-
-  /// 日志用：文本截断（复读检测日志里别刷一长串）
-  String _shorten(String s, [int n = 24]) {
-    return s.length <= n ? s : '${s.substring(0, n)}…';
-  }
-
   /// 8-08 14:0x（断点 D 修复）：任务 running → 自动续跑（APP 内第一版唤醒）。
   /// 男主回完用户消息任务没完成 → 自动继续执行，不用用户再发消息。
   /// 防死循环：currentStep 变了 → 重置计数（正常推进）；同一步连续 3 轮
   /// 无进展（currentStep 没变）→ 停止，注入系统事件让男主向用户交代。
   Future<void> _maybeAutoResume(String pid) async {
     if (_generating) return; // 已在生成（并发保护）
-    if (_stopRequested) return; // 8-08 17:4x：用户已要求停止 → 不自动续跑
     final flow = await FlowStore.get(pid);
     if (flow == null || flow['status'] != 'running') return;
     final cur = (flow['currentStep'] as num?)?.toInt() ?? 0;
@@ -806,11 +709,7 @@ class _ChatPageState extends State<ChatPage>
   ///   每轮都去调工具/重写便签 → 用户看到"男主一直不停"）
   /// - 用户消息排队（男主忙时收集的）→ 优先回用户（相当于自动插话）
   /// - 流程场景不经过这里（走 _maybeAutoResume，任务驱动）
-  Future<void> _maybeAutoContinue(
-    String pid, {
-    required bool spoke,
-    String? text,
-  }) async {
+  Future<void> _maybeAutoContinue(String pid, {required bool spoke}) async {
     if (_generating) return; // 并发保护
     if (pid.isEmpty) return;
     // ① 用户有消息排队（男主忙时收集的）→ 先回用户（优先级最高）
@@ -818,7 +717,6 @@ class _ChatPageState extends State<ChatPage>
     if (pending.isNotEmpty) {
       _autoContinuePid = null;
       _autoContinueCount = 0; // 用户说话了，续话计数重置
-      _lastContinueText = null;
       final texts = pending
           .map((e) => '[待#${e['id']}] ${e['text']}')
           .join('；');
@@ -847,27 +745,7 @@ class _ChatPageState extends State<ChatPage>
       _autoContinuePid = null;
       _autoContinueCount = 0;
       _lastAutoContinueAt = null;
-      _lastContinueText = null;
       return;
-    }
-    // ②'' 复读检测（8-08 17:4x 用户："他重复说最后的总结"）：
-    // 男主这轮内容 = 上轮复读（相同/互相包含/开头一致）→ 不唤醒，
-    // 否则"总结→续话→再总结"复读风暴，25 秒间隔也拦不住
-    if (text != null &&
-        text.trim().isNotEmpty &&
-        _lastContinueText != null &&
-        _isRepeatText(text.trim(), _lastContinueText!)) {
-      DebugLogger.log(
-        '管家流程',
-        '🔕 男主在复读上轮内容（"${_shorten(text)}"），不再唤醒（防复读风暴）',
-      );
-      _autoContinuePid = null;
-      _autoContinueCount = 0;
-      _lastAutoContinueAt = null;
-      return;
-    }
-    if (text != null && text.trim().isNotEmpty) {
-      _lastContinueText = text.trim();
     }
     // ②' 续话最小间隔 25 秒（8-08 17:2x 日志复盘：防"续话→调工具→再续话"风暴）。
     // 用户刚说话（_lastAutoContinueAt 为 null）不限制——第一轮续话立即允许
@@ -890,7 +768,6 @@ class _ChatPageState extends State<ChatPage>
       _autoContinuePid = null;
       _autoContinueCount = 0;
       _lastAutoContinueAt = null;
-      _lastContinueText = null;
       DebugLogger.log('管家流程', '🔔 男主续话已达 3 次上限，停止（等用户说话）');
       return;
     }
@@ -935,13 +812,6 @@ class _ChatPageState extends State<ChatPage>
     // 上屏 + 推给男主（先回用户再继续干活），不再默默收集。
     // 停止触发的生成（systemEvent 非空）不走插话。
     if (systemEvent == null && t.trim().isNotEmpty) {
-      // 8-08 17:4x（用户："我只是说话让它停止，它听不懂"）：
-      // 说话停止 = 按⏹——必须在插话/收集之前拦截，否则"别说了"被当成
-      // 插话推给男主，男主回完又续话 → 用户越说它越停不下来（恶性循环）
-      if (_isStopIntent(t)) {
-        await _verbalStop(t);
-        return;
-      }
       final flowPid =
           _state.personaId ??
           (_state.leadId == null ? '' : '${_state.leadId}_default');
@@ -964,13 +834,12 @@ class _ChatPageState extends State<ChatPage>
       _autoContinuePid = null;
       _autoContinueCount = 0;
       _lastAutoContinueAt = null;
-      _lastContinueText = null;
       _stopRequested = false; // 用户说话了 → 停止状态解除
     }
     // 8-08 15:5x：本轮男主输出信息（finally 用——判断"男主这轮说了话没"、
     // 续话/插话检查的数据源）。注意作用域：try 外声明，try/finally 都能读。
     var roundSpoke = false; // 男主本轮最终生成了非空文本
-    var roundFinalText = ''; // 8-08 17:4x：男主本轮最终文本（复读检测用）
+    var roundHadTools = false; // 男主本轮调了工具
     final userMsgId = DateTime.now().millisecondsSinceEpoch.toString();
     // 本轮男主第一句话气泡 id 重置（工具气泡只挂本轮第一句话头上）
     _firstAiMsgId = null;
@@ -1253,6 +1122,7 @@ class _ChatPageState extends State<ChatPage>
       while (result.toolCalls != null && result.toolCalls!.isNotEmpty) {
         toolLoop++;
         toolExecuted = true;
+        roundHadTools = true;
         if (toolLoop > maxToolRounds) {
           // 防御兜底（正常路径由下方 stop 事件先拦，这里保证不无限循环）
           DebugLogger.log(
@@ -2097,10 +1967,7 @@ class _ChatPageState extends State<ChatPage>
       // 剥离所有指令（#…#）→ 用户只看到男主自然的回复
       displayText = ButlerCommandParser.instance.strip(displayText);
       // 8-08 15:5x：男主最终文本 → roundSpoke（finally 判断"这轮说了话没"）
-      // 8-08 17:4x：同时记 roundFinalText（_maybeAutoContinue 复读检测用——
-      // 男主每轮醒来重复上轮总结 → 不唤醒，根治"重复说最后的总结"）
-      roundFinalText = displayText.trim();
-      if (roundFinalText.isNotEmpty) roundSpoke = true;
+      if (displayText.trim().isNotEmpty) roundSpoke = true;
       // 待定查询：男主回复"看5条/全部" → 继续审批流程
       if (_pendingQuery != null) {
         await _resolvePendingQuery(displayText);
@@ -2248,16 +2115,8 @@ class _ChatPageState extends State<ChatPage>
             // 有插话排队 → 不续跑，让插话先（用户着急，先回用户再干活）
             // 8-08 15:5x：插话触发轮（_interruptRoundActive）→ 不续跑，
             // 先确认男主回了用户（方法末尾检查，没回就注入"只回用户"轮）
-            // 8-08 17:4x：用户说话停止（_stopRequested）→ 也不续跑
-            if (_pendingInterruptEvent == null &&
-                !_interruptRoundActive &&
-                !_stopRequested) {
+            if (_pendingInterruptEvent == null && !_interruptRoundActive) {
               unawaited(_maybeAutoResume(personaId));
-            } else if (_stopRequested) {
-              DebugLogger.log(
-                '管家流程',
-                '⏸ 用户已要求停止，跳过自动续跑',
-              );
             } else {
               DebugLogger.log(
                 '管家流程',
@@ -2277,11 +2136,7 @@ class _ChatPageState extends State<ChatPage>
                 _pendingProviderErrorEvent == null &&
                 !_stopRequested) {
               unawaited(
-                _maybeAutoContinue(
-                  personaId,
-                  spoke: roundSpoke,
-                  text: roundFinalText,
-                ),
+                _maybeAutoContinue(personaId, spoke: roundSpoke),
               );
             } else if (_stopRequested) {
               DebugLogger.log(
@@ -2304,7 +2159,7 @@ class _ChatPageState extends State<ChatPage>
           _sendMsg(
             '',
             systemEvent: pendingStop,
-            bubbleText: '⏸ 已让他停下，男主正在处理…',
+            bubbleText: '⏸ 你按了停止，男主正在处理…',
           ),
         );
       }
@@ -3418,9 +3273,6 @@ class _ChatPageState extends State<ChatPage>
   int _autoContinueCount = 0; // 用户消息之间男主主动续话次数
   DateTime? _lastAutoContinueAt; // 8-08 17:2x：上次续话时间（最小间隔 25s 防风暴）
   String? _autoContinuePid;
-  // 8-08 17:4x（用户反馈：男主"重复说最后的总结"）：上次续话轮的男主文本
-  // ——男主复读上轮总结/确认 → 不再唤醒（防复读风暴）
-  String? _lastContinueText;
 
   /// 8-04 21:1x：一键验收进行中（自动切 AI 跑真实对话）
   bool _accepting = false;

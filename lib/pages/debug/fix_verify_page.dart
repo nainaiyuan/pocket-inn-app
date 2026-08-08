@@ -209,49 +209,6 @@ class _FixVerifyPageState extends State<FixVerifyPage> {
       });
     }
 
-    // ⑥ 说话停止意图（8-08 17:4x：说"停/别说了"=按⏹，男主才会自己停）
-    const stopCases = <(String, bool)>[
-      ('别说了', true), ('别管了', true), ('停下来', true), ('停', true),
-      ('够了', true), ('安静点', true), ('闭嘴', true), ('晚安', true),
-      ('我睡了', true), ('不用了', true), ('不要再说了', true),
-      // 不误伤：问句/反义/正常消息
-      ('你睡了吗', false), ('别停啊继续', false), ('我不要吃火锅', false),
-      ('还在吗', false), ('这个停止键在哪', false), ('好的', false),
-      ('不要停止', false), ('别停', false), ('继续说', false),
-    ];
-    for (final (input, expected) in stopCases) {
-      final actual = isStopIntent(input);
-      final pass = actual == expected;
-      cases.add({
-        'group': '⑥ 说话停止',
-        'input': '$input',
-        'expected': '$expected',
-        'actual': '$actual',
-        'pass': pass ? '✅' : '❌',
-      });
-    }
-
-    // ⑦ 复读判定（8-08 17:4x：男主重复说最后的总结 → 不再唤醒）
-    const repeatCases = <(String, String, bool)>[
-      ('总结：测试完成', '总结：测试完成', true), // 完全相同
-      ('已全部测完，结果如下', '已全部测完，结果如下，随时可以继续', true), // 互相包含
-      ('25个工具全部测试完成，其中3个正常1个有异常，总结如上', '25个工具全部测试完成，其中3个正常1个有异常，总结如上，随时可以继续', true), // 开头一致
-      ('25个工具全部测试完成', '流程已暂停，等你指示', false), // 不同内容
-      ('短', '短', true), // 短文本相同也算
-      ('你好呀', '你好', false), // 短文本包含不算（防误伤）
-    ];
-    for (final (a, b, expected) in repeatCases) {
-      final actual = isRepeatText(a, b);
-      final pass = actual == expected;
-      cases.add({
-        'group': '⑦ 复读判定',
-        'input': '$a vs $b',
-        'expected': '$expected',
-        'actual': '$actual',
-        'pass': pass ? '✅' : '❌',
-      });
-    }
-
     _caseResults
       ..clear()
       ..addAll(cases);
