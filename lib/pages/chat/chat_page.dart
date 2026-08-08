@@ -396,6 +396,10 @@ class _ChatPageState extends State<ChatPage>
     await FlowStore.stop(pid, userMessages: userText);
     // 8-08 13:0x 检查点⑤锚点：暂停 = 完全停止（用户拍板）——日志留痕，
     // resume 队列实现后这里要同时"移出队列 + 取消唤醒 Timer"
+    // 8-08 14:0x：停止 → 取消自动续跑（否则刚停又被续跑拉起来）
+    _autoResumePid = null;
+    _autoResumeRounds = 0;
+    _lastAutoResumeStep = -1;
     DebugLogger.log(
       '管家流程',
       '⏸ 用户停止流程：目标「${flow['goal']}」，停在 ${cur + 1}/${steps.length} 步'
@@ -424,6 +428,59 @@ class _ChatPageState extends State<ChatPage>
       return;
     }
     await _sendMsg('', systemEvent: event);
+  }
+
+  /// 8-08 14:0x（断点 D 修复）：任务 running → 自动续跑（APP 内第一版唤醒）。
+  /// 男主回完用户消息任务没完成 → 自动继续执行，不用用户再发消息。
+  /// 防死循环：currentStep 变了 → 重置计数（正常推进）；同一步连续 3 轮
+  /// 无进展（currentStep 没变）→ 停止，注入系统事件让男主向用户交代。
+  Future<void> _maybeAutoResume(String pid) async {
+    if (_generating) return; // 已在生成（并发保护）
+    final flow = await FlowStore.get(pid);
+    if (flow == null || flow['status'] != 'running') return;
+    final cur = (flow['currentStep'] as num?)?.toInt() ?? 0;
+    if (_autoResumePid != pid) {
+      // 换了任务 → 重置计数
+      _autoResumePid = pid;
+      _autoResumeRounds = 0;
+      _lastAutoResumeStep = -1;
+    }
+    if (cur != _lastAutoResumeStep) {
+      // 推进了 → 重置无进展计数
+      _lastAutoResumeStep = cur;
+      _autoResumeRounds = 0;
+    }
+    if (_autoResumeRounds >= 3) {
+      // 同一步连续 3 轮没推进 → 停止自动续跑，让男主交代
+      DebugLogger.log('管家流程', '🔔 自动续跑 3 轮无进展，停止（等用户指示）');
+      _autoResumePid = null;
+      _autoResumeRounds = 0;
+      _lastAutoResumeStep = -1;
+      await _sendMsg(
+        '',
+        systemEvent: '你刚才自动续跑了几轮但流程没有推进（一直停在'
+            '第 ${cur + 1} 步）。不要继续空转：告诉用户你卡在哪、缺什么，'
+            '或决定 finish/cancel。',
+      );
+      return;
+    }
+    _autoResumeRounds++;
+    final steps = (flow['steps'] as List?)?.length ?? 0;
+    DebugLogger.log(
+      '管家流程',
+      '🔔 自动续跑 #$_autoResumeRounds（任务 running，男主继续执行第 ${cur + 1}/$steps 步）',
+    );
+    final stepText =
+        (flow['steps'] as List?) != null && cur < (flow['steps'] as List).length
+            ? (flow['steps'] as List)[cur].toString()
+            : '';
+    await _sendMsg(
+      '',
+      systemEvent: '任务还没完成，继续执行（用户没发新消息，这是自动续跑）：'
+          '目标「${flow['goal']}」，当前第 ${cur + 1}/$steps 步（$stepText）。'
+          '基于已有结果继续推进；做完调 manage_flow next/finish。'
+          '别重新规划、别重复查已查过的东西。',
+    );
   }
 
   Future<void> _sendMsg(String t, {String? systemEvent}) async {
@@ -794,11 +851,16 @@ class _ChatPageState extends State<ChatPage>
         var loopExceeded = false;
         for (final call in result.toolCalls!) {
           final name = call['name']?.toString() ?? '';
-          final args = (call['arguments'] as Map<String, dynamic>?) ?? {};
+          // 8-08 14:0x（断点 C 根治）：男主工具参数常写中文 key（{动作: next}）
+          // 工具只认英文 key（{action: next}）→ next 失败 → 任务卡死。
+          // 模型行为不可控，解析层兜底：按工具名做中文→英文参数名归一化。
+          final rawArgs = (call['arguments'] as Map<String, dynamic>?) ?? {};
+          final args = _normalizeToolArgs(name, rawArgs);
           _ToolResult toolResult;
           DebugLogger.log(
             'AI路由',
-            '🔧 工具 $name 参数：${args.isEmpty ? '（空）' : args}',
+            '🔧 工具 $name 参数：${args.isEmpty ? '（空）' : args}'
+            '${rawArgs != args && rawArgs.isNotEmpty ? '（原文：$rawArgs）' : ''}',
           );
           // 8-07 21:2x 用户：工具气泡没显示全/跳过——工具循环无异常保护，
           // 一个工具执行炸了后面全断。每个工具单独 try-catch：炸了显示 ❌
@@ -1097,7 +1159,9 @@ class _ChatPageState extends State<ChatPage>
               toolResult = const _ToolResult(
                 false,
                 'manage_flow 参数：action=create/next/finish/cancel/resume/status/update，'
-                'create/update 要 goal+steps',
+                'create/update 要 goal+steps。'
+                '参数名用英文（action/goal/steps），别用中文"动作/目标/步骤"。'
+                '示例：{"action":"next"}',
               );
             }
             // 流程状态变化 → 刷新停止条
@@ -1552,22 +1616,24 @@ class _ChatPageState extends State<ChatPage>
       // 8-08 13:0x 检查点⑤锚点（纯日志埋点，暂不实现唤醒）：
       // 本轮结束（无论成败）后，任务是否还 running——这是"男主回复用户后
       // 任务睡着"的判定依据。日志对照 A/B/C/D 判定卡 D 项。
+      // 注意：FlowStore 的 key 是 personaId（含测试空间也是同一 key），
+      // 不能用 chatPid（带 mock 后缀）判断。
       if (personaId.isNotEmpty) {
         try {
-          final fPid = _useTestSpace(personaId)
-              ? '$personaId${AIProviderManager.mockTestSuffix}'
-              : personaId;
-          FlowStore.warm(fPid);
-          if (FlowStore.isRunning(fPid)) {
-            final f = await FlowStore.get(fPid);
+          FlowStore.warm(personaId);
+          if (FlowStore.isRunning(personaId)) {
+            final f = await FlowStore.get(personaId);
             final steps = (f?['steps'] as List?)?.length ?? 0;
             final cur = ((f?['currentStep'] as num?)?.toInt() ?? 0) + 1;
             DebugLogger.log(
               '管家流程',
               '⏰ 检查点⑤：本轮结束，任务仍 running'
               '（目标「${f?['goal'] ?? '?'}」第 $cur/$steps 步）'
-              '→ 需要 resume 机制继续（待实现，用户再发消息才会动）',
+              '→ 自动续跑（断点 D 已修复）',
             );
+            // 8-08 14:0x（断点 D 修复）：任务 running → 自动续跑，
+            // 男主自己把活干完，不用用户再发消息。无进展 3 轮自动停。
+            unawaited(_maybeAutoResume(personaId));
           } else {
             DebugLogger.log('管家流程', '⏰ 检查点⑤：本轮结束，任务非 running（无需唤醒）');
           }
@@ -2584,6 +2650,13 @@ class _ChatPageState extends State<ChatPage>
 
   /// 8-03 18:2x：男主生成锁（防并发——男主生成中再发消息会上下文混乱）
   bool _generating = false;
+
+  // 8-08 14:0x（断点 D 修复）：自动续跑（APP 内第一版唤醒）。
+  // 男主回完用户消息任务还 running → 自动继续，不用用户再发消息。
+  // 防死循环：currentStep 变了重置计数；同一步连续 3 轮无进展 → 停。
+  int _autoResumeRounds = 0;
+  String? _autoResumePid;
+  int _lastAutoResumeStep = -1;
   // 8-06 23:55：停止事件排队——男主生成中按停止，等这轮结束自动触发
   String? _pendingStopEvent;
 
@@ -3557,6 +3630,78 @@ class _ChatPageState extends State<ChatPage>
     }
   }
 
+  /// 8-08 14:0x（断点 C 根治）：工具参数中文 key → 英文 key 归一化。
+  /// 男主（DeepSeek）常传 {动作: next}、{内容: …}，工具只认英文 key，
+  /// 导致 next 失败、任务卡死。按工具名做别名映射，模型写错也不卡。
+  Map<String, dynamic> _normalizeToolArgs(
+    String toolName,
+    Map<String, dynamic> args,
+  ) {
+    if (args.isEmpty) return args;
+    // 工具名 → {中文key: 英文key}。覆盖日志里见过的错误写法 + 常见中文。
+    const aliases = <String, Map<String, String>>{
+      'manage_flow': {
+        '动作': 'action', '操作': 'action',
+        '目标': 'goal', '目的': 'goal',
+        '步骤': 'steps',
+      },
+      'record_memory': {
+        '内容': 'content', '类别': 'category', '分类': 'category',
+        '关键词': 'keywords', '标签': 'keywords',
+      },
+      'recall_memory': {
+        '查询': 'query', '关键词': 'query', '内容': 'query',
+        '类别': 'category', '分类': 'category',
+      },
+      'manage_pad': {
+        '动作': 'action', '操作': 'action',
+        '内容': 'content', '便签': 'content',
+      },
+      'notify_user': {
+        '内容': 'messages', '消息': 'messages', '文本': 'messages',
+        '标题': 'title', '间隔': 'interval_seconds',
+        '等待': 'wait_minutes', '时间': 'wait_minutes',
+      },
+      'resolve_pending': {
+        '回复': 'replied_ids', '已回复': 'replied_ids',
+        'ids': 'replied_ids', 'id': 'replied_ids',
+      },
+      'manage_frequent_tools': {
+        '动作': 'action', '操作': 'action',
+        '名字': 'name', '名称': 'name', '工具': 'name',
+      },
+      'manage_tool_cache': {
+        '动作': 'action', '操作': 'action',
+        '工具': 'tool', '结果': 'result',
+      },
+      'write_diary': {
+        '内容': 'content', '日期': 'date',
+      },
+      'query_diary': {
+        '日期': 'date', '查询': 'query', '关键词': 'query',
+      },
+      'query_logs': {
+        '查询': 'query', '关键词': 'query',
+      },
+      'manage_goal': {
+        '动作': 'action', '目标': 'goal',
+      },
+      'query_tool_formats': {
+        '工具': 'tool', '名字': 'tool', '名称': 'tool',
+      },
+    };
+    final table = aliases[toolName];
+    if (table == null) return args;
+    final out = Map<String, dynamic>.from(args);
+    table.forEach((cn, en) {
+      if (out.containsKey(cn) && !out.containsKey(en)) {
+        out[en] = out[cn];
+        out.remove(cn);
+      }
+    });
+    return out;
+  }
+
   /// 工具执行：record_memory（弹窗确认 → 写记忆 → 返回结果给模型）
   Future<_ToolResult> _executeRecordTool(
     String category,
@@ -3591,7 +3736,8 @@ class _ChatPageState extends State<ChatPage>
       ]);
       DebugLogger.log(
         '指令模块',
-        '✅ 工具记录确认: [${category.isEmpty ? '其他' : category}] $content',
+        '✅ 工具记录确认: [${category.isEmpty ? '其他' : category}] $content'
+        '（session=$_chatSessionId, leaf=$_chatLeafId）',
       );
       return _ToolResult(true, '已记录：[$category] $content');
     }
@@ -3619,7 +3765,11 @@ class _ChatPageState extends State<ChatPage>
       if (s.isNotEmpty) messages.add(s);
     }
     if (messages.isEmpty) {
-      return const _ToolResult(false, '没有可弹的消息（messages 为空）');
+      return const _ToolResult(
+        false,
+        '没有可弹的消息——参数名用 messages（字符串或字符串列表），'
+        '别用中文"内容/消息"。示例：{"messages":["汪～"]}',
+      );
     }
     final rawInterval = args['interval_seconds'];
     final intervalSec = (rawInterval as num?)?.toInt();
@@ -3704,6 +3854,13 @@ class _ChatPageState extends State<ChatPage>
         sessionId,
         category: isCategory ? category : null,
         keyword: isCategory ? null : (query.isEmpty ? category : query),
+      );
+      // 8-08 14:0x（记忆查不到诊断）：写入/查询的 session 是否一致、命中数。
+      // 曾出现 record_memory 成功但 recall_memory 查不到——用日志对 sessionId。
+      DebugLogger.log(
+        '指令模块',
+        '🔍 recall_memory: session=$sessionId query=${query.isEmpty ? category : query}'
+        ' → 命中 ${memories.length} 条${memories.isEmpty ? '（查不到！对比写入时的 session）' : ''}',
       );
       if (memories.isEmpty) {
         return _ToolResult(
