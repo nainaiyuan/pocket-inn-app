@@ -61,3 +61,56 @@ int? parseSecondsArg(dynamic v) {
 final RegExp tagShapeRe = RegExp(r'<(?:[a-zA-Z_/|\u4e00-\u9fa5][^>]*)>');
 
 String stripTagShapes(String text) => text.replaceAll(tagShapeRe, '');
+
+/// 结束检查退出信号解析（8-08 18:1x GPT 意见：续话=一次检查机会，
+/// 男主必须能明确说"我没有事情做了"）。
+/// 返回：true=无需继续（need_continue:false / next_action:null/none/无），
+/// false=需要继续（need_continue:true），null=没输出信号（保持现状）。
+/// 兼容 JSON 字段（{"need_continue": false}）、标签块（<sys>need_continue:false</sys>）、
+/// 纯文本（need_continue:false）三种形态。
+bool? parseExitSignal(String raw) {
+  if (raw.isEmpty) return null;
+  final t = raw.toLowerCase();
+  // ① 显式继续/结束判定（优先级高：男主说"需要继续"就是继续）
+  final nc =
+      RegExp(r'"?need_continue"?\s*[:：]?\s*(true|false)').firstMatch(t);
+  if (nc != null) return nc.group(1) == 'false';
+  // ② 下一步动作为空 → 结束
+  if (RegExp(r'"?next_action"?\s*[:：]\s*("?null"?|none|无|空)').hasMatch(t)) {
+    return true;
+  }
+  return null;
+}
+
+/// 退出标记从显示文本剥离（防纯文本路径把 need_continue/next_action 漏给用户看）。
+/// JSON 块路径（parseStructuredOutput）已自动丢弃未知字段，这里是兜底——
+/// 只剥"裸标记"（不在 JSON 对象里的），JSON 对象里的字段不碰。
+String stripExitSignal(String text) {
+  var t = text.replaceAll(
+    RegExp(
+      r'\{\s*"?need_continue"?\s*[:：]\s*(true|false)\s*,?\s*\}',
+      caseSensitive: false,
+    ),
+    '',
+  );
+  t = t.replaceAll(
+    RegExp(
+      r'\{\s*"?next_action"?\s*[:：]\s*("?null"?|none|无|空)\s*,?\s*\}',
+      caseSensitive: false,
+    ),
+    '',
+  );
+  // 裸标记（前面不是 { 、 或 " → 不在 JSON 对象里）
+  t = t
+      .replaceAll(
+        RegExp(r'(?<![{,"])"?need_continue"?\s*[:：]\s*(true|false)',
+            caseSensitive: false),
+        '',
+      )
+      .replaceAll(
+        RegExp(r'(?<![{,"])"?next_action"?\s*[:：]\s*("?null"?|none|无|空)',
+            caseSensitive: false),
+        '',
+      );
+  return t.trim();
+}

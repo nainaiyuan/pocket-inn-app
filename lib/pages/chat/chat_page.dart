@@ -462,6 +462,7 @@ class _ChatPageState extends State<ChatPage>
       _autoContinuePid = null;
       _autoContinueCount = 0;
       _lastAutoContinueAt = null;
+      _continueFrozen = false; // 8-08 18:1x：停止也解除续话冻结
       _interruptRoundActive = false;
       _interruptFollowUpDone = false;
       DebugLogger.log('管家流程', '⏸ 用户按停止（无流程）：停止男主自动续话，等他说话');
@@ -511,6 +512,7 @@ class _ChatPageState extends State<ChatPage>
     _autoContinuePid = null;
     _autoContinueCount = 0;
     _lastAutoContinueAt = null;
+    _continueFrozen = false; // 8-08 18:1x：停止也解除续话冻结
     _interruptRoundActive = false;
     _interruptFollowUpDone = false;
     DebugLogger.log(
@@ -566,6 +568,7 @@ class _ChatPageState extends State<ChatPage>
     _autoContinuePid = null;
     _autoContinueCount = 0;
     _lastAutoContinueAt = null;
+    _continueFrozen = false; // 8-08 18:1x：用户说话 → 解除续话冻结
     _stopRequested = false; // 插话 = 用户主动说话，停止状态解除
     // 8-08 15:5x：存下插话内容（插话轮男主没回 → 兜底轮带给她看）
     _interruptUserText = text;
@@ -707,6 +710,9 @@ class _ChatPageState extends State<ChatPage>
   /// - 上限：用户消息之间最多 3 次（用户说话重置计数）
   /// - 最小间隔 25 秒（8-08 17:2x 日志复盘：男主 70 秒被唤醒 6 次，
   ///   每轮都去调工具/重写便签 → 用户看到"男主一直不停"）
+  /// - 8-08 18:1x（GPT 意见）：续话 = "结束检查轮"——唤醒不是"必须继续说话"，
+  ///   是给男主一次判断机会；他输出 need_continue:false / next_action:null
+  ///   （_continueFrozen）→ 不再唤醒，直到用户说话
   /// - 用户消息排队（男主忙时收集的）→ 优先回用户（相当于自动插话）
   /// - 流程场景不经过这里（走 _maybeAutoResume，任务驱动）
   Future<void> _maybeAutoContinue(String pid, {required bool spoke}) async {
@@ -717,6 +723,7 @@ class _ChatPageState extends State<ChatPage>
     if (pending.isNotEmpty) {
       _autoContinuePid = null;
       _autoContinueCount = 0; // 用户说话了，续话计数重置
+      _continueFrozen = false; // 用户说话了，解除冻结
       final texts = pending
           .map((e) => '[待#${e['id']}] ${e['text']}')
           .join('；');
@@ -745,9 +752,19 @@ class _ChatPageState extends State<ChatPage>
       _autoContinuePid = null;
       _autoContinueCount = 0;
       _lastAutoContinueAt = null;
+      _continueFrozen = false;
       return;
     }
-    // ②' 续话最小间隔 25 秒（8-08 17:2x 日志复盘：防"续话→调工具→再续话"风暴）。
+    // ②' 男主已明确判定无需继续（need_continue:false）→ 不再唤醒
+    //（8-08 18:1x GPT：next_action 为空 + 无 running 任务 → 停止 resume）
+    if (_continueFrozen) {
+      DebugLogger.log(
+        '管家流程',
+        '🔒 续话冻结：男主已判定无需继续，等用户说话（不再自动唤醒）',
+      );
+      return;
+    }
+    // ②'' 续话最小间隔 25 秒（8-08 17:2x 日志复盘：防"续话→调工具→再续话"风暴）。
     // 用户刚说话（_lastAutoContinueAt 为 null）不限制——第一轮续话立即允许
     final now = DateTime.now();
     if (_lastAutoContinueAt != null &&
@@ -768,6 +785,7 @@ class _ChatPageState extends State<ChatPage>
       _autoContinuePid = null;
       _autoContinueCount = 0;
       _lastAutoContinueAt = null;
+      _continueFrozen = false;
       DebugLogger.log('管家流程', '🔔 男主续话已达 3 次上限，停止（等用户说话）');
       return;
     }
@@ -777,18 +795,25 @@ class _ChatPageState extends State<ChatPage>
     if (mounted) setState(() {});
     DebugLogger.log(
       '管家流程',
-      '🔔 男主续话 #$_autoContinueCount（用户没说话，唤醒男主判断要不要继续说）',
+      '🔔 男主续话 #$_autoContinueCount（结束检查轮：唤醒男主判断要不要继续说）',
     );
     // 8-08 16:2x（用户反馈：男主"为什么发空消息给我"）：
     // 续话提醒必须说清"这是系统自动提醒，不是用户消息"，男主才不会误解
+    // 8-08 18:1x（GPT 意见）：改成"结束检查轮"——判断有没有必须继续的事，
+    // 没有就输出退出标记 {"need_continue": false}（管家识别，不显示给她）
     await _sendMsg(
       '',
       systemEvent: '【系统自动提醒——这不是用户消息，不用回复这条提醒本身】\n'
-          '上一轮你已经回复完毕，用户没有说话。'
-          '你可以：① 主动再补充一句、或者做点事（比如查资料、记记忆）；'
-          '② 如果没什么要说的，就回复一句自然的结束语（比如"好啦，先这样～"）'
-          '——系统检测到你说完就不再自动提醒，直到用户下次说话。'
-          '注意：刚做完的事不用再调工具确认（比如流程已结束就别重复 finish），'
+          '现在是"结束检查"：上一轮你已回复完，用户没有说话。\n'
+          '请判断有没有必须继续的事：\n'
+          '① 有未完成的话题，或刚才被打断没说完的回复？\n'
+          '② 有正在运行的任务需要继续推进？\n'
+          '③ 有明确的下一步动作（查资料/记记忆/推进流程）？\n'
+          '有 → 继续做，或说一句进展；\n'
+          '没有 → 说一句自然的结束语，并在这条回复的末尾加上退出标记：'
+          '{"need_continue": false}（管家识别这个标记，不会显示给她；'
+          '加了这个标记，系统就不会再自动唤醒你）。\n'
+          '注意：刚做完的事不用再调工具确认（流程已结束就别重复 finish），'
           '没有新事做就直接说结束语。',
       silentBubble: true,
     );
@@ -839,7 +864,6 @@ class _ChatPageState extends State<ChatPage>
     // 8-08 15:5x：本轮男主输出信息（finally 用——判断"男主这轮说了话没"、
     // 续话/插话检查的数据源）。注意作用域：try 外声明，try/finally 都能读。
     var roundSpoke = false; // 男主本轮最终生成了非空文本
-    var roundHadTools = false; // 男主本轮调了工具
     final userMsgId = DateTime.now().millisecondsSinceEpoch.toString();
     // 本轮男主第一句话气泡 id 重置（工具气泡只挂本轮第一句话头上）
     _firstAiMsgId = null;
@@ -1122,7 +1146,6 @@ class _ChatPageState extends State<ChatPage>
       while (result.toolCalls != null && result.toolCalls!.isNotEmpty) {
         toolLoop++;
         toolExecuted = true;
-        roundHadTools = true;
         if (toolLoop > maxToolRounds) {
           // 防御兜底（正常路径由下方 stop 事件先拦，这里保证不无限循环）
           DebugLogger.log(
@@ -1966,6 +1989,25 @@ class _ChatPageState extends State<ChatPage>
       }
       // 剥离所有指令（#…#）→ 用户只看到男主自然的回复
       displayText = ButlerCommandParser.instance.strip(displayText);
+      // 8-08 18:1x（GPT 意见：结束检查轮 + 明确退出状态）：
+      // 男主输出 need_continue:false / next_action:null → 冻结自动唤醒
+      //（这轮就是"结束检查轮"，男主明确说"没事情做了"）
+      final exitSignal = parseExitSignal(replyTexts.join('\n'));
+      if (exitSignal == true) {
+        _continueFrozen = true;
+        DebugLogger.log(
+          '管家流程',
+          '🔚 男主明确判定无需继续（need_continue:false/next_action:null），冻结自动唤醒',
+        );
+      } else if (exitSignal == false) {
+        _continueFrozen = false;
+        DebugLogger.log(
+          '管家流程',
+          '🔔 男主明确判定需要继续（need_continue:true），解除冻结',
+        );
+      }
+      // 退出标记从显示文本剥离（防纯文本路径漏给用户看；JSON 路径已自动丢弃）
+      displayText = stripExitSignal(displayText);
       // 8-08 15:5x：男主最终文本 → roundSpoke（finally 判断"这轮说了话没"）
       if (displayText.trim().isNotEmpty) roundSpoke = true;
       // 待定查询：男主回复"看5条/全部" → 继续审批流程
@@ -3273,6 +3315,10 @@ class _ChatPageState extends State<ChatPage>
   int _autoContinueCount = 0; // 用户消息之间男主主动续话次数
   DateTime? _lastAutoContinueAt; // 8-08 17:2x：上次续话时间（最小间隔 25s 防风暴）
   String? _autoContinuePid;
+  // 8-08 18:1x（GPT 意见：结束检查轮 + 明确退出状态）：
+  // 男主输出 need_continue:false / next_action:null → 冻结自动唤醒，
+  // 直到用户说话/插话/停止才解除。"唤醒"=一次检查机会，不是必须继续说话。
+  bool _continueFrozen = false;
 
   /// 8-04 21:1x：一键验收进行中（自动切 AI 跑真实对话）
   bool _accepting = false;

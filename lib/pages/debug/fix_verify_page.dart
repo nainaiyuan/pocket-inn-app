@@ -209,6 +209,53 @@ class _FixVerifyPageState extends State<FixVerifyPage> {
       });
     }
 
+    // ⑥ 结束检查退出信号（8-08 18:1x GPT 意见：续话=一次检查机会，
+    // 男主输出 need_continue:false / next_action:null → 冻结唤醒）
+    const exitCases = <(String, bool?)>[
+      ('好啦先这样~ {"need_continue": false}', true),
+      ('<sys>need_continue:false</sys>', true),
+      ('need_continue:false', true),
+      ('{"msg":"继续","need_continue": true}', false),
+      ('{"next_action": null}', true),
+      ('next_action:none', true),
+      ('next_action:无', true),
+      ('我还有事要做', null), // 没输出信号
+      ('好的，我现在去查资料', null),
+      ('', null),
+    ];
+    for (final (input, expected) in exitCases) {
+      final actual = parseExitSignal(input);
+      final pass = actual == expected;
+      cases.add({
+        'group': '⑥ 退出信号',
+        'input': '$input',
+        'expected': '$expected',
+        'actual': '$actual',
+        'pass': pass ? '✅' : '❌',
+      });
+    }
+
+    // ⑦ 退出标记剥离（标记不能漏给用户看）
+    const stripCases = <(String, String)>[
+      ('好啦先这样~ {"need_continue": false}', '好啦先这样~'),
+      ('继续做 {"need_continue": true}', '继续做'),
+      ('need_continue:false 结束', '结束'),
+      // JSON 块由多气泡解析器丢弃未知字段，这里不动（保持原样即正确）
+      ('{"msg":"好啦","need_continue":false}', '{"msg":"好啦","need_continue":false}'),
+      ('普通文本', '普通文本'),
+    ];
+    for (final (input, expected) in stripCases) {
+      final actual = stripExitSignal(input);
+      final pass = actual == expected;
+      cases.add({
+        'group': '⑦ 标记剥离',
+        'input': '$input',
+        'expected': '$expected',
+        'actual': '$actual',
+        'pass': pass ? '✅' : '❌',
+      });
+    }
+
     _caseResults
       ..clear()
       ..addAll(cases);
@@ -343,9 +390,12 @@ class _FixVerifyPageState extends State<FixVerifyPage> {
                 '7. 软提示区 → ⚠️ 未做专区（用【系统】前缀块代替）\n'
                 '8. 无进展判定 → ✅ currentStep+工具历史，3 轮熔断\n'
                 '9. resume_mode → ✅ silent 已实现（normal 未做）\n'
-                '10. 测试任务冲突 → ✅ 优先级降级（聊天>请求>后台测试）\n\n'
-                '🔍 行为类修复（插话/续话/自动续跑）验证方法：'
-                '工具箱 → 运行日志 → 🔍 只看关键，看 ⏰/🔔/💬/⏸ 锚点',
+                '10. 测试任务冲突 → ✅ 优先级降级（聊天>请求>后台测试）\n'
+                '11. 结束检查轮 → ✅ 8-08 18:1x：续话=一次检查机会，'
+                '男主输出 {"need_continue": false} 或 next_action:null → '
+                '冻结唤醒（🔚 男主判定结束 / 🔒 续话冻结 锚点）\n\n'
+                '🔍 行为类修复（插话/续话/自动续跑/结束检查）验证方法：'
+                '工具箱 → 运行日志 → 🔍 只看关键，看 ⏰/🔔/💬/⏸/🔚/🔒 锚点',
                 style: const TextStyle(fontSize: 12, height: 1.6),
               ),
             ),
