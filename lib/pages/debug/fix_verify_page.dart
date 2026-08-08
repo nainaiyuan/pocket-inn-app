@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/flow_store.dart';
 import '../../services/parse_utils.dart';
@@ -321,7 +323,7 @@ class _FixVerifyPageState extends State<FixVerifyPage> {
       add('next 最后一步 → status', 'done', '${(await FlowStore.get(pid))?['status']}');
       // BUG-2：summary 完成态不再显示"第 3/2 步"越界
       final sm = FlowStore.summary(pid);
-      add('summary 完成态不越界', '已完成', '${sm?.contains('已完成') ?? false}');
+      add('summary 完成态不越界', 'true', '${sm?.contains('已完成') ?? false}');
       // BUG-4：done 后 update → 回 running（新任务能跑）
       await FlowStore.update(pid, goal: '新任务', steps: [
         {'name': '步骤C', 'doneType': 'ai_output'},
@@ -366,6 +368,41 @@ class _FixVerifyPageState extends State<FixVerifyPage> {
           '${agg4.whereType<ToolGroupData>().first.msgs.length}');
       final agg5 = groupToolMessages([]);
       add('⑨ 空列表 → 0', '0', '${agg5.length}');
+      // ── 8-08 21:0x 旧数据自愈（用户：暂停的 5/4、停止条不收回去）──
+      // 老版本 next() 最后一步只 currentStep=len 不设 done → 读进来自愈
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        'flow___heal1__',
+        jsonEncode({
+          'goal': '旧流程',
+          'currentStep': 2,
+          'status': 'running',
+          'steps': [
+            {'name': 'A', 'status': 'done'},
+            {'name': 'B', 'status': 'done'},
+          ],
+        }),
+      );
+      final h1 = await FlowStore.get('__heal1__');
+      add('自愈 running+cur==len → done', 'done', '${h1?['status']}');
+      add('自愈后 isRunning', 'false', '${FlowStore.isRunning('__heal1__')}');
+      await prefs.setString(
+        'flow___heal2__',
+        jsonEncode({
+          'goal': '旧流程',
+          'currentStep': 2,
+          'status': 'paused_by_user',
+          'steps': [
+            {'name': 'A', 'status': 'done'},
+            {'name': 'B', 'status': 'done'},
+          ],
+        }),
+      );
+      final h2 = await FlowStore.get('__heal2__');
+      add('自愈 paused+cur==len → done', 'done', '${h2?['status']}');
+      // 清理自愈测试数据
+      await prefs.remove('flow___heal1__');
+      await prefs.remove('flow___heal2__');
     } catch (e) {
       add('执行异常', '无', '$e');
     }

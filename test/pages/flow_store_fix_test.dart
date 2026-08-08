@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -143,5 +145,52 @@ void main() {
 
   test('聚合：空列表 → 0', () {
     expect(groupToolMessages([]), isEmpty);
+  });
+
+  // ── 8-08 21:0x 旧数据自愈（用户：暂停的 5/4、停止条不收回去）──
+  // 老版本（≤70f52c3）next() 最后一步只 currentStep=len 不设 done →
+  // running + cur>=len 残留 → 读进来必须自愈成 done
+  Map<String, dynamic> oldFlow({required int cur, required String status}) => {
+        'goal': '旧流程',
+        'currentStep': cur,
+        'status': status,
+        'steps': [
+          {'name': 'A', 'status': 'done'},
+          {'name': 'B', 'status': 'done'},
+        ],
+      };
+
+  test('自愈：旧数据 running+cur==len → 读成 done', () async {
+    SharedPreferences.setMockInitialValues({
+      'flow___heal1__': jsonEncode(oldFlow(cur: 2, status: 'running')),
+    });
+    final f = await FlowStore.get('__heal1__');
+    expect(f?['status'], 'done');
+    expect(FlowStore.isRunning('__heal1__'), isFalse);
+  });
+
+  test('自愈：paused_by_user+cur==len → 读成 done（暂停也收尾）', () async {
+    SharedPreferences.setMockInitialValues({
+      'flow___heal2__': jsonEncode(oldFlow(cur: 2, status: 'paused_by_user')),
+    });
+    final f = await FlowStore.get('__heal2__');
+    expect(f?['status'], 'done');
+  });
+
+  test('自愈：cancelled+cur==len → 保持 cancelled（取消是终态）', () async {
+    SharedPreferences.setMockInitialValues({
+      'flow___heal3__': jsonEncode(oldFlow(cur: 2, status: 'cancelled')),
+    });
+    final f = await FlowStore.get('__heal3__');
+    expect(f?['status'], 'cancelled');
+  });
+
+  test('自愈：cur>len 越界 → 修正为 len + done', () async {
+    SharedPreferences.setMockInitialValues({
+      'flow___heal4__': jsonEncode(oldFlow(cur: 5, status: 'running')),
+    });
+    final f = await FlowStore.get('__heal4__');
+    expect(f?['currentStep'], 2);
+    expect(f?['status'], 'done');
   });
 }

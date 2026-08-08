@@ -169,8 +169,11 @@ class _ChatPageState extends State<ChatPage>
       if (!FlowStore.isRunning(pid)) return;
       final flow = await FlowStore.get(pid);
       final steps = (flow?['steps'] as List?)?.length ?? 0;
-      final cur = ((flow?['currentStep'] as num?)?.toInt() ?? 0) + 1;
+      final rawCur = (flow?['currentStep'] as num?)?.toInt() ?? 0;
       if (steps == 0) return;
+      // 8-08 21:0x（用户：5/4）：currentStep 走完但 status 残留 running 的
+      // 旧数据由 FlowStore 自愈；这里再兜一层显示保护（不显示越界进度）
+      final cur = rawCur >= steps ? steps : rawCur + 1;
       DebugLogger.log(
         '管家流程',
         '🔔 APP 重启恢复：上次任务未完成（「${flow?['goal']}」第 $cur/$steps 步），'
@@ -2189,7 +2192,10 @@ class _ChatPageState extends State<ChatPage>
           if (FlowStore.isRunning(personaId)) {
             final f = await FlowStore.get(personaId);
             final steps = (f?['steps'] as List?)?.length ?? 0;
-            final cur = ((f?['currentStep'] as num?)?.toInt() ?? 0) + 1;
+            final rawCur = (f?['currentStep'] as num?)?.toInt() ?? 0;
+            // 8-08 21:0x：越界保护（自愈后的 running 不应出现 cur>=len，
+            // 再兜一层防日志显示 5/4）
+            final cur = rawCur >= steps ? steps : rawCur + 1;
             DebugLogger.log(
               '管家流程',
               '⏰ 检查点⑤：本轮结束，任务仍 running'

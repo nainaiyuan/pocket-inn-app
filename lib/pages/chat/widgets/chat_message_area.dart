@@ -4,6 +4,7 @@ import '../../../models/chat_message.dart';
 import '../services/chat_storage_service.dart';
 import '../state/chat_presence.dart';
 import 'message_bubble.dart';
+import 'tool_group_card.dart';
 
 /// 消息区域 —— 渲染消息列表 + 加载历史 + 多选删除
 class ChatMessageArea extends StatefulWidget {
@@ -276,15 +277,36 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
           child: ListView.builder(
             controller: _scrollCtrl,
             padding: const EdgeInsets.only(top: 8, bottom: 8),
-            itemCount: _messages.length,
+            // 8-08 20:4x（用户+GPT 定稿）：展示层聚合——连续 [tool] 消息
+            // 聚成工具卡（折叠一行/展开原样）。注意：chat_page 实际走的是
+            // ChatMessageArea，不是 ChatMessageList（20:31 用户反馈工具卡
+            // 没生效 = 改错文件，此处才是真正渲染路径）。
+            itemCount: groupToolMessages(_messages).length,
             itemBuilder: (context, index) {
-              final msg = _messages[index];
+              final items = groupToolMessages(_messages);
+              final item = items[index];
+              // 工具卡：整段一个折叠卡片
+              if (item is ToolGroupData) {
+                return Padding(
+                  padding: const EdgeInsets.only(top: 3, bottom: 3),
+                  child: ToolGroupCard(
+                    key: ValueKey(item.msgs.first.id),
+                    group: item,
+                    inputTapRegionGroupId: const Object(),
+                  ),
+                );
+              }
+              final msg = item as ChatMessage;
               final mid = msg.id ?? '';
               final selected = _selectedIds.contains(mid);
               // 8-04 17:1x（用户：聊天UI要体现时间，几月几日聊的都不知道）：
               // 时间分隔条——首条/与上条间隔>10分钟/跨天时显示（微信风格）
-              final sep = _timeSeparator(
-                  index > 0 ? _messages[index - 1] : null, msg);
+              // 工具卡整体算一条（用组内最后一条的时间做比较基准）
+              final prevRaw = index > 0 ? items[index - 1] : null;
+              final prevMsg = prevRaw is ToolGroupData
+                  ? prevRaw.msgs.last
+                  : prevRaw as ChatMessage?;
+              final sep = _timeSeparator(prevMsg, msg);
               return Column(
                 children: [
                   if (sep != null) sep,
@@ -340,9 +362,9 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
                           onAvatarLongPress: () => _enterSelectMode(msg.id ?? ''),
                           inputTapRegionGroupId: const Object(),
                           isLastUserMessageWithoutReply:
-                              index == _messages.length - 1 && msg.isMe,
+                              msg == _messages.last && msg.isMe,
                           isLastCharacterMessage:
-                              index == _messages.length - 1 && !msg.isMe,
+                              msg == _messages.last && !msg.isMe,
                           showActions: false,
                           canEdit: false,
                           canDelete: false,

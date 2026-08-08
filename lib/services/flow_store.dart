@@ -70,12 +70,36 @@ class FlowStore {
         final parsed = jsonDecode(raw) as Map<String, dynamic>;
         // 8-08 15:2x：旧数据（字符串 steps）读取时升级为对象
         _upgradeSteps(parsed);
+        // 8-08 21:0x（用户：暂停的变 5/4、停止条不收回去）：
+        // 旧 APK 残留数据自愈——老版本 next() 最后一步只设 currentStep
+        // 不设 done（running + currentStep==len）→ 停止条永不消失、
+        // 重启提示"第 5/4 步"。读进来就修正：步数走完的非 cancelled
+        // 流程一律补 done（取消保留）。
+        _selfHeal(parsed);
         _memCache = parsed;
       } else {
         _memCache = null;
       }
     } catch (e) {
       _memCache = null;
+    }
+  }
+
+  /// 8-08 21:0x（用户：5/4 + 停止条不收回去）：旧 APK 残留数据自愈。
+  /// 老版本（≤70f52c3）next() 最后一步只 currentStep=len 不设 done →
+  /// running + cur>=len → 停止条永不消失、重启提示"第 5/4 步"。
+  /// 规则：currentStep 已走完所有步骤且不是 cancelled → 补 done。
+  /// 同时修正越界的 currentStep（步骤数变少/update 残留）。
+  static void _selfHeal(Map<String, dynamic> f) {
+    final steps = _stepsOf(f);
+    if (steps.isEmpty) return;
+    final status = f['status']?.toString() ?? '';
+    var cur = (f['currentStep'] as num?)?.toInt() ?? 0;
+    if (cur > steps.length) cur = steps.length; // 越界修正
+    f['currentStep'] = cur;
+    if (cur >= steps.length && status != 'cancelled') {
+      f['status'] = 'done';
+      f['stoppedNote'] = '';
     }
   }
 
@@ -479,12 +503,22 @@ class FlowStore {
     if (f['status'] != 'stopped' && f['status'] != 'paused_by_user') {
       return '流程不在暂停状态（${f['status']}）';
     }
+    // 8-08 21:0x（用户：暂停的 5/4 不收回去）：暂停前其实所有步骤已走完
+    // （旧数据/边界）→ resume 时直接收尾，别恢复成一个空跑的 running
+    final steps = _stepsOf(f);
+    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
+    if (steps.isNotEmpty && cur >= steps.length) {
+      f['status'] = 'done';
+      f['stoppedNote'] = '';
+      await _write(personaId, f);
+      _log('流程', '✅ resume 发现步骤已走完 → 直接收尾（done）');
+      await _sinkToPad(personaId, f, done: true);
+      return '流程步骤其实已全部完成，已收尾 ✅';
+    }
     f['status'] = 'running';
     f['stoppedNote'] = '';
     await _write(personaId, f);
     _log('流程', '▶ resume 继续流程');
-    final steps = _stepsOf(f);
-    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
     return '继续流程：${f['goal']}，第 ${cur + 1} 步：${_stepName(steps[cur])}';
   }
 

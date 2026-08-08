@@ -242,6 +242,10 @@ StructuredOutput parseStructuredOutput(String raw) {
             )
             .trim();
         if (t.isEmpty) continue;
+        // 8-08 21:0x（用户：调工具时男主有思考没说话 → 出现"<"单独气泡）：
+        // 剥完还剩纯标签残渣（无闭合 > 的 <thinking/< 等）→ 丢弃整块；
+        // 带数字的（<3 表情）和带正文的（x < y）不误伤
+        if (RegExp(r'^<[a-zA-Z_/|]*$').hasMatch(t)) continue;
         bubbles.add(BubblePart(BubbleKind.msg, [BubbleSpan(SpanKind.text, t)]));
     }
   }
