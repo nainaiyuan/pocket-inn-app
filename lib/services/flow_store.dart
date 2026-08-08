@@ -162,6 +162,16 @@ class FlowStore {
     return f != null && (f['status']?.toString() ?? '') == 'running';
   }
 
+  /// 8-08 21:3x（用户："流程结束停止窗还在"）：流程是否已收尾
+  /// （done/cancelled）——收尾后停止条不再显示（男主汇报完可能被
+  /// 检查轮唤醒续话，_autoContinueCount>0 会让停止条误挂）
+  static bool isDone(String personaId) {
+    final f = _memCache;
+    if (f == null || f.isEmpty) return false;
+    final s = f['status']?.toString() ?? '';
+    return s == 'done' || s == 'cancelled';
+  }
+
   /// 步骤对象化：String → {name, doneType: tool_result}；
   /// Map → {name: 必填, doneType/doneCondition 可选}
   static Map<String, dynamic> _stepFrom(dynamic s) {

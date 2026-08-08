@@ -18,6 +18,21 @@ import 'dart:math' as math;
 /// 气泡内片段类型
 enum SpanKind { text, act }
 
+/// 8-08 21:3x（用户：男主气泡输出"工具:query_tool_formats关键词=notify_user"）：
+/// DeepSeek 把工具调用文本化泄漏进回复（工具:名 关键词=值）——整行剥掉。
+/// 只认行首"工具:"+工具名特征，不误伤"这个工具:xxx 很好用"（行首非工具:）。
+/// 供 bare 块解析和 chat_page _displayableText（渐进显示）共用。
+String stripToolTextLines(String t) {
+  final lines = t.split('\n').where((ln) {
+    final s = ln.trim();
+    if (s.isEmpty) return false;
+    return !RegExp(
+      r'^工具[:：]\s*[\w_]+(\s*(关键词|参数)[:：]\s*[^\s，。；;]+)?\s*$',
+    ).hasMatch(s);
+  }).join('\n').trim();
+  return lines;
+}
+
 /// 气泡内一个片段
 class BubbleSpan {
   final SpanKind kind;
@@ -241,6 +256,22 @@ StructuredOutput parseStructuredOutput(String raw) {
               '',
             )
             .trim();
+        if (t.isEmpty) continue;
+        // 8-08 21:0x（用户：男主气泡输出"工具:query_tool_formats关键词=notify_user"）：
+        // DeepSeek 把工具调用文本化泄漏进回复（工具:名 关键词=值）——整行剥掉。
+        // 只认行首"工具:"+工具名特征，不误伤"这个工具:xxx 很好用"（行首非工具:）
+        final lines = t.split('\n').where((ln) {
+          final s = ln.trim();
+          if (s.isEmpty) return false;
+          return !RegExp(
+            r'^工具[:：]\s*[\w_]+(\s*(关键词|参数)[:：]\s*[^\s，。；;]+)?\s*$',
+          ).hasMatch(s);
+        }).join('\n').trim();
+        t = lines;
+        if (t.isEmpty) continue;
+        // 8-08 21:0x（用户：男主气泡输出"工具:query_tool_formats关键词=notify_user"）：
+        // DeepSeek 文本化工具调用泄漏 → 整行剥掉（公共函数，渐进显示同用）
+        t = stripToolTextLines(t);
         if (t.isEmpty) continue;
         // 8-08 21:0x（用户：调工具时男主有思考没说话 → 出现"<"单独气泡）：
         // 剥完还剩纯标签残渣（无闭合 > 的 <thinking/< 等）→ 丢弃整块；

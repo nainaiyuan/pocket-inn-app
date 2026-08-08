@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:pocket_inn/models/chat_message.dart';
+import 'package:pocket_inn/pages/chat/services/multi_bubble_parser.dart';
 import 'package:pocket_inn/pages/chat/widgets/tool_group_card.dart';
 import 'package:pocket_inn/services/flow_store.dart';
 
@@ -192,5 +193,26 @@ void main() {
     final f = await FlowStore.get('__heal4__');
     expect(f?['currentStep'], 2);
     expect(f?['status'], 'done');
+  });
+
+  // ── 8-08 21:3x 文本化工具调用泄漏（用户：男主气泡"工具:xxx关键词=yyy"）──
+  test('剥工具行：纯工具调用行 → 空', () {
+    expect(stripToolTextLines('工具:query_tool_formats关键词=notify_user'), '');
+    expect(
+      stripToolTextLines('工具：query_tool_formats 关键词：notify_user'),
+      '',
+    );
+  });
+
+  test('剥工具行：混合文本只剥工具行', () {
+    expect(
+      stripToolTextLines('好的，马上\n工具:query_tool_formats关键词=countdown_card'),
+      '好的，马上',
+    );
+  });
+
+  test('剥工具行：不误伤正常文本', () {
+    expect(stripToolTextLines('这个工具:xxx 很好用'), '这个工具:xxx 很好用');
+    expect(stripToolTextLines('她说工具:锤子 敲一下'), '她说工具:锤子 敲一下');
   });
 }

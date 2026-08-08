@@ -2835,14 +2835,24 @@ class _ChatPageState extends State<ChatPage>
                   // 8-08 17:3x（用户反馈："他说那么多话我要让他停止"）：
                   // 停止条显示条件扩展——男主生成中/自动续话中（无流程）也显示，
                   // 否则男主连续说话时用户没地方按停止，只能等 3 次上限
-                  if (FlowStore.isRunning(
+                  // 8-08 21:3x（用户："流程结束了停止窗还在"）：
+                  // 流程 done/cancelled 后隐藏——否则男主汇报完流程被
+                  // "结束检查轮"唤醒续话时 _autoContinueCount>0，停止条
+                  // 一直挂着"男主正在执行流程：已完成"
+                  if (!FlowStore.isDone(
                         _state.personaId ??
                             (_state.leadId == null
                                 ? ''
                                 : '${_state.leadId}_default'),
-                      ) ||
-                      _generating ||
-                      _autoContinueCount > 0)
+                      ) &&
+                      (FlowStore.isRunning(
+                            _state.personaId ??
+                                (_state.leadId == null
+                                    ? ''
+                                    : '${_state.leadId}_default'),
+                          ) ||
+                          _generating ||
+                          _autoContinueCount > 0))
                     _buildFlowStopBar(),
                   ChatInputBar(
                     externalCtrl: _inputCtrl,
@@ -4037,6 +4047,10 @@ class _ChatPageState extends State<ChatPage>
     // 8-08 00:2x：标签形态兜底剥离（模型自创 <…> 全清，界面永远干净）
     t = stripTagShapes(t);
     t = ButlerCommandParser.instance.strip(t);
+    // 8-08 21:3x（用户：男主气泡"工具:xxx关键词=yyy"）：DeepSeek 文本化
+    // 工具调用泄漏 → 渐进显示路径也剥（落库后渲染走 multi_bubble_parser，
+    // 那里同样调 stripToolTextLines）
+    t = stripToolTextLines(t);
     try {
       final butler = ChatService.instance.butler;
       if (butler != null) {

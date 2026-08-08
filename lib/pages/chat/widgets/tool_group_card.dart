@@ -57,14 +57,15 @@ class _ToolGroupCardState extends State<ToolGroupCard> {
   bool _expanded = false;
   bool _userTouched = false; // 用户手动点过 → 之后不再自动展开
 
-  /// 段内是否有"正在…"消息（= 工具轮执行中）
-  bool get _running =>
-      widget.group.msgs.any((m) => m.text.contains('正在'));
-
-  /// 已完成条数（✅/❌ 都算走完）
-  int get _finished => widget.group.msgs
-      .where((m) => m.text.contains('✅') || m.text.contains('❌'))
-      .length;
+  /// 段内是否执行中（8-08 21:3x 用户："一直 3/6" 根因修复）：
+  /// 之前用"段内任何消息含'正在'"——工具消息是历史落库文本，完成态
+  /// 不改写它 → running 永远 true → 标题永远"正在调用：X…（m/N）"。
+  /// 改：执行中 = 段内【最后一条】消息是"正在…"（工具轮还在追加）；
+  /// 最后一条是 ✅/❌（_appendToolResultBubble 统一出口）→ 轮已结束。
+  bool get _running {
+    if (widget.group.msgs.isEmpty) return false;
+    return widget.group.msgs.last.text.contains('正在');
+  }
 
   /// 当前执行中的工具名（最后一条"正在…"消息）
   String? get _currentTool {
@@ -100,8 +101,11 @@ class _ToolGroupCardState extends State<ToolGroupCard> {
     final total = widget.group.msgs.length;
     final running = _running;
     final current = _currentTool;
+    // 8-08 21:3x（用户："3/6 不要这样显示"）：去掉 m/N 计数——
+    // 计数会停在中间值（3/6）让人以为卡住。执行中只显示工具名，
+    // 结束显示总数。
     final title = running
-        ? '🛠 正在调用：$current…（$_finished/$total）'
+        ? '🛠 正在调用：$current…'
         : '🛠 调用了 $total 个工具';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
