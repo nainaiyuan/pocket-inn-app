@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../butler/flow/butler_flow.dart';
 import '../../../utils/debug_logger.dart';
@@ -8,6 +9,10 @@ import '../../debug/debug_toolbox_page.dart';
 
 /// 调试日志弹层（黑底终端风格，可滚动、可选中复制、可按标签筛选）。
 /// 两个视图：日志（散行） / 流程（管家流程树，看每步是否顺利）。
+///
+/// 8-08 13:0x 用户反馈：日志太长找不到关键行 → 加「只看关键日志」开关
+/// +「复制关键日志」按钮：只提取锚点行（🔧📦📋▶⏰🔔⏸❌⚠️）一键复制，
+/// 直接粘贴发给龙虾定位断点（A/B/C/D 判定）。
 void showDebugLogSheet(BuildContext context) {
   showModalBottomSheet(
     context: context,
@@ -26,6 +31,12 @@ class _DebugLogSheet extends StatefulWidget {
 class _DebugLogSheetState extends State<_DebugLogSheet> {
   String _filter = '全部';
   bool _showFlows = false; // false = 日志行视图，true = 流程树视图
+  bool _anchorsOnly = false; // true = 只看关键锚点行（🔧📦📋▶⏰🔔⏸❌⚠️）
+
+  /// 关键锚点标记（断点定位用，对应 A/B/C/D 判定卡）
+  static final RegExp _anchorPattern = RegExp(
+    r'🔧|📦|📋|▶|⏰|🔔|⏸|❌|⚠️',
+  );
 
   static const _tags = [
     '全部',
@@ -151,6 +162,43 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
             ),
             const Divider(color: Colors.white24),
             if (!_showFlows) ...[
+              // 只看关键锚点 + 一键复制（08-08 新增：日志太长找不到关键行）
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    ChoiceChip(
+                      label: const Text('🔍 只看关键', style: TextStyle(fontSize: 11)),
+                      selected: _anchorsOnly,
+                      selectedColor: const Color(0xFFC896B4),
+                      labelStyle: TextStyle(
+                        color: _anchorsOnly ? Colors.white : Colors.white70,
+                      ),
+                      side: BorderSide(
+                        color: _anchorsOnly
+                            ? const Color(0xFFC896B4)
+                            : Colors.white24,
+                      ),
+                      onSelected: (v) =>
+                          setState(() => _anchorsOnly = v),
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      '🔧📦📋▶⏰🔔⏸❌⚠️',
+                      style: TextStyle(fontSize: 11, color: Colors.white38),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: _copyAnchorLogs,
+                      icon: const Icon(Icons.copy, size: 14, color: Color(0xFFC896B4)),
+                      label: const Text(
+                        '复制关键日志',
+                        style: TextStyle(color: Color(0xFFC896B4), fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               // 标签筛选
               SizedBox(
                 height: 34,
@@ -208,13 +256,44 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
 
   String get _filteredText {
     final all = DebugLogger.recentLogs;
-    if (_filter == '全部') return all.join('\n');
-    if (_filter == '其他') {
-      return all
-          .where((l) => !_tags.sublist(1).any((t) => l.contains('[$t]')))
-          .join('\n');
+    // 锚点过滤（只看关键行，叠加在标签筛选之上）
+    Iterable<String> base;
+    if (_filter == '全部') {
+      base = all;
+    } else if (_filter == '其他') {
+      base = all
+          .where((l) => !_tags.sublist(1).any((t) => l.contains('[$t]')));
+    } else {
+      base = all.where((l) => l.contains('[$_filter]'));
     }
-    return all.where((l) => l.contains('[$_filter]')).join('\n');
+    if (_anchorsOnly) {
+      base = base.where((l) => _anchorPattern.hasMatch(l));
+    }
+    return base.join('\n');
+  }
+
+  /// 复制关键锚点日志到剪贴板（不受标签筛选影响，取全部锚点行按时间顺序）
+  Future<void> _copyAnchorLogs() async {
+    final all = DebugLogger.recentLogs;
+    final anchors =
+        all.where((l) => _anchorPattern.hasMatch(l)).toList(growable: false);
+    if (anchors.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('还没有关键日志，先跑一次再复制')),
+      );
+      return;
+    }
+    final text = [
+      '===== 关键锚点日志（${DateTime.now().toString()}）=====',
+      ...anchors,
+      '===== 结束 =====',
+    ].join('\n');
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已复制 ${anchors.length} 行关键日志，直接粘贴发给龙虾即可')),
+    );
   }
 }
 

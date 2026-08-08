@@ -394,6 +394,13 @@ class _ChatPageState extends State<ChatPage>
         <String>[];
     final cur = (flow['currentStep'] as num?)?.toInt() ?? 0;
     await FlowStore.stop(pid, userMessages: userText);
+    // 8-08 13:0x 检查点⑤锚点：暂停 = 完全停止（用户拍板）——日志留痕，
+    // resume 队列实现后这里要同时"移出队列 + 取消唤醒 Timer"
+    DebugLogger.log(
+      '管家流程',
+      '⏸ 用户停止流程：目标「${flow['goal']}」，停在 ${cur + 1}/${steps.length} 步'
+      '（暂停后不唤醒，等用户再发消息）',
+    );
     if (mounted) setState(() {});
     final curStep = cur < steps.length ? steps[cur] : '';
     final event =
@@ -1541,6 +1548,32 @@ class _ChatPageState extends State<ChatPage>
       if (personaId.isNotEmpty && _isEndOfDaySignal(t)) {
         if (!_chatSessionIsMock) unawaited(_recordChatEnd());
         unawaited(_writeDailyDiary(chatPid, personaName));
+      }
+      // 8-08 13:0x 检查点⑤锚点（纯日志埋点，暂不实现唤醒）：
+      // 本轮结束（无论成败）后，任务是否还 running——这是"男主回复用户后
+      // 任务睡着"的判定依据。日志对照 A/B/C/D 判定卡 D 项。
+      if (personaId.isNotEmpty) {
+        try {
+          final fPid = _useTestSpace(personaId)
+              ? '$personaId${AIProviderManager.mockTestSuffix}'
+              : personaId;
+          FlowStore.warm(fPid);
+          if (FlowStore.isRunning(fPid)) {
+            final f = await FlowStore.get(fPid);
+            final steps = (f?['steps'] as List?)?.length ?? 0;
+            final cur = ((f?['currentStep'] as num?)?.toInt() ?? 0) + 1;
+            DebugLogger.log(
+              '管家流程',
+              '⏰ 检查点⑤：本轮结束，任务仍 running'
+              '（目标「${f?['goal'] ?? '?'}」第 $cur/$steps 步）'
+              '→ 需要 resume 机制继续（待实现，用户再发消息才会动）',
+            );
+          } else {
+            DebugLogger.log('管家流程', '⏰ 检查点⑤：本轮结束，任务非 running（无需唤醒）');
+          }
+        } catch (e) {
+          DebugLogger.log('管家流程', '⏰ 检查点⑤检查失败: $e');
+        }
       }
     }
     // 8-06 23:55：停止事件排队——这轮结束（无论成败）自动触发，不丢
