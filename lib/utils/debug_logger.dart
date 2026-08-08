@@ -123,10 +123,14 @@ class DebugLogger {
     int limit = 15,
     String? date,
   }) {
-    // 取日志源：'today'/'yesterday'/'2026-08-06' → 读对应文件；null → 内存缓冲
+    // 取日志源：'today'/'yesterday'/'2026-08-06' → 读对应文件；null → 当天文件
+    // 8-08 22:5x（男主 21:23 汇报 keyword 疑似不生效）：原来 null/'today'
+    // 走内存 _buffer（只留最近 200 行）——App 跑久一点 keyword 匹配的行早被
+    // 挤出缓冲 → 查不到 → 像"不生效"。所有日志本就落盘（_appendToToday），
+    // 直接读当天文件全量，keyword 全量生效。
     List<String> source;
     if (date == null || date == 'today') {
-      source = _buffer.toList(growable: false);
+      source = _readFile(_pathFor(DateTime.now()));
     } else if (date == 'yesterday') {
       source = _readFile(_pathFor(DateTime.now().subtract(const Duration(days: 1))));
     } else {

@@ -447,6 +447,13 @@ class CapabilityProbe {
 /// 格式类错误判定：HTTP 400/422 且报错提到工具/函数/参数等 → 是格式问题，
 /// 触发"降级下一种调用方式"；网络/超时/401/500 → 不是格式问题，走 provider
 /// failover（防把网络抖动误判成格式问题、把好好的 openai 格式降级成文本协议）。
+///
+/// 8-08 22:5x（用户：老弹灰框一串错误，可能就是 400）：DeepSeek 思考模式
+/// 工具轮报 "The 'reasoning_content' in the thinking mode must be passed back"
+/// ——这句没有 tool/function/argument 等词，原来判定为"非格式错误"→ 不降级
+/// → failover/弹窗。补 reasoning/thinking/思考 关键词：这类 400 是消息格式
+/// 问题（原生 tool_calls 回传要求太高），应降级 text 协议（translateToolRound
+/// 丢弃 tool_calls 合并结果，天然免疫 400）。
 bool isFormatError(Object error) {
   final message = error.toString().toLowerCase();
   final mentionsFormat = message.contains('tool') ||
@@ -455,7 +462,12 @@ bool isFormatError(Object error) {
       message.contains('parameter') ||
       message.contains('unknown field') ||
       message.contains('unexpected') ||
-      message.contains('invalid request');
+      message.contains('invalid request') ||
+      // 8-08 22:5x：DeepSeek 思考模式回传要求（reasoning_content 必须原样带回）
+      message.contains('reasoning_content') ||
+      message.contains('reasoning') ||
+      message.contains('thinking') ||
+      message.contains('思考');
   final badStatus = message.contains('400') || message.contains('422');
   return mentionsFormat && badStatus;
 }

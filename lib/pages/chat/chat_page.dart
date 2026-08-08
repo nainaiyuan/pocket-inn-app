@@ -1195,9 +1195,27 @@ class _ChatPageState extends State<ChatPage>
         //   思考模式 tool_calls 必须配 id 回传，否则 400）
         // ② 文本块工具（⟨工具:⟩ 解析，无 id）：不发伪造原生 tool_calls，
         //   工具结果合并注入 user 消息（文本协议兜底，本地/不支持原生工具的模型用）
-        final nativeCalls = result.toolCalls!
-            .where((c) => (c['id']?.toString() ?? '').isNotEmpty)
-            .toList();
+        // 8-08 22:5x（DeepSeek 400 根治，用户：老弹灰框一串错误）：
+        // 思考模式要求带 tool_calls 的 assistant 消息必须原样回传
+        // reasoning_content（8-03 06:54 已知）。响应里解析不出（或为空）
+        // 时强行发原生 tool_calls 必 400 → 该轮不发原生，工具结果全走
+        // 文本合并注入（translateToolRound 路径，天然免疫 400）。
+        // 非思考模型（推理链本来就空）也走文本协议——功能完整只是不用
+        // 原生 tool_calls，比 400 弹灰框强。
+        final hasReasoning =
+            (result.reasoningContent?.trim().isNotEmpty ?? false);
+        final nativeCalls = hasReasoning
+            ? result.toolCalls!
+                .where((c) => (c['id']?.toString() ?? '').isNotEmpty)
+                .toList()
+            : <Map<String, dynamic>>[];
+        if (result.toolCalls!.isNotEmpty && nativeCalls.isEmpty) {
+          DebugLogger.log(
+            'AI路由',
+            '🛡 工具轮无 reasoning_content（思考链关/解析失败）→ '
+            '原生 tool_calls 转文本协议，防 DeepSeek 400',
+          );
+        }
         final textToolResults = <String>[];
         // 8-07 00:1x：用户拒绝收集——拒绝不走普通工具结果（男主会无视），
         // 这轮工具执行完走【系统事件】通道强制男主决策
