@@ -1020,6 +1020,7 @@ class _ChatPageState extends State<ChatPage>
         // 用户 8-03 02:41 模块化重构：技能注入 + 温控询问 + 获准记忆 → USER_PROFILE
         //（用户状态）；审批反馈 + 工具强制提示 → TASK_STATE（任务状态）
         userProfile: [
+          _currentUserSetting(),
           if (skillInjection != null) skillInjection,
           if (keywordAsk != null) keywordAsk,
           ...recallInjection,
@@ -1109,6 +1110,7 @@ class _ChatPageState extends State<ChatPage>
               personaId,
               personaName: personaName,
               personaPrompt: _currentPersonaPrompt(),
+              userProfile: _currentUserSetting(),
               sessionId: _chatSessionId,
               storagePersonaId: chatPid,
               systemEvent: rewriteEvent,
@@ -1944,6 +1946,7 @@ class _ChatPageState extends State<ChatPage>
           personaId,
           personaName: personaName,
           personaPrompt: _currentPersonaPrompt(),
+          userProfile: _currentUserSetting(),
           toolRound: true,
           // 8-06 21:12 用户 bug：第一轮男主已回过话 → 工具轮别再带旧话（防回复两句）
           userAlreadyReplied: result.text.trim().isNotEmpty,
@@ -7435,6 +7438,24 @@ class _ChatPageState extends State<ChatPage>
     );
   }
 
+  /// 当前用户设定（用户 8-06 18:24 设定版本管理·用户框）——独立注入
+  /// SystemTemplate【用户状态】段（8-08 22:5x 用户：之前误拼进男主设定段）。
+  /// 所有男主对话轮（正常/重写/工具轮）都带，男主知道用户档案不"性情大变"。
+  String _currentUserSetting() {
+    try {
+      final pid = _state.personaId;
+      if (pid == null || pid.isEmpty) return '';
+      final book = SettingVersionStore.cached(_settingPid());
+      if (book == null) return '';
+      final user = book.currentUser.trim();
+      if (user.isEmpty) return '';
+      return '【用户设定·当前版】（分段，改哪段用 update_setting 的 tag 定位）\n'
+          '${_formatSectionsNumbered(user)}';
+    } catch (_) {
+      return '';
+    }
+  }
+
   /// 当前 persona 的初始设定（用户写的人设），随每轮请求进 system
   String _currentPersonaPrompt() {
     try {
@@ -7446,17 +7467,14 @@ class _ChatPageState extends State<ChatPage>
         final book = SettingVersionStore.cached(_settingPid());
         if (book != null) {
           final male = book.currentMale.trim();
-          final user = book.currentUser.trim();
           if (male.isNotEmpty) {
             prompt +=
                 '\n\n【男主设定·当前版】（分段，改哪段用 update_setting 的 tag 定位）\n'
                 '${_formatSectionsNumbered(male)}';
           }
-          if (user.isNotEmpty) {
-            prompt +=
-                '\n\n【用户设定·当前版】（分段，改哪段用 update_setting 的 tag 定位）\n'
-                '${_formatSectionsNumbered(user)}';
-          }
+          // 8-08 22:5x（用户：用户设定不该拼进男主设定段）：用户设定拆走——
+          // 独立走 userProfile 参数 → SystemTemplate【用户状态】段（见
+          // _currentUserSetting），不再混在【男主设定】里
           final summary = SettingVersionStore.summaryTextSync(_settingPid());
           if (summary.isNotEmpty) {
             prompt +=

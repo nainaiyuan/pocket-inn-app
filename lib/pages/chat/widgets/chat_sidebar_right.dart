@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../../../butler/system_template.dart';
 import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
 import '../../../services/setting_version_store.dart';
+import '../../system_view_page.dart';
 import '../services/chat_storage_service.dart';
 import '../state/current_character_state.dart';
 import 'task_list_page.dart';
@@ -372,13 +374,47 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                                 color: const Color(0xFFF0E8EC),
                                 borderRadius: BorderRadius.circular(10),
                               ),
-                              child: const Text(
-                                '（系统 Prompt 由管家自动生成，可在上方编辑原始设定）',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Color(0xFF8A7A80),
-                                  height: 1.5,
-                                ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    '系统 Prompt 由管家自动生成（固定模板 + 男主/用户设定 + 实时注入）。'
+                                    '固定模板是代码里的默认规则（输出格式、工具用法等），'
+                                    '点下方按钮可以看最近一次实际发给男主的完整内容，'
+                                    '也可以编辑固定模板或一键恢复默认。',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF8A7A80),
+                                      height: 1.5,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  // 8-08 22:5x（用户：代码给的设定在框里看不见）：
+                                  // 占位文本 → 真入口（查看完整 system + 编辑/恢复固定模板）
+                                  TextButton.icon(
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: const Color(0xFF6A4A5A),
+                                      minimumSize: const Size(0, 32),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8),
+                                    ),
+                                    onPressed: () async {
+                                      // 侧栏可能没聊过天 → preview 兜底（页面内处理）
+                                      await SystemTemplate.loadCoreOverride();
+                                      if (!context.mounted) return;
+                                      await Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              const SystemViewPage(),
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(Icons.article_outlined,
+                                        size: 16),
+                                    label: const Text('查看 / 编辑系统提示',
+                                        style: TextStyle(fontSize: 12)),
+                                  ),
+                                ],
                               ),
                             )
                           else
