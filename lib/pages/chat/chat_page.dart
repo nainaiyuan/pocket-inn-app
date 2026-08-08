@@ -454,6 +454,11 @@ class _ChatPageState extends State<ChatPage>
     _autoResumePid = null;
     _autoResumeRounds = 0;
     _lastAutoResumeStep = -1;
+    // 8-08 15:5x：停止 → 同时重置续话/插话状态
+    _autoContinuePid = null;
+    _autoContinueCount = 0;
+    _interruptRoundActive = false;
+    _interruptFollowUpDone = false;
     DebugLogger.log(
       '管家流程',
       '⏸ 用户停止流程：目标「${flow['goal']}」，停在 ${cur + 1}/${steps.length} 步'
@@ -548,10 +553,13 @@ class _ChatPageState extends State<ChatPage>
         pendingMsgs.map((e) => e['id'].toString()).toList(),
       );
     }
+    // 8-08 15:5x：存下插话内容（插话轮男主没回 → 兜底轮带给她看）
+    _interruptUserText = userText;
     final event =
         '用户想跟你说话（流程**不停止**，你回复她之后继续执行流程）：'
         '她刚才发来的消息：$userText。'
-        '先回复她（她着急），然后回到流程继续干活（别重新规划，接着当前步骤做）。';
+        '**这一轮先回复她，不要调任何工具**——她着急，'
+        '先回完她，流程会自动继续（不用你手动管）。';
     DebugLogger.log('管家流程', '💬 插话：把 $pushedCount 条收集消息推给男主（流程保持 running）');
     if (_generating) {
       // 男主正在跑这轮（工具轮循环中）→ 排队，等它结束自动触发
@@ -648,10 +656,83 @@ class _ChatPageState extends State<ChatPage>
     );
   }
 
+  /// 8-08 15:5x（用户需求：男主回复后自动唤醒，判断要不要继续说）：
+  /// 非流程场景的男主主动续话机制——
+  /// - 男主这轮说了话（spoke=true）→ 自动再唤醒一次，让他判断：
+  ///   继续补充 / 做点事 / 结束这轮（结束=不唤醒，直到用户下次说话）
+  /// - 男主这轮没说话 → 不唤醒（他不想说了）
+  /// - 上限：用户消息之间最多 3 次（用户说话重置计数）
+  /// - 用户消息排队（男主忙时收集的）→ 优先回用户（相当于自动插话）
+  /// - 流程场景不经过这里（走 _maybeAutoResume，任务驱动）
+  Future<void> _maybeAutoContinue(String pid, {required bool spoke}) async {
+    if (_generating) return; // 并发保护
+    if (pid.isEmpty) return;
+    // ① 用户有消息排队（男主忙时收集的）→ 先回用户（优先级最高）
+    final pending = PendingQueueStore.list(pid);
+    if (pending.isNotEmpty) {
+      _autoContinuePid = null;
+      _autoContinueCount = 0; // 用户说话了，续话计数重置
+      final texts = pending
+          .map((e) => '[待#${e['id']}] ${e['text']}')
+          .join('；');
+      await PendingQueueStore.removeByIds(
+        pid,
+        pending.map((e) => e['id'].toString()).toList(),
+      );
+      DebugLogger.log(
+        '管家流程',
+        '💬 男主忙时收集到用户消息 → 自动推给男主先回（$texts）',
+      );
+      if (mounted) {
+        unawaited(
+          _sendMsg(
+            '',
+            systemEvent: '用户刚才发来消息（你忙的时候管家收集的）：$texts。'
+                '先回复她。',
+            bubbleText: '💬 男主先回你…',
+          ),
+        );
+      }
+      return;
+    }
+    // ② 男主这轮没说话 → 不唤醒（他不想说了，安静等用户）
+    if (!spoke) {
+      _autoContinuePid = null;
+      _autoContinueCount = 0;
+      return;
+    }
+    // ③ 上限 3 次（用户没说话）
+    if (_autoContinuePid != pid) {
+      _autoContinuePid = pid;
+      _autoContinueCount = 0;
+    }
+    if (_autoContinueCount >= 3) {
+      _autoContinuePid = null;
+      _autoContinueCount = 0;
+      DebugLogger.log('管家流程', '🔔 男主续话已达 3 次上限，停止（等用户说话）');
+      return;
+    }
+    _autoContinueCount++;
+    DebugLogger.log(
+      '管家流程',
+      '🔔 男主续话 #$_autoContinueCount（用户没说话，唤醒男主判断要不要继续说）',
+    );
+    // silentBubble：不显示系统气泡，男主直接说话（用户只看到他主动续话）
+    await _sendMsg(
+      '',
+      systemEvent: '用户没有说话。你可以：'
+          '① 补充一句刚才没说完的；② 做点事（调工具，比如查资料/记记忆）；'
+          '③ 没什么要说的就**直接回复"（这轮结束）"之类的话**——'
+          '系统检测到你不再说话就会停止自动唤醒，直到用户下次说话。',
+      silentBubble: true,
+    );
+  }
+
   Future<void> _sendMsg(
     String t, {
     String? systemEvent,
     String? bubbleText,
+    bool silentBubble = false,
   }) async {
     // 8-07 14:03：测试空间设定初始化（首次进测试空间，复制真实设定副本）
     final _tPid =
@@ -690,32 +771,58 @@ class _ChatPageState extends State<ChatPage>
     }
     // 8-03 18:2x（用户反馈"男主说完话再说话他不理人"）：生成锁——
     // 男主生成中（含工具轮）新消息直接忽略并提示，防并发上下文混乱
+    // 8-08 15:5x（用户反馈修复）：不再忽略——收集进待回复队列，上屏，
+    // 男主这轮结束自动回（_maybeAutoContinue ① 优先处理），消息不丢
     if (_generating) {
-      DebugLogger.log('管家流程', '⏳ 男主正在忙（生成中），忽略新消息: $t');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('男主正在忙，等他回完再说…'),
-            duration: Duration(seconds: 2),
-          ),
-        );
+      if (systemEvent == null && t.trim().isNotEmpty && _tPid.isNotEmpty) {
+        PendingQueueStore.enqueue(_tPid, t);
+        _autoContinuePid = null;
+        _autoContinueCount = 0;
+        DebugLogger.log('管家流程', '⏳ 男主正在忙，收集用户消息（不丢）: $t');
+        if (mounted) {
+          _msgKey.currentState?.appendMessage(
+            ChatMessage(
+              id: DateTime.now().millisecondsSinceEpoch.toString(),
+              text: t,
+              isMe: true,
+            ),
+          );
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('男主正在忙，已记下你的话，他回完就说'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
       }
       return;
     }
     _generating = true;
+    // 8-08 15:5x：用户正常发消息 → 重置男主续话计数（用户说话 = 新一轮对话）
+    if (systemEvent == null && t.trim().isNotEmpty) {
+      _autoContinuePid = null;
+      _autoContinueCount = 0;
+    }
+    // 8-08 15:5x：本轮男主输出信息（finally 用——判断"男主这轮说了话没"、
+    // 续话/插话检查的数据源）。注意作用域：try 外声明，try/finally 都能读。
+    var roundSpoke = false; // 男主本轮最终生成了非空文本
+    var roundHadTools = false; // 男主本轮调了工具
     final userMsgId = DateTime.now().millisecondsSinceEpoch.toString();
     // 本轮男主第一句话气泡 id 重置（工具气泡只挂本轮第一句话头上）
     _firstAiMsgId = null;
     // 8-06 23:55：停止触发的生成没有用户消息 → 显示系统提示气泡
-    _msgKey.currentState?.appendMessage(
-      ChatMessage(
-        id: userMsgId,
-        text: systemEvent == null
-            ? t
-            : (bubbleText ?? '⏸ 你按了停止，男主正在处理…'),
-        isMe: true,
-      ),
-    );
+    // 8-08 15:5x：silentBubble（男主自动续话轮）不显示系统气泡——男主直接说话
+    if (!silentBubble) {
+      _msgKey.currentState?.appendMessage(
+        ChatMessage(
+          id: userMsgId,
+          text: systemEvent == null
+              ? t
+              : (bubbleText ?? '⏸ 你按了停止，男主正在处理…'),
+          isMe: true,
+        ),
+      );
+    }
     final lid = _state.leadId;
     final personaId = _state.personaId ?? (lid == null ? '' : '${lid}_default');
     final personaName = _state.personaName ?? _state.lead?.name ?? '角色';
@@ -984,6 +1091,7 @@ class _ChatPageState extends State<ChatPage>
       while (result.toolCalls != null && result.toolCalls!.isNotEmpty) {
         toolLoop++;
         toolExecuted = true;
+        roundHadTools = true;
         if (toolLoop > maxToolRounds) {
           // 防御兜底（正常路径由下方 stop 事件先拦，这里保证不无限循环）
           DebugLogger.log(
@@ -1465,16 +1573,32 @@ class _ChatPageState extends State<ChatPage>
             final action = args['action']?.toString() ?? '';
             final name = args['name']?.toString() ?? '';
             if (action == 'add') {
-              if (!ToolCatalog.allNames.contains(name)) {
-                toolResult = _ToolResult(false, '没有「$name」这个工具');
+              // 8-08 15:5x（用户反馈）：中文名/描述也能加（"记她的事"→record_memory），
+              // 成功回显中文名确认，失败给可用示例
+              final resolved = ToolCatalog.resolveName(name);
+              if (resolved == null) {
+                toolResult = _ToolResult(
+                  false,
+                  '没有「$name」这个工具。试试这些：'
+                  '${ToolCatalog.allNames.take(8).join('、')}…'
+                  '（也可以发中文描述，如"记她的事"）',
+                );
               } else {
-                await FrequentToolsStore.add(personaId, name);
-                toolResult = _ToolResult(true, '已加入常用表：$name（每轮都会出现在【你常用的工具】）');
+                await FrequentToolsStore.add(personaId, resolved);
+                final desc = ToolCatalog.toolDetail(resolved) ?? resolved;
+                toolResult = _ToolResult(
+                  true,
+                  '已加入常用表：$resolved（$desc）——'
+                  '每轮都会出现在【你常用的工具】',
+                );
               }
             } else if (action == 'remove') {
-              final ok = await FrequentToolsStore.remove(personaId, name);
+              // 8-08 15:5x：中文名/描述也能删
+              final resolved = ToolCatalog.resolveName(name);
+              final ok = resolved != null &&
+                  await FrequentToolsStore.remove(personaId, resolved);
               toolResult = ok
-                  ? _ToolResult(true, '已从常用表移除：$name')
+                  ? _ToolResult(true, '已从常用表移除：$resolved')
                   : _ToolResult(false, '常用表里没有「$name」');
             } else if (action == 'list') {
               final list = FrequentToolsStore.list(personaId);
@@ -1828,6 +1952,8 @@ class _ChatPageState extends State<ChatPage>
       }
       // 剥离所有指令（#…#）→ 用户只看到男主自然的回复
       displayText = ButlerCommandParser.instance.strip(displayText);
+      // 8-08 15:5x：男主最终文本 → roundSpoke（finally 判断"这轮说了话没"）
+      if (displayText.trim().isNotEmpty) roundSpoke = true;
       // 待定查询：男主回复"看5条/全部" → 继续审批流程
       if (_pendingQuery != null) {
         await _resolvePendingQuery(displayText);
@@ -1971,13 +2097,30 @@ class _ChatPageState extends State<ChatPage>
             // 8-08 14:0x（断点 D 修复）：任务 running → 自动续跑，
             // 男主自己把活干完，不用用户再发消息。无进展 3 轮自动停。
             // 有插话排队 → 不续跑，让插话先（用户着急，先回用户再干活）
-            if (_pendingInterruptEvent == null) {
+            // 8-08 15:5x：插话触发轮（_interruptRoundActive）→ 不续跑，
+            // 先确认男主回了用户（方法末尾检查，没回就注入"只回用户"轮）
+            if (_pendingInterruptEvent == null && !_interruptRoundActive) {
               unawaited(_maybeAutoResume(personaId));
             } else {
-              DebugLogger.log('管家流程', '💬 有插话排队，跳过自动续跑（先回用户）');
+              DebugLogger.log(
+                '管家流程',
+                '💬 插话排队或插话轮进行中，跳过自动续跑（先回用户）',
+              );
             }
           } else {
             DebugLogger.log('管家流程', '⏰ 检查点⑤：本轮结束，任务非 running（无需唤醒）');
+            // 8-08 15:5x（用户需求：男主回复后自动唤醒判断要不要继续说）：
+            // 非流程场景——男主这轮说了话 → 自动再唤醒一次让他判断
+            // 还要不要继续说（上限 3 次；用户说话重置；有用户消息排队先回用户）。
+            // 有排队事件（停止/插话/错误）→ 不续话，先处理排队事件
+            if (!_interruptRoundActive &&
+                _pendingStopEvent == null &&
+                _pendingInterruptEvent == null &&
+                _pendingProviderErrorEvent == null) {
+              unawaited(
+                _maybeAutoContinue(personaId, spoke: roundSpoke),
+              );
+            }
           }
         } catch (e) {
           DebugLogger.log('管家流程', '⏰ 检查点⑤检查失败: $e');
@@ -2005,6 +2148,10 @@ class _ChatPageState extends State<ChatPage>
       _pendingInterruptEvent = null;
       if (mounted) {
         setState(() {}); // 插话按钮恢复"💬 插话"
+        // 8-08 15:5x：标记插话触发轮——这轮结束检查男主是否回了用户
+        // （没回 → 注入"只回用户"轮；回了 → 恢复正常续跑）
+        _interruptRoundActive = true;
+        _interruptFollowUpDone = false;
         unawaited(
           _sendMsg(
             '',
@@ -2027,6 +2174,31 @@ class _ChatPageState extends State<ChatPage>
           ),
         );
       }
+    }
+    // 8-08 15:5x（用户反馈核心修复）：插话轮结束检查——男主这轮只调了工具
+    // 没回用户 → 再注入"只回用户"轮（禁工具，上限 1 次）；回了 → 正常结束
+    if (_interruptRoundActive) {
+      if (!roundSpoke && !_interruptFollowUpDone) {
+        _interruptFollowUpDone = true;
+        DebugLogger.log(
+          '管家流程',
+          '💬 插话轮男主只调了工具没回话 → 注入"只回用户"轮（兜底）',
+        );
+        if (mounted) {
+          unawaited(
+            _sendMsg(
+              '',
+              systemEvent: '用户还在等你回复（你刚才只顾着调工具，没回她的话）。'
+                  '**这一轮只回复她，禁止调用任何工具**。她刚才说：$_interruptUserText。'
+                  '回完之后流程会自动继续，不用你操心。',
+              bubbleText: '💬 男主先回你…',
+            ),
+          );
+        }
+        return;
+      }
+      // 男主已回（或兜底轮已注入过、男主仍没回 → 放弃干预，交给续跑机制）
+      _interruptRoundActive = false;
     }
   }
 
@@ -3057,6 +3229,17 @@ class _ChatPageState extends State<ChatPage>
   // AI 全失败 → 排队注入系统事件让男主解释（上限 1 次，再次失败弹窗兜底）
   String? _pendingProviderErrorEvent;
   bool _providerErrorInjected = false;
+
+  // 8-08 15:5x（用户反馈：插话后男主光调工具没回用户）：
+  // 插话轮结束检查——男主这轮没说话（只调了工具）→ 再注入"只回用户"轮
+  bool _interruptRoundActive = false; // 当前这轮是插话触发轮
+  bool _interruptFollowUpDone = false; // 兜底轮已注入（上限 1 次）
+  String _interruptUserText = ''; // 插话内容（兜底轮带给她看）
+
+  // 8-08 15:5x（用户需求：男主回复后自动唤醒判断要不要继续说，最多 3 次；
+  // 用户说话重置；流程场景走 _maybeAutoResume 不受此限）
+  int _autoContinueCount = 0; // 用户消息之间男主主动续话次数
+  String? _autoContinuePid;
 
   /// 8-04 21:1x：一键验收进行中（自动切 AI 跑真实对话）
   bool _accepting = false;
@@ -4211,9 +4394,8 @@ class _ChatPageState extends State<ChatPage>
         '别用中文"内容/消息"。示例：{"messages":["汪～"]}',
       );
     }
-    final rawInterval = args['interval_seconds'];
-    final intervalSec = (rawInterval as num?)?.toInt();
-    final waitMin = (args['wait_minutes'] as num?)?.toInt() ?? 5;
+    final intervalSec = _parseSecondsArg(args['interval_seconds']);
+    final waitMin = _parseMinutesArg(args['wait_minutes']) ?? 5;
     // 男主没填间隔 → null → 服务端自适应（默认 4s，条数多自动加速）
     final interval = intervalSec == null
         ? null
@@ -4776,14 +4958,54 @@ class _ChatPageState extends State<ChatPage>
   ///
   /// 8-06 13:38 用户：屏幕固定悬浮卡片，可挪动可收起，卡面倒计时+自由编辑内容；
   /// 男主填选项（延长/结束/纯消息）；逾期后男主可选要不要弹窗问/多久弹窗/多久唤醒。
+  /// 8-08 15:5x（用户反馈）：时长解析——支持带单位
+  /// （"30分钟"/"1小时"/"2小时30分钟"/"90"/30），解析不了返回 null
+  int? _parseMinutesArg(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toInt();
+    final s = v.toString().trim().toLowerCase();
+    if (s.isEmpty) return null;
+    final pureNum = RegExp(r'^(\d+)$').firstMatch(s);
+    if (pureNum != null) return int.parse(pureNum.group(1)!); // 纯数字=分钟
+    final hm = RegExp(r'^(\d+)\s*(小时|时|h)\s*(\d+)\s*(分钟|分|min|mins?)$')
+        .firstMatch(s);
+    if (hm != null) {
+      return int.parse(hm.group(1)!) * 60 + int.parse(hm.group(3)!);
+    }
+    final h = RegExp(r'^(\d+(?:\.\d+)?)\s*(小时|时|h)$').firstMatch(s);
+    if (h != null) return (double.parse(h.group(1)!) * 60).round();
+    final m = RegExp(r'^(\d+(?:\.\d+)?)\s*(分钟|分|min|mins?)$').firstMatch(s);
+    if (m != null) return double.parse(m.group(1)!).round();
+    final sec = RegExp(r'^(\d+)\s*(秒|s)$').firstMatch(s);
+    if (sec != null) return (int.parse(sec.group(1)!) / 60).ceil();
+    return null;
+  }
+
+  /// 8-08 15:5x：秒数解析（interval_seconds 用，"4秒"/"2分钟"/30）
+  int? _parseSecondsArg(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toInt();
+    final s = v.toString().trim().toLowerCase();
+    if (s.isEmpty) return null;
+    final pureNum = RegExp(r'^(\d+)$').firstMatch(s);
+    if (pureNum != null) return int.parse(pureNum.group(1)!); // 纯数字=秒
+    final sec = RegExp(r'^(\d+)\s*(秒|s)$').firstMatch(s);
+    if (sec != null) return int.parse(sec.group(1)!);
+    final m = RegExp(r'^(\d+(?:\.\d+)?)\s*(分钟|分|min|mins?)$').firstMatch(s);
+    if (m != null) return (double.parse(m.group(1)!) * 60).round();
+    final h = RegExp(r'^(\d+(?:\.\d+)?)\s*(小时|时|h)$').firstMatch(s);
+    if (h != null) return (double.parse(h.group(1)!) * 3600).round();
+    return null;
+  }
+
   Future<_ToolResult> _executeCountdownCard(Map<String, dynamic> args) async {
-    final minutes = (args['minutes'] as num?)?.toInt(); // null = 纯选择卡片
+    final minutes = _parseMinutesArg(args['minutes']); // null = 纯选择卡片
     final title = args['title']?.toString().trim() ?? '记得回来哦';
     final category = args['category']?.toString().trim() ?? '';
     final allowRequest = args['allow_request'] == true;
     final remindOnExpire = args['remind_on_expire'] != false;
-    final remindDelay = (args['remind_delay_minutes'] as num?)?.toInt() ?? 0;
-    final wakeMin = (args['wake_minutes'] as num?)?.toInt() ?? 5;
+    final remindDelay = _parseMinutesArg(args['remind_delay_minutes']) ?? 0;
+    final wakeMin = _parseMinutesArg(args['wake_minutes']) ?? 5;
     // 选项解析（8-07 21:2x：兼容男主传字符串数组 ["A. 选项一", "B. 选项二"]
     // → 转成 message 选项按钮，否则用户看到文字点不了）
     final options = <CardOption>[];
@@ -6809,8 +7031,11 @@ class _ChatPageState extends State<ChatPage>
       default:
         return _ToolResult(
           false,
-          '便签操作失败：未知动作 $action'
-          '（set/append/remove）',
+          '便签操作失败：未知动作「$action」。'
+          '可用动作：set（整体更新，要 content）/append（追加，要 content）'
+          '/remove（删行，要 from，可选 to）。'
+          '示例：{"action":"set","content":"第一行\\n第二行"}；'
+          '{"action":"remove","from":2}',
         );
     }
   }

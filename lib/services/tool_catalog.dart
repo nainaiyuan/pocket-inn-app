@@ -58,6 +58,32 @@ class ToolCatalog {
     return list;
   }
 
+  /// 8-08 15:5x（用户反馈：manage_frequent_tools 传中文名加不进）：
+  /// 工具名解析——英文精确 → 中文描述包含匹配（"记她的事"→record_memory）。
+  /// 找不到返回 null。
+  static String? resolveName(String input) {
+    final n = input.trim();
+    if (n.isEmpty) return null;
+    if (allNames.contains(n)) return n; // 英文精确
+    for (final tools in categories.values) {
+      for (final entry in tools.entries) {
+        final desc = entry.value.replaceAll('（', '').replaceAll('）', '');
+        if (desc.contains(n) || n.contains(entry.key)) {
+          return entry.key;
+        }
+      }
+    }
+    // 再试一次：输入可能带了括号/多余字符（如"record_memory（记她的事）"）
+    for (final tools in categories.values) {
+      for (final entry in tools.entries) {
+        if (n.startsWith(entry.key) || entry.key.startsWith(n)) {
+          return entry.key;
+        }
+      }
+    }
+    return null;
+  }
+
   static int get totalCount => allNames.length;
 
   /// 分类概览（注入 prompt / list_tools 无参数）：'记忆 5 个：记她的事…'
