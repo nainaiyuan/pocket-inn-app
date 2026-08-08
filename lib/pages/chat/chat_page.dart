@@ -3913,6 +3913,17 @@ class _ChatPageState extends State<ChatPage>
     // 8-07 23:3x JSON 化：parseStructuredOutput 统一解析（JSON 块 + 旧标签
     // 双兼容）——reply 标注不显示、sys 静默不显示不落库，气泡只含 msg/act
     final parsed = parseStructuredOutput(rawText);
+    // 8-08 22:5x（用户：JSON 块附近乱七八糟的文字，浪费 token 还看不见）：
+    // 男主输出带结构化块但周围有杂散文字 → 内容照常显示（不重写），
+    // 但注入下轮 taskState 提醒他按格式（用完即清，同 _formatHint 机制）
+    if (parsed.hasFormat && stripStructuredBlocks(rawText).isNotEmpty) {
+      const jsonMessyHint = '你刚才回复里，JSON 块/标签外面带了杂散文字'
+          '（如"思考一下{...}完毕"的"思考一下"）——她看不到这些字，还浪费 token。'
+          '以后只输出 JSON 对象（每个占一行）和工具调用，周围不要任何其他文字。';
+      _formatHint =
+          _formatHint == null ? jsonMessyHint : '$_formatHint\n$jsonMessyHint';
+      DebugLogger.log('AI路由', '📐 男主 JSON 块带杂散文字，下轮提示按格式');
+    }
     final parts = parsed.bubbles;
     if (parts.isEmpty) return rows;
     String? firstMsgId;

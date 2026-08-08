@@ -18,6 +18,71 @@ import 'dart:math' as math;
 /// 气泡内片段类型
 enum SpanKind { text, act }
 
+/// 8-08 22:5x（用户：JSON 块附近乱七八糟的文字，浪费 token 还看不见）：
+/// 剥掉所有结构化块（JSON 数组/对象、旧标签 msg/act/reply/sys），返回
+/// 剩余文本。非空 = 男主输出里带了杂散文字 → chat_page 借此提醒男主按格式。
+/// （⟨工具:⟩块在 ToolIntentParser.stripToolBlocks 已剥，这里只管 JSON/标签）
+/// 8-08 22:5x：JSON 剥除用平衡扫描（_jsonObjRe 非贪婪会把
+/// {"name":..,"arguments":{}} 截成残渣），字符串里的括号不误伤；
+/// 没闭合的 {/[ 不剥（残留 → 算杂散 → 提醒男主写岔了）。
+String stripStructuredBlocks(String raw) {
+  var t = raw;
+  for (final re in [_msgRe, _actRe, _replyTagRe, _sysTagRe]) {
+    t = t.replaceAll(re, '');
+  }
+  final sb = StringBuffer();
+  var i = 0;
+  while (i < t.length) {
+    final ch = t[i];
+    if (ch == '{' || ch == '[') {
+      final end = _matchBalanced(t, i);
+      if (end > i) {
+        i = end;
+        continue;
+      }
+    }
+    sb.write(ch);
+    i++;
+  }
+  return sb.toString().trim();
+}
+
+/// 从 [start]（'{' 或 '['）扫描到配对的闭合符，返回结束位置（不含）。
+/// 字符串内容里的括号/转义不计数；没闭合返回 -1。
+int _matchBalanced(String s, int start) {
+  final open = s[start];
+  final close = open == '{' ? '}' : ']';
+  var depth = 0;
+  var inStr = false;
+  var esc = false;
+  for (var i = start; i < s.length; i++) {
+    final c = s[i];
+    if (inStr) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c == r'\') {
+        esc = true;
+        continue;
+      }
+      if (c == '"') inStr = false;
+      continue;
+    }
+    if (c == '"') {
+      inStr = true;
+      continue;
+    }
+    if (c == open) {
+      depth++;
+    } else if (c == close) {
+      depth--;
+      if (depth == 0) return i + 1;
+    }
+  }
+  return -1;
+}
+
 /// 8-08 21:3x（用户：男主气泡输出"工具:query_tool_formats关键词=notify_user"）：
 /// DeepSeek 把工具调用文本化泄漏进回复（工具:名 关键词=值）——整行剥掉。
 /// 只认行首"工具:"+工具名特征，不误伤"这个工具:xxx 很好用"（行首非工具:）。
