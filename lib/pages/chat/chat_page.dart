@@ -5,6 +5,8 @@ import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../butler/debug_lab/agent_run_trace.dart';
+import '../../butler/debug_lab/trace_session.dart';
 import '../../services/global_banner_service.dart';
 import '../../services/tool_approval_store.dart';
 import '../../services/global_timer_card_service.dart';
@@ -1803,6 +1805,18 @@ class _ChatPageState extends State<ChatPage>
             toolResult.ok,
             toolResult.text,
           );
+          // ── Agent Debug Lab 埋点（8-09）：工具执行 + 记忆写入 ──
+          TraceSession.instance.recordToolExecution(TraceToolExecution(
+            name: name,
+            args: args,
+            ok: toolResult.ok,
+            resultText: toolResult.text,
+            userApproved: !toolResult.text.startsWith('用户拒绝'),
+          ));
+          if (toolResult.ok &&
+              (name == 'record_memory' || name == 'record_relation')) {
+            TraceSession.instance.recordMemoryWritten('$name ✅');
+          }
           // 8-08 15:2x（步骤状态机）：工具使用记录进 FlowStore 当前步
           // toolsUsed（完成条件判定 + 任务清单"本步已用工具"数据源）
           final briefForStep = toolResult.text.trim();

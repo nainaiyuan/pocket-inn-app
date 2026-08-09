@@ -9,6 +9,8 @@ import 'context_manager.dart';
 import 'chat_storage_service.dart';
 import '../../../models/chat_message.dart';
 import '../../../butler/context/context_tracker.dart';
+import '../../../butler/debug_lab/agent_run_trace.dart';
+import '../../../butler/debug_lab/trace_session.dart';
 import '../../../butler/system_template.dart' show SystemTemplate;
 import '../../../services/chat_database_service.dart';
 import '../../../services/chat_service.dart';
@@ -48,6 +50,24 @@ class AiChatService {
       cancellationToken: cancellationToken,
     );
   }
+
+  /// Agent Debug Lab：AIChatMessage → TraceMessage（摘要式）
+  static TraceMessage _toTraceMessage(AIChatMessage m) =>
+      TraceMessage.summarized(
+        role: m.role,
+        content: m.content,
+        toolCallId: m.toolCallId,
+        reasoningContent: m.reasoningContent,
+        toolCalls: (m.toolCalls ?? const [])
+            .map((c) => TraceToolCall(
+                  id: c['id']?.toString(),
+                  name: c['name']?.toString() ?? '',
+                  arguments:
+                      (c['arguments'] as Map?)?.cast<String, dynamic>() ??
+                          const {},
+                ))
+            .toList(),
+      );
 
   /// 已做过上下文恢复的 persona（防重复恢复）
   final Set<String> _contextRestored = {};
@@ -1338,6 +1358,22 @@ class AiChatService {
       }
       messages.add(AIChatMessage(role: 'user', content: message));
     }
+    // ── Agent Debug Lab 埋点（8-09）：begin + 记录实际发出的 messages ──
+    TraceSession.instance.begin(
+      ctxPid,
+      message,
+      toolRound: toolRound,
+      contextSnapshot: {
+        'stateful': decision.stateful,
+        'isLight': isLight,
+        'switchedProvider': switchedProvider,
+        'needRecover': needRecover,
+        'isFirstRun': _contextRestored.length == 1,
+      },
+    );
+    TraceSession.instance.recordFirstMessages(
+      messages.map(_toTraceMessage).toList(),
+    );
     late final AIProviderResult result;
     try {
       result = await _chat(
@@ -1405,6 +1441,19 @@ class AiChatService {
         rethrow;
       }
     }
+    // ── Agent Debug Lab 埋点：模型输出（文本/思考链/工具调用）──
+    TraceSession.instance.recordModelOutput(
+      text: result.text,
+      reasoning: result.reasoningContent,
+      toolCalls: (result.toolCalls ?? const [])
+          .map((c) => TraceToolCall(
+                id: c['id']?.toString(),
+                name: c['name']?.toString() ?? '',
+                arguments: (c['arguments'] as Map?)?.cast<String, dynamic>() ??
+                    const {},
+              ))
+          .toList(),
+    );
     // 男主回复进上下文（当前话题原文）
     if (result.text.trim().isNotEmpty) {
       ContextManager.instance.feedAssistantMessage(ctxPid, result.text.trim());
@@ -1439,6 +1488,7 @@ class AiChatService {
           DebugLogger.log('上下文调试',
               '📝 已记录男主回复（重试第1次）：${retry.text.length > 40 ? retry.text.substring(0, 40) + '…' : retry.text}');
         }
+        TraceSession.instance.finish(retry.text);
         return retry;
       }
       // 第 2 次重试不带 tools：空回复可能是工具定义干扰 → 排除后至少能正常聊天
@@ -1460,16 +1510,19 @@ class AiChatService {
           DebugLogger.log('上下文调试',
               '📝 重试第2次返回工具调用（${retry2.toolCalls!.map((c) => c['name']).join('、')}），照常返回走工具轮');
         }
+        TraceSession.instance.finish(retry2.text);
         return retry2;
       }
       // 两次重试都空 → 返回空结果，不抛异常（chat_page 侧轻提示，不弹红色报错）
       DebugLogger.log('AI路由', '⚠️ 空回复重试 2 次仍为空，返回空结果（不抛异常）');
+      TraceSession.instance.abort();
       return AIProviderResult(text: '', toolCalls: null, usage: result.usage);
     }
     if (result.text.trim().isEmpty && !hasToolCalls) {
       // 工具轮空文本：工具已执行（气泡已反馈），男主"调用完不说话"是合法行为，
       // 不是异常 → 返回空结果（用户 8-03 02:26：空回复不该弹"发送失败"）
       DebugLogger.log('AI路由', '🔧 工具轮空文本（工具已完成，男主未补充说话）→ 返回空结果');
+      TraceSession.instance.finish(null);
       return AIProviderResult(text: '', toolCalls: null, usage: result.usage);
     }
     // token 追踪：API 精确 usage → 管家累计 + 记得清单更新
@@ -1527,6 +1580,10 @@ class AiChatService {
               '${_currentModelName(personaId)} → $w token');
         }
       }
+    }
+    // ── Agent Debug Lab 埋点：无待处理工具 → 本轮结束并存轨迹 ──
+    if (!hasToolCalls) {
+      TraceSession.instance.finish(result.text);
     }
     return result;
   }
@@ -2102,6 +2159,7 @@ class AiChatService {
           if (content.isNotEmpty) {
             await ContextManager.instance
                 .appendSummary(personaId, '（$range）$content');
+            TraceSession.instance.recordChange('新增摘要($range): ${content.length}字');
             saved = true;
             DebugLogger.log('上下文管理',
                 '✅ 男主调 save_summary 写入摘要（$range，${content.length} 字）');
@@ -2154,6 +2212,7 @@ class AiChatService {
       final summary = res.text.trim();
       if (summary.isNotEmpty) {
         await ContextManager.instance.appendSummary(personaId, summary);
+        TraceSession.instance.recordChange('摘要缩减: ${summary.length}字');
         DebugLogger.log('上下文管理', '✅ 摘要缩减完成（${summary.length} 字）');
       } else {
         await ContextManager.instance.restoreSummaries(personaId, old);
