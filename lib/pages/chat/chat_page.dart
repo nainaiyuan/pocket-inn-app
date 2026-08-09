@@ -2356,7 +2356,24 @@ class _ChatPageState extends State<ChatPage>
         );
         // 8-09 18:4x（用户设计定稿）：退出标记 = 男主声明"回完了+干完了"
         // → 对话流程结束（回复只消条目，退出标记才结束流程）
-        unawaited(ChatFlowStore.finish(personaId));
+        // 8-09 21:0x（用户：一个大流程结束男主至少要跟她说一句）：
+        // 结束前校验——男主从没回过话（只调工具）→ 拒绝结束，
+        // 引导先说话；说过话 → 正常 finish。
+        final finishBlock = ChatFlowStore.finishCheck(personaId);
+        if (finishBlock != null) {
+          _pendingInterruptEvent = finishBlock;
+          DebugLogger.log('管家流程', '🔚 男主想结束但没说过话 → 打回引导先说话');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('男主还没跟用户说话，已提醒他先回复再结束'),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        } else {
+          unawaited(ChatFlowStore.finish(personaId));
+        }
       } else if (exitSignal == false) {
         _continueFrozen = false;
         DebugLogger.log(

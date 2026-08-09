@@ -257,9 +257,7 @@ class ChatFlowStore {
         // 8-09 20:1x：复核追加在**大流程结尾**（steps 末尾），
         // 不插在中间——它是"这个流程结束了吗"的确认，不是新消息。
         final reviewStep = _newStep(
-          '【复核】这个流程里调了工具——确认：还有要补充的吗？'
-          '要调整流程吗？还是就这样结束（输出退出标记 '
-          '{"need_continue": false}）？'
+          '【复核】这个流程里调了工具——${_reviewGuide(steps)}'
           '（刚回复的内容细节看上下文，这里只记大概：'
           '${_short(lastText, 12)}）',
           isReview: true,
@@ -422,6 +420,26 @@ class ChatFlowStore {
   /// 男主输出退出标记（need_continue:false）→ 流程结束
   /// 他声明"回完了+干完了"。还有没回的工作 → 也尊重他的判断
   /// （他可能决定放弃某项），流程直接 done。
+  /// 8-09 21:0x（用户：一个大流程结束男主至少要跟她说一句）：
+  /// 结束校验——男主这个流程里**从没回复过用户**（只调工具）→ 拒绝结束，
+  /// 返回原因让管家引导先说话；说过话 → 正常结束返回 null。
+  /// （纯聊天流程男主必然回过话；调了工具没回话的才被挡）
+  static String? finishCheck(String personaId) {
+    final f = _memCache;
+    if (f == null || f['status'] != 'running') return null;
+    final steps = _stepsOf(f);
+    if (steps.isEmpty) return null;
+    final realSteps = steps.where((s) => s['isReview'] != true).toList();
+    final hasSpoken = realSteps.any(
+        (s) => ((s['reply'] as String?)?.toString().trim() ?? '').isNotEmpty);
+    if (!hasSpoken) {
+      return '这个流程你还没跟她说过话（只调了工具）。结束前必须说一句：'
+          '告诉她结果/说句自然的话——说完这条（不用带退出标记也行，'
+          '管家看到你说话就当你回过她了），再结束。';
+    }
+    return null;
+  }
+
   static Future<void> finish(String personaId) async {
     if (personaId.isEmpty) return;
     await warm(personaId);
@@ -496,8 +514,7 @@ class ChatFlowStore {
           (s) => s['isReview'] == true && s['status'] != 'done');
       if (reviewIdx >= 0) {
         sb.writeln('→ 复核（这个流程用过工具，结束前确认，不是新消息不用"回"）：'
-            '判断：还有要补充的吗？要调整流程吗？'
-            '还是确认结束（输出退出标记 {"need_continue": false}）？');
+            '${_reviewGuide(steps)}');
         return sb.toString();
       }
       sb.writeln('✅ 已全部回应。收尾检查（回复≠结束，工作做完才结束）：');
@@ -701,13 +718,8 @@ class ChatFlowStore {
         (s) => s['isReview'] == true,
         orElse: () => pending.first);
     if (review['isReview'] == true) {
-      final realSteps = steps.where((s) => s['isReview'] != true).toList();
-      final doneReal = realSteps.where((s) => s['status'] == 'done').length;
-      final pendingReal = realSteps.length - doneReal;
       return '复核（上个流程用过工具，结束前确认，不是新消息不用"回"）：'
-          '已处理 $doneReal 条${pendingReal > 0 ? '，还有 $pendingReal 条在流程里（继续处理）' : ''}'
-          '——判断：还有要补充的吗？要调整流程吗？'
-          '还是确认结束（输出退出标记 {"need_continue": false}）？';
+          '${_reviewGuide(steps)}';
     }
     final briefs = pending
         .take(3)
@@ -722,6 +734,30 @@ class ChatFlowStore {
 
   static Map<String, dynamic> _asMap(dynamic v) =>
       v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
+
+  /// 8-09 21:0x（用户：一个大流程结束男主至少要跟她说一句）：
+  /// 复核引导 = 看男主这个流程里**说没说过话**（真实步骤有没有 reply）：
+  /// - 说过话 → 问"有补充吗？还是直接结束？"（可以直接输出退出标记）
+  /// - 没说话（只调工具没回复）→ 必须先说一句（告诉她结果/说句自然的话），
+  ///   说完再输出退出标记结束——不能默默调完工具就消失。
+  static String _reviewGuide(List<Map<String, dynamic>> steps) {
+    final realSteps = steps.where((s) => s['isReview'] != true).toList();
+    final doneReal = realSteps.where((s) => s['status'] == 'done').length;
+    final pendingReal = realSteps.length - doneReal;
+    final hasSpoken = realSteps.any(
+        (s) => ((s['reply'] as String?)?.toString().trim() ?? '').isNotEmpty);
+    final base = '已处理 $doneReal 条'
+        '${pendingReal > 0 ? '，还有 $pendingReal 条在流程里（继续处理）' : ''}';
+    if (hasSpoken) {
+      return '$base——这个流程你回过她了。判断：还有要补充的吗？'
+          '要调整流程吗？还是确认结束（输出退出标记 '
+          '{"need_continue": false}）？';
+    }
+    return '$base——这个流程你**还没跟她说过话**（只调了工具）。'
+        '结束前必须说一句：告诉她结果/说句自然的话，'
+        '说完再输出退出标记 {"need_continue": false} 结束。'
+        '（不能只输出退出标记就结束，她那边会以为你消失了）';
+  }
 
   static String _toolsBrief(Map<String, dynamic> tools) {
     final parts = <String>[];
