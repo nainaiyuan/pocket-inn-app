@@ -248,18 +248,14 @@ class ChatFlowStore {
       final anyToolUsed = steps.any((s) =>
           s['isReview'] != true && _asMap(s['tools']).isNotEmpty);
       if (anyToolUsed) {
-        final lastReal = steps.lastWhere(
-            (s) => s['isReview'] != true,
-            orElse: () => <String, dynamic>{'userText': ''});
-        final lastText = (lastReal['userText'] ?? '').toString();
         // 8-09 18:39（用户设计）：复核只给大概，不给完整句子——
         // 男主要看细节去上下文（ContextManager 原文）。
         // 8-09 20:1x：复核追加在**大流程结尾**（steps 末尾），
         // 不插在中间——它是"这个流程结束了吗"的确认，不是新消息。
+        // 8-09 21:1x（用户）：复核要插男主说的话原文摘要——
+        // _reviewGuide 里已带（说过话→列摘要；没说话→必须先说一句）。
         final reviewStep = _newStep(
-          '【复核】这个流程里调了工具——${_reviewGuide(steps)}'
-          '（刚回复的内容细节看上下文，这里只记大概：'
-          '${_short(lastText, 12)}）',
+          '【复核】这个流程里调了工具——${_reviewGuide(steps)}',
           isReview: true,
         );
         steps.add(reviewStep);
@@ -737,7 +733,8 @@ class ChatFlowStore {
 
   /// 8-09 21:0x（用户：一个大流程结束男主至少要跟她说一句）：
   /// 复核引导 = 看男主这个流程里**说没说过话**（真实步骤有没有 reply）：
-  /// - 说过话 → 问"有补充吗？还是直接结束？"（可以直接输出退出标记）
+  /// - 说过话 → 列出男主说过的话摘要（原文截断，细节看上下文定位），
+  ///   问"有补充吗？还是直接结束？"（可以直接输出退出标记）
   /// - 没说话（只调工具没回复）→ 必须先说一句（告诉她结果/说句自然的话），
   ///   说完再输出退出标记结束——不能默默调完工具就消失。
   static String _reviewGuide(List<Map<String, dynamic>> steps) {
@@ -749,14 +746,36 @@ class ChatFlowStore {
     final base = '已处理 $doneReal 条'
         '${pendingReal > 0 ? '，还有 $pendingReal 条在流程里（继续处理）' : ''}';
     if (hasSpoken) {
-      return '$base——这个流程你回过她了。判断：还有要补充的吗？'
-          '要调整流程吗？还是确认结束（输出退出标记 '
-          '{"need_continue": false}）？';
+      final spoken = _spokenBrief(realSteps);
+      return '$base——你回过她的话（摘要，细节看上下文原文定位）：\n$spoken\n'
+          '判断：还有要补充的吗？要调整流程吗？'
+          '还是确认结束（输出退出标记 {"need_continue": false}）？';
     }
     return '$base——这个流程你**还没跟她说过话**（只调了工具）。'
         '结束前必须说一句：告诉她结果/说句自然的话，'
         '说完再输出退出标记 {"need_continue": false} 结束。'
         '（不能只输出退出标记就结束，她那边会以为你消失了）';
+  }
+
+  /// 男主这个流程里说过的话摘要（原文截断，最多 3 条，超出提示总数）——
+  /// 8-09 21:1x（用户：复核要插男主说的话原文摘要，让他自己定位说了什么）
+  static String _spokenBrief(List<Map<String, dynamic>> realSteps) {
+    final spoken = realSteps
+        .where((s) =>
+            ((s['reply'] as String?)?.toString().trim() ?? '').isNotEmpty)
+        .map((s) {
+      // 剥掉标注（退出标记 JSON / <reply>回#N</reply>）只留真实说话内容
+      var t = (s['reply'] as String?)?.toString().trim() ?? '';
+      t = t.replaceAll(RegExp(r'\{"need_continue"\s*:\s*(?:true|false)\}'), '');
+      t = t.replaceAll(RegExp(r'\{"next_action"\s*:\s*"[^"]*"\}'), '');
+      t = t.replaceAll(RegExp(r'<reply>[\s\S]*?</reply>'), '');
+      t = t.replaceAll(RegExp(r'"reply"\s*:\s*"[^"]*"'), '');
+      t = t.trim();
+      return '· "${_short(t, 40)}"';
+    }).toList();
+    if (spoken.isEmpty) return '';
+    final show = spoken.take(3).join('\n');
+    return spoken.length > 3 ? '$show\n…（共 ${spoken.length} 条，其余看上下文）' : show;
   }
 
   static String _toolsBrief(Map<String, dynamic> tools) {
