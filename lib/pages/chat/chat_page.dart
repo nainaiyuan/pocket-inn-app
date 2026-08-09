@@ -863,9 +863,9 @@ class _ChatPageState extends State<ChatPage>
     // ② 男主这轮没说话 → 不唤醒（他不想说了，安静等用户）
     // 8-09 15:2x（用户日志：插话后男主断了——任务 paused_by_user 时男主
     // 回完插话/没回话都必须唤醒判断 resume/update/cancel，否则流程永远挂）
-    // 8-10 00:4x（用户：男主思考了却不说话）：有补说提示（上轮思考截断
-    // 正文空）→ 没说话也唤醒，把思考结论说出来
-    if (!spoke && _pendingThinkingRetryHint == null) {
+    // 8-10 00:4x（用户确认：空回复=二次唤醒复核正常流程，男主确认结束，
+    // 别乱改）→ 不加"有思考无正文强制唤醒"的兜底
+    if (!spoke) {
       final flowNow = await FlowStore.get(pid);
       final pausedByUser = flowNow != null &&
           (flowNow['status']?.toString() ?? '') == 'paused_by_user';
@@ -944,15 +944,10 @@ class _ChatPageState extends State<ChatPage>
     }
     // 8-09 18:1x（对话流程）：检查轮带待回清单（还有几条没回）
     final chatFlowBrief = ChatFlowStore.checkBrief(pid);
-    // 8-10 00:4x（用户：男主思考了却不说话）：上轮思考截断正文空 →
-    // 检查轮开头带补说提示（用完即清）
-    final thinkingRetryHint = _pendingThinkingRetryHint;
-    _pendingThinkingRetryHint = null;
     await _sendMsg(
       '',
       systemEvent: '【系统自动提醒——这不是用户消息，不用回复这条提醒本身】\n'
           '现在是"结束检查"：上一轮你已回复完，用户没有说话。\n'
-          '${thinkingRetryHint != null ? '$thinkingRetryHint\n' : ''}'
           '$pausedJudge'
           '${chatFlowBrief != null ? '（对话流程：$chatFlowBrief）\n' : ''}'
           '请判断有没有必须继续的事：\n'
@@ -2495,20 +2490,9 @@ class _ChatPageState extends State<ChatPage>
       ChatPresence.instance.markAllRead();
       // 用户 8-03 02:26：男主空回复（无工具、无文本）不该弹红色报错。
       // 轻提示即可（重试 2 次都空 → AI 服务端偶发，不是功能坏了）
+      // 8-10 00:4x（用户确认：空回复 = 二次唤醒复核正常流程，男主复核
+      // 确认结束 → 输出退出标记无正文，别乱改）→ 不加任何兜底/提示
       if (displayText.trim().isEmpty && !toolExecuted && mounted) {
-        // 8-10 00:4x（用户：男主思考了却不说话）：有思考链无正文 =
-        // V4 思考耗光输出预算正文被截断（max_tokens 8192 是根因修复，
-        // 这里是兜底）→ 设提示，检查轮唤醒男主补说，不 silently 卡死
-        final thought = result.reasoningContent;
-        if (thought != null && thought.trim().isNotEmpty) {
-          _pendingThinkingRetryHint = '上一轮你只思考了没说话（正文没生成'
-              '出来，可能是思考占满了输出预算）。现在把思考结论简短说出来'
-              '——她还在等你。';
-          DebugLogger.log(
-            'AI路由',
-            '🧠 男主有思考无正文（思考截断）→ 检查轮提示补说',
-          );
-        }
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('男主这次没有回复，再发一条试试'),
@@ -3692,12 +3676,6 @@ class _ChatPageState extends State<ChatPage>
   // 合并到最近一次大回复的思考链里一次展开全看到）：大流程工具轮思考
   // 攒起 buffer，男主最终回复轮（无 toolCalls）合并挂气泡后清空。
   final List<String> _flowThinkingBuffer = [];
-
-  // 8-10 00:4x（用户：男主结尾思考了却不说话——V4 思考耗光输出预算，
-  // 正文截断成空）：男主思考了但正文空 → 下次唤醒时提示补说（用完即清）。
-  // max_tokens 8192 是根因修复，这是兜底：万一还截断，至少男主会被
-  // 提醒"把思考结论说出来"，不 silently 卡死。
-  String? _pendingThinkingRetryHint;
 
   /// 工具轮思考攒 buffer（剥工具行；空/无效忽略）。
   void _bufferFlowThinking(String? raw) {
