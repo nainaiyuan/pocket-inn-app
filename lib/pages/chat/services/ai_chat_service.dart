@@ -696,56 +696,6 @@ class AiChatService {
     {
       'type': 'function',
       'function': {
-        'name': 'manage_flow',
-        'description':
-            '管理你的流程（8-06 23:55 你设计：长任务先立流程，一条条执行，'
-            '做完再结束）。action=create（立流程：goal 目标 + steps 步骤列表）'
-            '/next（当前步完成，推进下一步）/finish（全部完成）/'
-            'cancel（取消）/resume（被她打断后继续）/status（看当前流程）/'
-            'update（她提了新要求 → 更新 goal/steps 从头执行）。'
-            '步骤写法：steps 每项可以是字符串，或对象 {"name":"步骤名",'
-            '"doneType":"tool_result|ai_output|user_confirm"}。'
-            '⚠️ 完成方式分开认（8-08 19:4x 你提的建议）：'
-            '**需要先调功能成功的步骤 → tool_result**（默认）；'
-            '**不需要调功能、你直接产出/汇总/告知的步骤 → ai_output**'
-            '（next 时带 result 提交，不会卡"没调工具"）；'
-            '需要她拍板的步骤 → user_confirm。'
-            '⚠️ 你自己的流程，不需要她审批。'
-            '流程执行中她发来的消息会被管家收集，你不用管，专注执行；'
-            '被她打断会收到系统事件，告诉你停在哪一步、她说了什么，'
-            '你再决定继续还是先回复她；'
-            '她拒绝了你的工具调用也会收到系统事件，别无视，换方案或先回复她。'
-            '想确认流程进度：直接调 status（免审批，立刻回你当前第几步），'
-            '不要用 list_tools / query_logs 反复查——查了也看不到流程状态，'
-            '而且会被她拒绝。',
-        'parameters': {
-          'type': 'object',
-          'properties': {
-            'action': {
-              'type': 'string',
-              'description':
-                  'create / next / finish / cancel / resume / status / update',
-            },
-            'goal': {
-              'type': 'string',
-              'description':
-                  'create 时：流程目标；update 时：新目标（可选）',
-            },
-            'steps': {
-              'type': 'array',
-              'items': {'type': 'string'},
-              'description':
-                  'create 时：步骤列表，如 ["查记忆类工具", "测 record_memory", '
-                  '"测 recall_memory"]；update 时：新步骤列表（可选）',
-            },
-          },
-          'required': ['action'],
-        },
-      },
-    },
-    {
-      'type': 'function',
-      'function': {
         'name': 'manage_frequent_tools',
         'description':
             '维护你的常用工具表（8-06 21:54 你设计：常用工具放概览里'
@@ -1303,10 +1253,8 @@ class AiChatService {
       if (flowText != null && flowText.isNotEmpty)
         AIChatMessage(
           role: 'system',
-          content: '【当前流程】（你自己立的流程，管家只负责存和执行；'
-              '**工具类步骤工具成功会自动推进**；产出/确认类步骤调 manage_flow next '
-              '并带 result 提交（会收到"第N步完成，现在第N+1步"反馈，那才算推进了）；'
-              '全部做完调 finish；中途要停调 cancel）\n$flowText'
+          content: '【当前流程】（旧长任务卡片，已停用——长任务直接做，'
+              '做完回复她消掉；有遗留卡片就按它收尾，工具类步骤做完会自动推进）\n$flowText'
               '\n（执行中她发来的消息管家会收集，不用管，专注执行；'
               '被她打断会收到【系统事件】，你决定继续还是先回复她）',
         ),

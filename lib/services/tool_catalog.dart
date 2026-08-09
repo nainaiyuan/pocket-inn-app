@@ -43,7 +43,7 @@ class ToolCatalog {
     },
     '自管理': {
       'manage_pad': '整理便签（当前任务模块，你自己维护）',
-      'manage_flow': '立流程（长任务先立计划 1.2.3.，一条条执行；支持 adjust 调整步骤）',
+      'manage_flow': '旧长任务卡片系统（8-10 已停用：长任务直接做，不用立流程；除非有遗留卡片要收尾，否则不要用）',
       'manage_chat_flow': '调整对话流程（merge 融合步骤/delete 删除步骤/status 查看）',
       'manage_tool_manual': '工具使用手册（格式/示例/坑，add/get/list/remove）',
       'manage_tool_test': '工具测试任务（start/report/status/abort，管家维护清单）',

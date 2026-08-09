@@ -28,7 +28,6 @@ class ToolIntentParser {
     'continue_speaking',
     'countdown_card',
     'list_tools',
-    'manage_flow',
     'manage_frequent_tools',
     'manage_pad',
     'manage_record_tree',

@@ -566,8 +566,8 @@ class _ChatPageState extends State<ChatPage>
         '停在 ${cur + 1}/${steps.length} 步（$curStep）。'
         '她刚才发来的消息（管家收集的）：'
         '${userText.isEmpty ? '（没有新消息，她只是按了停止）' : userText}。'
-        '请决定：① 调 manage_flow resume 继续执行流程；'
-        '② 先回复她（流程保持暂停，回完再 resume，或 finish/cancel 结束）。';
+        '请决定：① 继续执行流程（旧长任务卡片，可直接说"继续"）；'
+        '② 先回复她（流程保持暂停，回完再继续，或说结束）。';
     if (_generating) {
       // 男主正在跑这轮（工具轮循环中）→ 排队，等它结束自动触发
       _pendingStopEvent = event;
@@ -690,10 +690,10 @@ class _ChatPageState extends State<ChatPage>
         '她刚才发来的消息：$fullText。\n'
         '**这一轮先回复她，不要调任何工具**（插话轮管家会拦截工具调用）。\n'
         '回完她之后，根据她的话判断：\n'
-        '· 她只是闲聊/没改需求 → 调 manage_flow resume 继续原流程；\n'
-        '· 她提了新需求/要查东西 → 调 manage_flow update 修改流程（加/改步骤）再继续；\n'
-        '· 她明确说"不要了/取消" → 才调 manage_flow cancel；\n'
-        '· 拿不准 → 默认 resume 继续原流程，**绝不因为她随便一句话就取消整个流程**。';
+        '· 她只是闲聊/没改需求 → 继续原流程（旧长任务卡片）；\n'
+        '· 她提了新需求/要查东西 → 按她说的调整方向再继续；\n'
+        '· 她明确说"不要了/取消" → 才结束流程；\n'
+        '· 拿不准 → 默认继续原流程，**绝不因为她随便一句话就取消整个流程**。';
     if (_pendingInterruptEvent != null) {
       // 已有插话排队 → 合并（男主当前轮结束只推一次，内容带全）
       _pendingInterruptEvent = '$_pendingInterruptEvent\n她又发来：$text';
@@ -814,7 +814,7 @@ class _ChatPageState extends State<ChatPage>
       '',
       systemEvent: '任务还没完成，继续执行（用户没发新消息，这是自动续跑）：'
           '目标「${flow['goal']}」，当前第 ${cur + 1}/$steps 步（$stepText）。'
-          '基于已有结果继续推进；做完调 manage_flow next/finish。'
+          '基于已有结果继续推进；做完直接回复她消掉（旧长任务卡片能收尾就收尾）。'
           '别重新规划、别重复查已查过的东西。',
       bubbleText: '🔔 男主继续执行流程…',
     );
@@ -966,11 +966,11 @@ class _ChatPageState extends State<ChatPage>
         (flowNow['status']?.toString() ?? '') == 'paused_by_user') {
       pausedJudge = '当前流程被她插话暂挂了（她的话：'
           '${flowNow['stoppedNote'] ?? ''}）。你判断：\n'
-          '· 她只是闲聊/没改需求 → 调 manage_flow resume 继续原流程；\n'
-          '· 她提了新需求/要查东西 → 调 manage_flow update 修改流程；\n'
-          '· 她明确说"不要了/取消" → 才调 manage_flow cancel；\n'
-          '· 拿不准 → 默认 resume 继续原流程，绝不乱取消。\n'
-          '判断完直接调工具，不用问她。\n';
+          '· 她只是闲聊/没改需求 → 继续原流程（旧长任务卡片，能收尾就收尾）；\n'
+          '· 她提了新需求/要查东西 → 按她说的调整方向再继续；\n'
+          '· 她明确说"不要了/取消" → 才结束流程；\n'
+          '· 拿不准 → 默认继续原流程，绝不乱取消。\n'
+          '判断完直接回复她，不用问她。\n';
     }
     // 8-09 18:1x（对话流程）：检查轮带待回清单（还有几条没回）
     final chatFlowBrief = ChatFlowStore.checkBrief(pid);
@@ -1443,7 +1443,7 @@ class _ChatPageState extends State<ChatPage>
                 role: 'tool',
                 content: '【工具 $name】❌被管家拦截：插话轮禁止调用工具，'
                     '这一轮只回复用户。她提的新需求先口头确认，'
-                    '回完后调 manage_flow resume/update/cancel 处理流程。',
+                    '回完后判断流程怎么办（继续/调整/结束）。',
                 toolCallId: call['id']?.toString() ?? 'call_${toolLoop}_$name',
               ),
             );
@@ -1695,154 +1695,41 @@ class _ChatPageState extends State<ChatPage>
             _appendToolBubble('🗃️ 男主在整理工具缓存…');
             toolResult = await _executeManageToolCache(args);
           } else if (name == 'manage_flow') {            // 8-06 23:55 用户：流程层——男主自管（免审批）
-            // 长任务先立流程（goal+steps），一条条执行，做完 finish
+            // 8-10 03:0x 用户拍板：长任务=普通对话流程，manage_flow 停用。
+            // 只放行收尾动作（finish/cancel/status 处理遗留卡片），创建/推进/续跑类一律拒绝。
             _appendToolBubble('📋 男主在整理流程…');
             final action = args['action']?.toString() ?? '';
-            if (action == 'create') {
-              final goal = args['goal']?.toString() ?? '';
-              final stepsRaw = args['steps'];
-              // 8-08 15:2x：steps 支持字符串或对象 {name, doneType, doneCondition}
-              final steps = <dynamic>[];
-              if (stepsRaw is List) {
-                for (final st in stepsRaw) {
-                  if (st is Map) {
-                    steps.add(st);
-                  } else {
-                    final t = st.toString().trim();
-                    if (t.isNotEmpty) steps.add(t);
-                  }
-                }
-              } else if (stepsRaw is String) {
-                steps.addAll(
-                  stepsRaw
-                      .split(RegExp(r'\n+'))
-                      .where((st) => st.trim().isNotEmpty),
-                );
-              }
-              toolResult = _ToolResult(
-                true,
-                await FlowStore.create(personaId, goal, steps),
-              );
-            } else if (action == 'next') {
-              // 8-08 15:2x（GPT 10 问 4 定案：结构化提交，不从文本抽取）：
-              // ai_output/user_confirm 步骤 next 时带 result（+可选 summary/next_action）
-              toolResult = _ToolResult(
-                true,
-                await FlowStore.next(
-                  personaId,
-                  result: args['result']?.toString(),
-                  summary: args['summary']?.toString(),
-                  nextAction: args['next_action']?.toString(),
-                ),
+            if (action != 'finish' && action != 'cancel' && action != 'status') {
+              toolResult = const _ToolResult(
+                false,
+                'manage_flow 已停用（8-10 用户拍板：长任务直接做，不用立流程/定步骤）。'
+                '直接干活，做完回复她消掉她的话；有遗留长任务卡片要收尾，用 finish/cancel/status。',
               );
             } else if (action == 'finish') {
               toolResult = _ToolResult(true, await FlowStore.finish(personaId));
             } else if (action == 'cancel') {
               toolResult = _ToolResult(true, await FlowStore.cancel(personaId));
-            } else if (action == 'resume') {
-              toolResult = _ToolResult(true, await FlowStore.resume(personaId));
             } else if (action == 'status') {
               final flowText = FlowStore.text(personaId);
               if (flowText != null) {
                 toolResult = _ToolResult(true, flowText);
               } else {
-                // 8-09 20:56（用户：男主心智里只有一个"流程"，不该让他
-                // 换工具）——没有长任务流程时，直接返回对话流程清单
-                // （用户消息自动立的，一句话=一个大流程，插话=小流程）。
-                // 不用叫男主调 manage_chat_flow，manage_flow status 就能看。
                 final chatText = ChatFlowStore.buildText(personaId);
                 if (chatText != null) {
                   toolResult = _ToolResult(
                     true,
-                    '没有长任务流程（男主主动立的多步任务）。\n'
-                    '当前对话流程（用户消息自动立）:\n$chatText',
+                    '没有长任务流程（已停用）。\n当前对话流程（用户消息自动立）:\n$chatText',
                   );
                 } else {
-                  toolResult = _ToolResult(
-                    false,
-                    '没有流程（长任务 create 先立；用户说话会自动立对话流程）',
-                  );
+                  toolResult = _ToolResult(false, '没有流程');
                 }
               }
-            } else if (action == 'update') {
-              // 8-07 00:1x 用户：用户提了新要求 → 更新流程目标/步骤，从头执行
-              final goal = args['goal']?.toString();
-              final stepsRaw = args['steps'];
-              List<dynamic>? steps;
-              if (stepsRaw is List) {
-                steps = <dynamic>[];
-                for (final st in stepsRaw) {
-                  if (st is Map) {
-                    steps.add(st);
-                  } else {
-                    final t = st.toString().trim();
-                    if (t.isNotEmpty) steps.add(t);
-                  }
-                }
-              } else if (stepsRaw is String) {
-                steps = stepsRaw
-                    .split(RegExp(r'\n+'))
-                    .where((st) => st.trim().isNotEmpty)
-                    .toList();
-              }
-              toolResult = _ToolResult(
-                true,
-                await FlowStore.update(personaId, goal: goal, steps: steps),
-              );
-            } else if (action == 'adjust') {
-              // 8-09 19:3x（设计九.8）：男主调整流程步骤——
-              // reorder/merge/split/delete/rename，参数全按步骤编号
-              final adjAction = args['adjust_action']?.toString() ??
-                  args['adjustAction']?.toString() ??
-                  args['动作']?.toString() ??
-                  '';
-              List<int>? indices;
-              if (args['indices'] is List) {
-                indices = (args['indices'] as List)
-                    .map((e) => int.tryParse(e.toString()) ?? 0)
-                    .where((e) => e > 0)
-                    .toList();
-              }
-              List<int>? order;
-              if (args['order'] is List) {
-                order = (args['order'] as List)
-                    .map((e) => int.tryParse(e.toString()) ?? 0)
-                    .where((e) => e > 0)
-                    .toList();
-              }
-              List<String>? names;
-              if (args['names'] is List) {
-                names = (args['names'] as List)
-                    .map((e) => e.toString())
-                    .toList();
-              }
-              final idx = int.tryParse(args['index']?.toString() ?? '') ?? 0;
-              toolResult = _ToolResult(
-                true,
-                await FlowStore.adjust(
-                  personaId,
-                  action: adjAction,
-                  indices: indices,
-                  index: idx > 0 ? idx : null,
-                  name: args['name']?.toString(),
-                  names: names,
-                  order: order,
-                ),
-              );
             } else {
               toolResult = const _ToolResult(
                 false,
-                'manage_flow 参数：action=create/next/finish/cancel/resume/status/update/adjust，'
-                'create/update 要 goal+steps。adjust 要 adjust_action=reorder/merge/split/delete/rename'
-                '（reorder 带 order=[新顺序编号]；merge 带 indices=[编号]+name=新步骤名；'
-                'split 带 index=编号+names=[新步骤名列表]；delete 带 indices=[编号]；'
-                'rename 带 index=编号+name=新名字）。'
-                '参数名用英文（action/goal/steps），别用中文"动作/目标/步骤"。'
-                '示例：{"action":"adjust","adjust_action":"merge","indices":[1,2],"name":"记录用户喜欢猫也喜欢狗"}',
+                'manage_flow 已停用（8-10 用户拍板：长任务直接做，不用立流程/定步骤）。',
               );
             }
-            // 流程状态变化 → 刷新停止条
-            if (mounted) setState(() {});
           } else if (name == 'manage_chat_flow') {
             // 8-09 19:3x（设计九.4/9.8）：对话流程调整——男主融合/删除步骤
             // action=merge（nos=[编号]+name=新内容）/ delete（nos=[编号]）/ status
@@ -2235,7 +2122,7 @@ class _ChatPageState extends State<ChatPage>
               toolMessages.add(AIChatMessage(
                 role: 'user',
                 content: '【系统事件】所有步骤都已完成 ✅。'
-                    '现在调 manage_flow finish 收尾，然后给用户汇总结果。',
+                    '直接回复她汇总结果收尾。',
               ));
             } else {
               toolMessages.add(AIChatMessage(
@@ -2749,9 +2636,9 @@ class _ChatPageState extends State<ChatPage>
               '',
               systemEvent: '用户还在等你回复（你刚才只顾着调工具，没回她的话）。'
                   '**这一轮只回复她，禁止调用任何工具**（管家会拦截）。她刚才说：$_interruptUserText。'
-                  '回完之后判断流程怎么办：她只是闲聊 → manage_flow resume 继续；'
-                  '她改需求 → manage_flow update；她说不要 → manage_flow cancel；'
-                  '拿不准 → 默认 resume，绝不乱取消。',
+                  '回完之后判断流程怎么办：她只是闲聊 → 继续原流程；'
+                  '她改需求 → 按她说的调整；她说不要 → 结束流程；'
+                  '拿不准 → 默认继续，绝不乱取消。',
               bubbleText: '💬 男主先回你…',
             ),
           );
@@ -4483,7 +4370,7 @@ class _ChatPageState extends State<ChatPage>
     return '管家支持这些工具调用格式（选一个照模板写，写完管家自动解析执行，'
         '结果会返回给你）：\n'
         '0. 一句话暗号（推荐，最不容易写错）：工具:工具名 参数名=值 参数名=值\n'
-        '   → 例：工具:manage_flow 动作=next / 工具:record_memory 内容=… 类别=日常\n'
+        '   → 例：工具:record_memory 内容=… 类别=日常 / 工具:list_tools\n'
         '1. OpenAI 系（你熟悉的话优先用）：\n'
         '   tool_calls:[{"function":{"name":"工具名","arguments":"{\\"参数\\":\\"值\\"}"}}]\n'
         '   → name 填工具名，arguments 填参数 JSON 字符串\n'
@@ -8000,9 +7887,8 @@ class _ChatPageState extends State<ChatPage>
           final flowText = FlowStore.text(pid);
           if (flowText != null) {
             prompt +=
-                '\n\n【流程】（你正在执行的长任务。进度管家不会自动推进——'
-                '每完成一步调 manage_flow 动作=next 推进，全部做完调 finish；'
-                '这是唯一进度来源，别从第一步重来）\n$flowText';
+                '\n\n【流程】（旧长任务卡片，已停用——长任务直接做不用立流程；'
+                '有遗留卡片就按它收尾，做完直接回复她）\n$flowText';
           }
           // 8-08 02:1x 用户：工具工作缓存（干活中间数据，短命；
           // 干完把要长期用的整理进记录/便签后 clear——"别查完就丢"）
