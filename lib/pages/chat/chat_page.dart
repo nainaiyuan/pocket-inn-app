@@ -609,6 +609,7 @@ class _ChatPageState extends State<ChatPage>
     _lastAutoContinueAt = null;
     _continueFrozen = false; // 8-08 18:1x：用户说话 → 解除续话冻结
     _stopRequested = false; // 插话 = 用户主动说话，停止状态解除
+    _maleChoseContinue = false; // 8-10 00:5x：用户说话 → 重置结尾命令标志
     // 8-09 18:2x（对话流程 v2）：插话也进对话流程（追加步骤）
     ChatFlowStore.warm(pid);
     unawaited(ChatFlowStore.feedUser(pid, text));
@@ -836,13 +837,23 @@ class _ChatPageState extends State<ChatPage>
     // 还有下一个大流程（running 有 pending）→ 检查轮带清单唤醒男主
     // 继续走（checkBrief 在下方注入"还有 N 条没回"）。
     // 普通聊天（statusOf == null）不受影响，检查轮照旧。
+    // 8-10 00:5x（用户：结尾命令）——男主输出续命/合并命令 → done
+    // 也放行（唤醒继续干活/处理后续大流程），用完即清。
     final chatFlowStatus = ChatFlowStore.statusOf(pid);
-    if (chatFlowStatus == 'done') {
+    final maleChoseContinue = _maleChoseContinue;
+    _maleChoseContinue = false;
+    if (chatFlowStatus == 'done' && !maleChoseContinue) {
       DebugLogger.log(
         '管家流程',
         '🔕 对话流程已结束（done），不唤醒（用户 8-10：消掉大流程不二次唤醒）',
       );
       return;
+    }
+    if (maleChoseContinue) {
+      DebugLogger.log(
+        '管家流程',
+        '🔔 男主结尾命令=继续/合并 → done 放行，检查轮唤醒',
+      );
     }
     // ① 用户有消息排队（男主忙时收集的）→ 先回用户（优先级最高）
     final pending = PendingQueueStore.list(pid);
@@ -2411,6 +2422,19 @@ class _ChatPageState extends State<ChatPage>
       // 男主输出 need_continue:false / next_action:null → 冻结自动唤醒
       //（这轮就是"结束检查轮"，男主明确说"没事情做了"）
       final exitSignal = parseExitSignal(replyTexts.join('\n'));
+      // 8-10 00:5x（用户：男主消掉大流程自带结尾命令）——男主选
+      // 续命（need_continue:true）或与后续大流程合二为一
+      // （next_action:merge）→ 即使流程 done 也放行唤醒继续
+      final nextAction = parseNextAction(replyTexts.join('\n'));
+      if (exitSignal == false || nextAction == 'merge') {
+        _maleChoseContinue = true;
+        DebugLogger.log(
+          '管家流程',
+          nextAction == 'merge'
+              ? '🔀 男主选择与后续大流程合二为一（next_action:merge）→ 唤醒继续'
+              : '🔁 男主选择续命继续（need_continue:true）→ 唤醒继续',
+        );
+      }
       if (exitSignal == true) {
         _continueFrozen = true;
         DebugLogger.log(
@@ -3689,6 +3713,11 @@ class _ChatPageState extends State<ChatPage>
   // 合并到最近一次大回复的思考链里一次展开全看到）：大流程工具轮思考
   // 攒起 buffer，男主最终回复轮（无 toolCalls）合并挂气泡后清空。
   final List<String> _flowThinkingBuffer = [];
+
+  // 8-10 00:5x（用户：男主消掉大流程自带结尾命令）：男主输出续命
+  // （need_continue:true）或合并（next_action:merge）→ 即使对话流程
+  // done 也放行唤醒（继续干活/处理后续大流程）；用完即清 + 用户消息重置。
+  bool _maleChoseContinue = false;
 
   /// 工具轮思考攒 buffer（剥工具行；空/无效忽略）。
   void _bufferFlowThinking(String? raw) {

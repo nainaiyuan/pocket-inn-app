@@ -489,7 +489,8 @@ class ChatFlowStore {
         if (dec.isNotEmpty) sb.writeln('    → $dec');
       }
       sb.writeln('没做完的（工具 ❌/没找到）→ 继续做完再结束；'
-          '确认都做完了 → 输出退出标记 {"need_continue": false} 结束流程。');
+          '确认都做完了 → 回复末尾带结束命令结束流程：'
+          '{"need_continue": false}');
       return sb.toString();
     }
     // 步骤清单（最多显示 6 步）
@@ -524,16 +525,17 @@ class ChatFlowStore {
         if (dec.isNotEmpty) sb.writeln('   → 判断：$dec');
       }
     }
-    // 当前步无工具 → 提示直接回复
+    // 当前步无工具 → 提示男主判断：直接回复消掉 or 调工具再回复消掉
+    // 8-10 00:5x（用户：插话轮要让男主判断"直接回消掉还是要调用工具
+    // 再说话消掉"，每轮插话都这样）
     final curStep = cur >= 0 && cur < steps.length ? steps[cur] : null;
     if (curStep != null &&
         curStep['status'] != 'done' &&
         _asMap(curStep['tools']).isEmpty) {
-      sb.writeln('→ 当前步：直接回复她就完成（要查东西先调工具再回复）。');
+      sb.writeln('→ 当前步：判断——直接回复她消掉这条，'
+          '还是要先调工具（查东西/记记忆）再回复消掉？');
     }
-    // 8-09 20:1x：复核只跟"调了工具"绑定（用户：没调工具默认流程已结束）。
-    // 复核在大流程结尾 = 确认这个流程是否结束。男主没确认 → 复核留在这里；
-    // 下个大流程（新消息）开始时复核置顶到第一步（feedUser 处理）。
+    // 8-09 20:1x：复核已去掉（8-10 00:49），无复核引导。
     // "没回"只数真实用户步骤（isReview != true）。
     final realPendingCount =
         steps.where((s) => s['status'] != 'done' && s['isReview'] != true).length;
@@ -541,23 +543,14 @@ class ChatFlowStore {
       sb.writeln('提示：还有 $realPendingCount 条没回（用户消息），先回她。'
           '${realPendingCount > 1 ? '一次回多条可标注 {"reply":"回#N、#M"}（N=第几步）一起消；否则默认只消最老一条。' : ''}');
     }
-    // 复核步骤单独给判断引导（不算"没回"，是流程结束确认）
-    final reviewIdx = steps.indexWhere(
-        (s) => s['isReview'] == true && s['status'] != 'done');
-    if (reviewIdx >= 0) {
-      final realSteps = steps
-          .where((s) => s['isReview'] != true)
-          .toList();
-      final doneReal = realSteps.where((s) => s['status'] == 'done').length;
-      final pendingReal = realSteps.length - doneReal;
-      sb.writeln('→ 复核（上个流程用过工具，结束前确认，不是新消息不用"回"）：'
-          '已处理 $doneReal 条'
-          '${pendingReal > 0 ? '，还有 $pendingReal 条在流程里（继续处理）' : ''}'
-          '——判断：还有要补充的吗？要调整流程吗？'
-          '还是确认结束（输出退出标记 {"need_continue": false}）？');
-    }
-    // 重复回复警告（无未消条目却说话 → 由 buildText 的 done 分支覆盖；
-    // 这里防"已消完但流程还没标 done"的边界，其实 done 分支已处理）
+    // 8-10 00:5x（用户：男主消掉大流程自带结尾命令）——结尾命令清单，
+    // 男主消掉大流程（最后一步回复）时回复末尾带一个：
+    // - 结束（不唤醒）/ 续命继续干活 / 与后续大流程合二为一
+    sb.writeln('结尾命令（回复末尾带一个，管家识别，不会显示给她）：\n'
+        '· {"need_continue": false} → 结束，不再唤醒\n'
+        '· {"need_continue": true} → 续命：还有事要做，唤醒继续干活\n'
+        '· {"next_action": "merge"} → 与后续大流程合二为一（剩余步骤'
+        '合并一起处理）');
     return sb.toString();
   }
 

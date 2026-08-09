@@ -82,6 +82,17 @@ bool? parseExitSignal(String raw) {
   return null;
 }
 
+/// 结尾命令的 next_action 值解析（8-10 00:5x 用户：男主消掉大流程
+/// 自带结尾命令——merge = 与后续大流程合二为一）。
+/// 返回 action 值（小写，如 'merge'），没输出则 null。
+/// 兼容 JSON 字段（{"next_action": "merge"}）、标签块、纯文本。
+String? parseNextAction(String raw) {
+  if (raw.isEmpty) return null;
+  final m = RegExp(r'"?next_action"?\s*[:：]\s*"([^"]+)"').firstMatch(raw);
+  if (m == null) return null;
+  return m.group(1)!.trim().toLowerCase();
+}
+
 /// 退出标记从显示文本剥离（防纯文本路径把 need_continue/next_action 漏给用户看）。
 /// JSON 块路径（parseStructuredOutput）已自动丢弃未知字段，这里是兜底——
 /// 只剥"裸标记"（不在 JSON 对象里的），JSON 对象里的字段不碰。
