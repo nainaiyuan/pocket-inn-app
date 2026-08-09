@@ -8,6 +8,7 @@ import '../butler/butler_skill_library_page.dart';
 import '../chat/gesture_test_page.dart';
 import '../chat/widgets/debug_log_sheet.dart';
 import 'chat_storage_self_test_page.dart';
+import 'debug_lab_page.dart';
 import 'fix_verify_page.dart';
 import 'mock_ai_test_page.dart';
 
@@ -65,6 +66,13 @@ class DebugToolboxPage extends StatelessWidget {
               title: '技能库',
               subtitle: '管家技能/模板管理',
               page: const ButlerSkillLibraryPage(),
+            ),
+            _Entry(
+              icon: Icons.troubleshoot,
+              iconColor: const Color(0xFFD8A8C8),
+              title: 'Debug Lab 找bug实验室',
+              subtitle: '男主轨迹自动记录+健康检查+一键复制报告发龙虾',
+              page: const DebugLabPage(),
             ),
           ]),
           _section('聊天', [

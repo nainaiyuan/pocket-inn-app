@@ -108,6 +108,23 @@ class TraceStore {
     return out;
   }
 
+  /// 全部 persona 最近 N 条（倒序：最新在前）—— Debug Lab 页用
+  Future<List<AgentRunTrace>> all({int limit = 50}) async {
+    final keys = await _storage.keys();
+    final mine = keys.where((k) => k.startsWith(_prefix)).toList()..sort();
+    final out = <AgentRunTrace>[];
+    for (final k in mine.reversed.take(limit)) {
+      final raw = await _storage.load(k);
+      if (raw == null || raw.isEmpty) continue;
+      try {
+        out.add(AgentRunTrace.fromJson(
+          (jsonDecode(raw) as Map).cast<String, dynamic>(),
+        ));
+      } catch (_) {}
+    }
+    return out;
+  }
+
   /// 清理超出上限的旧轨迹
   Future<void> _trim(String personaId) async {
     final keys = await _storage.keys();
