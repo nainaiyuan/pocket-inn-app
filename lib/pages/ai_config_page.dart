@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../ai_provider/ai_provider_manager.dart';
+import '../ai_provider/ai_module_log.dart';
 import '../ai_provider/failover_router.dart';
 import '../ai_provider/models.dart';
 import '../ai_provider/provider_presets.dart';
@@ -590,7 +591,27 @@ class _AiConfigPageState extends State<AiConfigPage> {
   /// 探测完 manager 广播 → 所有页面能力灯自动联动，这里只弹结果提示。
   void _probeAfterSave(String id, String name) {
     unawaited(
-      manager.capabilitiesFor(id).then((caps) {
+      manager.capabilitiesFor(id).then((caps) async {
+        // 8-09 22:4x（用户：没看见思考链——开关默认"自动"，DeepSeek 默认
+        // 不开思考）：探测结果回写 thinkingSupported——探测确认支持思考的
+        // AI，配置页开关明确可用；确认不支持的置灰（避免用户开了没效果）。
+        // 只在有实测结果（isProbed）时回写，猜测结果不动（可能误判）。
+        if (caps.isProbed) {
+          AIProviderConfig? existing;
+          try {
+            existing = manager.providers.firstWhere((c) => c.id == id);
+          } catch (_) {}
+          if (existing != null &&
+              existing.thinkingSupported != caps.supportsReasoning) {
+            await manager.saveProvider(
+              existing.copyWith(thinkingSupported: caps.supportsReasoning),
+            );
+            AiModuleLog.log(
+              'AI探测',
+              '${existing.name} 思考支持回写：${caps.supportsReasoning}',
+            );
+          }
+        }
         if (!mounted) return;
         final summary = caps.isProbed
             ? '实测：${caps.systemLabel}（${caps.capabilitySummary}）'
