@@ -1258,9 +1258,23 @@ class _ChatPageState extends State<ChatPage>
         }
         final firstText = await _displayableText(textToShow);
         if (firstText.isNotEmpty) {
+          // 8-09 23:5x（用户：大流程思考合并到最近一次大回复）：
+          // 第一轮就调工具（toolCalls 非空）→ 思考攒 buffer 不挂气泡，
+          // 等最终回复合并；第一轮纯回复 → 思考直接挂。
+          // 插话轮例外：插话是独立轮（流程暂停中插进来回她），思考
+          // 独立显示，不能把流程攒的思考合并给它。
+          final firstCalling = (result.toolCalls?.isNotEmpty ?? false);
+          final interruptRound = _interruptRoundActive;
+          if (firstCalling && !interruptRound) {
+            _bufferFlowThinking(result.reasoningContent);
+          }
           final rows = await _appendMaleReply(
             textToShow,
-            thinkingChain: result.reasoningContent,
+            thinkingChain: interruptRound
+                ? result.reasoningContent
+                : (firstCalling
+                    ? null
+                    : _takeFlowThinking(result.reasoningContent)),
             isFirst: true,
           );
           dbRows.addAll(rows);
@@ -2272,18 +2286,30 @@ class _ChatPageState extends State<ChatPage>
           // 正常情况下 system_template 要求男主"请求工具时不输出文本"，
           // 所以工具轮中间文本很少；万一模型不听话说了话，显示出来
           // 也比攒起来让用户以为卡住强。工具结果仍由管家批量回传。
+          // 8-09 23:5x（用户：大流程中间思考多次、只结尾大回复）：
+          // 思考链不再零碎挂中间气泡——还在调工具（toolCalls 非空）→
+          // 思考攒 buffer；这轮是最终回复（无 toolCalls）→ buffer+本轮
+          // 合并挂第一条气泡，一次展开全看到。
           replyTexts.add(result.text.trim());
           final roundText = await _displayableText(result.text);
           if (roundText.isNotEmpty) {
+            final stillCalling = (result.toolCalls?.isNotEmpty ?? false);
+            if (stillCalling) {
+              _bufferFlowThinking(result.reasoningContent);
+            }
             dbRows.addAll(await _appendMaleReply(
               result.text,
-              thinkingChain: result.reasoningContent,
+              thinkingChain: stillCalling
+                  ? null
+                  : _takeFlowThinking(result.reasoningContent),
             ));
           } else {
             ChatPresence.instance.endTyping();
           }
         } else {
-          // 工具轮没说话（可能又调工具）→ 工具阶段不显示
+          // 工具轮没说话（可能又调工具）→ 工具阶段不显示；
+          // 8-09 23:5x：没说话但思考了 → 攒 buffer（最终回复合并显示）
+          _bufferFlowThinking(result.reasoningContent);
           ChatPresence.instance.endTyping();
         }
         // 8-08 01:2x 用户（管家编排）：审批拒绝【不打断流程】——拒绝结果
@@ -2300,6 +2326,17 @@ class _ChatPageState extends State<ChatPage>
           }
           rejectedTools.clear();
         }
+      }
+
+      // 8-09 23:5x（用户：大流程思考合并）兜底：循环退出后 buffer 还有
+      // 残留 = 男主最后一轮没说话但思考了（text 空 + 无 toolCalls 时
+      // 2280 else 分支只攒不取）→ 挂思考气泡（正文空 → "（他正在思考…）"
+      // 占位 + 思考折叠区），思考不丢。
+      if (_flowThinkingBuffer.isNotEmpty) {
+        dbRows.addAll(await _appendMaleReply(
+          '',
+          thinkingChain: _takeFlowThinking(null),
+        ));
       }
 
       // 剥离 #keywords（仅管家可见）→ 显示/落库用干净文本
@@ -3633,6 +3670,31 @@ class _ChatPageState extends State<ChatPage>
   String? _pendingFeedback;
   // 8-04 18:34：疑似工具调用格式不对 → 下轮注入男主正确格式提示（用完即清）
   String? _formatHint;
+
+  // 8-09 23:5x（用户：大流程中间思考多次、只结尾大回复 → 思考别零碎显示，
+  // 合并到最近一次大回复的思考链里一次展开全看到）：大流程工具轮思考
+  // 攒起 buffer，男主最终回复轮（无 toolCalls）合并挂气泡后清空。
+  final List<String> _flowThinkingBuffer = [];
+
+  /// 工具轮思考攒 buffer（剥工具行；空/无效忽略）。
+  void _bufferFlowThinking(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return;
+    final clean = stripToolTextLines(raw).trim();
+    if (clean.isEmpty) return;
+    _flowThinkingBuffer.add(clean);
+  }
+
+  /// 取走合并思考（buffer + 本轮）并清空；无内容返回 null。
+  String? _takeFlowThinking(String? currentRaw) {
+    final parts = <String>[..._flowThinkingBuffer];
+    _flowThinkingBuffer.clear();
+    if (currentRaw != null && currentRaw.trim().isNotEmpty) {
+      final clean = stripToolTextLines(currentRaw).trim();
+      if (clean.isNotEmpty) parts.add(clean);
+    }
+    if (parts.isEmpty) return null;
+    return parts.join('\n\n');
+  }
 
   /// 男主获准调取的记忆查询词（下轮注入检索到的记忆）
   String? _pendingRecall;
