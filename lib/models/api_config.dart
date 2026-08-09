@@ -132,8 +132,15 @@ abstract class ResolvedApiConfig with _$ResolvedApiConfig {
       // thinking:{type:enabled} 可能按默认深度（低/不思考）跑 → 无
       // reasoning_content。DeepSeek 系开思考时补 high（思考质量与速度
       // 平衡；max 太慢影响聊天体验）。其他家不认识该参数可能报错 → 不注入。
+      // 8-10 00:4x（用户：男主结尾思考了却不说话——V4 思考耗输出预算，
+      // 正文被截断成空/残缺"<"）：思考模式必须给足 max_tokens——
+      // 思考（reasoning_content）和正文共用一个输出预算，默认值被思考
+      // 吃光 → 正文 0 token → 男主"思考了但没说话"，退出标记出不来、
+      // 流程不结束、下一个大流程不触发。8192 = 思考 high + 正常回复
+      // 都留足。只对 DeepSeek 系注入（其他家可能不认识/报错）。
       if (thinkingEnabled! && baseUrl.toLowerCase().contains('deepseek')) {
         body['reasoning_effort'] = 'high';
+        body['max_tokens'] = 8192;
       }
     }
     return body;

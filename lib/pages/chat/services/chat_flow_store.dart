@@ -248,22 +248,41 @@ class ChatFlowStore {
       final anyToolUsed = steps.any((s) =>
           s['isReview'] != true && _asMap(s['tools']).isNotEmpty);
       if (anyToolUsed) {
-        // 8-09 18:39（用户设计）：复核只给大概，不给完整句子——
-        // 男主要看细节去上下文（ContextManager 原文）。
-        // 8-09 20:1x：复核追加在**大流程结尾**（steps 末尾），
-        // 不插在中间——它是"这个流程结束了吗"的确认，不是新消息。
-        // 8-09 21:1x（用户）：复核要插男主说的话原文摘要——
-        // _reviewGuide 里已带（说过话→列摘要；没说话→必须先说一句）。
-        final reviewStep = _newStep(
-          '【复核】这个流程里调了工具——${_reviewGuide(steps)}',
-          isReview: true,
-        );
-        steps.add(reviewStep);
-        f['steps'] = steps;
-        f['currentStep'] = steps.indexOf(reviewStep);
+        // 8-10 00:4x（用户：男主干完活说过话 → 不用二次复核确认，直接
+        // 结束；下面还有大流程就继续走）：
+        // 复核只挡"这个流程男主从没跟用户说过话"（只调工具）的场景——
+        // 结束前必须补一句（8-09 21:0x 用户规则）。
+        // 男主说过话 → 直接 done：他想补充，结束检查轮（_maybeAutoContinue）
+        // 还会唤醒他一次判断"有没说完的？"，补充通道不丢；而省掉复核轮 =
+        // 少一次"思考又截断不说话"的机会（V4 思考耗预算，见 api_config
+        // max_tokens 修复）。
+        final hasSpoken = steps.any((s) =>
+            s['isReview'] != true &&
+            ((s['reply'] as String?)?.toString().trim() ?? '').isNotEmpty);
+        if (!hasSpoken) {
+          // 8-09 18:39（用户设计）：复核只给大概，不给完整句子——
+          // 男主要看细节去上下文（ContextManager 原文）。
+          // 8-09 20:1x：复核追加在**大流程结尾**（steps 末尾），
+          // 不插在中间——它是"这个流程结束了吗"的确认，不是新消息。
+          // 8-09 21:1x（用户）：复核要插男主说的话原文摘要——
+          // _reviewGuide 里已带（说过话→列摘要；没说话→必须先说一句）。
+          final reviewStep = _newStep(
+            '【复核】这个流程里调了工具——${_reviewGuide(steps)}',
+            isReview: true,
+          );
+          steps.add(reviewStep);
+          f['steps'] = steps;
+          f['currentStep'] = steps.indexOf(reviewStep);
+          await _write(personaId, f);
+          _log('对话流程',
+              '🔁 流程用过工具且男主没说过话 → 插复核（先补一句再结束）');
+          return;
+        }
+        // 说过话 → 直接结束（不插复核）
+        f['status'] = 'done';
+        f['currentStep'] = steps.length;
         await _write(personaId, f);
-        _log('对话流程',
-            '🔁 流程用过工具 → 大流程结尾插复核（确认是否结束）');
+        _log('对话流程', '✔ 男主已说过话，大流程直接结束（无复核，有下个流程自动走）');
         return;
       }
       // 没调工具 → 默认流程已结束（用户 20:12：纯对话/纯插话不插复核）
