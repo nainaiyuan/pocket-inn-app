@@ -1258,23 +1258,18 @@ class _ChatPageState extends State<ChatPage>
         }
         final firstText = await _displayableText(textToShow);
         if (firstText.isNotEmpty) {
-          // 8-09 23:5x（用户：大流程思考合并到最近一次大回复）：
-          // 第一轮就调工具（toolCalls 非空）→ 思考攒 buffer 不挂气泡，
-          // 等最终回复合并；第一轮纯回复 → 思考直接挂。
-          // 插话轮例外：插话是独立轮（流程暂停中插进来回她），思考
-          // 独立显示，不能把流程攒的思考合并给它。
-          final firstCalling = (result.toolCalls?.isNotEmpty ?? false);
+          // 8-10 00:0x（用户：哪个对话先出来，思考就放到谁那里；全都该有
+          // 思考，不然像 bug——DS 客户端开思考就全有思考，不会时有时无）：
+          // 男主说话的气泡 → 挂自己的思考（_takeFlowThinking 在 buffer 空
+          // 时 = 本轮思考）。之前纯工具轮（男主没说话）攒的思考合并给
+          // 这个气泡（不丢）。插话轮：插话思考独立挂自己的，不碰 buffer
+          //（插话是独立轮，不能把流程攒的思考合并给它）。
           final interruptRound = _interruptRoundActive;
-          if (firstCalling && !interruptRound) {
-            _bufferFlowThinking(result.reasoningContent);
-          }
           final rows = await _appendMaleReply(
             textToShow,
             thinkingChain: interruptRound
                 ? result.reasoningContent
-                : (firstCalling
-                    ? null
-                    : _takeFlowThinking(result.reasoningContent)),
+                : _takeFlowThinking(result.reasoningContent),
             isFirst: true,
           );
           dbRows.addAll(rows);
@@ -1284,11 +1279,15 @@ class _ChatPageState extends State<ChatPage>
           }
           // 文字进入打字机播放 → "正在输出"由打字机播完时 endTyping 关闭
         } else {
-          // 文本被剥离成空（纯指令/工具块）→ 本轮没有打字 → 关"正在输出"
+          // 文本被剥离成空（纯指令/工具块）→ 本轮没有打字 → 关"正在输出"；
+          // 8-10 00:0x：没说话但思考了 → 攒 buffer（下个说话气泡合并）
+          _bufferFlowThinking(result.reasoningContent);
           ChatPresence.instance.endTyping();
         }
       } else {
-        // 第一轮没说话（直接调工具）→ 工具阶段不显示"正在输出"
+        // 第一轮没说话（直接调工具）→ 工具阶段不显示"正在输出"；
+        // 8-10 00:0x：思考攒 buffer（下个说话气泡合并，不丢）
+        _bufferFlowThinking(result.reasoningContent);
         ChatPresence.instance.endTyping();
       }
       // function calling 循环：模型请求工具 → 执行 → 回传 → 再生成（最多3轮防死循环）
@@ -2290,18 +2289,16 @@ class _ChatPageState extends State<ChatPage>
           // 思考链不再零碎挂中间气泡——还在调工具（toolCalls 非空）→
           // 思考攒 buffer；这轮是最终回复（无 toolCalls）→ buffer+本轮
           // 合并挂第一条气泡，一次展开全看到。
+          // 8-10 00:0x（用户修正：哪个对话先出来思考放谁那里，全都该有
+          // 思考，别时有时无）：说话的气泡一律挂思考——_takeFlowThinking
+          // 在 buffer 空时 = 本轮自己的思考；buffer 非空（之前纯工具轮
+          // 男主没说话攒的）→ 合并给这个气泡（不丢）。
           replyTexts.add(result.text.trim());
           final roundText = await _displayableText(result.text);
           if (roundText.isNotEmpty) {
-            final stillCalling = (result.toolCalls?.isNotEmpty ?? false);
-            if (stillCalling) {
-              _bufferFlowThinking(result.reasoningContent);
-            }
             dbRows.addAll(await _appendMaleReply(
               result.text,
-              thinkingChain: stillCalling
-                  ? null
-                  : _takeFlowThinking(result.reasoningContent),
+              thinkingChain: _takeFlowThinking(result.reasoningContent),
             ));
           } else {
             ChatPresence.instance.endTyping();
