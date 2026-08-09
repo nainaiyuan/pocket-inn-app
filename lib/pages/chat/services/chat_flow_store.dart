@@ -118,7 +118,9 @@ class ChatFlowStore {
     };
   }
 
-  /// 工具执行 → 挂到当前步（toolsUsed 同款）
+  /// 工具执行 → 挂到步骤（8-09 18:4x 改：挂载点 = 第一个未消步骤；
+  /// 全部已消 → 挂最后一步。支持"先回复再干活"：男主回复消完条目后
+  /// 继续调工具，工具挂到最后一步上，工作不会丢）
   static Future<void> feedTool(String personaId, String toolName,
       {required bool ok, String? brief}) async {
     if (personaId.isEmpty || toolName.isEmpty) return;
@@ -126,9 +128,16 @@ class ChatFlowStore {
     final f = _memCache;
     if (f == null || f['status'] != 'running') return;
     final steps = _stepsOf(f);
-    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
-    if (cur < 0 || cur >= steps.length) return;
-    final step = steps[cur];
+    if (steps.isEmpty) return;
+    var target = -1;
+    for (var i = 0; i < steps.length; i++) {
+      if (steps[i]['status'] != 'done') {
+        target = i;
+        break;
+      }
+    }
+    if (target < 0) target = steps.length - 1; // 全消完 → 挂最后一步
+    final step = steps[target];
     final tools = _asMap(step['tools']);
     final prev = (tools[toolName] as Map?) ?? <String, dynamic>{};
     tools[toolName] = {
@@ -180,7 +189,11 @@ class ChatFlowStore {
     }
     if (!changed) return;
     f['steps'] = steps; // _stepsOf 是拷贝，必须写回（FlowStore BUG-3 教训）
-    // 推进 currentStep 到第一个 pending（或结束）
+    // 8-09 18:4x（用户设计定稿）：回复 ≠ 流程结束！
+    // 男主先回复再干活是合法策略——回复只消"对话义务"（✅ 已回），
+    // "工作义务"（查/记/做）还在。流程结束 = 男主输出退出标记
+    // （need_continue:false，chat_page 调 finish()）才 done。
+    // 所以这里不再自动 done，只推进 currentStep 到第一个 pending（或标全部已回）。
     var nextCur = -1;
     for (var i = 0; i < steps.length; i++) {
       if (steps[i]['status'] != 'done') {
@@ -188,16 +201,25 @@ class ChatFlowStore {
         break;
       }
     }
-    if (nextCur < 0) {
-      f['currentStep'] = steps.length;
-      f['status'] = 'done';
-      await _write(personaId, f);
-      _log('对话流程', '✅ 全部回应完成，流程结束');
-    } else {
-      f['currentStep'] = nextCur;
-      await _write(personaId, f);
-      _log('对话流程', '✔ 消条目 → 当前第 ${nextCur + 1} 步');
-    }
+    f['currentStep'] = nextCur < 0 ? steps.length : nextCur;
+    await _write(personaId, f);
+    _log('对话流程', nextCur < 0
+        ? '✔ 全部已回应（流程待男主退出标记结束）'
+        : '✔ 消条目 → 当前第 ${nextCur + 1} 步');
+  }
+
+  /// 男主输出退出标记（need_continue:false）→ 流程结束
+  /// 他声明"回完了+干完了"。还有没回的工作 → 也尊重他的判断
+  /// （他可能决定放弃某项），流程直接 done。
+  static Future<void> finish(String personaId) async {
+    if (personaId.isEmpty) return;
+    await warm(personaId);
+    final f = _memCache;
+    if (f == null || f['status'] != 'running') return;
+    f['status'] = 'done';
+    f['currentStep'] = (_stepsOf(f).length);
+    await _write(personaId, f);
+    _log('对话流程', '🔚 男主输出退出标记，流程结束');
   }
 
   /// 解析男主回复里的消条目标注（第N步，1-based）
@@ -247,8 +269,26 @@ class ChatFlowStore {
     final sb = StringBuffer();
     sb.writeln('【对话流程】目标：${f['goal']}');
     if (status == 'done') {
-      sb.writeln('✅ 全部已回应（${steps.length} 步）。没有新消息就别再说话，'
-          '输出退出标记 {"need_continue": false}。');
+      sb.writeln('✅ 流程已结束（全部回应 + 你确认无工作遗漏）。'
+          '没有新消息就别再说话，输出退出标记 {"need_continue": false}。');
+      return sb.toString();
+    }
+    // 全部已回应但流程没结束（男主没输出退出标记）→ 收尾检查：
+    // 回复 ≠ 结束，工作义务还在——提示男主检查每步的工具链有没有 ❌/没找到
+    final allReplied = steps.every((s) => s['status'] == 'done');
+    if (allReplied) {
+      sb.writeln('✅ 已全部回应。收尾检查（回复≠结束，工作做完才结束）：');
+      for (var i = 0; i < steps.length; i++) {
+        final step = steps[i];
+        final tools = _asMap(step['tools']);
+        if (tools.isEmpty) continue;
+        sb.writeln('  第${i + 1}步「${_short(step['userText'].toString(), 20)}」'
+            '工具：${_toolsBrief(tools)}');
+        final dec = _decisionHint(tools);
+        if (dec.isNotEmpty) sb.writeln('    → $dec');
+      }
+      sb.writeln('没做完的（工具 ❌/没找到）→ 继续做完再结束；'
+          '确认都做完了 → 输出退出标记 {"need_continue": false} 结束流程。');
       return sb.toString();
     }
     // 步骤清单（最多显示 6 步）
@@ -335,16 +375,69 @@ class ChatFlowStore {
     return '';
   }
 
-  /// 检查轮简报：'还有 2 条没回：#1「…」'；无未回返回 null
+  /// 检查轮简报：'还有 N 条没回：…' / 全部已回 → '已全部回应，收尾检查'
+  /// （8-09 18:4x：回复≠结束——全回但流程没 done 也要唤醒收尾检查，
+  /// 男主才能回去把没做完的工作做完）
   static String? checkBrief(String personaId) {
     final f = _memCache;
     if (f == null || f['status'] != 'running') return null;
     final steps = _stepsOf(f);
+    if (steps.isEmpty) return null;
     final pending = <Map<String, dynamic>>[];
     for (var i = 0; i < steps.length; i++) {
       if (steps[i]['status'] != 'done') pending.add(steps[i]);
     }
-    if (pending.isEmpty) return null;
+    if (pending.isEmpty) {
+      // 全部已回应 → 收尾检查（有工具 ❌/没找到 → 回去做完）
+      var hasUnfinished = false;
+      for (final s in steps) {
+        final tools = _asMap(s['tools']);
+        if (tools.isEmpty) continue;
+        var anyBad = false;
+        for (final v in tools.values) {
+          if (v is Map) {
+            final ok = v['ok'] == true;
+            final brief = (v['brief'] ?? '').toString();
+            if (!ok ||
+                brief.contains('没找到') ||
+                brief.contains('没有找到') ||
+                brief.contains('无结果') ||
+                brief.contains('没有相关') ||
+                brief.contains('暂无')) {
+              anyBad = true;
+            }
+          }
+        }
+        if (anyBad) {
+          hasUnfinished = true;
+          break;
+        }
+      }
+      if (hasUnfinished) {
+        return '已全部回应，但第 ${steps.indexWhere((s) {
+          final tools = _asMap(s['tools']);
+          if (tools.isEmpty) return false;
+          for (final v in tools.values) {
+            if (v is Map) {
+              final ok = v['ok'] == true;
+              final brief = (v['brief'] ?? '').toString();
+              if (!ok ||
+                  brief.contains('没找到') ||
+                  brief.contains('没有找到') ||
+                  brief.contains('无结果') ||
+                  brief.contains('没有相关') ||
+                  brief.contains('暂无')) {
+                return true;
+              }
+            }
+          }
+          return false;
+        }) + 1} 步有工具没做完（❌/没找到）——回去继续做完，'
+            '做完输出退出标记结束流程。';
+      }
+      return '已全部回应，流程待你确认结束——没有遗漏就输出退出标记 '
+          '{"need_continue": false}。';
+    }
     final briefs = pending
         .take(3)
         .map((s) => '第${steps.indexOf(s) + 1}步「${_short(s['userText'].toString(), 20)}」')

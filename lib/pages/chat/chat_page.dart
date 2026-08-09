@@ -2219,6 +2219,9 @@ class _ChatPageState extends State<ChatPage>
           '管家流程',
           '🔚 男主明确判定无需继续（need_continue:false/next_action:null），冻结自动唤醒',
         );
+        // 8-09 18:4x（用户设计定稿）：退出标记 = 男主声明"回完了+干完了"
+        // → 对话流程结束（回复只消条目，退出标记才结束流程）
+        unawaited(ChatFlowStore.finish(personaId));
       } else if (exitSignal == false) {
         _continueFrozen = false;
         DebugLogger.log(
