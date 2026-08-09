@@ -24,7 +24,10 @@ import '../services/preset_service.dart';
 import '../services/storage_service.dart';
 import '../services/user_settings_service.dart';
 import '../services/voice_chat_service.dart';
+import '../services/trace_storage_prefs.dart';
 import '../services/tts/tts_service.dart';
+import '../butler/debug_lab/trace_store.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/world_book_service.dart';
 
 /// 全局 DI 容器。
@@ -59,6 +62,12 @@ Future<void> setupServiceLocator() async {
 
   getIt.registerSingleton<ApiRequestLogService>(ApiRequestLogService.instance);
   await _tryInit('ApiRequestLogService', () => getIt<ApiRequestLogService>().initialize());
+
+  // ── Agent Debug Lab：轨迹持久化（摘要式 1-2KB×50，重启不丢）──
+  await _tryInit('AgentTraceStore', () async {
+    final prefs = await SharedPreferences.getInstance();
+    TraceStore.configure(PrefsTraceStorage(prefs));
+  });
 
   // ── 字体 ──
   getIt.registerSingleton<FontService>(FontService.instance);
