@@ -44,9 +44,21 @@ class TraceToolCall {
 }
 
 /// 一条消息（发给模型/模型返回的 messages 元素）
+///
+/// ⚠️ 摘要式存储（用户 8-09 13:53 定稿）：不存全量原文——
+/// content 只保留前 [maxContentChars] 字，reasoning 只保留前
+/// [maxReasoningChars] 字。检查器只需要骨架（role/配对/关键词），
+/// 全文细节要看时查 DebugLogger 日志（日志全量落盘）。
 class TraceMessage {
+  /// 单条消息内容保留上限（字符）
+  static const int maxContentChars = 120;
+
+  /// 思考链保留上限（字符）
+  static const int maxReasoningChars = 80;
+
   final String role; // system | user | assistant | tool
   final String content;
+  final bool contentTruncated; // 是否被截断过
   final List<TraceToolCall> toolCalls; // assistant 消息的 tool_calls
   final String? toolCallId; // tool 消息配对用
   final String? reasoningContent; // assistant 思考链
@@ -54,10 +66,35 @@ class TraceMessage {
   const TraceMessage({
     required this.role,
     this.content = '',
+    this.contentTruncated = false,
     this.toolCalls = const [],
     this.toolCallId,
     this.reasoningContent,
   });
+
+  /// 摘要式构造：content/reasoning 自动截断
+  factory TraceMessage.summarized({
+    required String role,
+    String content = '',
+    List<TraceToolCall> toolCalls = const [],
+    String? toolCallId,
+    String? reasoningContent,
+  }) {
+    final truncated = content.length > maxContentChars;
+    return TraceMessage(
+      role: role,
+      content: truncated
+          ? content.substring(0, maxContentChars)
+          : content,
+      contentTruncated: truncated,
+      toolCalls: toolCalls,
+      toolCallId: toolCallId,
+      reasoningContent: reasoningContent != null &&
+              reasoningContent.length > maxReasoningChars
+          ? reasoningContent.substring(0, maxReasoningChars)
+          : reasoningContent,
+    );
+  }
 
   bool get isSystem => role == 'system';
   bool get isUser => role == 'user';
@@ -67,6 +104,7 @@ class TraceMessage {
   Map<String, dynamic> toJson() => {
         'role': role,
         'content': content,
+        'contentTruncated': contentTruncated,
         'toolCalls': toolCalls.map((t) => t.toJson()).toList(),
         'toolCallId': toolCallId,
         'reasoningContent': reasoningContent,
@@ -75,6 +113,7 @@ class TraceMessage {
   factory TraceMessage.fromJson(Map<String, dynamic> json) => TraceMessage(
         role: json['role']?.toString() ?? '',
         content: json['content']?.toString() ?? '',
+        contentTruncated: json['contentTruncated'] as bool? ?? false,
         toolCalls: ((json['toolCalls'] as List?) ?? const [])
             .whereType<Map>()
             .map((m) => TraceToolCall.fromJson(m.cast<String, dynamic>()))
@@ -170,8 +209,15 @@ class AgentRunTrace {
   /// 这次对话写了哪些记忆（record_memory/record_relation/save_summary 等）
   final List<String> memoriesWritten;
 
+  /// 增量变化记录（用户 8-09 13:53：记"新增/变化"不记全量）——
+  /// 如：'新增摘要(#1-#5): 她喜欢猫' / '写入记忆: 喜好-奶茶' / '窗口校准: 65536→68000'
+  final List<String> changes;
+
   /// 上下文快照
   final Map<String, dynamic> contextSnapshot;
+
+  /// 最终回复保留上限（字符）
+  static const int maxReplyChars = 100;
 
   /// 构造（不用 const：finishedAt 需运行后设置）
   AgentRunTrace({
@@ -189,6 +235,7 @@ class AgentRunTrace {
     this.secondMessages = const [],
     this.finalReply,
     this.memoriesWritten = const [],
+    this.changes = const [],
     this.contextSnapshot = const {},
   });
 
@@ -215,8 +262,12 @@ class AgentRunTrace {
         'modelToolCalls': modelToolCalls.map((t) => t.toJson()).toList(),
         'toolExecutions': toolExecutions.map((t) => t.toJson()).toList(),
         'secondMessages': secondMessages.map((m) => m.toJson()).toList(),
-        'finalReply': finalReply,
+        'finalReply': finalReply != null &&
+                finalReply!.length > maxReplyChars
+            ? finalReply!.substring(0, maxReplyChars)
+            : finalReply,
         'memoriesWritten': memoriesWritten,
+        'changes': changes,
         'contextSnapshot': contextSnapshot,
       };
 
@@ -244,6 +295,9 @@ class AgentRunTrace {
             ((json['memoriesWritten'] as List?) ?? const [])
                 .whereType<String>()
                 .toList(),
+        changes: ((json['changes'] as List?) ?? const [])
+            .whereType<String>()
+            .toList(),
         contextSnapshot:
             (json['contextSnapshot'] as Map?)?.cast<String, dynamic>() ??
                 const {},

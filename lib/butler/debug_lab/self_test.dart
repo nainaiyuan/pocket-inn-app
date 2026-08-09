@@ -13,6 +13,7 @@ library;
 import 'agent_run_trace.dart';
 import 'trace_analyzer.dart';
 import 'trace_store.dart';
+import 'trace_session.dart';
 
 /// 构造一个正常轨迹：人设 + 状态块 + 历史 + 用户消息 + 工具调用 + 结果回传
 AgentRunTrace buildHealthyTrace() {
@@ -176,7 +177,55 @@ void main() async {
   print(roundTripOk ? '✅ 存取一致' : '❌ 存取不一致');
 
   print('');
-  final ok = healthyFails == 0 && hasT3 && roundTripOk;
+  print('─────────────────────────────');
+  print('');
+
+  // ── 测试 4：TraceSession 全流程（begin→记录→工具轮续接→finish）──
+  print('【测试4】TraceSession 埋点全流程');
+  TraceStore.configure(MemoryTraceStorage());
+  final sess = TraceSession.instance;
+  sess.begin('test_persona', '帮我查一下天气');
+  sess.recordFirstMessages([
+    TraceMessage.summarized(role: 'system', content: '你是「沈星回」。人设：温柔疏离。'),
+    TraceMessage.summarized(role: 'user', content: '帮我查一下天气'),
+  ]);
+  sess.recordModelOutput(
+    text: '',
+    reasoning: '模拟思考：调天气工具',
+    toolCalls: [
+      TraceToolCall(id: 'call_1', name: 'query_weather', arguments: const {'city': '上海'}),
+    ],
+  );
+  sess.recordToolExecution(const TraceToolExecution(
+    name: 'query_weather', args: {'city': '上海'}, ok: true, resultText: '28°C 多云',
+  ));
+  // 工具轮续接
+  sess.begin('test_persona', '', toolRound: true);
+  sess.recordFirstMessages([
+    TraceMessage.summarized(role: 'system', content: '【当前情况】状态：正常对话'),
+    TraceMessage.summarized(
+      role: 'assistant',
+      toolCalls: [TraceToolCall(id: 'call_1', name: 'query_weather')],
+    ),
+    TraceMessage.summarized(role: 'tool', content: '28°C 多云', toolCallId: 'call_1'),
+    TraceMessage.summarized(role: 'user', content: '【用户当前消息】帮我查一下天气'),
+  ]);
+  sess.recordChange('窗口校准: 65536→68000');
+  sess.recordMemoryWritten('喜好-奶茶（测试）');
+  await sess.finish('上海今天 28°C 多云，出门不用带伞～');
+  final saved = await TraceStore.instance.recent('test_persona', limit: 1);
+  final sessionOk = saved.isNotEmpty &&
+      saved.first.hasToolCalls &&
+      saved.first.toolExecutions.length == 1 &&
+      saved.first.secondMessages.any((m) => m.isTool) &&
+      saved.first.changes.isNotEmpty &&
+      saved.first.memoriesWritten.isNotEmpty;
+  print(sessionOk
+      ? '✅ 会话完整（工具调用+结果回传+变化+记忆都记录了）'
+      : '❌ 会话不完整');
+
+  print('');
+  final ok = healthyFails == 0 && hasT3 && roundTripOk && sessionOk;
   print(ok
       ? '═══ 全部通过：检查器能抓 bug，可以进入埋点阶段 ═══'
       : '═══ 有失败项，先修再埋点 ═══');
