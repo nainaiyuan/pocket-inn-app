@@ -831,6 +831,19 @@ class _ChatPageState extends State<ChatPage>
   Future<void> _maybeAutoContinue(String pid, {required bool spoke}) async {
     if (_generating) return; // 并发保护
     if (pid.isEmpty) return;
+    // 8-10 00:49（用户：去掉二次复核）——对话流程已结束（done）→
+    // 不唤醒：男主先干活再回复，回复消掉大流程 = 流程结束，安静等用户。
+    // 还有下一个大流程（running 有 pending）→ 检查轮带清单唤醒男主
+    // 继续走（checkBrief 在下方注入"还有 N 条没回"）。
+    // 普通聊天（statusOf == null）不受影响，检查轮照旧。
+    final chatFlowStatus = ChatFlowStore.statusOf(pid);
+    if (chatFlowStatus == 'done') {
+      DebugLogger.log(
+        '管家流程',
+        '🔕 对话流程已结束（done），不唤醒（用户 8-10：消掉大流程不二次唤醒）',
+      );
+      return;
+    }
     // ① 用户有消息排队（男主忙时收集的）→ 先回用户（优先级最高）
     final pending = PendingQueueStore.list(pid);
     if (pending.isNotEmpty) {
