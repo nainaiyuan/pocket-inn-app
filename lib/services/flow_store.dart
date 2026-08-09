@@ -550,6 +550,174 @@ class FlowStore {
     }
   }
 
+  /// 8-09 19:3x（用户设计定稿 9.8：adjust_flow 工具）：男主调整流程步骤。
+  /// 动作（全部按步骤编号，1-based，跟 taskList/清单显示一致）：
+  /// - reorder：调整顺序，order=[新顺序的步骤编号列表]（如 [3,1,2]）
+  /// - merge：合并多个步骤为一个，indices=[要合并的编号] + name=新步骤名
+  ///   （例：A"记录喜欢猫"+B"记录喜欢狗" → merge indices=[1,2] name="记录喜欢猫也喜欢狗"）
+  /// - split：拆分一个步骤为多个，index=要拆的编号 + names=[新步骤名列表]
+  /// - delete：删除步骤，indices=[要删的编号]
+  /// - rename：改步骤名，index=编号 + name=新名字
+  /// 性质：不是关卡，是记录男主的调整动作（日志可回看可追溯）。
+  /// 调整后 currentStep 跟随修正（指向原当前步的新位置），状态保持 running。
+  static Future<String> adjust(String personaId,
+      {required String action,
+      List<int>? indices,
+      int? index,
+      String? name,
+      List<String>? names,
+      List<int>? order}) async {
+    final f = await _read(personaId);
+    if (f == null) return '没有流程（create 先立）';
+    if (f['status'] != 'running') {
+      return '流程不在执行中（${f['status']}），先 resume 再调整';
+    }
+    final steps = _stepsOf(f);
+    if (steps.isEmpty) return '没有步骤';
+    final n = steps.length;
+    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
+    // 当前步对应的步骤对象（调整后按它找回新位置）
+    final curStepObj = (cur >= 0 && cur < n) ? steps[cur] : null;
+
+    switch (action) {
+      case 'reorder':
+        if (order == null || order.isEmpty || order.length != n) {
+          return 'reorder 需要 order=[新顺序的步骤编号]（1-based，包含全部 $n 步，不重不漏）';
+        }
+        if (order.toSet().length != n ||
+            order.any((x) => x < 1 || x > n)) {
+          return 'order 必须包含全部 $n 个编号（1-$n），不重不漏';
+        }
+        final newSteps = <Map<String, dynamic>>[];
+        for (final no in order) {
+          newSteps.add(steps[no - 1]);
+        }
+        f['steps'] = newSteps;
+        f['currentStep'] =
+            curStepObj == null ? 0 : newSteps.indexOf(curStepObj).clamp(0, n - 1);
+        await _write(personaId, f);
+        _log('流程', '🔀 adjust reorder：$order');
+        return '已调整顺序：${order.join(' → ')}';
+      case 'merge':
+        if (indices == null || indices.length < 2) {
+          return 'merge 需要 indices=[至少两个步骤编号] 合并成一个';
+        }
+        if (indices.any((x) => x < 1 || x > n)) {
+          return 'indices 超出范围（1-$n）';
+        }
+        final nameText =
+            (name ?? '').trim().isEmpty ? '合并步骤' : name!.trim();
+        final merged = <String, dynamic>{
+          'name': nameText,
+          'status': 'pending',
+          'result': '',
+          'doneType': 'tool_result',
+          'doneCondition': null,
+          'summary': '',
+          'nextAction': '',
+          'toolsUsed': <String, dynamic>{},
+          // 8-09 19:3x：记录合并来源（可追溯：谁和谁合成了这个）
+          'mergedFrom': indices.map((x) => steps[x - 1]['name']).toList(),
+        };
+        // 被合并步骤中若有已完成的 → 合并后从"未完成"算（内容已融合，
+        // 男主重新执行；工具历史留在原步骤里随合并消失，但日志可查）
+        // 若原当前步在被合并之列 → 新步骤成为当前步
+        final wasCur = indices.contains(cur + 1);
+        final newSteps = <Map<String, dynamic>>[];
+        for (var i = 0; i < n; i++) {
+          if (indices.contains(i + 1)) continue;
+          newSteps.add(steps[i]);
+        }
+        final insertPos = (indices.first - 1).clamp(0, newSteps.length);
+        newSteps.insert(insertPos, merged);
+        f['steps'] = newSteps;
+        f['currentStep'] =
+            wasCur ? insertPos : (curStepObj == null ? 0 : newSteps.indexOf(curStepObj).clamp(0, newSteps.length - 1));
+        await _write(personaId, f);
+        _log('流程', '🧬 adjust merge：${indices.join('+')} → 「$nameText」');
+        return '已合并：${indices.map((x) => steps[x - 1]['name']).join(' + ')} → 「$nameText」（第 ${insertPos + 1} 步）';
+      case 'split':
+        if (index == null || index < 1 || index > n) {
+          return 'split 需要 index=要拆的步骤编号（1-$n）';
+        }
+        if (names == null || names.isEmpty) {
+          return 'split 需要 names=[拆分后的步骤名列表]';
+        }
+        final clean = names
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+        if (clean.length < 2) return 'names 至少要两个非空步骤名';
+        final wasCur = index == cur + 1;
+        final newSteps = <Map<String, dynamic>>[];
+        for (var i = 0; i < n; i++) {
+          if (i + 1 == index) {
+            for (final nm in clean) {
+              newSteps.add({
+                'name': nm,
+                'status': 'pending',
+                'result': '',
+                'doneType': 'tool_result',
+                'doneCondition': null,
+                'summary': '',
+                'nextAction': '',
+                'toolsUsed': <String, dynamic>{},
+                'splitFrom': steps[i]['name'],
+              });
+            }
+            continue;
+          }
+          newSteps.add(steps[i]);
+        }
+        f['steps'] = newSteps;
+        f['currentStep'] = wasCur
+            ? (index - 1).clamp(0, newSteps.length - 1)
+            : (curStepObj == null
+                ? 0
+                : newSteps.indexOf(curStepObj).clamp(0, newSteps.length - 1));
+        await _write(personaId, f);
+        _log('流程', '✂️ adjust split：第$index 步 → ${clean.length} 步');
+        return '已拆分：第 $index 步「${steps[index - 1]['name']}」→ ${clean.join('、')}';
+      case 'delete':
+        if (indices == null || indices.isEmpty) {
+          return 'delete 需要 indices=[要删的步骤编号]';
+        }
+        if (indices.any((x) => x < 1 || x > n)) {
+          return 'indices 超出范围（1-$n）';
+        }
+        if (indices.length >= n) return '不能删光所有步骤（至少留一步）';
+        final wasCur = indices.contains(cur + 1);
+        final newSteps = <Map<String, dynamic>>[];
+        for (var i = 0; i < n; i++) {
+          if (indices.contains(i + 1)) continue;
+          newSteps.add(steps[i]);
+        }
+        f['steps'] = newSteps;
+        f['currentStep'] = wasCur
+            ? (cur).clamp(0, newSteps.length - 1)
+            : (curStepObj == null
+                ? 0
+                : newSteps.indexOf(curStepObj).clamp(0, newSteps.length - 1));
+        await _write(personaId, f);
+        _log('流程', '🗑 adjust delete：${indices.join('、')}');
+        return '已删除第 ${indices.join('、')} 步，剩 ${newSteps.length} 步';
+      case 'rename':
+        if (index == null || index < 1 || index > n) {
+          return 'rename 需要 index=步骤编号（1-$n）';
+        }
+        final nameText = (name ?? '').trim();
+        if (nameText.isEmpty) return 'rename 需要 name=新步骤名';
+        steps[index - 1]['name'] = nameText;
+        f['steps'] = steps; // _stepsOf 是拷贝，必须写回
+        await _write(personaId, f);
+        _log('流程', '✏️ adjust rename：第$index 步 → 「$nameText」');
+        return '已改第 $index 步为「$nameText」';
+      default:
+        return 'adjust 动作：reorder（order=新顺序）/ merge（indices+name）/ '
+            'split（index+names）/ delete（indices）/ rename（index+name）';
+    }
+  }
+
   /// 8-09 15:3x（用户设计定稿：插话=流程步骤）：当前步之后插入一个步骤。
   /// 流程保持 running（不暂停）——用户的话成为流程的一部分，
   /// 当前步完成后 autoAdvance/next 自然推进到它（"第3步结束、第4步前插"）。

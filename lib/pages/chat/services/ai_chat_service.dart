@@ -879,6 +879,15 @@ class AiChatService {
               'type': 'string',
               'description': '这次总结覆盖的上下文编号范围，如 "#1-#42"',
             },
+            'keep_nos': {
+              'type': 'array',
+              'items': {'type': 'integer'},
+              'description':
+                  '可选：要保留原文的编号列表（如 [1,2] 保留最近两条原话）。'
+                  '聊天区不能全删——必须至少留几条原文（用户最近说了什么），'
+                  '否则接不上话。不传 = 全部折叠成摘要。'
+                  '注意：保留的原文会继续占上下文，只留必要的（最近几句关键原话）。',
+            },
           },
           'required': ['content', 'range'],
         },
@@ -2147,7 +2156,10 @@ class AiChatService {
         '① content：影响后续对话的提醒，每条一行 20 字内，细节不写——'
         '能当场查的（记忆、日记）不写，需要时你用工具查'
         '② range：这次总结覆盖的编号范围'
-        '${rangeLabel.isEmpty ? '' : '（就是 $rangeLabel）'}。'
+        '${rangeLabel.isEmpty ? '' : '（就是 $rangeLabel）'}'
+        '③ keep_nos（可选）：要保留原文的编号列表——'
+        '聊天区不能全删，至少留最近几句关键原话（她最近说了什么），'
+        '否则你接不上话；只留必要的，别全留。'
         '不重要的直接遗忘，不要客套话。';
     try {
       final res = await AIProviderManager.instance.chat(
@@ -2170,6 +2182,16 @@ class AiChatService {
         if (name == 'save_summary' && args is Map) {
           final content = (args['content'] as String?)?.trim() ?? '';
           final range = (args['range'] as String?)?.trim() ?? rangeLabel;
+          // 8-09 19:3x（设计十.3/.4 编号选择）：keep_nos → 选中的原文行放回
+          // 当前话题（保留原文片段，男主接得上话）；没传 → 全折叠成摘要
+          final keepRaw = args['keep_nos'];
+          List<int> keepNos = const [];
+          if (keepRaw is List) {
+            keepNos = keepRaw
+                .map((e) => int.tryParse(e.toString()) ?? 0)
+                .where((e) => e > 0)
+                .toList();
+          }
           if (content.isNotEmpty) {
             await ContextManager.instance
                 .appendSummary(personaId, '（$range）$content');
@@ -2177,6 +2199,16 @@ class AiChatService {
             saved = true;
             DebugLogger.log('上下文管理',
                 '✅ 男主调 save_summary 写入摘要（$range，${content.length} 字）');
+          }
+          if (keepNos.isNotEmpty) {
+            final kept =
+                ContextManager.instance.keepRawNos(personaId, keepNos);
+            if (kept > 0) {
+              DebugLogger.log('上下文管理',
+                  '📌 男主保留原文编号 $keepNos → 放回 $kept 行（接得上话）');
+            }
+          } else {
+            ContextManager.instance.discardPendingSelect(personaId);
           }
         }
       }

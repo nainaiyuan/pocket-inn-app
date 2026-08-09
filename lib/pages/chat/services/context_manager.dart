@@ -513,8 +513,47 @@ class ContextManager {
     if (t == null) return (0, 0, '');
     final chatLines =
         t.raw.where((l) => !l.startsWith('工具')).toList();
+    // 8-09 19:3x（设计十.3/.4 编号选择）：取走时留一份"带编号的原文"备份，
+    // 男主 save_summary 带 keep_nos → 选中的行放回当前话题（原文保留），
+    // 没选中的才丢（已进摘要/日记）。没调 keep_nos → 全丢（原行为不变）。
+    _pendingSelect[personaId] = chatLines;
     return (1, chatLines.length, chatLines.join('\n'));
   }
+
+  /// 8-09 19:3x（设计十.3/.4）：待选择原文备份（personaId → 带编号的对话行）。
+  /// 男主总结时可选编号保留（keep_nos）——聊天区不能全删，要留原文片段，
+  /// 否则男主接不上话。没选的一律丢弃（被摘要替换）。
+  final Map<String, List<String>> _pendingSelect = {};
+
+  /// 男主 save_summary 带 keep_nos=[编号] → 选中的行放回当前话题原文。
+  /// 编号 = 这次总结范围的相对编号（#1-#N，跟 range 一致）。
+  /// 返回放回的行数。
+  int keepRawNos(String personaId, List<int> nos) {
+    final lines = _pendingSelect.remove(personaId);
+    if (lines == null || lines.isEmpty) return 0;
+    if (nos.isEmpty) return 0;
+    final keep = <String>[];
+    for (final no in nos) {
+      if (no >= 1 && no <= lines.length) {
+        final line = lines[no - 1];
+        if (!keep.contains(line)) keep.add(line);
+      }
+    }
+    if (keep.isEmpty) return 0;
+    final t = _topics.putIfAbsent(personaId, TopicState.new);
+    // 放回最前（保留的是较早的原文，新对话从后面继续）
+    t.raw.insertAll(0, keep);
+    return keep.length;
+  }
+
+  /// 没调 keep_nos → 清掉待选择备份（全丢，被摘要替换）
+  void discardPendingSelect(String personaId) {
+    _pendingSelect.remove(personaId);
+  }
+
+  /// 待选择备份还剩多少行（调试用）
+  int debugPendingSelectCount(String personaId) =>
+      _pendingSelect[personaId]?.length ?? 0;
 
   /// 清空管家指令日志（8-05 19:19 用户：总结后不重要的扔掉）
   void clearButlerLog(String personaId) => _butlerLog.remove(personaId);

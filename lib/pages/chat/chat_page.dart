@@ -1610,8 +1610,7 @@ class _ChatPageState extends State<ChatPage>
             // 8-08 02:1x 用户：工具工作缓存——男主干活中间数据（自管免审批）
             _appendToolBubble('🗃️ 男主在整理工具缓存…');
             toolResult = await _executeManageToolCache(args);
-          } else if (name == 'manage_flow') {
-            // 8-06 23:55 用户：流程层——男主自管（免审批）
+          } else if (name == 'manage_flow') {            // 8-06 23:55 用户：流程层——男主自管（免审批）
             // 长任务先立流程（goal+steps），一条条执行，做完 finish
             _appendToolBubble('📋 男主在整理流程…');
             final action = args['action']?.toString() ?? '';
@@ -1688,16 +1687,103 @@ class _ChatPageState extends State<ChatPage>
                 true,
                 await FlowStore.update(personaId, goal: goal, steps: steps),
               );
+            } else if (action == 'adjust') {
+              // 8-09 19:3x（设计九.8）：男主调整流程步骤——
+              // reorder/merge/split/delete/rename，参数全按步骤编号
+              final adjAction = args['adjust_action']?.toString() ??
+                  args['adjustAction']?.toString() ??
+                  args['动作']?.toString() ??
+                  '';
+              List<int>? indices;
+              if (args['indices'] is List) {
+                indices = (args['indices'] as List)
+                    .map((e) => int.tryParse(e.toString()) ?? 0)
+                    .where((e) => e > 0)
+                    .toList();
+              }
+              List<int>? order;
+              if (args['order'] is List) {
+                order = (args['order'] as List)
+                    .map((e) => int.tryParse(e.toString()) ?? 0)
+                    .where((e) => e > 0)
+                    .toList();
+              }
+              List<String>? names;
+              if (args['names'] is List) {
+                names = (args['names'] as List)
+                    .map((e) => e.toString())
+                    .toList();
+              }
+              final idx = int.tryParse(args['index']?.toString() ?? '') ?? 0;
+              toolResult = _ToolResult(
+                true,
+                await FlowStore.adjust(
+                  personaId,
+                  action: adjAction,
+                  indices: indices,
+                  index: idx > 0 ? idx : null,
+                  name: args['name']?.toString(),
+                  names: names,
+                  order: order,
+                ),
+              );
             } else {
               toolResult = const _ToolResult(
                 false,
-                'manage_flow 参数：action=create/next/finish/cancel/resume/status/update，'
-                'create/update 要 goal+steps。'
+                'manage_flow 参数：action=create/next/finish/cancel/resume/status/update/adjust，'
+                'create/update 要 goal+steps。adjust 要 adjust_action=reorder/merge/split/delete/rename'
+                '（reorder 带 order=[新顺序编号]；merge 带 indices=[编号]+name=新步骤名；'
+                'split 带 index=编号+names=[新步骤名列表]；delete 带 indices=[编号]；'
+                'rename 带 index=编号+name=新名字）。'
                 '参数名用英文（action/goal/steps），别用中文"动作/目标/步骤"。'
-                '示例：{"action":"next"}',
+                '示例：{"action":"adjust","adjust_action":"merge","indices":[1,2],"name":"记录用户喜欢猫也喜欢狗"}',
               );
             }
             // 流程状态变化 → 刷新停止条
+            if (mounted) setState(() {});
+          } else if (name == 'manage_chat_flow') {
+            // 8-09 19:3x（设计九.4/9.8）：对话流程调整——男主融合/删除步骤
+            // action=merge（nos=[编号]+name=新内容）/ delete（nos=[编号]）/ status
+            _appendToolBubble('📋 男主在调整对话流程…');
+            final action = args['action']?.toString() ?? '';
+            List<int>? nos;
+            if (args['nos'] is List) {
+              nos = (args['nos'] as List)
+                  .map((e) => int.tryParse(e.toString()) ?? 0)
+                  .where((e) => e > 0)
+                  .toList();
+            }
+            if (action == 'merge') {
+              final r = await ChatFlowStore.mergeSteps(
+                personaId,
+                nos: nos ?? const [],
+                name: args['name']?.toString(),
+              );
+              toolResult = _ToolResult(r == 'ok', r == 'ok'
+                  ? '已融合对话流程步骤 ✅（下次注入清单可见）'
+                  : r);
+            } else if (action == 'delete') {
+              final r = await ChatFlowStore.deleteSteps(
+                personaId,
+                nos: nos ?? const [],
+              );
+              toolResult = _ToolResult(r == 'ok', r == 'ok'
+                  ? '已删除对话流程步骤 ✅'
+                  : r);
+            } else if (action == 'status') {
+              toolResult = _ToolResult(
+                true,
+                ChatFlowStore.buildText(personaId) ?? '没有对话流程',
+              );
+            } else {
+              toolResult = const _ToolResult(
+                false,
+                'manage_chat_flow 参数：action=merge/delete/status。'
+                'merge 带 nos=[步骤编号列表]+name=合并后的新内容；'
+                'delete 带 nos=[步骤编号列表]。示例：'
+                '{"action":"merge","nos":[1,2],"name":"记录用户喜欢猫也喜欢狗"}',
+              );
+            }
             if (mounted) setState(() {});
           } else if (name == 'manage_tool_manual') {
             // 8-08 15:2x（设计文档四，GPT 10 问 2）：工具使用手册——男主自管免审批

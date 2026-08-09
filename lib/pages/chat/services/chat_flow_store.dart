@@ -264,6 +264,119 @@ class ChatFlowStore {
         : '✔ 消条目 → 当前第 ${nextCur + 1} 步');
   }
 
+  /// 8-09 19:3x（用户设计定稿 9.4/9.8）：融合 = 男主自己判断重新编排步骤。
+  /// 对话流程的步骤合并：把多个步骤（用户消息）合并成一个新步骤。
+  /// 例：A"我喜欢猫" + B"我喜欢狗" → merge nos=[1,2] name="记录用户喜欢猫也喜欢狗"
+  /// 男主说了新内容（name）就作为合并后的新步骤内容；没给 name →
+  /// 自动拼"【合并】原步骤1 + 原步骤2"（保留原话可追溯）。
+  /// 返回：'ok' 或错误提示。
+  static Future<String> mergeSteps(String personaId,
+      {required List<int> nos, String? name}) async {
+    await warm(personaId);
+    final f = _memCache;
+    if (f == null || f['status'] != 'running') {
+      return '没有执行中的对话流程（先让用户发消息）';
+    }
+    final steps = _stepsOf(f);
+    if (steps.isEmpty) return '没有步骤';
+    if (nos.length < 2) return 'merge 至少要两个步骤编号';
+    if (nos.any((x) => x < 1 || x > steps.length)) {
+      return '编号超出范围（1-${steps.length}）';
+    }
+    // 合并内容：新名字 or 自动拼原话
+    final nameText = (name ?? '').trim();
+    final mergedText = nameText.isNotEmpty
+        ? nameText
+        : '【合并】${nos.map((x) => _short(steps[x - 1]['userText'].toString(), 20)).join(' + ')}';
+    final newStep = <String, dynamic>{
+      'no': DateTime.now().millisecondsSinceEpoch,
+      'userText': mergedText,
+      'ts': _hhmm(),
+      'status': 'pending',
+      'tools': <String, dynamic>{},
+      'reply': '',
+      'mergedFrom': nos.map((x) => steps[x - 1]['userText'].toString()).toList(),
+    };
+    // 被合并步骤的工具链合并进新步骤（不丢工作记录）
+    final tools = <String, dynamic>{};
+    for (final x in nos) {
+      final st = steps[x - 1];
+      final stTools = _asMap(st['tools']);
+      stTools.forEach((name_, v) {
+        final prev = (tools[name_] as Map?) ?? <String, dynamic>{};
+        final vv = v is Map ? v : const <String, dynamic>{};
+        tools[name_] = {
+          'count': ((prev['count'] as num?)?.toInt() ?? 0) +
+              ((vv['count'] as num?)?.toInt() ?? 1),
+          'ok': (prev['ok'] == true) && (vv['ok'] == true),
+          'brief': (vv['brief'] ?? prev['brief'] ?? '').toString(),
+        };
+      });
+    }
+    if (tools.isNotEmpty) newStep['tools'] = tools;
+    // 重建步骤列表：删掉被合并的，新步骤插在第一个被合并步骤的位置
+    final sorted = [...nos]..sort();
+    final insertPos = sorted.first - 1;
+    final newSteps = <Map<String, dynamic>>[];
+    for (var i = 0; i < steps.length; i++) {
+      if (nos.contains(i + 1)) continue;
+      newSteps.add(steps[i]);
+    }
+    newSteps.insert(insertPos.clamp(0, newSteps.length), newStep);
+    f['steps'] = newSteps;
+    // currentStep 修正：指向合并后的新步骤（如果原当前步被合并）
+    var nextCur = -1;
+    for (var i = 0; i < newSteps.length; i++) {
+      if (newSteps[i]['status'] != 'done') {
+        nextCur = i;
+        break;
+      }
+    }
+    f['currentStep'] = nextCur < 0 ? newSteps.length : nextCur;
+    await _write(personaId, f);
+    _log('对话流程', '🧬 mergeSteps：${nos.join('+')} → 「$mergedText」');
+    return 'ok';
+  }
+
+  /// 8-09 19:3x（设计九.8 对话流程版）：删除对话流程步骤（编号 1-based）。
+  /// 男主判断某条消息不用回了（合并掉了/不需要）→ 删掉。
+  static Future<String> deleteSteps(String personaId,
+      {required List<int> nos}) async {
+    await warm(personaId);
+    final f = _memCache;
+    if (f == null || f['status'] != 'running') return '没有执行中的对话流程';
+    final steps = _stepsOf(f);
+    if (steps.isEmpty) return '没有步骤';
+    if (nos.isEmpty) return 'delete 需要至少一个步骤编号';
+    if (nos.any((x) => x < 1 || x > steps.length)) {
+      return '编号超出范围（1-${steps.length}）';
+    }
+    if (nos.length >= steps.length) return '不能删光所有步骤';
+    final newSteps = <Map<String, dynamic>>[];
+    for (var i = 0; i < steps.length; i++) {
+      if (nos.contains(i + 1)) continue;
+      newSteps.add(steps[i]);
+    }
+    f['steps'] = newSteps;
+    var nextCur = -1;
+    for (var i = 0; i < newSteps.length; i++) {
+      if (newSteps[i]['status'] != 'done') {
+        nextCur = i;
+        break;
+      }
+    }
+    f['currentStep'] = nextCur < 0 ? newSteps.length : nextCur;
+    await _write(personaId, f);
+    _log('对话流程', '🗑 deleteSteps：${nos.join('、')}');
+    return 'ok';
+  }
+
+  static String _hhmm() {
+    final now = DateTime.now();
+    return '${now.hour.toString().padLeft(2, '0')}:'
+        '${now.minute.toString().padLeft(2, '0')}';
+  }
+
   /// 男主输出退出标记（need_continue:false）→ 流程结束
   /// 他声明"回完了+干完了"。还有没回的工作 → 也尊重他的判断
   /// （他可能决定放弃某项），流程直接 done。
