@@ -61,6 +61,10 @@ class AIProviderConfig {
     // 8-09 17:2x（用户设计）：DeepSeek 类"必须回传思考链"的 AI 兜底开关。
     // true = 工具轮不用原生（走文本协议），省回传思考链的 token
     this.textToolRound = false,
+    // 8-09 17:2x：探测结果——此 AI 工具轮思考是否"必须回传思考链"
+    // （DeepSeek 类 = true；OpenAI/Gemini/Claude 类 = false）。
+    // true 时 UI 才显示"工具轮方式"A/B 开关
+    this.returnRequired = false,
   });
 
   /// 稳定唯一 id，如 'preset-deepseek' / 'custom'
@@ -125,6 +129,10 @@ class AIProviderConfig {
   /// 思考参数（thinkingEnabled）不受影响：对话照常思考。
   final bool textToolRound;
 
+  /// 探测结果：工具轮思考是否必须回传思考链（DeepSeek 类 = true）。
+  /// true → UI 显示"工具轮方式"A/B 开关（回传原生 / 文本协议省 token）
+  final bool returnRequired;
+
   bool get isStateful => memoryMode == 'stateful';
 
   bool get supportsChat => capabilities.contains(AICapability.chat);
@@ -152,6 +160,7 @@ class AIProviderConfig {
     bool? thinkingEnabled,
     bool? thinkingSupported,
     bool? textToolRound,
+    bool? returnRequired,
   }) {
     return AIProviderConfig(
       id: id ?? this.id,
@@ -171,6 +180,7 @@ class AIProviderConfig {
       thinkingEnabled: thinkingEnabled ?? this.thinkingEnabled,
       thinkingSupported: thinkingSupported ?? this.thinkingSupported,
       textToolRound: textToolRound ?? this.textToolRound,
+      returnRequired: returnRequired ?? this.returnRequired,
     );
   }
 
@@ -192,6 +202,7 @@ class AIProviderConfig {
         'thinkingEnabled': thinkingEnabled,
         'thinkingSupported': thinkingSupported,
         'textToolRound': textToolRound,
+        'returnRequired': returnRequired,
       };
 
   factory AIProviderConfig.fromJson(Map<String, dynamic> json) {
@@ -218,6 +229,7 @@ class AIProviderConfig {
       thinkingEnabled: json['thinkingEnabled'] as bool?,
       thinkingSupported: json['thinkingSupported'] as bool?,
       textToolRound: json['textToolRound'] as bool? ?? false,
+      returnRequired: json['returnRequired'] as bool? ?? false,
     );
   }
 }

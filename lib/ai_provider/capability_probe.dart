@@ -37,6 +37,8 @@ class AIProviderCapabilities {
     required this.supportsReasoning,
     required this.supportsStreaming,
     this.supportsBackendMemory = false,
+    // 8-09 17:2x：工具轮思考是否必须回传思考链（DeepSeek 类 = true）
+    this.returnRequired = false,
     this.probedAt,
     this.probeSource = 'guess',
   });
@@ -55,6 +57,10 @@ class AIProviderCapabilities {
   /// 无 → stateless 每次全量带。安全默认 false（全量带永远不会错）。
   final bool supportsBackendMemory;
 
+  /// 工具轮思考是否必须回传思考链（8-09 用户：DeepSeek 类原生工具调用
+  /// 不传 reasoning_content 就 400 = true；其他 AI 不要求 = false）
+  final bool returnRequired;
+
   /// 探测时间；null = 从未实测（纯猜测）
   final DateTime? probedAt;
 
@@ -62,6 +68,27 @@ class AIProviderCapabilities {
   final String probeSource;
 
   bool get isProbed => probeSource == 'probe';
+
+  AIProviderCapabilities copyWith({
+    String? toolFormat,
+    bool? supportsReasoning,
+    bool? supportsStreaming,
+    bool? supportsBackendMemory,
+    bool? returnRequired,
+    DateTime? probedAt,
+    String? probeSource,
+  }) {
+    return AIProviderCapabilities(
+      toolFormat: toolFormat ?? this.toolFormat,
+      supportsReasoning: supportsReasoning ?? this.supportsReasoning,
+      supportsStreaming: supportsStreaming ?? this.supportsStreaming,
+      supportsBackendMemory:
+          supportsBackendMemory ?? this.supportsBackendMemory,
+      returnRequired: returnRequired ?? this.returnRequired,
+      probedAt: probedAt ?? this.probedAt,
+      probeSource: probeSource ?? this.probeSource,
+    );
+  }
 
   /// 系别展示名（UI 能力灯用；未来新格式在这里加一行即可）
   String get systemLabel {
@@ -86,6 +113,7 @@ class AIProviderCapabilities {
     final parts = <String>[
       '原生工具 ${toolFormat == 'openai' ? '✓' : '✗'}',
       '思考链 ${supportsReasoning ? '✓' : '✗'}',
+      '回传要求 ${returnRequired ? '✓' : '✗'}',
       '流式 ${supportsStreaming ? '✓' : '✗'}',
       '后台记忆 ${supportsBackendMemory ? '✓' : '✗'}',
     ];
@@ -97,6 +125,7 @@ class AIProviderCapabilities {
         'supportsReasoning': supportsReasoning,
         'supportsStreaming': supportsStreaming,
         'supportsBackendMemory': supportsBackendMemory,
+        'returnRequired': returnRequired,
         'probedAt': probedAt?.toIso8601String(),
         'probeSource': probeSource,
       };
@@ -108,6 +137,7 @@ class AIProviderCapabilities {
       supportsReasoning: json['supportsReasoning'] as bool? ?? false,
       supportsStreaming: json['supportsStreaming'] as bool? ?? false,
       supportsBackendMemory: json['supportsBackendMemory'] as bool? ?? false,
+      returnRequired: json['returnRequired'] as bool? ?? false,
       probedAt: rawProbedAt == null ? null : DateTime.tryParse(rawProbedAt),
       probeSource: json['probeSource'] as String? ?? 'guess',
     );

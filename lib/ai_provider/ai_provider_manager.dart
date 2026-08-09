@@ -879,6 +879,16 @@ class AIProviderManager {
             } on Object catch (error) {
               if (isFormatError(error)) {
                 lastFormatError = error;
+                // 8-09 17:2x：碰壁记忆——思考模式 AI 原生工具轮格式类错误
+                // （reasoning_content 回传要求相关）→ 记 returnRequired=true，
+                // UI 显示"工具轮方式"A/B 开关（下次用户可直接选 B 免回传）
+                if (config.thinkingEnabled == true ||
+                    config.thinkingSupported == true) {
+                  unawaited(_update(
+                    config.id,
+                    (c) => c.copyWith(returnRequired: true),
+                  ));
+                }
                 AiModuleLog.log(
                   'AI路由',
                   '⚠️ ${config.name} 的 $formatId 格式调用失败（格式类错误）→ '
@@ -1084,6 +1094,10 @@ class AIProviderManager {
     AIProviderCapabilities caps;
     try {
       caps = await _probe.probe(resolved);
+      // 8-09 17:2x：return-required = 静态判定（DeepSeek 已知事实）∪ 碰壁记忆
+      caps = caps.copyWith(
+        returnRequired: _isReturnRequired(resolved) || config.returnRequired,
+      );
       // 🧠 后台记忆实测 → 自动对齐 memoryMode（8-05 用户：不查表，实测为准）
       await _applyMemoryModeFromProbe(config, caps);
       AiModuleLog.log(
@@ -1093,6 +1107,9 @@ class AIProviderManager {
       );
     } on Object catch (error) {
       caps = _probe.guess(resolved);
+      caps = caps.copyWith(
+        returnRequired: _isReturnRequired(resolved) || config.returnRequired,
+      );
       AiModuleLog.log(
         'AI探测',
         '⚠️ ${config.name} 探测失败，用 URL 猜测(${caps.systemLabel}): '
@@ -1105,6 +1122,9 @@ class AIProviderManager {
     if (caps.isProbed) {
       await _update(config.id, (c) => c.copyWith(
             thinkingSupported: caps.supportsReasoning,
+            // 8-09 17:2x：return-required 同步（DeepSeek 类静态判定 +
+            // 运行时碰壁记忆），UI 据此显示"工具轮方式"A/B 开关
+            returnRequired: caps.returnRequired,
           ));
     }
     return caps;
@@ -1281,6 +1301,15 @@ class AIProviderManager {
       }
     }
     return null;
+  }
+
+  /// 8-09 17:2x：静态判定"工具轮思考必须回传思考链"（已知事实表）。
+  /// DeepSeek 官方端点 = true（思考模式工具轮不传 reasoning_content 就 400）；
+  /// 其他厂商 = false（OpenAI/Gemini/Claude 不要求回传）。
+  /// 运行时碰壁（原生工具轮 400 + reasoning 关键词）会另行记忆到配置。
+  bool _isReturnRequired(ResolvedApiConfig resolved) {
+    final url = resolved.baseUrl.toLowerCase();
+    return url.contains('deepseek');
   }
 
   /// 格式降级链：用户显式指定 → 只试那一种（尊重用户，不自动降级）；

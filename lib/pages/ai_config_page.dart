@@ -791,6 +791,11 @@ class _ProviderFormState extends State<_ProviderForm> {
   /// 探测结果：此 AI 支持思考吗（null=未探测；false=确认不支持→开关置灰）
   bool? get _thinkingSupported => widget.existing?.thinkingSupported;
 
+  /// 探测结果：此 AI 工具轮思考是否必须回传思考链（DeepSeek 类 = true）。
+  /// true → 显示"工具轮方式"A/B 开关（回传原生 / 文本协议省 token）；
+  /// 其他 AI 不显示（工具轮正常思考、无需回传，用户不用纠结）
+  bool get _returnRequired => widget.existing?.returnRequired ?? false;
+
   /// 模型下拉选项：预设添加用预设的列表；编辑时按 id 反查预设列表。
   List<String> get _modelOptions {
     final preset = widget.preset;
@@ -1071,18 +1076,19 @@ class _ProviderFormState extends State<_ProviderForm> {
                       }
                     },
             ),
-            if (_thinkingSupported == true) ...[
+            if (_returnRequired) ...[
               const SizedBox(height: 8),
               // ---- 工具轮方式（8-09 17:2x 用户设计定稿）----
-              // 只在"支持思考"的 AI 上显示（无思考能力 = 原生畅通、无回传
-              // 问题 = 不需要这个纠结）。DeepSeek 类原生工具调用必须回传
-              // 思考链（否则 400）→ 选 B 免回传、省 token。
+              // 只在"必须回传思考链"的 AI（DeepSeek 类，探测 returnRequired=true）
+              // 上显示：这类 AI 原生工具调用必须把思考链传回去（否则 400）。
+              // 其他 AI 工具轮正常思考、不用回传 → 不显示（用户不用纠结）。
               DropdownButtonFormField<String>(
                 value: _textToolRound ? 'text' : 'native',
                 decoration: const InputDecoration(
                   labelText: '工具轮方式',
                   helperText:
-                      'A 原生调用 = 效果最好（思考链原样传回，仅 DeepSeek 类要求）；'
+                      '此 AI 原生工具调用必须回传思考链（否则 400）：'
+                      'A 原生调用 = 思考链原样传回，效果最好；'
                       'B 文本协议 = 男主用 ⟨工具:⟩ 文本块报工具，不产生原生调用、'
                       '不用回传思考链（省 token，不怕 400）。对话思考不受影响',
                 ),
