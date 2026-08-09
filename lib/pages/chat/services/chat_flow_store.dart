@@ -313,6 +313,12 @@ class ChatFlowStore {
     if (nos.any((x) => x < 1 || x > steps.length)) {
       return '编号超出范围（1-${steps.length}）';
     }
+    // 8-09 20:18（用户：复核不能跳过）——复核不能参与合并，
+    // 它是流程结尾的确认步骤，男主必须单独回答。
+    if (nos.any((x) => steps[x - 1]['isReview'] == true)) {
+      return '复核步骤不能合并——它问的是"还有要补充的吗？要调整流程吗？'
+          '还是确认结束？"必须单独回答（回复/调整/输出退出标记）';
+    }
     // 合并内容：新名字 or 自动拼原话
     final nameText = (name ?? '').trim();
     final mergedText = nameText.isNotEmpty
@@ -380,6 +386,12 @@ class ChatFlowStore {
     if (nos.isEmpty) return 'delete 需要至少一个步骤编号';
     if (nos.any((x) => x < 1 || x > steps.length)) {
       return '编号超出范围（1-${steps.length}）';
+    }
+    // 8-09 20:18（用户：复核不能跳过）——复核是管家插在大流程结尾的
+    // 确认步骤，男主必须回答（补充/调整/确认结束），不能删掉绕过。
+    if (nos.any((x) => steps[x - 1]['isReview'] == true)) {
+      return '复核步骤不能删除——它问的是"还有要补充的吗？要调整流程吗？'
+          '还是确认结束？"必须回答（回复/调整/输出退出标记）';
     }
     if (nos.length >= steps.length) return '不能删光所有步骤';
     final newSteps = <Map<String, dynamic>>[];
