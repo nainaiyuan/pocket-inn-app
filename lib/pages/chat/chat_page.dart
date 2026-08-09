@@ -4267,7 +4267,28 @@ class _ChatPageState extends State<ChatPage>
       DebugLogger.log('AI路由', '📐 男主 JSON 块带杂散文字，下轮提示按格式');
     }
     final parts = parsed.bubbles;
-    if (parts.isEmpty) return rows;
+    if (parts.isEmpty) {
+      // 8-09 23:5x（用户：调工具后男主回复被剥成"<"，思考链也看不见）：
+      // 正文被剥空/丢弃（工具残留剥离、标签残渣丢弃）但思考链非空 →
+      // 仍挂思考链气泡（正文空 → message_bubble 显示"（他正在思考…）"占位）。
+      // 思考过程不该跟着正文一起丢——男主调了工具想了半天，用户至少能看到
+      // 他思考了什么。
+      if (cleanThinking != null && cleanThinking.isNotEmpty) {
+        final id =
+            '${DateTime.now().microsecondsSinceEpoch}_ai${isFirst ? '0' : 'x'}_think';
+        _msgKey.currentState?.appendMessage(
+          ChatMessage(
+            id: id,
+            text: '',
+            isMe: false,
+            thinkingChain: cleanThinking,
+          ),
+        );
+        rows.add(_BubbleRow(id, '', null));
+        if (isFirst) _firstAiMsgId = id;
+      }
+      return rows;
+    }
     String? firstMsgId;
     for (var i = 0; i < parts.length; i++) {
       final part = parts[i];
