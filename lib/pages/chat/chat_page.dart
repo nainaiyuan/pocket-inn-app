@@ -763,12 +763,25 @@ class _ChatPageState extends State<ChatPage>
       return;
     }
     // ② 男主这轮没说话 → 不唤醒（他不想说了，安静等用户）
+    // 8-09 15:2x（用户日志：插话后男主断了——任务 paused_by_user 时男主
+    // 回完插话/没回话都必须唤醒判断 resume/update/cancel，否则流程永远挂）
     if (!spoke) {
-      _autoContinuePid = null;
-      _autoContinueCount = 0;
-      _lastAutoContinueAt = null;
-      _continueFrozen = false;
-      return;
+      final flowNow = await FlowStore.get(pid);
+      final pausedByUser = flowNow != null &&
+          (flowNow['status']?.toString() ?? '') == 'paused_by_user';
+      if (!pausedByUser) {
+        _autoContinuePid = null;
+        _autoContinueCount = 0;
+        _lastAutoContinueAt = null;
+        _continueFrozen = false;
+        return;
+      }
+      // paused_by_user：不 return——继续走检查轮（下方 pausedJudge 会带
+      // resume/update/cancel 指令），男主必须交代流程怎么处理
+      DebugLogger.log(
+        '管家流程',
+        '🔔 流程仍被插话暂挂（paused_by_user），男主没说话也唤醒判断流程',
+      );
     }
     // ②' 男主已明确判定无需继续（need_continue:false）→ 不再唤醒
     //（8-08 18:1x GPT：next_action 为空 + 无 running 任务 → 停止 resume）
@@ -2058,8 +2071,12 @@ class _ChatPageState extends State<ChatPage>
       }
       // 8-06 21:36 用户：男主回复带编号 → 管家按标注消除待回复
       // （"回待#1、待#2"消除对应；"不回待#3"也消除=放下；没标注兜底消最老一条）
-      if (result.text.trim().isNotEmpty) {
-        final removed = await PendingQueueStore.resolve(personaId, result.text);
+      // 8-09 15:2x（用户日志：男主测工具时每轮都回#1 → 待回复永不消）：
+      // 原用 result.text（最后一轮）——男主最后一轮纯调工具无文本时 resolve
+      // 不执行，所有"回#N"标注作废 → 改用 replyTexts.join（全部轮次文本）
+      final allRoundText = replyTexts.join('\n').trim();
+      if (allRoundText.isNotEmpty) {
+        final removed = await PendingQueueStore.resolve(personaId, allRoundText);
         if (removed.isNotEmpty) {
           DebugLogger.log('指令模块', '📥 待回复已消除 待#${removed.join('、')}（男主回复带编号）');
         }
