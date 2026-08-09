@@ -590,17 +590,35 @@ class _ChatPageState extends State<ChatPage>
         pendingMsgs.map((e) => e['id'].toString()).toList(),
       );
     }
-    // 8-08 19:0x（GPT 18:59 + 用户 19:04 定稿）：插话 = 流程暂挂（paused_by_user）
-    // ——不是 stop，也不完全不暂停。checkpoint=currentStep 天然保存。
-    final hasFlow = await FlowStore.get(pid);
-    if (hasFlow != null) {
-      await FlowStore.pauseByUser(pid, userMessage: fullText);
+    // 8-09 15:3x（用户设计定稿）：插话 = 流程里的正式步骤（不暂停流程）。
+    // 流程执行中 → 当前步后插入"回复用户+判断"步骤，流程保持 running：
+    // 当前步完成 → autoAdvance 自然推进到插话步骤 → 男主回复+调 manage_flow。
+    // 用户的话像正常步骤一样记录（状态块可见、结束沉淀便签），
+    // 检查点⑤ 看到流程 running 天然续跑——从根上杜绝"插话后断链"。
+    final flowNow = await FlowStore.get(pid);
+    final flowRunning = flowNow != null && flowNow['status'] == 'running';
+    if (flowRunning) {
+      final short =
+          fullText.length > 40 ? '${fullText.substring(0, 40)}…' : fullText;
+      await FlowStore.insertStep(pid,
+          name: '回复用户：$short',
+          note: fullText);
+      DebugLogger.log('管家流程', '📌 用户插话 → 插入流程步骤（男主回完她后判断流程）: $short');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('已把你的话排进流程，男主做完当前步就回你'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
     }
     final event =
-        '用户想跟你说话（流程**已暂挂**，不是停止，你回完她之后判断）：'
+        '用户想跟你说话（管家转达，你回完她之后判断）：'
         '她刚才发来的消息：$fullText。\n'
         '**这一轮先回复她，不要调任何工具**（插话轮管家会拦截工具调用）。\n'
-        '回完她之后，根据她的话判断流程怎么办：\n'
+        '回完她之后，根据她的话判断：\n'
         '· 她只是闲聊/没改需求 → 调 manage_flow resume 继续原流程；\n'
         '· 她提了新需求/要查东西 → 调 manage_flow update 修改流程（加/改步骤）再继续；\n'
         '· 她明确说"不要了/取消" → 才调 manage_flow cancel；\n'
@@ -695,6 +713,18 @@ class _ChatPageState extends State<ChatPage>
     }
     _autoResumeRounds++;
     final steps = (flow['steps'] as List?)?.length ?? 0;
+    // 8-09 15:3x（插话=流程步骤）：续跑前先查插话步骤兜底——
+    // 男主卡在"回复用户"步骤只回话没调 manage_flow → 2 轮后强制 resume
+    final fb = await FlowStore.interruptStepFallback(pid);
+    if (fb == 'ok' || fb == 'ok_done') {
+      DebugLogger.log('管家流程', '⏭ 插话步骤兜底触发（男主未调 manage_flow），流程继续');
+      _autoResumeRounds = 0;
+      _lastAutoResumeStep = -1; // 步骤已变，重置无进展计数
+      if (fb == 'ok_done') return; // 全部完成，流程收尾，不再续跑
+      // ok：已推进到下一步 → 继续本轮续跑（男主执行新步骤）
+    } else if (fb == 'waiting') {
+      DebugLogger.log('管家流程', '⏳ 插话步骤男主仍未调 manage_flow（兜底计数+1，继续提示）');
+    }
     DebugLogger.log(
       '管家流程',
       '🔔 自动续跑 #$_autoResumeRounds（任务 running，男主继续执行第 ${cur + 1}/$steps 步）',

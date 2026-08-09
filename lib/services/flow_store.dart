@@ -370,6 +370,22 @@ class FlowStore {
         return (true, '');
       case 'tool_result':
       default:
+        // 8-09 15:3x（插话=流程步骤）：插话步骤必须调 manage_flow
+        // （resume/update/cancel）才算完成——男主调别的工具成功不算，
+        // 他得先决定流程走向（用户定稿："判断是必须的"）
+        if ((step['stepType'] ?? '') == 'user_interrupt') {
+          final mf = toolsUsed['manage_flow'];
+          final hasManageFlow = mf is Map && mf['ok'] == true;
+          if (!hasManageFlow) {
+            return (
+              false,
+              '这步（回复用户）需要调 manage_flow 决定流程走向'
+                  '（resume 继续/update 改流程/cancel 取消）——'
+                  '你回复她的话已送达，不用重复说，只补判断动作'
+            );
+          }
+          return (true, '');
+        }
         if (!hasOkTool) {
           // 8-08 19:4x（男主建议：功能推进/人工产出分开认）：
           // 卡住的步骤如果是纯产出型，提示男主改类型，别硬卡
@@ -527,6 +543,81 @@ class FlowStore {
     }
   }
 
+  /// 8-09 15:3x（用户设计定稿：插话=流程步骤）：当前步之后插入一个步骤。
+  /// 流程保持 running（不暂停）——用户的话成为流程的一部分，
+  /// 当前步完成后 autoAdvance/next 自然推进到它（"第3步结束、第4步前插"）。
+  /// [stepType]='user_interrupt' 标记插话步骤（状态块可见、完成条件=调 manage_flow）。
+  static Future<String> insertStep(String personaId,
+      {required String name, String? note}) async {
+    final f = await _read(personaId);
+    if (f == null) return '没有流程（create 先立）';
+    if (f['status'] != 'running') {
+      return '流程不在执行中（${f['status']}），无需插步骤';
+    }
+    final steps = _stepsOf(f);
+    if (steps.isEmpty) return '没有步骤';
+    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
+    if (cur < 0 || cur >= steps.length) return '步骤索引越界';
+    final newStep = <String, dynamic>{
+      'name': name,
+      'status': 'pending',
+      'result': '',
+      'doneType': 'tool_result',
+      'doneCondition': '回复她后调 manage_flow 决定流程（resume/update/cancel）',
+      'summary': '',
+      'nextAction': '',
+      'toolsUsed': <String, dynamic>{},
+      'stepType': 'user_interrupt',
+      'note': note ?? '',
+    };
+    steps.insert(cur + 1, newStep);
+    await _write(personaId, f);
+    _log('流程', '📌 插话步骤插入（第 ${cur + 2} 位）：$name');
+    return '已插入用户插话步骤（第 ${cur + 2} 步）';
+  }
+
+  /// 8-09 15:3x（插话=流程步骤）：插话步骤兜底——
+  /// 男主卡在"回复用户"步骤多轮没调 manage_flow → 强制完成（隐式 resume），
+  /// 流程不能卡在插话步骤（回话已送达，判断靠提示引导，不硬卡）。
+  /// 返回：null=不是插话步骤/无需兜底；'ok'=已强制完成并推进；'ok_done'=全部完成；
+  /// 'waiting'=还差轮数继续卡（下轮续跑再提示）。
+  static Future<String?> interruptStepFallback(String personaId,
+      {int maxRounds = 2}) async {
+    final f = await _read(personaId);
+    if (f == null || f['status'] != 'running') return null;
+    final steps = _stepsOf(f);
+    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
+    if (cur < 0 || cur >= steps.length) return null;
+    final step = steps[cur];
+    if ((step['stepType'] ?? '') != 'user_interrupt') return null;
+    // 已调 manage_flow 成功 → 等 autoAdvance 自然推进，无需兜底
+    final mf = (step['toolsUsed'] as Map?)?['manage_flow'];
+    if (mf is Map && mf['ok'] == true) return null;
+    final rounds = ((step['interruptRounds'] as num?)?.toInt() ?? 0) + 1;
+    step['interruptRounds'] = rounds;
+    if (rounds < maxRounds) {
+      await _write(personaId, f);
+      return 'waiting';
+    }
+    // 强制完成：标记 done + 隐式 resume（继续原流程）
+    step['status'] = 'done';
+    step['result'] = '管家兜底：男主 $rounds 轮未调 manage_flow，按 resume 继续原流程';
+    if (cur + 1 >= steps.length) {
+      f['currentStep'] = cur + 1;
+      f['status'] = 'done';
+      f['stoppedNote'] = '';
+      await _write(personaId, f);
+      _log('流程', '⏭ 插话步骤兜底：男主未调 manage_flow，全部步骤完成，收尾');
+      await _sinkToPad(personaId, f, done: true);
+      return 'ok_done';
+    }
+    f['currentStep'] = cur + 1;
+    steps[cur + 1]['status'] = 'running';
+    await _write(personaId, f);
+    _log('流程', '⏭ 插话步骤兜底：男主未调 manage_flow → 隐式 resume 继续原流程');
+    return 'ok';
+  }
+
   /// 用户打断（停止按钮）：running → stopped，记下用户消息
   static Future<String> stop(String personaId, {String? userMessages}) async {
     final f = await _read(personaId);
@@ -674,7 +765,9 @@ class FlowStore {
           : (st == 'running' || (i == cur && status == 'running')
               ? (status == 'paused_by_user' ? '⏸' : '▶')
               : '☐');
-      var line = '$mark 第${i + 1}步 $name';
+      // 8-09 15:3x（插话=流程步骤）：插话步骤加 💬 标记，男主一眼认出
+      final isInterrupt = (s['stepType'] ?? '') == 'user_interrupt';
+      var line = '$mark 第${i + 1}步 $name${isInterrupt ? ' 💬她插话' : ''}';
       if (st == 'done' && result.isNotEmpty) line += '（结果：$result）';
       sb.writeln(line);
     }
