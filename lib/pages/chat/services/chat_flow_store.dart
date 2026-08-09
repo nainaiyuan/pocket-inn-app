@@ -101,7 +101,17 @@ class ChatFlowStore {
     if (!_isTerminal(f) && f!['status'] == 'running') {
       // 追加步骤
       final steps = _stepsOf(f);
+      // 8-09 20:1x（用户：男主没确认复核 → 下个大流程第一步插复核）：
+      // 有 pending 复核（上个流程结尾没确认）→ 新消息=下个大流程开始，
+      // 复核置顶到第一步，男主先确认旧流程（回#N 或退出标记）再处理新消息。
+      final pendingReviewIdx = steps.indexWhere(
+          (s) => s['isReview'] == true && s['status'] != 'done');
       steps.add(_newStep(text));
+      if (pendingReviewIdx >= 0) {
+        final review = steps.removeAt(pendingReviewIdx);
+        steps.insert(0, review);
+        _log('对话流程', '📌 上个流程复核未确认 → 置顶到第一步（先确认再处理新消息）');
+      }
       f['steps'] = steps;
       await _write(personaId, f);
       _log('对话流程', '📥 追加步骤 ${steps.length}：${_short(text)}');
@@ -220,43 +230,53 @@ class ChatFlowStore {
     }
     if (!changed) return;
     f['steps'] = steps; // _stepsOf 是拷贝，必须写回（FlowStore BUG-3 教训）
-    // 8-09 18:4x（用户设计定稿）：回复 ≠ 流程结束！
-    // 男主先回复再干活是合法策略——回复只消"对话义务"（✅ 已回），
-    // "工作义务"（查/记/做）还在。流程结束 = 男主输出退出标记
-    // （need_continue:false，chat_page 调 finish()）才 done。
-    // 8-09 18:33（用户设计）：回复完所有真实条目 → 自动追加**复核步骤**——
-    // 男主中途说的话不会被彻底消掉，他下次唤醒要判断"回答完整吗：
-    // 补充（继续调工具/再回复）还是就这样结束（输出退出标记）？"
-    // 防循环：只有消掉"真实用户步骤"且全 done 且没有 pending 复核时
-    // 才追加；消复核步骤本身不追加（否则"补充→回复→再复核"无限循环）。
+    // 8-09 20:1x（用户重新定义复核，纠正 18:33 实现）：
+    // 【复核的真实语义】大流程结尾的"确认是否结束"步骤：
+    // - 触发条件 = **这个流程（含插话小流程）里用过工具**。
+    //   不管大流程还是小流程，只要调过工具 → 大流程结尾默认插复核，
+    //   问男主：有补充吗？要调整流程吗？还是确认结束？
+    // - **没调工具**（纯对话/纯插话）→ 默认流程已结束，不插复核。
+    // - 男主**没确认** → 复核留在末尾；下个大流程（新用户消息）开始时
+    //   复核置顶到第一步，男主先确认旧流程再处理新消息。
+    // 防循环：消掉复核步骤本身不追加（repliedReal=false 已挡）；已有
+    // pending 复核不重复追加。
     final allDone = steps.every((s) => s['status'] == 'done');
     final hasPendingReview =
         steps.any((s) => s['isReview'] == true && s['status'] != 'done');
     if (allDone && repliedReal && !hasPendingReview) {
-      final lastReal = steps.lastWhere(
-          (s) => s['isReview'] != true,
-          orElse: () => <String, dynamic>{'userText': ''});
-      final lastText = (lastReal['userText'] ?? '').toString();
-      // 8-09 18:39（用户设计）：复核只给大概，不给完整句子——
-      // 男主要看细节去上下文（ContextManager 原文）。
-      // 复核插在下一个流程（第一个 pending 真实步骤）前面，
-      // 男主可以"复核旧流程 + 回新流程"一起做掉（标注 回#N、#M）。
-      final reviewStep = _newStep(
-        '【复核】你刚回复了她（关于：${_short(lastText, 12)}）'
-        '（回复细节看上下文，这里只记大概）',
-        isReview: true,
-      );
-      final firstPendingReal = steps.indexWhere(
-          (s) => s['status'] != 'done' && s['isReview'] != true);
-      if (firstPendingReal >= 0) {
-        steps.insert(firstPendingReal, reviewStep);
-      } else {
+      // 大流程/小流程里用过工具吗？（复核步骤自身不算）
+      final anyToolUsed = steps.any((s) =>
+          s['isReview'] != true && _asMap(s['tools']).isNotEmpty);
+      if (anyToolUsed) {
+        final lastReal = steps.lastWhere(
+            (s) => s['isReview'] != true,
+            orElse: () => <String, dynamic>{'userText': ''});
+        final lastText = (lastReal['userText'] ?? '').toString();
+        // 8-09 18:39（用户设计）：复核只给大概，不给完整句子——
+        // 男主要看细节去上下文（ContextManager 原文）。
+        // 8-09 20:1x：复核追加在**大流程结尾**（steps 末尾），
+        // 不插在中间——它是"这个流程结束了吗"的确认，不是新消息。
+        final reviewStep = _newStep(
+          '【复核】这个流程里调了工具——确认：还有要补充的吗？'
+          '要调整流程吗？还是就这样结束（输出退出标记 '
+          '{"need_continue": false}）？'
+          '（刚回复的内容细节看上下文，这里只记大概：'
+          '${_short(lastText, 12)}）',
+          isReview: true,
+        );
         steps.add(reviewStep);
+        f['steps'] = steps;
+        f['currentStep'] = steps.indexOf(reviewStep);
+        await _write(personaId, f);
+        _log('对话流程',
+            '🔁 流程用过工具 → 大流程结尾插复核（确认是否结束）');
+        return;
       }
-      f['steps'] = steps;
-      f['currentStep'] = steps.indexOf(reviewStep);
+      // 没调工具 → 默认流程已结束（用户 20:12：纯对话/纯插话不插复核）
+      f['status'] = 'done';
+      f['currentStep'] = steps.length;
       await _write(personaId, f);
-      _log('对话流程', '🔁 回复已消，复核步骤插在新流程前（男主判断回答完整性）');
+      _log('对话流程', '✔ 没用工具，默认流程结束（无复核）');
       return;
     }
     // 推进 currentStep 到第一个 pending（或标全部已回）
@@ -457,17 +477,15 @@ class ChatFlowStore {
     // 回复 ≠ 结束，工作义务还在——提示男主检查每步的工具链有没有 ❌/没找到
     final allReplied = steps.every((s) => s['status'] == 'done');
     if (allReplied) {
-      // 有 pending 复核步骤 → 优先给男主复核判断（回答完整性自检）
+      // 有 pending 复核步骤 → 优先给男主复核判断（流程结束确认）
       // 8-09 20:1x：复核不显示为"☐ 第N步"（男主会以为要回#N 重复说话），
-      // 只作为整体判断引导
+      // 只作为整体判断引导；文案=大流程结尾确认（用了工具才有的复核）
       final reviewIdx = steps.indexWhere(
           (s) => s['isReview'] == true && s['status'] != 'done');
       if (reviewIdx >= 0) {
-        final review = steps[reviewIdx];
-        sb.writeln('→ 复核（回答完整性自检，不是新消息不用"回"）：'
-            '你刚回复了她（${_short(review['userText'].toString(), 30)}）'
-            '——判断：回答完整吗？要补充（继续调工具/再回复）？'
-            '还是就这样结束（输出退出标记 {"need_continue": false}）？');
+        sb.writeln('→ 复核（这个流程用过工具，结束前确认，不是新消息不用"回"）：'
+            '判断：还有要补充的吗？要调整流程吗？'
+            '还是确认结束（输出退出标记 {"need_continue": false}）？');
         return sb.toString();
       }
       sb.writeln('✅ 已全部回应。收尾检查（回复≠结束，工作做完才结束）：');
@@ -523,8 +541,9 @@ class ChatFlowStore {
         _asMap(curStep['tools']).isEmpty) {
       sb.writeln('→ 当前步：直接回复她就完成（要查东西先调工具再回复）。');
     }
-    // 8-09 20:1x（用户实测：复核步骤被算进"还有N条没回"→ 男主把猫
-    // 重复说了一遍）：复核步骤不是用户消息，不该算"没回"。
+    // 8-09 20:1x：复核只跟"调了工具"绑定（用户：没调工具默认流程已结束）。
+    // 复核在大流程结尾 = 确认这个流程是否结束。男主没确认 → 复核留在这里；
+    // 下个大流程（新消息）开始时复核置顶到第一步（feedUser 处理）。
     // "没回"只数真实用户步骤（isReview != true）。
     final realPendingCount =
         steps.where((s) => s['status'] != 'done' && s['isReview'] != true).length;
@@ -532,23 +551,20 @@ class ChatFlowStore {
       sb.writeln('提示：还有 $realPendingCount 条没回（用户消息），先回她。'
           '${realPendingCount > 1 ? '一次回多条可标注 {"reply":"回#N、#M"}（N=第几步）一起消；否则默认只消最老一条。' : ''}');
     }
-    // 复核步骤单独给判断引导（不算"没回"，是完整性自检）
+    // 复核步骤单独给判断引导（不算"没回"，是流程结束确认）
     final reviewIdx = steps.indexWhere(
         (s) => s['isReview'] == true && s['status'] != 'done');
     if (reviewIdx >= 0) {
-      // 8-09 20:1x：复核要覆盖整个大流程——男主回复了她（猫），
-      // 她又插话说了（狗），都处理了 → 判断：这些都说完了吗？还有补充吗？
       final realSteps = steps
           .where((s) => s['isReview'] != true)
           .toList();
       final doneReal = realSteps.where((s) => s['status'] == 'done').length;
       final pendingReal = realSteps.length - doneReal;
-      sb.writeln('→ 复核（回答完整性自检，不是新消息不用"回"）：'
-          '你刚回复了她（${_short(steps[reviewIdx]['userText'].toString(), 30)}），'
-          '${doneReal > 0 ? '已处理 $doneReal 条' : ''}'
+      sb.writeln('→ 复核（上个流程用过工具，结束前确认，不是新消息不用"回"）：'
+          '已处理 $doneReal 条'
           '${pendingReal > 0 ? '，还有 $pendingReal 条在流程里（继续处理）' : ''}'
-          '——判断：全部说完了吗？要补充（继续调工具/再回复）？'
-          '还是就这样结束（输出退出标记 {"need_continue": false}）？');
+          '——判断：还有要补充的吗？要调整流程吗？'
+          '还是确认结束（输出退出标记 {"need_continue": false}）？');
     }
     // 重复回复警告（无未消条目却说话 → 由 buildText 的 done 分支覆盖；
     // 这里防"已消完但流程还没标 done"的边界，其实 done 分支已处理）
@@ -668,7 +684,7 @@ class ChatFlowStore {
       return '还有 ${realPending.length} 条没回：$briefs$more——先回她，回完再结束；'
           '回多条可标注 {"reply":"回#N、#M"} 一起消。';
     }
-    // 只剩复核 pending → 完整性自检（不是"没回"，是判断）
+    // 只剩复核 pending → 流程结束确认（不是"没回"，是判断）
     final review = pending.firstWhere(
         (s) => s['isReview'] == true,
         orElse: () => pending.first);
@@ -676,10 +692,10 @@ class ChatFlowStore {
       final realSteps = steps.where((s) => s['isReview'] != true).toList();
       final doneReal = realSteps.where((s) => s['status'] == 'done').length;
       final pendingReal = realSteps.length - doneReal;
-      return '你刚回复了她，复核（不是新消息不用"回"）：'
+      return '复核（上个流程用过工具，结束前确认，不是新消息不用"回"）：'
           '已处理 $doneReal 条${pendingReal > 0 ? '，还有 $pendingReal 条在流程里（继续处理）' : ''}'
-          '——判断：全部说完了吗？要补充（继续调工具/再回复）？'
-          '还是就这样结束（输出退出标记 {"need_continue": false}）？';
+          '——判断：还有要补充的吗？要调整流程吗？'
+          '还是确认结束（输出退出标记 {"need_continue": false}）？';
     }
     final briefs = pending
         .take(3)
