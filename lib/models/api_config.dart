@@ -90,6 +90,9 @@ abstract class ResolvedApiConfig with _$ResolvedApiConfig {
     @JsonKey(defaultValue: '') @Default('') String customBody,
     // 8-09 17:0x：思考模式开关（见 ApiModel.thinkingEnabled 注释）
     @JsonKey() bool? thinkingEnabled,
+    // 8-10 01:3x（用户：档位全内置，只填模型，配置页可选，即时生效）：
+    // 思考档位 'auto'/'off'/'low'/'high'/'max'（默认 auto，管家自动映射）
+    @JsonKey(defaultValue: 'auto') @Default('auto') String thinkingLevel,
   }) = _ResolvedApiConfig;
 
   factory ResolvedApiConfig.fromJson(Map<String, dynamic> json) =>
@@ -119,29 +122,58 @@ abstract class ResolvedApiConfig with _$ResolvedApiConfig {
       if (tools != null && tools.isNotEmpty) 'tools': tools,
     };
     body.addAll(parseCustomBody());
-    // 8-09 17:0x（用户设计定稿）：思考模式显式开关——true 注入开启参数、
-    // false 注入关闭参数（DeepSeek V3.2 格式 thinking.type），显式值覆盖
-    // customBody 里的旧配置（customBody 链路已断，这里兜底补齐）。
-    // null = 不注入，跟随服务端默认。
-    if (thinkingEnabled != null) {
-      body['thinking'] = {
-        'type': thinkingEnabled! ? 'enabled' : 'disabled',
-      };
-      // 8-09 22:5x（用户：V4 有思考链却看不到）：DeepSeek V4 思考模式
-      // 需要 reasoning_effort（non-thinking/high/max）控制深度，只带
-      // thinking:{type:enabled} 可能按默认深度（低/不思考）跑 → 无
-      // reasoning_content。DeepSeek 系开思考时补 high（思考质量与速度
-      // 平衡；max 太慢影响聊天体验）。其他家不认识该参数可能报错 → 不注入。
-      // 8-10 00:4x（用户：男主结尾思考了却不说话——V4 思考耗输出预算，
-      // 正文被截断成空/残缺"<"）：思考模式必须给足 max_tokens——
-      // 思考（reasoning_content）和正文共用一个输出预算，默认值被思考
-      // 吃光 → 正文 0 token → 男主"思考了但没说话"，退出标记出不来、
-      // 流程不结束、下一个大流程不触发。8192 = 思考 high + 正常回复
-      // 都留足。只对 DeepSeek 系注入（其他家可能不认识/报错）。
-      if (thinkingEnabled! && baseUrl.toLowerCase().contains('deepseek')) {
-        body['reasoning_effort'] = 'high';
-        body['max_tokens'] = 8192;
+    // 8-10 01:3x（用户：档位全内置，用户只填模型；配置页可选档位，
+    // 即时生效；男主不能自己切）：
+    // 思考档位按模型系映射注入（各家参数名/格式不同，只注入"确定认识"
+    // 的参数，不认识的参数可能 400 → 不注入，跟随服务端默认）：
+    // - DeepSeek：thinking.type + reasoning_effort + max_tokens 8192
+    // - OpenAI 系（o1/o3/o4 等）：reasoning_effort（low/medium/high）
+    // - Claude/Gemini/其他：不注入（参数名不兼容，跟随服务端默认）
+    // 档位：auto=管家自动 / off=关闭 / low=轻快 / high=平衡 / max=深度
+    final level = thinkingLevel.isEmpty ? 'auto' : thinkingLevel;
+    final isDeepSeek = baseUrl.toLowerCase().contains('deepseek');
+    final isOpenAI =
+        baseUrl.toLowerCase().contains('openai') ||
+        model.toLowerCase().startsWith('o1') ||
+        model.toLowerCase().startsWith('o3') ||
+        model.toLowerCase().startsWith('o4') ||
+        model.toLowerCase().startsWith('gpt');
+    // 旧配置 thinkingEnabled 兼容：显式 true/false 覆盖档位（自动档位
+    // 无 thinkingEnabled 时生效；旧配置迁移后 thinkingLevel 已带值，
+    // 这里只兜底 ResolvedApiConfig 直接构造的场景）
+    final effectiveLevel = thinkingEnabled == null
+        ? level
+        : (thinkingEnabled! ? 'high' : 'off');
+    if (effectiveLevel == 'off') {
+      // 关闭思考
+      if (isDeepSeek) {
+        body['thinking'] = {'type': 'disabled'};
       }
+      // 其他家：无通用"关闭思考"参数 → 不注入（跟随服务端默认）
+    } else {
+      final deep = effectiveLevel == 'max'
+          ? 'max'
+          : (effectiveLevel == 'low' ? 'low' : 'high');
+      if (isDeepSeek) {
+        body['thinking'] = {'type': 'enabled'};
+        // 8-09 22:5x（用户：V4 有思考链却看不到）：DeepSeek V4 思考模式
+        // 需要 reasoning_effort（non-thinking/high/max）控制深度，只带
+        // thinking:{type:enabled} 可能按默认深度（低/不思考）跑 → 无
+        // reasoning_content。8-10 01:3x：档位映射 low→low / high→high /
+        // max→max。
+        // 8-10 00:4x（用户：男主结尾思考了却不说话——V4 思考耗输出预算，
+        // 正文被截断成空/残缺"<"）：思考模式必须给足 max_tokens——
+        // 思考（reasoning_content）和正文共用一个输出预算，默认值被思考
+        // 吃光 → 正文 0 token → 男主"思考了但没说话"，退出标记出不来、
+        // 流程不结束、下一个大流程不触发。8192 = 思考 high + 正常回复
+        // 都留足。
+        body['reasoning_effort'] = deep;
+        body['max_tokens'] = 8192;
+      } else if (isOpenAI) {
+        // OpenAI o 系列：reasoning_effort 只认 low/medium/high（无 max）
+        body['reasoning_effort'] = deep == 'max' ? 'high' : deep;
+      }
+      // Claude/Gemini/其他：不注入（参数名不兼容，跟随服务端默认）
     }
     return body;
   }

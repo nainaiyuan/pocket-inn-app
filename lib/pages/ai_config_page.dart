@@ -532,6 +532,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
     final refreshHours = result['refreshHours'] as int?;
     final toolFormat = result['toolFormat'] as String?;
     final thinkingEnabled = result['thinkingEnabled'] as bool?;
+    final thinkingLevel = result['thinkingLevel'] as String? ?? 'auto';
     final textToolRound = result['textToolRound'] as bool? ?? false;
 
     if (existing != null) {
@@ -546,6 +547,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
           refreshHours: refreshHours,
           toolFormat: toolFormat,
           thinkingEnabled: thinkingEnabled,
+          thinkingLevel: thinkingLevel,
           textToolRound: textToolRound,
         ),
       );
@@ -575,6 +577,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
           refreshHours: refreshHours,
           toolFormat: toolFormat ?? 'auto',
           thinkingEnabled: thinkingEnabled,
+          thinkingLevel: thinkingLevel,
           textToolRound: textToolRound,
         ),
       );
@@ -799,6 +802,13 @@ class _ProviderFormState extends State<_ProviderForm> {
   /// 时置灰不可点。
   bool? _thinkingEnabled;
 
+  /// 8-10 01:3x（用户：用户不知道档位、调用方式全内置；配置页可选档位，
+  /// 即时生效；男主不能自己切）：
+  /// 思考档位 'auto'/'off'/'low'/'high'/'max'——管家按模型系自动映射
+  /// 各家参数（DeepSeek reasoning_effort / OpenAI reasoning_effort /
+  /// 其他家跟随默认），用户只选档位不懂参数。
+  String _thinkingLevel = 'auto';
+
   /// 8-09 17:2x（用户设计）：工具轮兜底开关。true = 工具轮不用原生
   /// （走文本协议），给"原生必须回传思考链"的 AI（DeepSeek 类）省 token。
   bool _textToolRound = false;
@@ -853,6 +863,12 @@ class _ProviderFormState extends State<_ProviderForm> {
     _memoryMode = existing?.memoryMode ?? 'stateless';
     _toolFormat = existing?.toolFormat ?? 'auto';
     _refreshHours = existing?.refreshHours;
+    // 8-10 01:3x（思考档位升级）：优先档位字段，旧数据只有
+    // thinkingEnabled → 迁移：null→auto / true→high / false→off
+    _thinkingLevel = existing?.thinkingLevel ??
+        (existing?.thinkingEnabled == null
+            ? 'auto'
+            : (existing!.thinkingEnabled! ? 'high' : 'off'));
     _thinkingEnabled = existing?.thinkingEnabled;
     _textToolRound = existing?.textToolRound ?? false;
     if (_refreshHours != null) {
@@ -1055,34 +1071,42 @@ class _ProviderFormState extends State<_ProviderForm> {
               ),
             ],
             const SizedBox(height: 8),
-            // ---- 思考模式（8-09 17:0x 用户设计定稿）----
-            // 同一个模型有思考/不思考两种模式（DeepSeek V3.2 后请求参数控制）
-            // 时可切换。探测确认不支持思考 → 置灰（开了也没用）。
-            // 思考开着时聊天里自动显示 🤔 思考过程（像 DeepSeek 官方）。
+            // ---- 思考档位（8-10 01:3x 用户设计定稿：档位全内置，
+            // 用户只填模型，配置页可选，即时生效）----
+            // 管家按模型系自动映射各家参数（DeepSeek reasoning_effort /
+            // OpenAI reasoning_effort / 其他家跟随默认），用户只选档位。
+            // 探测确认不支持思考 → 置灰（开了也没用）。
             DropdownButtonFormField<String>(
-              value: _thinkingEnabled == null
-                  ? 'auto'
-                  : (_thinkingEnabled! ? 'on' : 'off'),
+              value: _thinkingLevel,
               decoration: InputDecoration(
-                labelText: '思考模式',
+                labelText: '思考档位',
                 helperText: _thinkingSupported == false
-                    ? '探测确认此 AI 不支持思考 → 开关不可用'
-                    : '开 = AI 打草稿再回答（聊天里自动显示 🤔 思考过程，像 DeepSeek 官方）；'
-                        '关 = 完全不思考，直接答（更快更省）；'
-                        '自动 = 跟随 AI 默认。保存后自动探测，不支持思考的 AI 会自动禁用',
+                    ? '探测确认此 AI 不支持思考 → 档位不可选'
+                    : 'AI 打草稿再回答的深度（聊天里显示 🤔 思考过程）：'
+                        '自动 = 管家按模型推荐；关闭 = 不思考直接答（更快更省）；'
+                        '轻快/平衡/深度 = 思考深度递增（越深越慢但想得越透）。'
+                        '保存即时生效',
               ),
-              items: [
-                const DropdownMenuItem(
+              items: const [
+                DropdownMenuItem(
                   value: 'auto',
-                  child: Text('自动（跟随 AI 默认）'),
+                  child: Text('自动（管家按模型推荐）'),
                 ),
-                const DropdownMenuItem(
-                  value: 'on',
-                  child: Text('开启思考（显示 🤔 思考过程）'),
-                ),
-                const DropdownMenuItem(
+                DropdownMenuItem(
                   value: 'off',
-                  child: Text('关闭思考（直接回答，更快更省）'),
+                  child: Text('关闭思考（直接回答，最快最省）'),
+                ),
+                DropdownMenuItem(
+                  value: 'low',
+                  child: Text('轻快（低深度，快）'),
+                ),
+                DropdownMenuItem(
+                  value: 'high',
+                  child: Text('平衡（高深度，推荐）'),
+                ),
+                DropdownMenuItem(
+                  value: 'max',
+                  child: Text('深度（最大深度，慢但想得深）'),
                 ),
               ],
               onChanged: _thinkingSupported == false
@@ -1090,9 +1114,11 @@ class _ProviderFormState extends State<_ProviderForm> {
                   : (value) {
                       if (value != null) {
                         setState(() {
-                          _thinkingEnabled = value == 'auto'
-                              ? null
-                              : (value == 'on');
+                          _thinkingLevel = value;
+                          // 同步旧开关字段（兼容旧逻辑/旧数据读取）
+                          _thinkingEnabled = value == 'off'
+                              ? false
+                              : (value == 'auto' ? null : true);
                         });
                       }
                     },
@@ -1199,6 +1225,7 @@ class _ProviderFormState extends State<_ProviderForm> {
                     // auto = 自动识别（合法持久化值，resolve 时走注册表）
                     'toolFormat': _toolFormat,
                     'thinkingEnabled': _thinkingEnabled,
+                    'thinkingLevel': _thinkingLevel,
                     'textToolRound': _textToolRound,
                   });
                 },

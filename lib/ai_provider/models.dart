@@ -58,6 +58,14 @@ class AIProviderConfig {
     // thinkingSupported：探测结果（true 才允许用户开开关，否则 UI 置灰）
     this.thinkingEnabled,
     this.thinkingSupported,
+    // 8-10 01:3x（用户：用户不知道档位、调用方式全内置，只填模型；
+    // 配置页可选档位，即时生效；男主不能自己切）：
+    // 思考档位（思考Enabled 的升级版，更细粒度）：
+    // 'auto'=管家自动（DeepSeek→high，其他跟随服务端默认）/
+    // 'off'=关闭思考 / 'low'=轻快（低深度，快）/
+    // 'high'=平衡（高深度，推荐）/'max'=深度（最大深度，慢但想得深）
+    // 旧数据（只有 thinkingEnabled）加载时迁移：null→auto / true→high / false→off
+    this.thinkingLevel = 'auto',
     // 8-09 17:2x（用户设计）：DeepSeek 类"必须回传思考链"的 AI 兜底开关。
     // true = 工具轮不用原生（走文本协议），省回传思考链的 token
     this.textToolRound = false,
@@ -123,6 +131,10 @@ class AIProviderConfig {
   /// 探测结果：此 AI 支持思考模式吗（false/未探测 → UI 开关置灰）
   final bool? thinkingSupported;
 
+  /// 思考档位（8-10 01:3x 用户设计：档位全内置，配置页可选，即时生效）：
+  /// 'auto'（默认，管家按模型系自动映射）/ 'off' / 'low' / 'high' / 'max'
+  final String thinkingLevel;
+
   /// 工具轮兜底开关（8-09 用户设计）：true = 工具轮不用原生调用，
   /// 一律走文本协议（⟨工具:⟩ 块）。给"原生工具调用必须回传思考链"的 AI
   /// （DeepSeek 类）省 token 用——不回传就不产生回传开销。
@@ -161,6 +173,7 @@ class AIProviderConfig {
     bool? thinkingSupported,
     bool? textToolRound,
     bool? returnRequired,
+    String? thinkingLevel,
   }) {
     return AIProviderConfig(
       id: id ?? this.id,
@@ -181,6 +194,7 @@ class AIProviderConfig {
       thinkingSupported: thinkingSupported ?? this.thinkingSupported,
       textToolRound: textToolRound ?? this.textToolRound,
       returnRequired: returnRequired ?? this.returnRequired,
+      thinkingLevel: thinkingLevel ?? this.thinkingLevel,
     );
   }
 
@@ -203,9 +217,20 @@ class AIProviderConfig {
         'thinkingSupported': thinkingSupported,
         'textToolRound': textToolRound,
         'returnRequired': returnRequired,
+        'thinkingLevel': thinkingLevel,
       };
 
   factory AIProviderConfig.fromJson(Map<String, dynamic> json) {
+    // 8-10 01:3x（思考档位升级）：旧数据只有 thinkingEnabled →
+    // 迁移到档位：null→auto / true→high / false→off
+    String migrateThinkingLevel() {
+      final level = json['thinkingLevel'] as String?;
+      if (level != null && level.isNotEmpty) return level;
+      final old = json['thinkingEnabled'] as bool?;
+      if (old == null) return 'auto';
+      return old ? 'high' : 'off';
+    }
+
     return AIProviderConfig(
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '未命名',
@@ -230,6 +255,7 @@ class AIProviderConfig {
       thinkingSupported: json['thinkingSupported'] as bool?,
       textToolRound: json['textToolRound'] as bool? ?? false,
       returnRequired: json['returnRequired'] as bool? ?? false,
+      thinkingLevel: migrateThinkingLevel(),
     );
   }
 }

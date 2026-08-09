@@ -1457,6 +1457,8 @@ class AIProviderManager {
         model: config.model,
         // 8-09 17:0x：思考模式开关传递（用户设计定稿）
         thinkingEnabled: config.thinkingEnabled,
+        // 8-10 01:3x（用户：档位配置页可选，即时生效）：思考档位传递
+        thinkingLevel: config.thinkingLevel,
       );
 
   /// DeepSeek 的 Anthropic 兼容端点（api.deepseek.com/anthropic）归一化回

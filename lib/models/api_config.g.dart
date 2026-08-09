@@ -49,6 +49,7 @@ _ResolvedApiConfig _$ResolvedApiConfigFromJson(Map<String, dynamic> json) =>
       model: json['model'] as String? ?? '',
       customBody: json['customBody'] as String? ?? '',
       thinkingEnabled: json['thinkingEnabled'] as bool?,
+      thinkingLevel: json['thinkingLevel'] as String? ?? 'auto',
     );
 
 Map<String, dynamic> _$ResolvedApiConfigToJson(_ResolvedApiConfig instance) =>
@@ -59,4 +60,6 @@ Map<String, dynamic> _$ResolvedApiConfigToJson(_ResolvedApiConfig instance) =>
       'apiKey': instance.apiKey,
       'model': instance.model,
       'customBody': instance.customBody,
+      'thinkingEnabled': instance.thinkingEnabled,
+      'thinkingLevel': instance.thinkingLevel,
     };

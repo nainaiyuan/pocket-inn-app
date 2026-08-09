@@ -70,7 +70,7 @@ class _$ApiModelCopyWithImpl<$Res>
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,modelId: null == modelId ? _self.modelId : modelId // ignore: cast_nullable_to_non_nullable
 as String,customBody: null == customBody ? _self.customBody : customBody // ignore: cast_nullable_to_non_nullable,thinkingEnabled: null == thinkingEnabled ? _self.thinkingEnabled : thinkingEnabled
-as String,
+as String
   ));
 }
 
@@ -274,7 +274,7 @@ class __$ApiModelCopyWithImpl<$Res>
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,modelId: null == modelId ? _self.modelId : modelId // ignore: cast_nullable_to_non_nullable
 as String,customBody: null == customBody ? _self.customBody : customBody // ignore: cast_nullable_to_non_nullable,thinkingEnabled: null == thinkingEnabled ? _self.thinkingEnabled : thinkingEnabled
-as String,
+as String
   ));
 }
 
@@ -566,7 +566,7 @@ as List<ApiModel>,
 /// @nodoc
 mixin _$ResolvedApiConfig {
 
-@JsonKey(defaultValue: '') String get id;@JsonKey(defaultValue: '未命名配置') String get name;@JsonKey(defaultValue: '') String get baseUrl;@JsonKey(defaultValue: '') String get apiKey;@JsonKey(defaultValue: '') String get model;@JsonKey(defaultValue: '') String get customBody;@JsonKey() bool? get thinkingEnabled;
+@JsonKey(defaultValue: '') String get id;@JsonKey(defaultValue: '未命名配置') String get name;@JsonKey(defaultValue: '') String get baseUrl;@JsonKey(defaultValue: '') String get apiKey;@JsonKey(defaultValue: '') String get model;@JsonKey(defaultValue: '') String get customBody;@JsonKey() bool? get thinkingEnabled;@JsonKey(defaultValue: 'auto') String get thinkingLevel;
 /// Create a copy of ResolvedApiConfig
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -579,16 +579,16 @@ $ResolvedApiConfigCopyWith<ResolvedApiConfig> get copyWith => _$ResolvedApiConfi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ResolvedApiConfig&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.baseUrl, baseUrl) || other.baseUrl == baseUrl)&&(identical(other.apiKey, apiKey) || other.apiKey == apiKey)&&(identical(other.model, model) || other.model == model)&&(identical(other.customBody, customBody) || other.customBody == customBody)&&(identical(other.thinkingEnabled, thinkingEnabled) || other.thinkingEnabled == thinkingEnabled));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ResolvedApiConfig&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.baseUrl, baseUrl) || other.baseUrl == baseUrl)&&(identical(other.apiKey, apiKey) || other.apiKey == apiKey)&&(identical(other.model, model) || other.model == model)&&(identical(other.customBody, customBody) || other.customBody == customBody)&&(identical(other.thinkingEnabled, thinkingEnabled) || other.thinkingEnabled == thinkingEnabled)&&(identical(other.thinkingLevel, thinkingLevel) || other.thinkingLevel == thinkingLevel));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,name,baseUrl,apiKey,model,customBody,thinkingEnabled);
+int get hashCode => Object.hash(runtimeType,id,name,baseUrl,apiKey,model,customBody,thinkingEnabled,thinkingLevel);
 
 @override
 String toString() {
-  return 'ResolvedApiConfig(id: $id, name: $name, baseUrl: $baseUrl, apiKey: $apiKey, model: $model, customBody: $customBody, thinkingEnabled: $thinkingEnabled)';
+  return 'ResolvedApiConfig(id: $id, name: $name, baseUrl: $baseUrl, apiKey: $apiKey, model: $model, customBody: $customBody, thinkingEnabled: $thinkingEnabled, thinkingLevel: $thinkingLevel)';
 }
 
 
@@ -599,7 +599,7 @@ abstract mixin class $ResolvedApiConfigCopyWith<$Res>  {
   factory $ResolvedApiConfigCopyWith(ResolvedApiConfig value, $Res Function(ResolvedApiConfig) _then) = _$ResolvedApiConfigCopyWithImpl;
 @useResult
 $Res call({
-@JsonKey(defaultValue: '') String id,@JsonKey(defaultValue: '未命名配置') String name,@JsonKey(defaultValue: '') String baseUrl,@JsonKey(defaultValue: '') String apiKey,@JsonKey(defaultValue: '') String model,@JsonKey(defaultValue: '') String customBody,@JsonKey() bool? thinkingEnabled
+@JsonKey(defaultValue: '') String id,@JsonKey(defaultValue: '未命名配置') String name,@JsonKey(defaultValue: '') String baseUrl,@JsonKey(defaultValue: '') String apiKey,@JsonKey(defaultValue: '') String model,@JsonKey(defaultValue: '') String customBody,@JsonKey() bool? thinkingEnabled,@JsonKey(defaultValue: 'auto') String thinkingLevel
 });
 
 
@@ -616,14 +616,16 @@ class _$ResolvedApiConfigCopyWithImpl<$Res>
 
 /// Create a copy of ResolvedApiConfig
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? name = null,Object? baseUrl = null,Object? apiKey = null,Object? model = null,Object? customBody = null,Object? thinkingEnabled = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? name = null,Object? baseUrl = null,Object? apiKey = null,Object? model = null,Object? customBody = null,Object? thinkingEnabled = null,Object? thinkingLevel = null,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
 as String,baseUrl: null == baseUrl ? _self.baseUrl : baseUrl // ignore: cast_nullable_to_non_nullable
 as String,apiKey: null == apiKey ? _self.apiKey : apiKey // ignore: cast_nullable_to_non_nullable
 as String,model: null == model ? _self.model : model // ignore: cast_nullable_to_non_nullable
-as String,customBody: null == customBody ? _self.customBody : customBody // ignore: cast_nullable_to_non_nullable,thinkingEnabled: null == thinkingEnabled ? _self.thinkingEnabled : thinkingEnabled
+as String,customBody: null == customBody ? _self.customBody : customBody // ignore: cast_nullable_to_non_nullable
+as String,thinkingEnabled: null == thinkingEnabled ? _self.thinkingEnabled : thinkingEnabled // ignore: cast_nullable_to_non_nullable
+as bool?,thinkingLevel: null == thinkingLevel ? _self.thinkingLevel : thinkingLevel // ignore: cast_nullable_to_non_nullable
 as String,
   ));
 }
@@ -765,7 +767,7 @@ return $default(_that.id,_that.name,_that.baseUrl,_that.apiKey,_that.model,_that
 @JsonSerializable()
 
 class _ResolvedApiConfig extends ResolvedApiConfig {
-  const _ResolvedApiConfig({@JsonKey(defaultValue: '') required this.id, @JsonKey(defaultValue: '未命名配置') required this.name, @JsonKey(defaultValue: '') required this.baseUrl, @JsonKey(defaultValue: '') required this.apiKey, @JsonKey(defaultValue: '') required this.model, @JsonKey(defaultValue: '') this.customBody = '', @JsonKey() this.thinkingEnabled}): super._();
+  const _ResolvedApiConfig({@JsonKey(defaultValue: '') required this.id, @JsonKey(defaultValue: '未命名配置') required this.name, @JsonKey(defaultValue: '') required this.baseUrl, @JsonKey(defaultValue: '') required this.apiKey, @JsonKey(defaultValue: '') required this.model, @JsonKey(defaultValue: '') this.customBody = '', @JsonKey() this.thinkingEnabled, @JsonKey(defaultValue: 'auto') this.thinkingLevel = 'auto'}): super._();
   factory _ResolvedApiConfig.fromJson(Map<String, dynamic> json) => _$ResolvedApiConfigFromJson(json);
 
 @override@JsonKey(defaultValue: '') final  String id;
@@ -775,6 +777,7 @@ class _ResolvedApiConfig extends ResolvedApiConfig {
 @override@JsonKey(defaultValue: '') final  String model;
 @override@JsonKey(defaultValue: '') final  String customBody;
 @override@JsonKey() final  bool? thinkingEnabled;
+@override@JsonKey(defaultValue: 'auto') final  String thinkingLevel;
 
 /// Create a copy of ResolvedApiConfig
 /// with the given fields replaced by the non-null parameter values.
@@ -789,16 +792,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ResolvedApiConfig&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.baseUrl, baseUrl) || other.baseUrl == baseUrl)&&(identical(other.apiKey, apiKey) || other.apiKey == apiKey)&&(identical(other.model, model) || other.model == model)&&(identical(other.customBody, customBody) || other.customBody == customBody)&&(identical(other.thinkingEnabled, thinkingEnabled) || other.thinkingEnabled == thinkingEnabled));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ResolvedApiConfig&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.baseUrl, baseUrl) || other.baseUrl == baseUrl)&&(identical(other.apiKey, apiKey) || other.apiKey == apiKey)&&(identical(other.model, model) || other.model == model)&&(identical(other.customBody, customBody) || other.customBody == customBody)&&(identical(other.thinkingEnabled, thinkingEnabled) || other.thinkingEnabled == thinkingEnabled)&&(identical(other.thinkingLevel, thinkingLevel) || other.thinkingLevel == thinkingLevel));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,name,baseUrl,apiKey,model,customBody,thinkingEnabled);
+int get hashCode => Object.hash(runtimeType,id,name,baseUrl,apiKey,model,customBody,thinkingEnabled,thinkingLevel);
 
 @override
 String toString() {
-  return 'ResolvedApiConfig(id: $id, name: $name, baseUrl: $baseUrl, apiKey: $apiKey, model: $model, customBody: $customBody, thinkingEnabled: $thinkingEnabled)';
+  return 'ResolvedApiConfig(id: $id, name: $name, baseUrl: $baseUrl, apiKey: $apiKey, model: $model, customBody: $customBody, thinkingEnabled: $thinkingEnabled, thinkingLevel: $thinkingLevel)';
 }
 
 
@@ -809,7 +812,7 @@ abstract mixin class _$ResolvedApiConfigCopyWith<$Res> implements $ResolvedApiCo
   factory _$ResolvedApiConfigCopyWith(_ResolvedApiConfig value, $Res Function(_ResolvedApiConfig) _then) = __$ResolvedApiConfigCopyWithImpl;
 @override @useResult
 $Res call({
-@JsonKey(defaultValue: '') String id,@JsonKey(defaultValue: '未命名配置') String name,@JsonKey(defaultValue: '') String baseUrl,@JsonKey(defaultValue: '') String apiKey,@JsonKey(defaultValue: '') String model,@JsonKey(defaultValue: '') String customBody,@JsonKey() bool? thinkingEnabled
+@JsonKey(defaultValue: '') String id,@JsonKey(defaultValue: '未命名配置') String name,@JsonKey(defaultValue: '') String baseUrl,@JsonKey(defaultValue: '') String apiKey,@JsonKey(defaultValue: '') String model,@JsonKey(defaultValue: '') String customBody,@JsonKey() bool? thinkingEnabled,@JsonKey(defaultValue: 'auto') String thinkingLevel
 });
 
 
@@ -826,14 +829,16 @@ class __$ResolvedApiConfigCopyWithImpl<$Res>
 
 /// Create a copy of ResolvedApiConfig
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? name = null,Object? baseUrl = null,Object? apiKey = null,Object? model = null,Object? customBody = null,Object? thinkingEnabled = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? name = null,Object? baseUrl = null,Object? apiKey = null,Object? model = null,Object? customBody = null,Object? thinkingEnabled = null,Object? thinkingLevel = null,}) {
   return _then(_ResolvedApiConfig(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
 as String,baseUrl: null == baseUrl ? _self.baseUrl : baseUrl // ignore: cast_nullable_to_non_nullable
 as String,apiKey: null == apiKey ? _self.apiKey : apiKey // ignore: cast_nullable_to_non_nullable
 as String,model: null == model ? _self.model : model // ignore: cast_nullable_to_non_nullable
-as String,customBody: null == customBody ? _self.customBody : customBody // ignore: cast_nullable_to_non_nullable,thinkingEnabled: null == thinkingEnabled ? _self.thinkingEnabled : thinkingEnabled
+as String,customBody: null == customBody ? _self.customBody : customBody // ignore: cast_nullable_to_non_nullable
+as String,thinkingEnabled: null == thinkingEnabled ? _self.thinkingEnabled : thinkingEnabled // ignore: cast_nullable_to_non_nullable
+as bool?,thinkingLevel: null == thinkingLevel ? _self.thinkingLevel : thinkingLevel // ignore: cast_nullable_to_non_nullable
 as String,
   ));
 }
