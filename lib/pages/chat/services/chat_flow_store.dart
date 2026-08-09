@@ -26,6 +26,7 @@ class ChatFlowStore {
   ChatFlowStore._();
 
   static const String _prefix = 'chatflow_';
+  static const String _counterKey = 'chatflow_counter';
 
   static Map<String, dynamic>? _memCache;
 
@@ -33,6 +34,19 @@ class ChatFlowStore {
   static void _log(String tag, String msg) => logSink?.call(tag, msg);
 
   static String _key(String personaId) => '$_prefix$personaId';
+
+  /// 流程编号（8-09 18:33 用户设计）：每个流程一个编号（流程#N），
+  /// 男主/用户可引用（合并、插话判断）。计数器持久化，全局自增。
+  static Future<int> _nextFlowNo() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final n = p.getInt(_counterKey) ?? 0;
+      await p.setInt(_counterKey, n + 1);
+      return n + 1;
+    } catch (_) {
+      return DateTime.now().millisecondsSinceEpoch % 100000;
+    }
+  }
 
   static Future<void> warm(String personaId) async {
     if (personaId.isEmpty) return;
@@ -93,8 +107,9 @@ class ChatFlowStore {
       _log('对话流程', '📥 追加步骤 ${steps.length}：${_short(text)}');
       return;
     }
-    // 立新流程
+    // 立新流程（8-09 18:33：带流程编号）
     final flow = <String, dynamic>{
+      'flowNo': await _nextFlowNo(),
       'goal': _short(text, 30),
       'status': 'running',
       'currentStep': 0,
@@ -102,10 +117,10 @@ class ChatFlowStore {
       'startedAt': DateTime.now().toIso8601String(),
     };
     await _write(personaId, flow);
-    _log('对话流程', '📋 立流程：「${flow['goal']}」1 步');
+    _log('对话流程', '📋 立流程 #${flow['flowNo']}：「${flow['goal']}」1 步');
   }
 
-  static Map<String, dynamic> _newStep(String text) {
+  static Map<String, dynamic> _newStep(String text, {bool isReview = false}) {
     final now = DateTime.now();
     return {
       'no': now.millisecondsSinceEpoch, // 时间戳 id（唯一）
@@ -115,6 +130,7 @@ class ChatFlowStore {
       'status': 'pending',
       'tools': <String, dynamic>{}, // toolName -> {count, ok, brief}
       'reply': '',
+      if (isReview) 'isReview': true, // 8-09 18:33：复核步骤（男主回复后自动挂）
     };
   }
 
@@ -164,6 +180,7 @@ class ChatFlowStore {
     if (steps.isEmpty) return;
     final marked = _parseMarkedNos(replyText);
     var changed = false;
+    var repliedReal = false; // 本轮消掉的条目里有真实用户步骤吗（复核追加条件）
     if (marked.isNotEmpty) {
       // 精确消：标注 #N = 第 N 步（绝对序号，跟清单显示一致）
       for (final no in marked) {
@@ -172,6 +189,7 @@ class ChatFlowStore {
           if (steps[idx]['status'] != 'done') {
             steps[idx]['status'] = 'done';
             steps[idx]['reply'] = replyText.trim();
+            if (steps[idx]['isReview'] != true) repliedReal = true;
             changed = true;
           }
         }
@@ -182,6 +200,7 @@ class ChatFlowStore {
         if (steps[i]['status'] != 'done') {
           steps[i]['status'] = 'done';
           steps[i]['reply'] = replyText.trim();
+          if (steps[i]['isReview'] != true) repliedReal = true;
           changed = true;
           break;
         }
@@ -193,7 +212,32 @@ class ChatFlowStore {
     // 男主先回复再干活是合法策略——回复只消"对话义务"（✅ 已回），
     // "工作义务"（查/记/做）还在。流程结束 = 男主输出退出标记
     // （need_continue:false，chat_page 调 finish()）才 done。
-    // 所以这里不再自动 done，只推进 currentStep 到第一个 pending（或标全部已回）。
+    // 8-09 18:33（用户设计）：回复完所有真实条目 → 自动追加**复核步骤**——
+    // 男主中途说的话不会被彻底消掉，他下次唤醒要判断"回答完整吗：
+    // 补充（继续调工具/再回复）还是就这样结束（输出退出标记）？"
+    // 防循环：只有消掉"真实用户步骤"且全 done 且没有 pending 复核时
+    // 才追加；消复核步骤本身不追加（否则"补充→回复→再复核"无限循环）。
+    final allDone = steps.every((s) => s['status'] == 'done');
+    final hasPendingReview =
+        steps.any((s) => s['isReview'] == true && s['status'] != 'done');
+    if (allDone && repliedReal && !hasPendingReview) {
+      final lastReal = steps.lastWhere(
+          (s) => s['isReview'] != true,
+          orElse: () => <String, dynamic>{'userText': ''});
+      final lastText = (lastReal['userText'] ?? '').toString();
+      steps.add(_newStep(
+        '【复核】你刚回复了「${_short(lastText, 40)}」——判断回答是否完整：'
+        '要补充（继续调工具/再回复）？还是就这样结束（输出退出标记 '
+        '{"need_continue": false}）？',
+        isReview: true,
+      ));
+      f['steps'] = steps;
+      f['currentStep'] = steps.length - 1;
+      await _write(personaId, f);
+      _log('对话流程', '🔁 回复已消，自动挂复核步骤（男主判断回答完整性）');
+      return;
+    }
+    // 推进 currentStep 到第一个 pending（或标全部已回）
     var nextCur = -1;
     for (var i = 0; i < steps.length; i++) {
       if (steps[i]['status'] != 'done') {
@@ -267,7 +311,8 @@ class ChatFlowStore {
     if (steps.isEmpty) return null;
     final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
     final sb = StringBuffer();
-    sb.writeln('【对话流程】目标：${f['goal']}');
+    final flowNo = f['flowNo'];
+    sb.writeln('【对话流程${flowNo != null ? ' #$flowNo' : ''}】目标：${f['goal']}');
     if (status == 'done') {
       sb.writeln('✅ 流程已结束（全部回应 + 你确认无工作遗漏）。'
           '没有新消息就别再说话，输出退出标记 {"need_continue": false}。');
@@ -277,6 +322,17 @@ class ChatFlowStore {
     // 回复 ≠ 结束，工作义务还在——提示男主检查每步的工具链有没有 ❌/没找到
     final allReplied = steps.every((s) => s['status'] == 'done');
     if (allReplied) {
+      // 有 pending 复核步骤 → 优先给男主复核判断（回答完整性自检）
+      final reviewIdx = steps.indexWhere(
+          (s) => s['isReview'] == true && s['status'] != 'done');
+      if (reviewIdx >= 0) {
+        final review = steps[reviewIdx];
+        sb.writeln('☐ 第${reviewIdx + 1}步 ${review['userText']}');
+        sb.writeln('→ 复核：你刚回复了她，判断回答是否完整——'
+            '要补充（继续调工具/再回复）？还是就这样结束'
+            '（输出退出标记 {"need_continue": false}）？');
+        return sb.toString();
+      }
       sb.writeln('✅ 已全部回应。收尾检查（回复≠结束，工作做完才结束）：');
       for (var i = 0; i < steps.length; i++) {
         final step = steps[i];
@@ -437,6 +493,12 @@ class ChatFlowStore {
       }
       return '已全部回应，流程待你确认结束——没有遗漏就输出退出标记 '
           '{"need_continue": false}。';
+    }
+    // 8-09 18:33：pending 里最老的是复核步骤 → 引导回答完整性判断
+    final oldest = pending.first;
+    if (oldest['isReview'] == true) {
+      return '你刚回复了她，复核：回答完整吗——要补充（继续调工具/再回复）？'
+          '还是就这样结束（输出退出标记 {"need_continue": false}）？';
     }
     final briefs = pending
         .take(3)
