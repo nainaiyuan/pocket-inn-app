@@ -216,6 +216,10 @@ class ContextManager {
 
   // ---- 读取 / 组装 ----
 
+  /// 当前话题原文行（8-09 18:1x ChatFlowStore 对话流程视图的数据源）
+  List<String> rawLines(String personaId) =>
+      List.unmodifiable(_topics[personaId]?.raw ?? const []);
+
   /// 待回复/已回复视图（8-06 21:26-21:30 用户设计）：
   /// 从原文算"男主最后一句回复之后她的话" = 待回复（自动，男主回完自动沉）。
   /// 已回复 = 最近 repliedN 对（她的话 → 你的回复）。

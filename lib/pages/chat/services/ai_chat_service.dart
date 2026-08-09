@@ -6,6 +6,7 @@ import '../../../ai_provider/models.dart';
 import '../../../ai_provider/price_table.dart';
 import '../../../services/openai_compatible_api_service.dart' show ChatCompletionCancelToken;
 import 'context_manager.dart';
+import 'chat_flow_store.dart';
 import 'chat_storage_service.dart';
 import '../../../models/chat_message.dart';
 import '../../../butler/context/context_tracker.dart';
@@ -1242,6 +1243,11 @@ class AiChatService {
     // state_hint=管家提示，防模型误认提示为工具内容。
     final flowHint = FlowStore.stateHint(ctxPid);
     final extraHints = (stateHints ?? const <String>[]).join('\n');
+    // 8-09 18:1x（用户设计定稿：每次对话=一个流程）：对话流程清单——
+    // 用户每条消息=一个条目，✅已回/☐没回 + 工具链 + 回复；每次唤醒注入，
+    // 男主看到就不会弄混、不漏、不重复回。流程中不注入（走【当前流程】）。
+    final chatFlowText =
+        inFlow ? null : ChatFlowStore.buildText(ctxPid);
     final statusBlocks = <AIChatMessage>[
       // 【当前情况】状态感知块（永远在，男主先看这个）
       AIChatMessage(
@@ -1262,6 +1268,11 @@ class AiChatService {
           content: '【待回复】（主对话她说的——一般要回，特殊情况可不回；'
               '要消必须显式标注 {"reply":"回#N"}（JSON 字段），一句话可回多条；'
               '不回就挂着，她问起来你老实说）\n$pendingUser',
+        ),
+      if (chatFlowText != null && chatFlowText.isNotEmpty)
+        AIChatMessage(
+          role: 'system',
+          content: '$chatFlowText',
         ),
       if (inFlow && pendingUser != null)
         AIChatMessage(

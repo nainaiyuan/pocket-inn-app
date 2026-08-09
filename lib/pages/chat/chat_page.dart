@@ -18,6 +18,7 @@ import '../../services/flow_store.dart';
 import '../../services/tool_cache_store.dart';
 import '../../services/tool_manual_store.dart';
 import '../../services/tool_test_store.dart';
+import 'services/chat_flow_store.dart';
 import '../../services/timer_plan_store.dart';
 import '../../services/pending_queue_store.dart';
 import '../../butler/memory/relation_record.dart';
@@ -904,11 +905,14 @@ class _ChatPageState extends State<ChatPage>
           '· 拿不准 → 默认 resume 继续原流程，绝不乱取消。\n'
           '判断完直接调工具，不用问她。\n';
     }
+    // 8-09 18:1x（对话流程）：检查轮带待回清单（还有几条没回）
+    final chatFlowBrief = ChatFlowStore.checkBrief(pid);
     await _sendMsg(
       '',
       systemEvent: '【系统自动提醒——这不是用户消息，不用回复这条提醒本身】\n'
           '现在是"结束检查"：上一轮你已回复完，用户没有说话。\n'
           '$pausedJudge'
+          '${chatFlowBrief != null ? '（对话流程：$chatFlowBrief）\n' : ''}'
           '请判断有没有必须继续的事：\n'
           '① 有未完成的话题，或刚才被打断没说完的回复？\n'
           '② 有正在运行的任务需要继续推进？\n'
