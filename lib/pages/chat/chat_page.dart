@@ -1986,10 +1986,16 @@ class _ChatPageState extends State<ChatPage>
           // 8-06 21:12 用户 bug：第一轮男主已回过话 → 工具轮别再带旧话（防回复两句）
           userAlreadyReplied: result.text.trim().isNotEmpty,
           toolMessages: toolMessages,
-          // 8-08 21:5x（GPT10问第7条）：软提示走状态块【状态提示】区
+          // 8-09 14:5x：Debug Lab 记录本轮实际注入的结果块（t4 兜底，
+          // 多轮工具时 secondMessages 只留最后一轮）
           stateHints: toolRoundHints,
           sessionId: _chatSessionId,
           storagePersonaId: chatPid,
+        );
+        // 8-09 14:5x：Debug Lab 记录本轮实际注入二次请求的结果块快照
+        // （含原生 tool 消息/文本块结果/系统事件），t4 检查对照它兜底
+        TraceSession.instance.recordInjectedToolResults(
+          toolMessages.map((m) => m.content).toList(),
         );
         if (result.text.trim().isNotEmpty) {
           // 8-08 01:2x 用户（管家编排）：工具轮男主文本——

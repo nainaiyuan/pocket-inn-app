@@ -126,6 +126,17 @@ class TraceSession {
     _current = _copy(t, changes: [...t.changes, change]);
   }
 
+  /// 记录工具轮实际注入二次请求的结果块（chat_page 组装 toolMessages 后调用）。
+  /// 多轮工具时 secondMessages 会被最后一轮覆盖，这里保留每轮的注入内容。
+  void recordInjectedToolResults(List<String> blocks) {
+    final t = _current;
+    if (t == null || _finished || blocks.isEmpty) return;
+    _current = _copy(
+      t,
+      injectedToolResults: [...t.injectedToolResults, ...blocks],
+    );
+  }
+
   /// 结束会话并保存（非工具轮的最终回复时调用）
   Future<void> finish(String? finalReply) async {
     final t = _current;
@@ -165,6 +176,7 @@ class TraceSession {
     List<TraceToolExecution>? toolExecutions,
     List<TraceMessage>? firstMessages,
     List<TraceMessage>? secondMessages,
+    List<String>? injectedToolResults,
     String? finalReply,
     List<String>? memoriesWritten,
     List<String>? changes,
@@ -182,6 +194,7 @@ class TraceSession {
         modelToolCalls: modelToolCalls ?? t.modelToolCalls,
         toolExecutions: toolExecutions ?? t.toolExecutions,
         secondMessages: secondMessages ?? t.secondMessages,
+        injectedToolResults: injectedToolResults ?? t.injectedToolResults,
         finalReply: finalReply ?? t.finalReply,
         memoriesWritten: memoriesWritten ?? t.memoriesWritten,
         changes: changes ?? t.changes,

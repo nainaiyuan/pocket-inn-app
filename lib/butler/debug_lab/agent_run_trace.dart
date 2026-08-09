@@ -203,6 +203,11 @@ class AgentRunTrace {
   /// 二次请求 messages（工具轮）
   final List<TraceMessage> secondMessages;
 
+  /// 工具轮实际注入二次请求的结果块快照（chat_page 组装 toolMessages 后记录）。
+  /// 8-09 14:5x（用户真实轨迹 t4 误报）：多轮工具时 secondMessages 只留最后
+  /// 一轮 → 检查器误判"结果丢失"。这里记每轮实际注入的块，t4 对照它兜底。
+  final List<String> injectedToolResults;
+
   /// 最终回复（男主对用户说的话）
   final String? finalReply;
 
@@ -233,6 +238,7 @@ class AgentRunTrace {
     this.modelToolCalls = const [],
     this.toolExecutions = const [],
     this.secondMessages = const [],
+    this.injectedToolResults = const [],
     this.finalReply,
     this.memoriesWritten = const [],
     this.changes = const [],
@@ -262,6 +268,7 @@ class AgentRunTrace {
         'modelToolCalls': modelToolCalls.map((t) => t.toJson()).toList(),
         'toolExecutions': toolExecutions.map((t) => t.toJson()).toList(),
         'secondMessages': secondMessages.map((m) => m.toJson()).toList(),
+        'injectedToolResults': injectedToolResults,
         'finalReply': finalReply != null &&
                 finalReply!.length > maxReplyChars
             ? finalReply!.substring(0, maxReplyChars)
@@ -290,6 +297,10 @@ class AgentRunTrace {
                 TraceToolExecution.fromJson(m.cast<String, dynamic>()))
             .toList(),
         secondMessages: _msgs(json['secondMessages']),
+        injectedToolResults:
+            ((json['injectedToolResults'] as List?) ?? const [])
+                .map((e) => e.toString())
+                .toList(),
         finalReply: json['finalReply']?.toString(),
         memoriesWritten:
             ((json['memoriesWritten'] as List?) ?? const [])

@@ -301,12 +301,15 @@ class TraceAnalyzer {
 
     // t4: 文本协议结果注入（无原生 id 时）
     final textOnly = !hasNative && trace.toolExecutions.isNotEmpty;
-    final secondText = trace.secondMessages
-        .map((m) => m.content)
-        .join('\n');
+    // 8-09 14:5x（真实轨迹 t4 误报）：多轮工具时 secondMessages 只留最后一轮，
+    // 用 injectedToolResults（chat_page 每轮实际注入的块）兜底对照
+    final injectedText = [
+      ...trace.secondMessages.map((m) => m.content),
+      ...trace.injectedToolResults,
+    ].join('\n');
     final textInjected = trace.toolExecutions.every((e) =>
-        secondText.contains(e.name) ||
-        (e.resultText.isNotEmpty && secondText.contains(
+        injectedText.contains(e.name) ||
+        (e.resultText.isNotEmpty && injectedText.contains(
             e.resultText.length > 20
                 ? e.resultText.substring(0, 20)
                 : e.resultText)));
