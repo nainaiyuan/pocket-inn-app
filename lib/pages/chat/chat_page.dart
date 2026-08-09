@@ -1693,27 +1693,21 @@ class _ChatPageState extends State<ChatPage>
               if (flowText != null) {
                 toolResult = _ToolResult(true, flowText);
               } else {
-                // 8-09 20:5x（用户实测：对话流程里男主调 manage_flow 得到
-                // "没有流程"）：manage_flow = 长任务流程（男主主动立）；
-                // 用户消息自动立的是对话流程（manage_chat_flow 管）。
-                // 没长任务时引导男主看对话流程，别以为"没流程"。
-                final chatFlow = ChatFlowStore.get(personaId);
-                if (chatFlow != null &&
-                    chatFlow['status']?.toString() == 'running') {
-                  final steps = chatFlow['steps'];
-                  final n = steps is List ? steps.length : 0;
+                // 8-09 20:56（用户：男主心智里只有一个"流程"，不该让他
+                // 换工具）——没有长任务流程时，直接返回对话流程清单
+                // （用户消息自动立的，一句话=一个大流程，插话=小流程）。
+                // 不用叫男主调 manage_chat_flow，manage_flow status 就能看。
+                final chatText = ChatFlowStore.buildText(personaId);
+                if (chatText != null) {
                   toolResult = _ToolResult(
-                    false,
-                    '没有长任务流程（manage_flow 管的是你主动立的长任务）。'
-                    '但**当前有对话流程在跑**（用户消息自动立的，共 $n 步）'
-                    '——看/调整对话流程用 manage_chat_flow '
-                    '（action=status/merge/delete），别用 manage_flow。',
+                    true,
+                    '没有长任务流程（男主主动立的多步任务）。\n'
+                    '当前对话流程（用户消息自动立）:\n$chatText',
                   );
                 } else {
                   toolResult = _ToolResult(
                     false,
-                    '没有流程（长任务 create 先立；用户消息的对话流程用 '
-                    'manage_chat_flow 查看）',
+                    '没有流程（长任务 create 先立；用户说话会自动立对话流程）',
                   );
                 }
               }
