@@ -435,18 +435,27 @@ class TraceAnalyzer {
     // s4: provider 切换频率——switchedProvider 频繁出现 = 稳定性隐患
     // 8-09 16:0x（观察项：【6】JSON contextSnapshot 显示 switchedProvider:true,
     // needRecover:true, isFirstRun:true——正常 failover，但频率值得盯）
+    // 8-09 21:3x（用户报告【1】-【4】实测）：s4 只在每天/app 启动后第一轮
+    // 出现（_contextRestored 空 → 首次恢复 + lastProvider 空 → switched=true）。
+    // 这是**正常的首次全量恢复**（设计行为：切换/首次必须全量带上下文），
+    // 不是故障——isFirstRun 时不算警告，避免每天第一轮误报。
     final switched = trace.contextSnapshot['switchedProvider'] == true;
     final needRecover = trace.contextSnapshot['needRecover'] == true;
+    final isFirstRun = trace.contextSnapshot['isFirstRun'] == true;
+    final isNormalFirst = isFirstRun && (switched || needRecover);
     out.add(TraceCheckResult(
       checkId: 's4',
       name: '状态·本轮发生 provider 切换/恢复',
       passed: !switched && !needRecover,
       detail: !switched && !needRecover
           ? '无切换（switchedProvider=false）'
-          : '⚠️ 本轮 ${[
-              if (switched) 'provider 切换',
-              if (needRecover) '上下文恢复',
-            ].join('+')}——failover 正常，但频繁出现要查 provider 稳定性',
+          : isNormalFirst
+              ? 'ℹ️ 首次使用/首轮恢复（isFirstRun=true）——正常全量带上下文，'
+                  '不是故障；若每天多轮频繁出现才查 provider 稳定性'
+              : '⚠️ 本轮 ${[
+                  if (switched) 'provider 切换',
+                  if (needRecover) '上下文恢复',
+                ].join('+')}——failover 正常，但频繁出现要查 provider 稳定性',
     ));
 
     return out;
