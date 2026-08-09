@@ -14,7 +14,9 @@ class ToolCatalog {
     '记忆': {
       'record_memory': '记她的事（喜好/约定/日常/事实，自动提取关键词）',
       'record_relation': '记关系（谁→谁→什么+原话+时间+归属，织成关系网）',
-      'recall_memory': '查以前记的关于她的事',
+      // 8-09 21:3x（t7 三次出现：男主用 query_record 查她的事）：
+      // 明确区分——查"她的事"只用 recall_memory，query_record 是查分类树
+      'recall_memory': '查她的事（她说过/你记过的喜好、约定、日常、事实）——**查她的事优先用这个**',
       'save_identity_memory': '记代号人物（家人A/朋友B）的事',
       'write_diary': '写日记存档',
       'query_diary': '按关键词翻日记',
@@ -30,8 +32,9 @@ class ToolCatalog {
       'request_permission': '申请某能力免审批',
     },
     '分类记录': {
-      'query_record': '查分类记录/候选分类路径',
-      'add_record': '记分类记录（你自己整理）',
+      // 8-09 21:3x（t7）：明确"不是查她的事"——防止男主选型混乱
+      'query_record': '查分类记录树（你自己的知识分类/候选分类路径）——**不是查她的事**，查她的事用 recall_memory',
+      'add_record': '记分类记录（你自己整理的知识分类）',
       'manage_record_tree': '调分类（改名/挪动/删除，必须她审批）',
     },
     '排查反馈': {
