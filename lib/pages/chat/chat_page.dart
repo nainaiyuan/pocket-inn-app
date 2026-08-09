@@ -651,6 +651,37 @@ class _ChatPageState extends State<ChatPage>
       }
       return;
     }
+    // 8-09 20:5x（用户实测：对话流程里插话显示"流程已暂挂"误导）：
+    // 没有长任务流程 → 检查对话流程（ChatFlowStore）。对话流程里
+    // 插话 = feedUser 追加步骤（上面已做），流程**没有暂挂**，
+    // 男主按步骤顺序回即可，不需要"resume/update/cancel"长任务指令。
+    final chatFlowNow = ChatFlowStore.get(pid);
+    final chatFlowRunning =
+        chatFlowNow != null && chatFlowNow['status']?.toString() == 'running';
+    if (chatFlowRunning) {
+      final short =
+          fullText.length > 40 ? '${fullText.substring(0, 40)}…' : fullText;
+      DebugLogger.log(
+          '管家流程', '💬 对话流程插话 → 已追加步骤，男主按序回: $short');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('已追加到对话流程，男主按顺序回你'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      final chatEvent =
+          '用户想跟你说话（已追加到当前对话流程，你按顺序回她，流程不用暂停）。'
+          '她刚才发来的消息：$fullText。\n'
+          '**这一轮先回复她**（插话轮管家会拦工具，回完她之后可以继续调工具处理流程步骤）。';
+      await _sendMsg(
+        '',
+        systemEvent: chatEvent,
+        bubbleText: '💬 男主先回你…',
+      );
+      return;
+    }
     final event =
         '用户想跟你说话（管家转达，你回完她之后判断）：'
         '她刚才发来的消息：$fullText。\n'
@@ -682,7 +713,7 @@ class _ChatPageState extends State<ChatPage>
         setState(() {});
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('已把你的话排上，男主这轮忙完就回你（流程已暂挂）'),
+            content: Text('已把你的话排上，男主这轮忙完就回你'),
             duration: Duration(seconds: 2),
           ),
         );
@@ -694,7 +725,7 @@ class _ChatPageState extends State<ChatPage>
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('已发给男主，他先回你（流程已暂挂）'),
+          content: Text('已发给男主，他先回你'),
           duration: Duration(seconds: 2),
         ),
       );
@@ -1658,10 +1689,34 @@ class _ChatPageState extends State<ChatPage>
             } else if (action == 'resume') {
               toolResult = _ToolResult(true, await FlowStore.resume(personaId));
             } else if (action == 'status') {
-              toolResult = _ToolResult(
-                true,
-                FlowStore.text(personaId) ?? '没有流程（create 先立）',
-              );
+              final flowText = FlowStore.text(personaId);
+              if (flowText != null) {
+                toolResult = _ToolResult(true, flowText);
+              } else {
+                // 8-09 20:5x（用户实测：对话流程里男主调 manage_flow 得到
+                // "没有流程"）：manage_flow = 长任务流程（男主主动立）；
+                // 用户消息自动立的是对话流程（manage_chat_flow 管）。
+                // 没长任务时引导男主看对话流程，别以为"没流程"。
+                final chatFlow = ChatFlowStore.get(personaId);
+                if (chatFlow != null &&
+                    chatFlow['status']?.toString() == 'running') {
+                  final steps = chatFlow['steps'];
+                  final n = steps is List ? steps.length : 0;
+                  toolResult = _ToolResult(
+                    false,
+                    '没有长任务流程（manage_flow 管的是你主动立的长任务）。'
+                    '但**当前有对话流程在跑**（用户消息自动立的，共 $n 步）'
+                    '——看/调整对话流程用 manage_chat_flow '
+                    '（action=status/merge/delete），别用 manage_flow。',
+                  );
+                } else {
+                  toolResult = _ToolResult(
+                    false,
+                    '没有流程（长任务 create 先立；用户消息的对话流程用 '
+                    'manage_chat_flow 查看）',
+                  );
+                }
+              }
             } else if (action == 'update') {
               // 8-07 00:1x 用户：用户提了新要求 → 更新流程目标/步骤，从头执行
               final goal = args['goal']?.toString();
@@ -2535,7 +2590,7 @@ class _ChatPageState extends State<ChatPage>
           _sendMsg(
             '',
             systemEvent: pendingInterrupt,
-            bubbleText: '💬 你插话了，男主先回你（流程已暂挂）…',
+            bubbleText: '💬 你插话了，男主先回你…',
           ),
         );
       }
@@ -4278,6 +4333,8 @@ class _ChatPageState extends State<ChatPage>
     if (!mounted) return false;
     final approved = await showDialog<bool>(
       context: context,
+      // 8-09 20:5x：同 _approveToolCall——防误触把"没点"当"拒绝"
+      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFFFDF7F9),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -4426,6 +4483,10 @@ class _ChatPageState extends State<ChatPage>
     FocusManager.instance.primaryFocus?.unfocus();
     final approved = await showDialog<bool>(
       context: context,
+      // 8-09 20:5x（用户实测：误点弹窗边缘 → 弹窗关闭 → 被当"拒绝"，
+      // 男主说"我拒绝"）：授权弹窗必须明确点按钮，点外面关不掉
+      // （barrierDismissible:false），防误触把"没点"当成"拒绝"。
+      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFFFDF7F9),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -4468,6 +4529,8 @@ class _ChatPageState extends State<ChatPage>
     final body = split.content;
     final approved = await showDialog<bool>(
       context: context,
+      // 8-09 20:5x：同 _approveToolCall——防误触把"没点"当"拒绝"
+      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFFFDF7F9),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
