@@ -1343,18 +1343,26 @@ class _ChatPageState extends State<ChatPage>
                 .map((c) => c.thinkingEnabled == true)
                 .firstOrNull ??
             false;
+        // 8-09 22:3x（用户日志 HTTP 400：assistant tool_calls 必须跟 tool 消息）：
+        // 修复"部分 call 缺 id"场景——原生路径要求**每个 call 都有 id 且全量配对**：
+        // - 缺 id 的 call 被过滤 → nativeCalls 少一条 → 但循环仍执行它（走文本收集）
+        //   → toolMessages 的 assistant(tool_calls) 带 N 个 call 却只有 N-1 条
+        //   tool 消息 → DeepSeek 400 "must be followed by tool messages responding
+        //   to each tool_call"。
+        // - 修：只要原生路径有任何一个 call 缺 id → 整轮转文本协议（不混用），
+        //   保证 assistant(tool_calls) 和 tool 消息严格一一配对。
         final nativeCalls = thinkingOn
-            ? (hasReasoning
+            ? (hasReasoning &&
+                    result.toolCalls!.every(
+                        (c) => (c['id']?.toString() ?? '').isNotEmpty))
                 ? result.toolCalls!
-                    .where((c) => (c['id']?.toString() ?? '').isNotEmpty)
-                    .toList()
-                : <Map<String, dynamic>>[])
+                : <Map<String, dynamic>>[]
             : result.toolCalls!;
         if (result.toolCalls!.isNotEmpty && nativeCalls.isEmpty) {
           DebugLogger.log(
             'AI路由',
-            '🛡 工具轮无 reasoning_content（思考链关/解析失败）→ '
-            '原生 tool_calls 转文本协议，防 DeepSeek 400',
+            '🛡 工具轮降级文本协议（思考链关/解析失败/工具 call 缺 id）→ '
+            '原生 tool_calls 不发了，防 DeepSeek 400',
           );
         }
         final textToolResults = <String>[];
@@ -2105,7 +2113,13 @@ class _ChatPageState extends State<ChatPage>
           // 8-06 21:36：continue/resolve_pending 结果不回填工具消息
           final isContinue =
               name == 'continue_speaking' || name == 'resolve_pending';
-          if (!isContinue && nativeCalls.contains(call)) {
+          // 8-09 22:3x（400 修复）：配对条件从 nativeCalls.contains(call)
+          // 改为 nativeCalls.isNotEmpty——原生路径现在是"全量配对"（要么
+          // 全部 call 都进 nativeCalls，要么整轮转文本），不再有"部分 call
+          // 被过滤"的中间态；contains 判断在 call 对象相等性上不可靠
+          //（模型返回的 map 可能被包装/复制），isNotEmpty 直接表达意图：
+          // 原生路径每个 call 都要有对应 tool 消息。
+          if (!isContinue && nativeCalls.isNotEmpty) {
             // 原生：tool 消息必须用模型给的 id 配对（不能自己编 id）
             // 8-04 17:0x（用户：📄 里工具轮要简化成"成功/失败+一句话"）：
             // content 统一带【工具 名】+ ✅成功/❌失败 标记 —— 模型看得更清楚，
