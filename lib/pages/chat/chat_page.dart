@@ -679,7 +679,9 @@ class _ChatPageState extends State<ChatPage>
       await _sendMsg(
         '',
         systemEvent: chatEvent,
-        bubbleText: '💬 男主先回你…',
+        // 8-10 01:2x（用户：插话气泡显示在我气泡那里，不要）：
+        // 插话轮不显示用户侧气泡，男主直接说话
+        silentBubble: true,
       );
       return;
     }
@@ -734,7 +736,9 @@ class _ChatPageState extends State<ChatPage>
     await _sendMsg(
       '',
       systemEvent: event,
-      bubbleText: '💬 男主先回你…',
+      // 8-10 01:2x（用户：插话气泡显示在我气泡那里，不要）：
+      // 插话轮不显示用户侧气泡，男主直接说话
+      silentBubble: true,
     );
   }
 
@@ -878,7 +882,9 @@ class _ChatPageState extends State<ChatPage>
             '',
             systemEvent: '用户刚才发来消息（你忙的时候管家收集的）：$texts。'
                 '先回复她。',
-            bubbleText: '💬 男主先回你…',
+            // 8-10 01:2x（用户：插话气泡显示在我气泡那里，不要）：
+            // 不显示用户侧气泡，男主直接说话
+            silentBubble: true,
           ),
         );
       }
@@ -2680,19 +2686,38 @@ class _ChatPageState extends State<ChatPage>
     final pendingInterrupt = _pendingInterruptEvent;
     if (pendingInterrupt != null) {
       _pendingInterruptEvent = null;
-      if (mounted) {
-        setState(() {}); // 插话按钮恢复"💬 插话"
-        // 8-08 15:5x：标记插话触发轮——这轮结束检查男主是否回了用户
-        // （没回 → 注入"只回用户"轮；回了 → 恢复正常续跑）
-        _interruptRoundActive = true;
-        _interruptFollowUpDone = false;
-        unawaited(
-          _sendMsg(
-            '',
-            systemEvent: pendingInterrupt,
-            bubbleText: '💬 你插话了，男主先回你…',
-          ),
+      // 8-10 01:2x（用户：男主把所有的都回完了才说"你插话了"，显示在
+      // 我的气泡那里，又唤醒男主一轮）——插话排队的消息可能已被男主在
+      // 流程里回了（feedUser 追加步骤后男主清单里一起消）→ 对话流程
+      // 没有待回步骤 → 插话消息已回完 → 不显示气泡、不唤醒男主。
+      final cf = ChatFlowStore.get(personaId);
+      final hasPendingStep = cf != null &&
+          ((cf['steps'] as List?) ?? const []).any(
+              (s) => s['status']?.toString() != 'done');
+      if (!hasPendingStep) {
+        DebugLogger.log(
+          '管家流程',
+          '🔕 插话消息男主已回完（流程无待回步骤），不触发插话轮',
         );
+        if (mounted) setState(() {}); // 插话按钮恢复"💬 插话"
+      } else {
+        if (mounted) {
+          setState(() {}); // 插话按钮恢复"💬 插话"
+          // 8-08 15:5x：标记插话触发轮——这轮结束检查男主是否回了用户
+          // （没回 → 注入"只回用户"轮；回了 → 恢复正常续跑）
+          _interruptRoundActive = true;
+          _interruptFollowUpDone = false;
+          unawaited(
+            _sendMsg(
+              '',
+              systemEvent: pendingInterrupt,
+              // 8-10 01:2x（用户：插话气泡显示在我气泡那里，不要）：
+              // 插话轮不显示用户侧"💬 男主先回你…"气泡——SnackBar
+              // 插话时已提示过，男主直接说话即可
+              silentBubble: true,
+            ),
+          );
+        }
       }
     }
     // 8-08 15:2x（设计九）：AI 全失败事件排队——这轮结束注入，男主解释
