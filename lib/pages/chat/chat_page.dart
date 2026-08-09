@@ -4374,23 +4374,17 @@ class _ChatPageState extends State<ChatPage>
     final parts = parsed.bubbles;
     if (parts.isEmpty) {
       // 8-09 23:5x（用户：调工具后男主回复被剥成"<"，思考链也看不见）：
-      // 正文被剥空/丢弃（工具残留剥离、标签残渣丢弃）但思考链非空 →
-      // 仍挂思考链气泡（正文空 → message_bubble 显示"（他正在思考…）"占位）。
-      // 思考过程不该跟着正文一起丢——男主调了工具想了半天，用户至少能看到
-      // 他思考了什么。
+      // 正文被剥空/丢弃但思考链非空 → 思考不跟着正文丢。
+      // 8-10 01:1x（用户：流程里思考跟着最近的文本走，流程结束没文本
+      // 才自己一行兜底）——不再单独挂思考气泡：攒进 buffer，下一个说话
+      // 气泡合并（跟最近文本走）；循环退出后 buffer 残留由兜底挂
+      //（"（他正在思考…）"占位 + 思考折叠区）。
       if (cleanThinking != null && cleanThinking.isNotEmpty) {
-        final id =
-            '${DateTime.now().microsecondsSinceEpoch}_ai${isFirst ? '0' : 'x'}_think';
-        _msgKey.currentState?.appendMessage(
-          ChatMessage(
-            id: id,
-            text: '',
-            isMe: false,
-            thinkingChain: cleanThinking,
-          ),
+        _bufferFlowThinking(cleanThinking);
+        DebugLogger.log(
+          'AI路由',
+          '🧠 男主文本被剥空但有思考 → 攒 buffer 等最近文本合并（不单独挂）',
         );
-        rows.add(_BubbleRow(id, '', null));
-        if (isFirst) _firstAiMsgId = id;
       }
       return rows;
     }
