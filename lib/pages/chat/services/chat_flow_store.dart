@@ -225,16 +225,28 @@ class ChatFlowStore {
           (s) => s['isReview'] != true,
           orElse: () => <String, dynamic>{'userText': ''});
       final lastText = (lastReal['userText'] ?? '').toString();
-      steps.add(_newStep(
-        '【复核】你刚回复了「${_short(lastText, 40)}」——判断回答是否完整：'
-        '要补充（继续调工具/再回复）？还是就这样结束（输出退出标记 '
-        '{"need_continue": false}）？',
+      // 8-09 18:39（用户设计）：复核只给大概，不给完整句子——
+      // 男主要看细节去上下文（ContextManager 原文）。
+      // 复核插在下一个流程（第一个 pending 真实步骤）前面，
+      // 男主可以"复核旧流程 + 回新流程"一起做掉（标注 回#N、#M）。
+      final reviewStep = _newStep(
+        '【复核】你刚回复了她（关于：${_short(lastText, 12)}）——'
+        '判断回答是否完整：要补充（继续调工具/再回复）？'
+        '还是就这样结束（输出退出标记 {"need_continue": false}）？'
+        '（回复细节看上下文，这里只记大概）',
         isReview: true,
-      ));
+      );
+      final firstPendingReal = steps.indexWhere(
+          (s) => s['status'] != 'done' && s['isReview'] != true);
+      if (firstPendingReal >= 0) {
+        steps.insert(firstPendingReal, reviewStep);
+      } else {
+        steps.add(reviewStep);
+      }
       f['steps'] = steps;
-      f['currentStep'] = steps.length - 1;
+      f['currentStep'] = steps.indexOf(reviewStep);
       await _write(personaId, f);
-      _log('对话流程', '🔁 回复已消，自动挂复核步骤（男主判断回答完整性）');
+      _log('对话流程', '🔁 回复已消，复核步骤插在新流程前（男主判断回答完整性）');
       return;
     }
     // 推进 currentStep 到第一个 pending（或标全部已回）
