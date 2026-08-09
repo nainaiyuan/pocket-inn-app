@@ -15,6 +15,11 @@ abstract class ApiModel with _$ApiModel {
     @JsonKey(defaultValue: '') required String id,
     @JsonKey(defaultValue: '') required String modelId,
     @JsonKey(defaultValue: '') @Default('') String customBody,
+    // 8-09 17:0x（用户设计定稿）：思考模式开关——同一个模型有思考/不思考
+    // 两种模式（DeepSeek V3.2 后请求参数控制）时用户可切换。
+    // null = 未设置（跟随服务端默认/customBody）；true = 强制开思考；
+    // false = 强制关思考（完全不思考，更快更省）。
+    @JsonKey() bool? thinkingEnabled,
   }) = _ApiModel;
 
   factory ApiModel.fromJson(Map<String, dynamic> json) =>
@@ -83,6 +88,8 @@ abstract class ResolvedApiConfig with _$ResolvedApiConfig {
     @JsonKey(defaultValue: '') required String apiKey,
     @JsonKey(defaultValue: '') required String model,
     @JsonKey(defaultValue: '') @Default('') String customBody,
+    // 8-09 17:0x：思考模式开关（见 ApiModel.thinkingEnabled 注释）
+    @JsonKey() bool? thinkingEnabled,
   }) = _ResolvedApiConfig;
 
   factory ResolvedApiConfig.fromJson(Map<String, dynamic> json) =>
@@ -112,6 +119,15 @@ abstract class ResolvedApiConfig with _$ResolvedApiConfig {
       if (tools != null && tools.isNotEmpty) 'tools': tools,
     };
     body.addAll(parseCustomBody());
+    // 8-09 17:0x（用户设计定稿）：思考模式显式开关——true 注入开启参数、
+    // false 注入关闭参数（DeepSeek V3.2 格式 thinking.type），显式值覆盖
+    // customBody 里的旧配置（customBody 链路已断，这里兜底补齐）。
+    // null = 不注入，跟随服务端默认。
+    if (thinkingEnabled != null) {
+      body['thinking'] = {
+        'type': thinkingEnabled! ? 'enabled' : 'disabled',
+      };
+    }
     return body;
   }
 }

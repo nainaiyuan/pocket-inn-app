@@ -1101,6 +1101,12 @@ class AIProviderManager {
     }
     await CapabilityCache.instance.put(key, caps);
     _setCapState(config.id, caps); // 广播给所有 UI 能力灯
+    // 8-09 17:0x：思考模式支持度同步到配置（UI 开关可用性：不支持 → 置灰）
+    if (caps.isProbed) {
+      await _update(config.id, (c) => c.copyWith(
+            thinkingSupported: caps.supportsReasoning,
+          ));
+    }
     return caps;
   }
 
@@ -1412,6 +1418,8 @@ class AIProviderManager {
         baseUrl: normalizeDeepSeekBaseUrl(config.baseUrl),
         apiKey: config.apiKey,
         model: config.model,
+        // 8-09 17:0x：思考模式开关传递（用户设计定稿）
+        thinkingEnabled: config.thinkingEnabled,
       );
 
   /// DeepSeek 的 Anthropic 兼容端点（api.deepseek.com/anthropic）归一化回

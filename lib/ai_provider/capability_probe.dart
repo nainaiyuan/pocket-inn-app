@@ -260,6 +260,36 @@ class CapabilityProbe {
       }
     }
 
+    // ①b 思考模式实测（8-09 17:0x 用户设计定稿：开关可用性由实测决定，
+    // 不能思考的 AI 按钮置灰）：
+    // 带 thinking:{type:enabled}（DeepSeek V3.2 思考参数）的极简对话请求，
+    // 返回 reasoning_content = 真支持思考模式（supportsReasoning=true）。
+    // 失败/无返回 = 不支持或参数名不认（保持 hints 推断值，不误判）。
+    // 探测请求失败（网络等）时跳过，避免雪上加霜。
+    if (probed) {
+      try {
+        final thinkingProbe = await _api.createChatCompletion(
+          config,
+          messages: const [
+            {'role': 'user', 'content': '1+1=？'},
+          ],
+          defaults: const {
+            'max_tokens': 60,
+            'temperature': 0,
+            // DeepSeek V3.2 thinking 参数（其他家不认 → 报错静默忽略，
+            // 保持 hints 推断；不误判为"不支持思考"）
+            'thinking': {'type': 'enabled'},
+          },
+        );
+        final tc = thinkingProbe.thinkingChain;
+        if (tc != null && tc.trim().isNotEmpty) {
+          supportsReasoning = true;
+        }
+      } on Object {
+        // 参数不认/超时 → 保持 hints 推断值，静默
+      }
+    }
+
     // ② 流式探测：读第一个 chunk 验证 SSE（仅当上面实测成功过）
     var supportsStreaming = false;
     if (probed) {

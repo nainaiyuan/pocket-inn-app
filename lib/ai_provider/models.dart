@@ -53,6 +53,11 @@ class AIProviderConfig {
     this.toolFormat = 'auto',
     this.memoryMode = 'stateless',
     this.refreshHours,
+    // 8-09 17:0x（用户设计定稿）：思考模式开关。
+    // thinkingEnabled：null=未设置(跟随服务端默认) / true=强制开 / false=强制关
+    // thinkingSupported：探测结果（true 才允许用户开开关，否则 UI 置灰）
+    this.thinkingEnabled,
+    this.thinkingSupported,
   });
 
   /// 稳定唯一 id，如 'preset-deepseek' / 'custom'
@@ -105,6 +110,12 @@ class AIProviderConfig {
   /// 确定"每次都要带"就不用 N 小时；不确定就先每次带，提醒之后改。
   final int? refreshHours;
 
+  /// 思考模式开关（8-09 用户设计定稿）：null=跟随默认 / true=强制开 / false=强制关
+  final bool? thinkingEnabled;
+
+  /// 探测结果：此 AI 支持思考模式吗（false/未探测 → UI 开关置灰）
+  final bool? thinkingSupported;
+
   bool get isStateful => memoryMode == 'stateful';
 
   bool get supportsChat => capabilities.contains(AICapability.chat);
@@ -129,6 +140,8 @@ class AIProviderConfig {
     String? toolFormat,
     String? memoryMode,
     int? refreshHours,
+    bool? thinkingEnabled,
+    bool? thinkingSupported,
   }) {
     return AIProviderConfig(
       id: id ?? this.id,
@@ -145,6 +158,8 @@ class AIProviderConfig {
       toolFormat: toolFormat ?? this.toolFormat,
       memoryMode: memoryMode ?? this.memoryMode,
       refreshHours: refreshHours ?? this.refreshHours,
+      thinkingEnabled: thinkingEnabled ?? this.thinkingEnabled,
+      thinkingSupported: thinkingSupported ?? this.thinkingSupported,
     );
   }
 
@@ -163,6 +178,8 @@ class AIProviderConfig {
         'toolFormat': toolFormat,
         'memoryMode': memoryMode,
         'refreshHours': refreshHours,
+        'thinkingEnabled': thinkingEnabled,
+        'thinkingSupported': thinkingSupported,
       };
 
   factory AIProviderConfig.fromJson(Map<String, dynamic> json) {
@@ -186,6 +203,8 @@ class AIProviderConfig {
       toolFormat: json['toolFormat'] as String? ?? 'auto',
       memoryMode: json['memoryMode'] as String? ?? 'stateless',
       refreshHours: json['refreshHours'] as int?,
+      thinkingEnabled: json['thinkingEnabled'] as bool?,
+      thinkingSupported: json['thinkingSupported'] as bool?,
     );
   }
 }

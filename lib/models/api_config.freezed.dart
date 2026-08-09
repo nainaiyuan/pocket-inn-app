@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$ApiModel {
 
-@JsonKey(defaultValue: '') String get id;@JsonKey(defaultValue: '') String get modelId;@JsonKey(defaultValue: '') String get customBody;
+@JsonKey(defaultValue: '') String get id;@JsonKey(defaultValue: '') String get modelId;@JsonKey(defaultValue: '') String get customBody;@JsonKey() bool? get thinkingEnabled;
 /// Create a copy of ApiModel
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -28,16 +28,16 @@ $ApiModelCopyWith<ApiModel> get copyWith => _$ApiModelCopyWithImpl<ApiModel>(thi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ApiModel&&(identical(other.id, id) || other.id == id)&&(identical(other.modelId, modelId) || other.modelId == modelId)&&(identical(other.customBody, customBody) || other.customBody == customBody));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ApiModel&&(identical(other.id, id) || other.id == id)&&(identical(other.modelId, modelId) || other.modelId == modelId)&&(identical(other.customBody, customBody) || other.customBody == customBody)&&(identical(other.thinkingEnabled, thinkingEnabled) || other.thinkingEnabled == thinkingEnabled));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,modelId,customBody);
+int get hashCode => Object.hash(runtimeType,id,modelId,customBody,thinkingEnabled);
 
 @override
 String toString() {
-  return 'ApiModel(id: $id, modelId: $modelId, customBody: $customBody)';
+  return 'ApiModel(id: $id, modelId: $modelId, customBody: $customBody, thinkingEnabled: $thinkingEnabled)';
 }
 
 
@@ -48,7 +48,7 @@ abstract mixin class $ApiModelCopyWith<$Res>  {
   factory $ApiModelCopyWith(ApiModel value, $Res Function(ApiModel) _then) = _$ApiModelCopyWithImpl;
 @useResult
 $Res call({
-@JsonKey(defaultValue: '') String id,@JsonKey(defaultValue: '') String modelId,@JsonKey(defaultValue: '') String customBody
+@JsonKey(defaultValue: '') String id,@JsonKey(defaultValue: '') String modelId,@JsonKey(defaultValue: '') String customBody,@JsonKey() bool? thinkingEnabled
 });
 
 
@@ -65,11 +65,11 @@ class _$ApiModelCopyWithImpl<$Res>
 
 /// Create a copy of ApiModel
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? modelId = null,Object? customBody = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? modelId = null,Object? customBody = null,Object? thinkingEnabled = null,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,modelId: null == modelId ? _self.modelId : modelId // ignore: cast_nullable_to_non_nullable
-as String,customBody: null == customBody ? _self.customBody : customBody // ignore: cast_nullable_to_non_nullable
+as String,customBody: null == customBody ? _self.customBody : customBody // ignore: cast_nullable_to_non_nullable,thinkingEnabled: null == thinkingEnabled ? _self.thinkingEnabled : thinkingEnabled
 as String,
   ));
 }
@@ -155,10 +155,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(defaultValue: '')  String id, @JsonKey(defaultValue: '')  String modelId, @JsonKey(defaultValue: '')  String customBody)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(defaultValue: '')  String id, @JsonKey(defaultValue: '')  String modelId, @JsonKey(defaultValue: '')  String customBody,@JsonKey()  bool? thinkingEnabled)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _ApiModel() when $default != null:
-return $default(_that.id,_that.modelId,_that.customBody);case _:
+return $default(_that.id,_that.modelId,_that.customBody,_that.thinkingEnabled);case _:
   return orElse();
 
 }
@@ -176,10 +176,10 @@ return $default(_that.id,_that.modelId,_that.customBody);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(defaultValue: '')  String id, @JsonKey(defaultValue: '')  String modelId, @JsonKey(defaultValue: '')  String customBody)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(defaultValue: '')  String id, @JsonKey(defaultValue: '')  String modelId, @JsonKey(defaultValue: '')  String customBody,@JsonKey()  bool? thinkingEnabled)  $default,) {final _that = this;
 switch (_that) {
 case _ApiModel():
-return $default(_that.id,_that.modelId,_that.customBody);case _:
+return $default(_that.id,_that.modelId,_that.customBody,_that.thinkingEnabled);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -196,10 +196,10 @@ return $default(_that.id,_that.modelId,_that.customBody);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(defaultValue: '')  String id, @JsonKey(defaultValue: '')  String modelId, @JsonKey(defaultValue: '')  String customBody)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(defaultValue: '')  String id, @JsonKey(defaultValue: '')  String modelId, @JsonKey(defaultValue: '')  String customBody,@JsonKey()  bool? thinkingEnabled)?  $default,) {final _that = this;
 switch (_that) {
 case _ApiModel() when $default != null:
-return $default(_that.id,_that.modelId,_that.customBody);case _:
+return $default(_that.id,_that.modelId,_that.customBody,_that.thinkingEnabled);case _:
   return null;
 
 }
@@ -211,12 +211,13 @@ return $default(_that.id,_that.modelId,_that.customBody);case _:
 @JsonSerializable()
 
 class _ApiModel extends ApiModel {
-  const _ApiModel({@JsonKey(defaultValue: '') required this.id, @JsonKey(defaultValue: '') required this.modelId, @JsonKey(defaultValue: '') this.customBody = ''}): super._();
+  const _ApiModel({@JsonKey(defaultValue: '') required this.id, @JsonKey(defaultValue: '') required this.modelId, @JsonKey(defaultValue: '') this.customBody = '', @JsonKey() this.thinkingEnabled}): super._();
   factory _ApiModel.fromJson(Map<String, dynamic> json) => _$ApiModelFromJson(json);
 
 @override@JsonKey(defaultValue: '') final  String id;
 @override@JsonKey(defaultValue: '') final  String modelId;
 @override@JsonKey(defaultValue: '') final  String customBody;
+@override@JsonKey() final  bool? thinkingEnabled;
 
 /// Create a copy of ApiModel
 /// with the given fields replaced by the non-null parameter values.
@@ -231,16 +232,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ApiModel&&(identical(other.id, id) || other.id == id)&&(identical(other.modelId, modelId) || other.modelId == modelId)&&(identical(other.customBody, customBody) || other.customBody == customBody));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ApiModel&&(identical(other.id, id) || other.id == id)&&(identical(other.modelId, modelId) || other.modelId == modelId)&&(identical(other.customBody, customBody) || other.customBody == customBody)&&(identical(other.thinkingEnabled, thinkingEnabled) || other.thinkingEnabled == thinkingEnabled));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,modelId,customBody);
+int get hashCode => Object.hash(runtimeType,id,modelId,customBody,thinkingEnabled);
 
 @override
 String toString() {
-  return 'ApiModel(id: $id, modelId: $modelId, customBody: $customBody)';
+  return 'ApiModel(id: $id, modelId: $modelId, customBody: $customBody, thinkingEnabled: $thinkingEnabled)';
 }
 
 
@@ -251,7 +252,7 @@ abstract mixin class _$ApiModelCopyWith<$Res> implements $ApiModelCopyWith<$Res>
   factory _$ApiModelCopyWith(_ApiModel value, $Res Function(_ApiModel) _then) = __$ApiModelCopyWithImpl;
 @override @useResult
 $Res call({
-@JsonKey(defaultValue: '') String id,@JsonKey(defaultValue: '') String modelId,@JsonKey(defaultValue: '') String customBody
+@JsonKey(defaultValue: '') String id,@JsonKey(defaultValue: '') String modelId,@JsonKey(defaultValue: '') String customBody,@JsonKey() bool? thinkingEnabled
 });
 
 
@@ -268,11 +269,11 @@ class __$ApiModelCopyWithImpl<$Res>
 
 /// Create a copy of ApiModel
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? modelId = null,Object? customBody = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? modelId = null,Object? customBody = null,Object? thinkingEnabled = null,}) {
   return _then(_ApiModel(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,modelId: null == modelId ? _self.modelId : modelId // ignore: cast_nullable_to_non_nullable
-as String,customBody: null == customBody ? _self.customBody : customBody // ignore: cast_nullable_to_non_nullable
+as String,customBody: null == customBody ? _self.customBody : customBody // ignore: cast_nullable_to_non_nullable,thinkingEnabled: null == thinkingEnabled ? _self.thinkingEnabled : thinkingEnabled
 as String,
   ));
 }
@@ -565,7 +566,7 @@ as List<ApiModel>,
 /// @nodoc
 mixin _$ResolvedApiConfig {
 
-@JsonKey(defaultValue: '') String get id;@JsonKey(defaultValue: '未命名配置') String get name;@JsonKey(defaultValue: '') String get baseUrl;@JsonKey(defaultValue: '') String get apiKey;@JsonKey(defaultValue: '') String get model;@JsonKey(defaultValue: '') String get customBody;
+@JsonKey(defaultValue: '') String get id;@JsonKey(defaultValue: '未命名配置') String get name;@JsonKey(defaultValue: '') String get baseUrl;@JsonKey(defaultValue: '') String get apiKey;@JsonKey(defaultValue: '') String get model;@JsonKey(defaultValue: '') String get customBody;@JsonKey() bool? get thinkingEnabled;
 /// Create a copy of ResolvedApiConfig
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -578,16 +579,16 @@ $ResolvedApiConfigCopyWith<ResolvedApiConfig> get copyWith => _$ResolvedApiConfi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ResolvedApiConfig&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.baseUrl, baseUrl) || other.baseUrl == baseUrl)&&(identical(other.apiKey, apiKey) || other.apiKey == apiKey)&&(identical(other.model, model) || other.model == model)&&(identical(other.customBody, customBody) || other.customBody == customBody));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ResolvedApiConfig&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.baseUrl, baseUrl) || other.baseUrl == baseUrl)&&(identical(other.apiKey, apiKey) || other.apiKey == apiKey)&&(identical(other.model, model) || other.model == model)&&(identical(other.customBody, customBody) || other.customBody == customBody)&&(identical(other.thinkingEnabled, thinkingEnabled) || other.thinkingEnabled == thinkingEnabled));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,name,baseUrl,apiKey,model,customBody);
+int get hashCode => Object.hash(runtimeType,id,name,baseUrl,apiKey,model,customBody,thinkingEnabled);
 
 @override
 String toString() {
-  return 'ResolvedApiConfig(id: $id, name: $name, baseUrl: $baseUrl, apiKey: $apiKey, model: $model, customBody: $customBody)';
+  return 'ResolvedApiConfig(id: $id, name: $name, baseUrl: $baseUrl, apiKey: $apiKey, model: $model, customBody: $customBody, thinkingEnabled: $thinkingEnabled)';
 }
 
 
@@ -598,7 +599,7 @@ abstract mixin class $ResolvedApiConfigCopyWith<$Res>  {
   factory $ResolvedApiConfigCopyWith(ResolvedApiConfig value, $Res Function(ResolvedApiConfig) _then) = _$ResolvedApiConfigCopyWithImpl;
 @useResult
 $Res call({
-@JsonKey(defaultValue: '') String id,@JsonKey(defaultValue: '未命名配置') String name,@JsonKey(defaultValue: '') String baseUrl,@JsonKey(defaultValue: '') String apiKey,@JsonKey(defaultValue: '') String model,@JsonKey(defaultValue: '') String customBody
+@JsonKey(defaultValue: '') String id,@JsonKey(defaultValue: '未命名配置') String name,@JsonKey(defaultValue: '') String baseUrl,@JsonKey(defaultValue: '') String apiKey,@JsonKey(defaultValue: '') String model,@JsonKey(defaultValue: '') String customBody,@JsonKey() bool? thinkingEnabled
 });
 
 
@@ -615,14 +616,14 @@ class _$ResolvedApiConfigCopyWithImpl<$Res>
 
 /// Create a copy of ResolvedApiConfig
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? name = null,Object? baseUrl = null,Object? apiKey = null,Object? model = null,Object? customBody = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? name = null,Object? baseUrl = null,Object? apiKey = null,Object? model = null,Object? customBody = null,Object? thinkingEnabled = null,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
 as String,baseUrl: null == baseUrl ? _self.baseUrl : baseUrl // ignore: cast_nullable_to_non_nullable
 as String,apiKey: null == apiKey ? _self.apiKey : apiKey // ignore: cast_nullable_to_non_nullable
 as String,model: null == model ? _self.model : model // ignore: cast_nullable_to_non_nullable
-as String,customBody: null == customBody ? _self.customBody : customBody // ignore: cast_nullable_to_non_nullable
+as String,customBody: null == customBody ? _self.customBody : customBody // ignore: cast_nullable_to_non_nullable,thinkingEnabled: null == thinkingEnabled ? _self.thinkingEnabled : thinkingEnabled
 as String,
   ));
 }
@@ -708,10 +709,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(defaultValue: '')  String id, @JsonKey(defaultValue: '未命名配置')  String name, @JsonKey(defaultValue: '')  String baseUrl, @JsonKey(defaultValue: '')  String apiKey, @JsonKey(defaultValue: '')  String model, @JsonKey(defaultValue: '')  String customBody)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(defaultValue: '')  String id, @JsonKey(defaultValue: '未命名配置')  String name, @JsonKey(defaultValue: '')  String baseUrl, @JsonKey(defaultValue: '')  String apiKey, @JsonKey(defaultValue: '')  String model, @JsonKey(defaultValue: '')  String customBody,@JsonKey()  bool? thinkingEnabled)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _ResolvedApiConfig() when $default != null:
-return $default(_that.id,_that.name,_that.baseUrl,_that.apiKey,_that.model,_that.customBody);case _:
+return $default(_that.id,_that.name,_that.baseUrl,_that.apiKey,_that.model,_that.customBody,_that.thinkingEnabled);case _:
   return orElse();
 
 }
@@ -729,10 +730,10 @@ return $default(_that.id,_that.name,_that.baseUrl,_that.apiKey,_that.model,_that
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(defaultValue: '')  String id, @JsonKey(defaultValue: '未命名配置')  String name, @JsonKey(defaultValue: '')  String baseUrl, @JsonKey(defaultValue: '')  String apiKey, @JsonKey(defaultValue: '')  String model, @JsonKey(defaultValue: '')  String customBody)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(defaultValue: '')  String id, @JsonKey(defaultValue: '未命名配置')  String name, @JsonKey(defaultValue: '')  String baseUrl, @JsonKey(defaultValue: '')  String apiKey, @JsonKey(defaultValue: '')  String model, @JsonKey(defaultValue: '')  String customBody,@JsonKey()  bool? thinkingEnabled)  $default,) {final _that = this;
 switch (_that) {
 case _ResolvedApiConfig():
-return $default(_that.id,_that.name,_that.baseUrl,_that.apiKey,_that.model,_that.customBody);case _:
+return $default(_that.id,_that.name,_that.baseUrl,_that.apiKey,_that.model,_that.customBody,_that.thinkingEnabled);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -749,10 +750,10 @@ return $default(_that.id,_that.name,_that.baseUrl,_that.apiKey,_that.model,_that
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(defaultValue: '')  String id, @JsonKey(defaultValue: '未命名配置')  String name, @JsonKey(defaultValue: '')  String baseUrl, @JsonKey(defaultValue: '')  String apiKey, @JsonKey(defaultValue: '')  String model, @JsonKey(defaultValue: '')  String customBody)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(defaultValue: '')  String id, @JsonKey(defaultValue: '未命名配置')  String name, @JsonKey(defaultValue: '')  String baseUrl, @JsonKey(defaultValue: '')  String apiKey, @JsonKey(defaultValue: '')  String model, @JsonKey(defaultValue: '')  String customBody,@JsonKey()  bool? thinkingEnabled)?  $default,) {final _that = this;
 switch (_that) {
 case _ResolvedApiConfig() when $default != null:
-return $default(_that.id,_that.name,_that.baseUrl,_that.apiKey,_that.model,_that.customBody);case _:
+return $default(_that.id,_that.name,_that.baseUrl,_that.apiKey,_that.model,_that.customBody,_that.thinkingEnabled);case _:
   return null;
 
 }
@@ -764,7 +765,7 @@ return $default(_that.id,_that.name,_that.baseUrl,_that.apiKey,_that.model,_that
 @JsonSerializable()
 
 class _ResolvedApiConfig extends ResolvedApiConfig {
-  const _ResolvedApiConfig({@JsonKey(defaultValue: '') required this.id, @JsonKey(defaultValue: '未命名配置') required this.name, @JsonKey(defaultValue: '') required this.baseUrl, @JsonKey(defaultValue: '') required this.apiKey, @JsonKey(defaultValue: '') required this.model, @JsonKey(defaultValue: '') this.customBody = ''}): super._();
+  const _ResolvedApiConfig({@JsonKey(defaultValue: '') required this.id, @JsonKey(defaultValue: '未命名配置') required this.name, @JsonKey(defaultValue: '') required this.baseUrl, @JsonKey(defaultValue: '') required this.apiKey, @JsonKey(defaultValue: '') required this.model, @JsonKey(defaultValue: '') this.customBody = '', @JsonKey() this.thinkingEnabled}): super._();
   factory _ResolvedApiConfig.fromJson(Map<String, dynamic> json) => _$ResolvedApiConfigFromJson(json);
 
 @override@JsonKey(defaultValue: '') final  String id;
@@ -773,6 +774,7 @@ class _ResolvedApiConfig extends ResolvedApiConfig {
 @override@JsonKey(defaultValue: '') final  String apiKey;
 @override@JsonKey(defaultValue: '') final  String model;
 @override@JsonKey(defaultValue: '') final  String customBody;
+@override@JsonKey() final  bool? thinkingEnabled;
 
 /// Create a copy of ResolvedApiConfig
 /// with the given fields replaced by the non-null parameter values.
@@ -787,16 +789,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ResolvedApiConfig&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.baseUrl, baseUrl) || other.baseUrl == baseUrl)&&(identical(other.apiKey, apiKey) || other.apiKey == apiKey)&&(identical(other.model, model) || other.model == model)&&(identical(other.customBody, customBody) || other.customBody == customBody));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ResolvedApiConfig&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.baseUrl, baseUrl) || other.baseUrl == baseUrl)&&(identical(other.apiKey, apiKey) || other.apiKey == apiKey)&&(identical(other.model, model) || other.model == model)&&(identical(other.customBody, customBody) || other.customBody == customBody)&&(identical(other.thinkingEnabled, thinkingEnabled) || other.thinkingEnabled == thinkingEnabled));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,name,baseUrl,apiKey,model,customBody);
+int get hashCode => Object.hash(runtimeType,id,name,baseUrl,apiKey,model,customBody,thinkingEnabled);
 
 @override
 String toString() {
-  return 'ResolvedApiConfig(id: $id, name: $name, baseUrl: $baseUrl, apiKey: $apiKey, model: $model, customBody: $customBody)';
+  return 'ResolvedApiConfig(id: $id, name: $name, baseUrl: $baseUrl, apiKey: $apiKey, model: $model, customBody: $customBody, thinkingEnabled: $thinkingEnabled)';
 }
 
 
@@ -807,7 +809,7 @@ abstract mixin class _$ResolvedApiConfigCopyWith<$Res> implements $ResolvedApiCo
   factory _$ResolvedApiConfigCopyWith(_ResolvedApiConfig value, $Res Function(_ResolvedApiConfig) _then) = __$ResolvedApiConfigCopyWithImpl;
 @override @useResult
 $Res call({
-@JsonKey(defaultValue: '') String id,@JsonKey(defaultValue: '未命名配置') String name,@JsonKey(defaultValue: '') String baseUrl,@JsonKey(defaultValue: '') String apiKey,@JsonKey(defaultValue: '') String model,@JsonKey(defaultValue: '') String customBody
+@JsonKey(defaultValue: '') String id,@JsonKey(defaultValue: '未命名配置') String name,@JsonKey(defaultValue: '') String baseUrl,@JsonKey(defaultValue: '') String apiKey,@JsonKey(defaultValue: '') String model,@JsonKey(defaultValue: '') String customBody,@JsonKey() bool? thinkingEnabled
 });
 
 
@@ -824,14 +826,14 @@ class __$ResolvedApiConfigCopyWithImpl<$Res>
 
 /// Create a copy of ResolvedApiConfig
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? name = null,Object? baseUrl = null,Object? apiKey = null,Object? model = null,Object? customBody = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? name = null,Object? baseUrl = null,Object? apiKey = null,Object? model = null,Object? customBody = null,Object? thinkingEnabled = null,}) {
   return _then(_ResolvedApiConfig(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
 as String,baseUrl: null == baseUrl ? _self.baseUrl : baseUrl // ignore: cast_nullable_to_non_nullable
 as String,apiKey: null == apiKey ? _self.apiKey : apiKey // ignore: cast_nullable_to_non_nullable
 as String,model: null == model ? _self.model : model // ignore: cast_nullable_to_non_nullable
-as String,customBody: null == customBody ? _self.customBody : customBody // ignore: cast_nullable_to_non_nullable
+as String,customBody: null == customBody ? _self.customBody : customBody // ignore: cast_nullable_to_non_nullable,thinkingEnabled: null == thinkingEnabled ? _self.thinkingEnabled : thinkingEnabled
 as String,
   ));
 }

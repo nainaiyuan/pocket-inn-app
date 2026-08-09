@@ -1281,11 +1281,26 @@ class _ChatPageState extends State<ChatPage>
         // 原生 tool_calls，比 400 弹灰框强。
         final hasReasoning =
             (result.reasoningContent?.trim().isNotEmpty ?? false);
-        final nativeCalls = hasReasoning
-            ? result.toolCalls!
-                .where((c) => (c['id']?.toString() ?? '').isNotEmpty)
-                .toList()
-            : <Map<String, dynamic>>[];
+        // 8-09 17:0x（用户设计定稿：思考模式显式开关）：
+        // 只有"开思考"的请求才需要 reasoning_content 回传保护（DeepSeek
+        // 思考模式要求原样回传，否则 400）。没开思考的模型（非思考模型/
+        // 思考关）工具轮本来就没有 reasoning_content，原生 tool_calls 完全
+        // 正常 → 不再一刀切转文本（修正 8-08 22:5x 的过度防御：它把非思考
+        // 模型的正常原生调用也砍了，这就是"动不动转文本协议"的直接原因）。
+        final thinkingOn = AIProviderManager.instance.providers
+                .where((c) =>
+                    c.id ==
+                    AIProviderManager.instance.lastProviderFor(personaId))
+                .map((c) => c.thinkingEnabled == true)
+                .firstOrNull ??
+            false;
+        final nativeCalls = thinkingOn
+            ? (hasReasoning
+                ? result.toolCalls!
+                    .where((c) => (c['id']?.toString() ?? '').isNotEmpty)
+                    .toList()
+                : <Map<String, dynamic>>[])
+            : result.toolCalls!;
         if (result.toolCalls!.isNotEmpty && nativeCalls.isEmpty) {
           DebugLogger.log(
             'AI路由',

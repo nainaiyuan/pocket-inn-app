@@ -530,6 +530,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
     final memoryMode = (result['memoryMode'] as String?) ?? 'stateless';
     final refreshHours = result['refreshHours'] as int?;
     final toolFormat = result['toolFormat'] as String?;
+    final thinkingEnabled = result['thinkingEnabled'] as bool?;
 
     if (existing != null) {
       // 编辑：整体保存
@@ -542,6 +543,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
           memoryMode: memoryMode,
           refreshHours: refreshHours,
           toolFormat: toolFormat,
+          thinkingEnabled: thinkingEnabled,
         ),
       );
       DebugLogger.log(
@@ -569,6 +571,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
           memoryMode: memoryMode,
           refreshHours: refreshHours,
           toolFormat: toolFormat ?? 'auto',
+          thinkingEnabled: thinkingEnabled,
         ),
       );
       _probeAfterSave(newId, name.isEmpty ? '自定义' : name);
@@ -767,11 +770,19 @@ class _ProviderFormState extends State<_ProviderForm> {
   /// stateful 模式的刷新周期（小时），null = 还没确定
   int? _refreshHours;
 
+  /// 8-09 17:0x（用户设计定稿）：思考模式开关——null=自动(跟随默认) /
+  /// true=强制开 / false=强制关。探测确认不支持思考（thinkingSupported=false）
+  /// 时置灰不可点。
+  bool? _thinkingEnabled;
+
   final TextEditingController _refreshHoursCtrl = TextEditingController();
 
   bool get _isLocal =>
       widget.preset?.type == ProviderType.local ||
       widget.existing?.type == ProviderType.local;
+
+  /// 探测结果：此 AI 支持思考吗（null=未探测；false=确认不支持→开关置灰）
+  bool? get _thinkingSupported => widget.existing?.thinkingSupported;
 
   /// 模型下拉选项：预设添加用预设的列表；编辑时按 id 反查预设列表。
   List<String> get _modelOptions {
@@ -809,6 +820,7 @@ class _ProviderFormState extends State<_ProviderForm> {
     _memoryMode = existing?.memoryMode ?? 'stateless';
     _toolFormat = existing?.toolFormat ?? 'auto';
     _refreshHours = existing?.refreshHours;
+    _thinkingEnabled = existing?.thinkingEnabled;
     if (_refreshHours != null) {
       _refreshHoursCtrl.text = '$_refreshHours';
     }
@@ -1009,6 +1021,49 @@ class _ProviderFormState extends State<_ProviderForm> {
               ),
             ],
             const SizedBox(height: 8),
+            // ---- 思考模式（8-09 17:0x 用户设计定稿）----
+            // 同一个模型有思考/不思考两种模式（DeepSeek V3.2 后请求参数控制）
+            // 时可切换。探测确认不支持思考 → 置灰（开了也没用）。
+            // 思考开着时聊天里自动显示 🤔 思考过程（像 DeepSeek 官方）。
+            DropdownButtonFormField<String>(
+              value: _thinkingEnabled == null
+                  ? 'auto'
+                  : (_thinkingEnabled! ? 'on' : 'off'),
+              decoration: InputDecoration(
+                labelText: '思考模式',
+                helperText: _thinkingSupported == false
+                    ? '探测确认此 AI 不支持思考 → 开关不可用'
+                    : '开 = AI 打草稿再回答（聊天里自动显示 🤔 思考过程，像 DeepSeek 官方）；'
+                        '关 = 完全不思考，直接答（更快更省）；'
+                        '自动 = 跟随 AI 默认。保存后自动探测，不支持思考的 AI 会自动禁用',
+              ),
+              items: [
+                const DropdownMenuItem(
+                  value: 'auto',
+                  child: Text('自动（跟随 AI 默认）'),
+                ),
+                const DropdownMenuItem(
+                  value: 'on',
+                  child: Text('开启思考（显示 🤔 思考过程）'),
+                ),
+                const DropdownMenuItem(
+                  value: 'off',
+                  child: Text('关闭思考（直接回答，更快更省）'),
+                ),
+              ],
+              onChanged: _thinkingSupported == false
+                  ? null
+                  : (value) {
+                      if (value != null) {
+                        setState(() {
+                          _thinkingEnabled = value == 'auto'
+                              ? null
+                              : (value == 'on');
+                        });
+                      }
+                    },
+            ),
+            const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
               child: FilledButton(
@@ -1076,6 +1131,7 @@ class _ProviderFormState extends State<_ProviderForm> {
                     'refreshHours': refreshHours,
                     // auto = 自动识别（合法持久化值，resolve 时走注册表）
                     'toolFormat': _toolFormat,
+                    'thinkingEnabled': _thinkingEnabled,
                   });
                 },
                 child: const Text('保存'),

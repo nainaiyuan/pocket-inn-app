@@ -10,6 +10,7 @@ _ApiModel _$ApiModelFromJson(Map<String, dynamic> json) => _ApiModel(
   id: json['id'] as String? ?? '',
   modelId: json['modelId'] as String? ?? '',
   customBody: json['customBody'] as String? ?? '',
+      thinkingEnabled: json['thinkingEnabled'] as bool?,
 );
 
 Map<String, dynamic> _$ApiModelToJson(_ApiModel instance) => <String, dynamic>{
@@ -47,6 +48,7 @@ _ResolvedApiConfig _$ResolvedApiConfigFromJson(Map<String, dynamic> json) =>
       apiKey: json['apiKey'] as String? ?? '',
       model: json['model'] as String? ?? '',
       customBody: json['customBody'] as String? ?? '',
+      thinkingEnabled: json['thinkingEnabled'] as bool?,
     );
 
 Map<String, dynamic> _$ResolvedApiConfigToJson(_ResolvedApiConfig instance) =>
