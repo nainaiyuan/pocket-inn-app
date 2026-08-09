@@ -137,6 +137,10 @@ class ChatFlowStore {
   /// 工具执行 → 挂到步骤（8-09 18:4x 改：挂载点 = 第一个未消步骤；
   /// 全部已消 → 挂最后一步。支持"先回复再干活"：男主回复消完条目后
   /// 继续调工具，工具挂到最后一步上，工作不会丢）
+  /// 8-09 20:1x（用户实测"我喜欢猫"插话"我喜欢狗"）：挂载点跳过复核
+  /// 步骤——复核是"判断完整性"不是用户消息，工具挂复核上会让男主
+  /// 看到复核步骤带"查了没找到"更混乱。优先挂第一个未消真实步骤；
+  /// 只有复核 pending → 挂复核（男主复核阶段补充干活）；全消 → 挂最后一步。
   static Future<void> feedTool(String personaId, String toolName,
       {required bool ok, String? brief}) async {
     if (personaId.isEmpty || toolName.isEmpty) return;
@@ -147,9 +151,17 @@ class ChatFlowStore {
     if (steps.isEmpty) return;
     var target = -1;
     for (var i = 0; i < steps.length; i++) {
-      if (steps[i]['status'] != 'done') {
+      if (steps[i]['status'] != 'done' && steps[i]['isReview'] != true) {
         target = i;
         break;
+      }
+    }
+    if (target < 0) {
+      for (var i = 0; i < steps.length; i++) {
+        if (steps[i]['status'] != 'done') {
+          target = i; // 只有复核 pending → 挂复核
+          break;
+        }
       }
     }
     if (target < 0) target = steps.length - 1; // 全消完 → 挂最后一步
@@ -230,9 +242,7 @@ class ChatFlowStore {
       // 复核插在下一个流程（第一个 pending 真实步骤）前面，
       // 男主可以"复核旧流程 + 回新流程"一起做掉（标注 回#N、#M）。
       final reviewStep = _newStep(
-        '【复核】你刚回复了她（关于：${_short(lastText, 12)}）——'
-        '判断回答是否完整：要补充（继续调工具/再回复）？'
-        '还是就这样结束（输出退出标记 {"need_continue": false}）？'
+        '【复核】你刚回复了她（关于：${_short(lastText, 12)}）'
         '（回复细节看上下文，这里只记大概）',
         isReview: true,
       );
@@ -448,14 +458,16 @@ class ChatFlowStore {
     final allReplied = steps.every((s) => s['status'] == 'done');
     if (allReplied) {
       // 有 pending 复核步骤 → 优先给男主复核判断（回答完整性自检）
+      // 8-09 20:1x：复核不显示为"☐ 第N步"（男主会以为要回#N 重复说话），
+      // 只作为整体判断引导
       final reviewIdx = steps.indexWhere(
           (s) => s['isReview'] == true && s['status'] != 'done');
       if (reviewIdx >= 0) {
         final review = steps[reviewIdx];
-        sb.writeln('☐ 第${reviewIdx + 1}步 ${review['userText']}');
-        sb.writeln('→ 复核：你刚回复了她，判断回答是否完整——'
-            '要补充（继续调工具/再回复）？还是就这样结束'
-            '（输出退出标记 {"need_continue": false}）？');
+        sb.writeln('→ 复核（回答完整性自检，不是新消息不用"回"）：'
+            '你刚回复了她（${_short(review['userText'].toString(), 30)}）'
+            '——判断：回答完整吗？要补充（继续调工具/再回复）？'
+            '还是就这样结束（输出退出标记 {"need_continue": false}）？');
         return sb.toString();
       }
       sb.writeln('✅ 已全部回应。收尾检查（回复≠结束，工作做完才结束）：');
@@ -485,6 +497,10 @@ class ChatFlowStore {
           : (isCur ? '▶' : '☐');
       final tools = _asMap(step['tools']);
       final reply = (step['reply'] as String?)?.toString().trim() ?? '';
+      // 8-09 20:1x（用户实测）：复核步骤不在清单里占"第N步"位置——
+      // 它会让男主以为要"回#N"，把已回复的内容重复说。
+      // 复核只在末尾作为整体判断引导出现（见下方"复核"段）。
+      if (step['isReview'] == true) continue;
       var line = '$mark 第${steps.indexOf(step) + 1}步 ${step['userText']}';
       if (st == 'done') {
         final toolPart = tools.isEmpty ? '' : '（工具：${_toolsBrief(tools)}）';
@@ -507,11 +523,32 @@ class ChatFlowStore {
         _asMap(curStep['tools']).isEmpty) {
       sb.writeln('→ 当前步：直接回复她就完成（要查东西先调工具再回复）。');
     }
-    // 消条目规则提示（合并消教育）
-    final pendingCount = steps.where((s) => s['status'] != 'done').length;
-    if (pendingCount > 0) {
-      sb.writeln('提示：还有 $pendingCount 条没回，先回她。'
-          '${pendingCount > 1 ? '一次回多条可标注 {"reply":"回#N、#M"}（N=第几步）一起消；否则默认只消最老一条。' : ''}');
+    // 8-09 20:1x（用户实测：复核步骤被算进"还有N条没回"→ 男主把猫
+    // 重复说了一遍）：复核步骤不是用户消息，不该算"没回"。
+    // "没回"只数真实用户步骤（isReview != true）。
+    final realPendingCount =
+        steps.where((s) => s['status'] != 'done' && s['isReview'] != true).length;
+    if (realPendingCount > 0) {
+      sb.writeln('提示：还有 $realPendingCount 条没回（用户消息），先回她。'
+          '${realPendingCount > 1 ? '一次回多条可标注 {"reply":"回#N、#M"}（N=第几步）一起消；否则默认只消最老一条。' : ''}');
+    }
+    // 复核步骤单独给判断引导（不算"没回"，是完整性自检）
+    final reviewIdx = steps.indexWhere(
+        (s) => s['isReview'] == true && s['status'] != 'done');
+    if (reviewIdx >= 0) {
+      // 8-09 20:1x：复核要覆盖整个大流程——男主回复了她（猫），
+      // 她又插话说了（狗），都处理了 → 判断：这些都说完了吗？还有补充吗？
+      final realSteps = steps
+          .where((s) => s['isReview'] != true)
+          .toList();
+      final doneReal = realSteps.where((s) => s['status'] == 'done').length;
+      final pendingReal = realSteps.length - doneReal;
+      sb.writeln('→ 复核（回答完整性自检，不是新消息不用"回"）：'
+          '你刚回复了她（${_short(steps[reviewIdx]['userText'].toString(), 30)}），'
+          '${doneReal > 0 ? '已处理 $doneReal 条' : ''}'
+          '${pendingReal > 0 ? '，还有 $pendingReal 条在流程里（继续处理）' : ''}'
+          '——判断：全部说完了吗？要补充（继续调工具/再回复）？'
+          '还是就这样结束（输出退出标记 {"need_continue": false}）？');
     }
     // 重复回复警告（无未消条目却说话 → 由 buildText 的 done 分支覆盖；
     // 这里防"已消完但流程还没标 done"的边界，其实 done 分支已处理）
@@ -620,9 +657,28 @@ class ChatFlowStore {
           '{"need_continue": false}。';
     }
     // 8-09 18:33：pending 里最老的是复核步骤 → 引导回答完整性判断
-    final oldest = pending.first;
-    if (oldest['isReview'] == true) {
-      return '你刚回复了她，复核：回答完整吗——要补充（继续调工具/再回复）？'
+    // 8-09 20:1x：复核不算"没回"——先看有没有真实用户步骤 pending
+    final realPending = pending.where((s) => s['isReview'] != true).toList();
+    if (realPending.isNotEmpty) {
+      final briefs = realPending
+          .take(3)
+          .map((s) => '第${steps.indexOf(s) + 1}步「${_short(s['userText'].toString(), 20)}」')
+          .join('、');
+      final more = realPending.length > 3 ? ' 等${realPending.length}条' : '';
+      return '还有 ${realPending.length} 条没回：$briefs$more——先回她，回完再结束；'
+          '回多条可标注 {"reply":"回#N、#M"} 一起消。';
+    }
+    // 只剩复核 pending → 完整性自检（不是"没回"，是判断）
+    final review = pending.firstWhere(
+        (s) => s['isReview'] == true,
+        orElse: () => pending.first);
+    if (review['isReview'] == true) {
+      final realSteps = steps.where((s) => s['isReview'] != true).toList();
+      final doneReal = realSteps.where((s) => s['status'] == 'done').length;
+      final pendingReal = realSteps.length - doneReal;
+      return '你刚回复了她，复核（不是新消息不用"回"）：'
+          '已处理 $doneReal 条${pendingReal > 0 ? '，还有 $pendingReal 条在流程里（继续处理）' : ''}'
+          '——判断：全部说完了吗？要补充（继续调工具/再回复）？'
           '还是就这样结束（输出退出标记 {"need_continue": false}）？';
     }
     final briefs = pending
