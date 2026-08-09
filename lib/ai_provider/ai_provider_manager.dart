@@ -1293,6 +1293,14 @@ class AIProviderManager {
     if (explicit != 'auto' && explicit.isNotEmpty) {
       return [explicit];
     }
+    // 8-09 17:2x（用户设计定稿）：工具轮兜底开关（textToolRound）——
+    // 给"原生工具调用必须回传思考链"的 AI（DeepSeek 类）省 token：
+    // 不用原生、工具一律走文本协议（⟨工具:⟩ 块），就不产生原生 tool_calls，
+    // 自然不需要回传思考链。思考参数（thinkingEnabled）不受影响，
+    // 对话照常思考——文本协议与思考正交。
+    if (config.textToolRound) {
+      return ['text', 'none'];
+    }
     switch (caps.toolFormat) {
       case 'text':
         return ['text', 'none'];

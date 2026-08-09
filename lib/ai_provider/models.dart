@@ -58,6 +58,9 @@ class AIProviderConfig {
     // thinkingSupported：探测结果（true 才允许用户开开关，否则 UI 置灰）
     this.thinkingEnabled,
     this.thinkingSupported,
+    // 8-09 17:2x（用户设计）：DeepSeek 类"必须回传思考链"的 AI 兜底开关。
+    // true = 工具轮不用原生（走文本协议），省回传思考链的 token
+    this.textToolRound = false,
   });
 
   /// 稳定唯一 id，如 'preset-deepseek' / 'custom'
@@ -116,6 +119,12 @@ class AIProviderConfig {
   /// 探测结果：此 AI 支持思考模式吗（false/未探测 → UI 开关置灰）
   final bool? thinkingSupported;
 
+  /// 工具轮兜底开关（8-09 用户设计）：true = 工具轮不用原生调用，
+  /// 一律走文本协议（⟨工具:⟩ 块）。给"原生工具调用必须回传思考链"的 AI
+  /// （DeepSeek 类）省 token 用——不回传就不产生回传开销。
+  /// 思考参数（thinkingEnabled）不受影响：对话照常思考。
+  final bool textToolRound;
+
   bool get isStateful => memoryMode == 'stateful';
 
   bool get supportsChat => capabilities.contains(AICapability.chat);
@@ -142,6 +151,7 @@ class AIProviderConfig {
     int? refreshHours,
     bool? thinkingEnabled,
     bool? thinkingSupported,
+    bool? textToolRound,
   }) {
     return AIProviderConfig(
       id: id ?? this.id,
@@ -160,6 +170,7 @@ class AIProviderConfig {
       refreshHours: refreshHours ?? this.refreshHours,
       thinkingEnabled: thinkingEnabled ?? this.thinkingEnabled,
       thinkingSupported: thinkingSupported ?? this.thinkingSupported,
+      textToolRound: textToolRound ?? this.textToolRound,
     );
   }
 
@@ -180,6 +191,7 @@ class AIProviderConfig {
         'refreshHours': refreshHours,
         'thinkingEnabled': thinkingEnabled,
         'thinkingSupported': thinkingSupported,
+        'textToolRound': textToolRound,
       };
 
   factory AIProviderConfig.fromJson(Map<String, dynamic> json) {
@@ -205,6 +217,7 @@ class AIProviderConfig {
       refreshHours: json['refreshHours'] as int?,
       thinkingEnabled: json['thinkingEnabled'] as bool?,
       thinkingSupported: json['thinkingSupported'] as bool?,
+      textToolRound: json['textToolRound'] as bool? ?? false,
     );
   }
 }

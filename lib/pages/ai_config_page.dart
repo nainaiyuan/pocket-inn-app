@@ -531,6 +531,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
     final refreshHours = result['refreshHours'] as int?;
     final toolFormat = result['toolFormat'] as String?;
     final thinkingEnabled = result['thinkingEnabled'] as bool?;
+    final textToolRound = result['textToolRound'] as bool? ?? false;
 
     if (existing != null) {
       // 编辑：整体保存
@@ -544,6 +545,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
           refreshHours: refreshHours,
           toolFormat: toolFormat,
           thinkingEnabled: thinkingEnabled,
+          textToolRound: textToolRound,
         ),
       );
       DebugLogger.log(
@@ -572,6 +574,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
           refreshHours: refreshHours,
           toolFormat: toolFormat ?? 'auto',
           thinkingEnabled: thinkingEnabled,
+          textToolRound: textToolRound,
         ),
       );
       _probeAfterSave(newId, name.isEmpty ? '自定义' : name);
@@ -775,6 +778,10 @@ class _ProviderFormState extends State<_ProviderForm> {
   /// 时置灰不可点。
   bool? _thinkingEnabled;
 
+  /// 8-09 17:2x（用户设计）：工具轮兜底开关。true = 工具轮不用原生
+  /// （走文本协议），给"原生必须回传思考链"的 AI（DeepSeek 类）省 token。
+  bool _textToolRound = false;
+
   final TextEditingController _refreshHoursCtrl = TextEditingController();
 
   bool get _isLocal =>
@@ -821,6 +828,7 @@ class _ProviderFormState extends State<_ProviderForm> {
     _toolFormat = existing?.toolFormat ?? 'auto';
     _refreshHours = existing?.refreshHours;
     _thinkingEnabled = existing?.thinkingEnabled;
+    _textToolRound = existing?.textToolRound ?? false;
     if (_refreshHours != null) {
       _refreshHoursCtrl.text = '$_refreshHours';
     }
@@ -1063,6 +1071,38 @@ class _ProviderFormState extends State<_ProviderForm> {
                       }
                     },
             ),
+            if (_thinkingSupported == true) ...[
+              const SizedBox(height: 8),
+              // ---- 工具轮方式（8-09 17:2x 用户设计定稿）----
+              // 只在"支持思考"的 AI 上显示（无思考能力 = 原生畅通、无回传
+              // 问题 = 不需要这个纠结）。DeepSeek 类原生工具调用必须回传
+              // 思考链（否则 400）→ 选 B 免回传、省 token。
+              DropdownButtonFormField<String>(
+                value: _textToolRound ? 'text' : 'native',
+                decoration: const InputDecoration(
+                  labelText: '工具轮方式',
+                  helperText:
+                      'A 原生调用 = 效果最好（思考链原样传回，仅 DeepSeek 类要求）；'
+                      'B 文本协议 = 男主用 ⟨工具:⟩ 文本块报工具，不产生原生调用、'
+                      '不用回传思考链（省 token，不怕 400）。对话思考不受影响',
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'native',
+                    child: Text('A 原生调用（推荐，回传思考链）'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'text',
+                    child: Text('B 文本协议（不回传思考链，省 token）'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _textToolRound = value == 'text');
+                  }
+                },
+              ),
+            ],
             const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
@@ -1132,6 +1172,7 @@ class _ProviderFormState extends State<_ProviderForm> {
                     // auto = 自动识别（合法持久化值，resolve 时走注册表）
                     'toolFormat': _toolFormat,
                     'thinkingEnabled': _thinkingEnabled,
+                    'textToolRound': _textToolRound,
                   });
                 },
                 child: const Text('保存'),
