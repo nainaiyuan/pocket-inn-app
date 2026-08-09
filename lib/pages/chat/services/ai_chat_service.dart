@@ -1133,8 +1133,11 @@ class AiChatService {
     // （compact/summarize 仍在 feed 前跑：总结的是不含当前消息的旧原文）
     if (!toolRound && systemEvent == null && message.trim().isNotEmpty) {
       ContextManager.instance.feedUserMessage(ctxPid, message);
-      // 8-06 21:36 用户：待回复队列入队（男主带编号管理，管家只做机械活）
-      PendingQueueStore.enqueue(ctxPid, message);
+      // 8-09 16:2x（用户：男主回两遍"我喜欢猫"）：
+      // 待回复入队移除——generateReply = 消息正在被正常处理（男主会直接回复），
+      // 再入队 = 同一条消息两个回复路径（正常回复 + 回#N 待回复）→ 双回复。
+      // 待回复队列只留给"男主忙时排队"场景（插话路径 insertStep/_pendingInterruptEvent），
+      // 正常对话不再制造待回复。
       // 8-03 20:1x（调试：用户怀疑男主对话被抛弃）——feed 全链路日志
       DebugLogger.log(
           '上下文调试',
