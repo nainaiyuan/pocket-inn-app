@@ -127,6 +127,14 @@ abstract class ResolvedApiConfig with _$ResolvedApiConfig {
       body['thinking'] = {
         'type': thinkingEnabled! ? 'enabled' : 'disabled',
       };
+      // 8-09 22:5x（用户：V4 有思考链却看不到）：DeepSeek V4 思考模式
+      // 需要 reasoning_effort（non-thinking/high/max）控制深度，只带
+      // thinking:{type:enabled} 可能按默认深度（低/不思考）跑 → 无
+      // reasoning_content。DeepSeek 系开思考时补 high（思考质量与速度
+      // 平衡；max 太慢影响聊天体验）。其他家不认识该参数可能报错 → 不注入。
+      if (thinkingEnabled! && baseUrl.toLowerCase().contains('deepseek')) {
+        body['reasoning_effort'] = 'high';
+      }
     }
     return body;
   }

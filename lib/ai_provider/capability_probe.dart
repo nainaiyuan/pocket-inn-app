@@ -304,11 +304,19 @@ class CapabilityProbe {
             {'role': 'user', 'content': '1+1=？'},
           ],
           defaults: const {
-            'max_tokens': 60,
+            // 8-09 22:5x 修复（用户：V4 有思考链却看不到，开关被置灰）：
+            // 原 max_tokens=60 太小——V4 思考模式（Think High/Max）思考
+            // 本身就要几百 token 预算，60 根本跑不起来 → 无 reasoning_content
+            // → 误判"不支持思考" → 配置页开关置灰 → 用户想开都开不了。
+            // 调大到 2000 给思考留空间；非思考模型回答极短，多花 token 可忽略。
+            'max_tokens': 2000,
             'temperature': 0,
-            // DeepSeek V3.2 thinking 参数（其他家不认 → 报错静默忽略，
+            // DeepSeek V3.2/V4 thinking 参数（其他家不认 → 报错静默忽略，
             // 保持 hints 推断；不误判为"不支持思考"）
             'thinking': {'type': 'enabled'},
+            // DeepSeek V4：思考深度参数（non-thinking/high/max），
+            // 探测用 high 即可证明支持思考（max 太慢）
+            'reasoning_effort': 'high',
           },
         );
         final tc = thinkingProbe.thinkingChain;
