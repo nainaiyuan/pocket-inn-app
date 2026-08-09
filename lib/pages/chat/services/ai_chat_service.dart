@@ -1281,7 +1281,12 @@ class AiChatService {
       if (chatFlowText != null && chatFlowText.isNotEmpty)
         AIChatMessage(
           role: 'system',
-          content: '$chatFlowText',
+          // 8-09 20:59（用户：大流程本来就在上下文，男主不该查）：
+          // 对话流程清单 = 全部待办，注入时明确"不用调工具查"——
+          // 男主看到清单直接处理，不需要 manage_flow status / manage_chat_flow status。
+          content: '【对话流程】（你的全部待办都在这——**不用调任何工具查流程**，'
+              '直接按清单处理：✅已回不用再回、☐/▶没回的处理、'
+              '复核判断补充还是结束）\n$chatFlowText',
         ),
       if (inFlow && pendingUser != null)
         AIChatMessage(
