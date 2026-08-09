@@ -132,6 +132,11 @@ class FlowStore {
     return _memCache;
   }
 
+  /// 8-09 16:0x（用户：流程卡片要动态显示）：FlowStore 变化 → 通知 UI 刷新。
+  /// chat_page 注册（onChanged = setState），流程卡片实时跟随：
+  /// 步骤推进/状态变化/流程结束立即更新，从同一个数据源读。
+  static void Function()? onChanged;
+
   static Future<void> _write(String personaId, Map<String, dynamic>? flow) async {
     if (personaId.isEmpty) return;
     final p = await SharedPreferences.getInstance();
@@ -142,6 +147,8 @@ class FlowStore {
       await p.setString(_key(personaId), jsonEncode(flow));
       _memCache = flow;
     }
+    // 写完后通知 UI（卡片/状态条实时跟随；UI 侧自己做 mounted 保护）
+    onChanged?.call();
   }
 
   /// 当前流程（无则 null）
@@ -740,6 +747,10 @@ class FlowStore {
     // 流程完成时 currentStep == steps.length，不再显示越界进度
     if (status == 'done' || status == 'cancelled' || cur >= steps.length) {
       return '「$goal」已完成（${steps.length} 步全部走完）';
+    }
+    // 8-09 16:0x（用户：卡片要显示暂停态）：stopped/paused 时进度带暂停标记
+    if (status == 'stopped' || status == 'paused_by_user') {
+      return '「$goal」第 ${cur + 1}/${steps.length} 步（⏸已暂停）';
     }
     return '「$goal」第 ${cur + 1}/${steps.length} 步';
   }

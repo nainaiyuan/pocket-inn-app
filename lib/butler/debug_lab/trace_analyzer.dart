@@ -335,6 +335,43 @@ class TraceAnalyzer {
           : '最后一条是 ${last.role}（${last.summary(30)}）',
     ));
 
+    // t6: 工具结果语义——ok:false 但文本像"查询无结果"（不是真失败）
+    // 8-09 16:0x（用户：查记忆无结果被男主说成"用户拒绝查"）：
+    // 查询无结果 ≠ 执行失败，男主可能误读 ❌ 为拒绝/失败
+    final noResultLike = RegExp(r'没有找到|无结果|不存在|查不到|未找到|暂时没有|没查到');
+    final suspiciousFails = trace.toolExecutions
+        .where((e) => !e.ok && e.resultText.contains(noResultLike))
+        .toList();
+    out.add(TraceCheckResult(
+      checkId: 't6',
+      name: '工具链·查询无结果被标失败（语义检查）',
+      passed: suspiciousFails.isEmpty,
+      detail: suspiciousFails.isEmpty
+          ? '无 ok:false 但文本像"查询无结果"的记录'
+          : '${suspiciousFails.length} 次查询无结果被标 ok:false：'
+              '${suspiciousFails.map((e) => '${e.name}「${e.resultText}」').join('；')}'
+              '——查询完成≠失败，应 ok:true（已修复，旧数据仍会显示）',
+    ));
+
+    // t7: 工具选型——查记忆/找信息却用了非 recall_memory 工具
+    // 8-09 16:0x（观察项：男主用 manage_tool_cache 找记忆 → 选型混乱症状）
+    final recallLike = RegExp(r'回忆|记忆|记得|查到|找.*记忆|recall');
+    final memoryLookupTools = <String>{'recall_memory', 'query_memory'};
+    final oddTools = trace.toolExecutions
+        .where((e) =>
+            e.resultText.contains(recallLike) &&
+            !memoryLookupTools.contains(e.name))
+        .toList();
+    out.add(TraceCheckResult(
+      checkId: 't7',
+      name: '工具链·查记忆用了非 recall_memory（选型观察）',
+      passed: oddTools.isEmpty,
+      detail: oddTools.isEmpty
+          ? '查记忆类需求都用 recall_memory'
+          : '男主用 ${oddTools.map((e) => '${e.name}（${e.resultText}）').join('；')} '
+              '找记忆——选型可疑，考虑工具手册/提示优化',
+    ));
+
     return out;
   }
 
@@ -394,6 +431,23 @@ class TraceAnalyzer {
         detail: '无上一轮工具调用，跳过',
       ));
     }
+
+    // s4: provider 切换频率——switchedProvider 频繁出现 = 稳定性隐患
+    // 8-09 16:0x（观察项：【6】JSON contextSnapshot 显示 switchedProvider:true,
+    // needRecover:true, isFirstRun:true——正常 failover，但频率值得盯）
+    final switched = trace.contextSnapshot['switchedProvider'] == true;
+    final needRecover = trace.contextSnapshot['needRecover'] == true;
+    out.add(TraceCheckResult(
+      checkId: 's4',
+      name: '状态·本轮发生 provider 切换/恢复',
+      passed: !switched && !needRecover,
+      detail: !switched && !needRecover
+          ? '无切换（switchedProvider=false）'
+          : '⚠️ 本轮 ${[
+              if (switched) 'provider 切换',
+              if (needRecover) '上下文恢复',
+            ].join('+')}——failover 正常，但频繁出现要查 provider 稳定性',
+    ));
 
     return out;
   }

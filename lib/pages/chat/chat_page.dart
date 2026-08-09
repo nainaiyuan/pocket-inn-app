@@ -82,6 +82,8 @@ class _ChatPageState extends State<ChatPage>
   double _offset = 0;
   Panel _currentPanel = Panel.center;
   Timer? _notifyWakeTimer; // 8-06 notify_user 超时唤醒
+  /// 8-09 16:0x：FlowStore 变化通知回调引用（dispose 时注销用）
+  VoidCallback? _flowOnChanged;
   Timer? _flowBarTimer; // 8-08 16:2x 流程条 2 秒轮询刷新（弹窗/底部进度同步）
 
   /// 设定审批弹窗内的版本快照（8-07 15:5x 用户：男主用 query_setting_version
@@ -110,6 +112,12 @@ class _ChatPageState extends State<ChatPage>
     DebugLogger.init();
     // 8-07 21:48 用户：日志增强——纯 Dart store 的日志钩子统一接 DebugLogger
     FlowStore.logSink = (t, m) => DebugLogger.log(t, m);
+    // 8-09 16:0x（用户：流程卡片动态显示）：FlowStore 变化 → 立即刷新 UI
+    //（步骤推进/状态变化/流程结束，卡片实时跟随，同一数据源）
+    _flowOnChanged = () {
+      if (mounted) setState(() {});
+    };
+    FlowStore.onChanged = _flowOnChanged;
     ToolCacheStore.logSink = (t, m) => DebugLogger.log(t, m);
     PendingQueueStore.logSink = (t, m) => DebugLogger.log(t, m);
     ToolIntentParser.logSink = (t, m) => DebugLogger.log(t, m);
@@ -119,19 +127,8 @@ class _ChatPageState extends State<ChatPage>
       duration: const Duration(milliseconds: 300),
     )..addListener(_onAnimTick);
     _state.addListener(_onStateChanged);
-    // 8-08 16:2x（用户反馈：弹窗显示流程 4-8，底部条还是 1-8）：
-    // 底部流程条是 build 快照不刷新 → 2 秒轮询刷新（仅流程 running 时有效）
-    _flowBarTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      if (!mounted) return;
-      final pid =
-          _state.personaId ??
-          (_state.leadId == null ? '' : '${_state.leadId}_default');
-      if (pid.isEmpty || !FlowStore.isRunning(pid)) return;
-      // get 会刷新内存缓存（warm 的 _load 是异步的，直接读 _memCache 可能旧）
-      FlowStore.get(pid).then((_) {
-        if (mounted) setState(() {});
-      });
-    });
+    // 8-09 16:0x：2 秒轮询已退役——FlowStore.onChanged（_write 后通知）实时刷新，
+    // 卡片/状态条与 FlowStore 同一数据源，步骤推进立即更新
     _load();
   }
 
@@ -402,11 +399,14 @@ class _ChatPageState extends State<ChatPage>
 
   /// 8-06 23:55 用户：流程停止条——长任务时强行让男主停止
   /// 8-08 16:2x（用户定稿）：去掉 💬 插话按钮（直接发送=插话），只留 ⏹ 停止
+  /// 8-09 16:0x（用户：卡片动态）：按钮随状态变——running → ⏹停止；
+  /// stopped/paused → ⏹结束（取消流程，卡片消失）
   Widget _buildFlowStopBar() {
     final pid =
         _state.personaId ??
         (_state.leadId == null ? '' : '${_state.leadId}_default');
     final summary = FlowStore.summary(pid) ?? '流程执行中';
+    final flowStatus = FlowStore.isRunning(pid) ? 'running' : 'paused';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -432,7 +432,10 @@ class _ChatPageState extends State<ChatPage>
               padding: const EdgeInsets.symmetric(horizontal: 8),
               minimumSize: const Size(0, 32),
             ),
-            child: const Text('⏹ 停止', style: TextStyle(fontSize: 12)),
+            child: Text(
+              flowStatus == 'running' ? '⏹ 停止' : '⏹ 结束',
+              style: const TextStyle(fontSize: 12),
+            ),
           ),
         ],
       ),
@@ -506,6 +509,35 @@ class _ChatPageState extends State<ChatPage>
         (flow['steps'] as List?)?.map((e) => e.toString()).toList() ??
         <String>[];
     final cur = (flow['currentStep'] as num?)?.toInt() ?? 0;
+    // 8-09 16:0x（用户：卡片按钮随状态变）：流程已暂停（stopped/paused_by_user）
+    // 时点按钮 = 结束（取消流程，卡片消失）；只有 running 才走 stop（可 resume）
+    final flowStatus = flow['status']?.toString() ?? '';
+    if (flowStatus != 'running') {
+      await FlowStore.cancel(pid);
+      _autoResumePid = null;
+      _autoResumeRounds = 0;
+      _lastAutoResumeStep = -1;
+      _autoContinuePid = null;
+      _autoContinueCount = 0;
+      _lastAutoContinueAt = null;
+      _continueFrozen = false;
+      _interruptRoundActive = false;
+      _interruptFollowUpDone = false;
+      DebugLogger.log(
+        '管家流程',
+        '⏹ 用户结束已暂停的流程：目标「${flow['goal']}」（取消）',
+      );
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('流程已结束'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
     await FlowStore.stop(pid, userMessages: userText);
     // 8-08 13:0x 检查点⑤锚点：暂停 = 完全停止（用户拍板）——日志留痕，
     // resume 队列实现后这里要同时"移出队列 + 取消唤醒 Timer"
@@ -2765,6 +2797,10 @@ class _ChatPageState extends State<ChatPage>
 
   @override
   void dispose() {
+    // 8-09 16:0x：注销 FlowStore 通知（防泄漏/跨页误刷新）
+    if (identical(FlowStore.onChanged, _flowOnChanged)) {
+      FlowStore.onChanged = null;
+    }
     _anim.removeListener(_onAnimTick);
     _anim.dispose();
     _notifyWakeTimer?.cancel(); // 8-06 notify_user 超时唤醒
@@ -2932,20 +2968,16 @@ class _ChatPageState extends State<ChatPage>
                   // 流程 done/cancelled 后隐藏——否则男主汇报完流程被
                   // "结束检查轮"唤醒续话时 _autoContinueCount>0，停止条
                   // 一直挂着"男主正在执行流程：已完成"
-                  if (!FlowStore.isDone(
+                  // 8-09 16:0x（用户：流程卡片动态显示，绑定 FlowStore 同一数据源）：
+                  // isActive（running/stopped/paused_by_user）才显示——有流程就弹、
+                  // 步骤推进/状态变化 via onChanged 实时刷新、结束（done/cancelled）自动消失。
+                  // 无流程时不再误挂（旧逻辑 _autoContinueCount>0 会显示"流程执行中"误导）。
+                  if (FlowStore.isActive(
                         _state.personaId ??
                             (_state.leadId == null
                                 ? ''
                                 : '${_state.leadId}_default'),
-                      ) &&
-                      (FlowStore.isRunning(
-                            _state.personaId ??
-                                (_state.leadId == null
-                                    ? ''
-                                    : '${_state.leadId}_default'),
-                          ) ||
-                          _generating ||
-                          _autoContinueCount > 0))
+                      ))
                     _buildFlowStopBar(),
                   ChatInputBar(
                     externalCtrl: _inputCtrl,
@@ -4749,9 +4781,13 @@ class _ChatPageState extends State<ChatPage>
         ' → 命中 ${memories.length} 条${memories.isEmpty ? '（查不到！对比写入时的 session）' : ''}',
       );
       if (memories.isEmpty) {
+        // 8-09 16:0x（用户：查记忆无结果被男主说成"用户拒绝查"）：
+        // 查询动作成功完成、只是没有结果——ok:true（查询完成）不是失败/拒绝。
+        // 文本明确"查询完成 + 不是失败"，男主不会再误读
         return _ToolResult(
-          false,
-          '没有找到关于「${query.isEmpty ? category : query}」的记忆',
+          true,
+          '查询完成：没有找到关于「${query.isEmpty ? category : query}」的记忆'
+              '（这是查询结果，不是失败或拒绝）',
         );
       }
       if (!mounted) return const _ToolResult(false, '用户不在，查询未授权');
