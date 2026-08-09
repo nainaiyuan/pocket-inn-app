@@ -1,90 +1,209 @@
-import 'context_manager.dart';
+import 'dart:convert';
 
-/// ChatFlowStore —— 对话流程视图（8-09 18:1x 用户设计定稿）
+import 'package:shared_preferences/shared_preferences.dart';
+
+/// ChatFlowStore —— 对话流程（8-09 18:1x 用户设计定稿，v2 状态机版）
 ///
-/// 每次对话 = 一个流程：用户每条消息 = 一个条目（待消），
-/// 男主回复才消掉，工具调用挂到未消条目上（记录处理方式）。
-/// 管家从上下文原文实时计算（零存储、零写入、男主零操作）：
-/// - 用户行 → 条目（☐ 待消）
-/// - 男主行 → 消条目：回复带标注（回#N）→ 精确消；无标注 → FIFO 消最老一条
-/// - 工具行 → 挂到最老未消条目（✅/❌ + 摘要）
-/// - 无未消条目时男主说话 → 计数（重复回复警告，防"回一和二"再演）
+/// 每次对话 = 一个流程，跟长任务流程（FlowStore）同款结构：
+///   goal + steps（每条用户消息 = 一步）+ status + currentStep
 ///
-/// 每次唤醒注入完整清单：☐ 待消（还欠她的话）+ ✅ 已消（工具链 + 回复）。
+/// 全自动（男主零操作）：
+/// - 用户发消息 → 自动立流程/追加步骤（她随时插话 = 追加步骤）
+/// - 男主调工具 → 挂到当前步（toolsUsed：{count, ok, brief}）
+/// - 男主回复 → 消条目：回复带标注（回#N、#M）→ 精确消多条（合并消，
+///   "回一和二一起做"）；无标注 → FIFO 消最老一条（不猜，系统不猜他回了哪几条）
+/// - 全部消完 → 流程自动 done
+///
+/// 每次唤醒注入完整清单：goal + ✅已回/▶当前/☐没回 + 当前步工具链 +
+/// **决策点**（查了没找到 → 明确提示：继续查还是回复结束）。
 /// 男主看到清单就不会弄混（知道还欠几条）、不会漏（☐ 挂着）、
 /// 不会重复回（✅ 已消 + 无新消息还说话会收到警告）。
+///
+/// 与 FlowStore 分工：FlowStore = 长任务（男主主动立、卡片、可停止）；
+/// ChatFlowStore = 每次对话的轻量流程（自动立、自动结束、不锁用户消息——
+/// 用户随时说话=插话=追加步骤）。
 class ChatFlowStore {
   ChatFlowStore._();
 
-  /// 清单最多显示条数（防上下文膨胀，更早的折叠）
-  static const int _maxShow = 8;
+  static const String _prefix = 'chatflow_';
 
-  /// 从原文行构建对话条目
-  /// 返回 (items, extraReplies)
-  /// items: [{no, ts, userText, done, tools: List<String>, reply}]
-  static (List<Map<String, dynamic>>, int) _build(List<String> raw) {
-    final items = <Map<String, dynamic>>[];
-    final pending = <int>[]; // 未消条目索引（FIFO）
-    var userNo = 0;
-    var extraReplies = 0;
-    for (final line in raw) {
-      if (line.startsWith('用户')) {
-        userNo++;
-        final idx = items.length;
-        items.add({
-          'no': userNo,
-          'ts': _tsOf(line),
-          'userText': _strip(line),
-          'done': false,
-          'tools': <String>[],
-          'reply': '',
-        });
-        pending.add(idx);
-      } else if (line.startsWith('工具')) {
-        final brief = _toolBrief(line);
-        if (brief.isEmpty) continue;
-        if (pending.isNotEmpty) {
-          (items[pending.first]['tools'] as List).add(brief);
-        } else if (items.isNotEmpty) {
-          // 无未消条目（先回后补记等）→ 挂到最后一条（记录处理过）
-          (items.last['tools'] as List).add(brief);
-        }
-      } else if (line.startsWith('男主')) {
-        final replyText = _strip(line);
-        if (replyText.isEmpty) continue;
-        // 标注解析：<reply>回#N、#M</reply> / "reply":"回#N" / 回待#N / 回#N
-        final marked = _parseMarkedNos(replyText);
-        if (marked.isNotEmpty) {
-          // 精确消：按条目绝对序号
-          for (final no in marked) {
-            for (final it in items) {
-              if (!it['done'] && it['no'] == no) {
-                it['done'] = true;
-                it['reply'] = replyText;
-                pending.remove(items.indexOf(it));
-                break;
-              }
-            }
+  static Map<String, dynamic>? _memCache;
+
+  static void Function(String tag, String msg)? logSink;
+  static void _log(String tag, String msg) => logSink?.call(tag, msg);
+
+  static String _key(String personaId) => '$_prefix$personaId';
+
+  static Future<void> warm(String personaId) async {
+    if (personaId.isEmpty) return;
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_key(personaId));
+      if (raw != null && raw.isNotEmpty) {
+        _memCache = jsonDecode(raw) as Map<String, dynamic>;
+      } else {
+        _memCache = null;
+      }
+    } catch (_) {
+      _memCache = null;
+    }
+  }
+
+  static Future<void> _write(String personaId, Map<String, dynamic>? flow) async {
+    if (personaId.isEmpty) return;
+    final p = await SharedPreferences.getInstance();
+    if (flow == null) {
+      await p.remove(_key(personaId));
+      _memCache = null;
+    } else {
+      await p.setString(_key(personaId), jsonEncode(flow));
+      _memCache = flow;
+    }
+  }
+
+  static List<Map<String, dynamic>> _stepsOf(Map<String, dynamic> f) {
+    final raw = f['steps'];
+    if (raw is List) {
+      return raw.map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e as Map)).toList();
+    }
+    return <Map<String, dynamic>>[];
+  }
+
+  static bool _isTerminal(Map<String, dynamic>? f) {
+    if (f == null) return true;
+    final s = f['status']?.toString() ?? '';
+    return s == 'done' || s == 'cancelled';
+  }
+
+  // ---- 写入（管家机械活，男主零操作）----
+
+  /// 用户消息 → 立流程/追加步骤
+  /// 无流程或已结束 → 立新流程（goal=第一条消息截断，steps=[这条]）；
+  /// 有执行中流程 → 追加步骤（她随时插话 = 追加，跟长任务插话一致）
+  static Future<void> feedUser(String personaId, String text) async {
+    if (personaId.isEmpty || text.trim().isEmpty) return;
+    await warm(personaId);
+    final f = _memCache;
+    if (!_isTerminal(f) && f!['status'] == 'running') {
+      // 追加步骤
+      final steps = _stepsOf(f);
+      steps.add(_newStep(text));
+      f['steps'] = steps;
+      await _write(personaId, f);
+      _log('对话流程', '📥 追加步骤 ${steps.length}：${_short(text)}');
+      return;
+    }
+    // 立新流程
+    final flow = <String, dynamic>{
+      'goal': _short(text, 30),
+      'status': 'running',
+      'currentStep': 0,
+      'steps': [_newStep(text)],
+      'startedAt': DateTime.now().toIso8601String(),
+    };
+    await _write(personaId, flow);
+    _log('对话流程', '📋 立流程：「${flow['goal']}」1 步');
+  }
+
+  static Map<String, dynamic> _newStep(String text) {
+    final now = DateTime.now();
+    return {
+      'no': now.millisecondsSinceEpoch, // 时间戳 id（唯一）
+      'userText': text.trim(),
+      'ts': '${now.hour.toString().padLeft(2, '0')}:'
+          '${now.minute.toString().padLeft(2, '0')}',
+      'status': 'pending',
+      'tools': <String, dynamic>{}, // toolName -> {count, ok, brief}
+      'reply': '',
+    };
+  }
+
+  /// 工具执行 → 挂到当前步（toolsUsed 同款）
+  static Future<void> feedTool(String personaId, String toolName,
+      {required bool ok, String? brief}) async {
+    if (personaId.isEmpty || toolName.isEmpty) return;
+    await warm(personaId);
+    final f = _memCache;
+    if (f == null || f['status'] != 'running') return;
+    final steps = _stepsOf(f);
+    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
+    if (cur < 0 || cur >= steps.length) return;
+    final step = steps[cur];
+    final tools = _asMap(step['tools']);
+    final prev = (tools[toolName] as Map?) ?? <String, dynamic>{};
+    tools[toolName] = {
+      'count': ((prev['count'] as num?)?.toInt() ?? 0) + 1,
+      'ok': ok,
+      'brief': brief ?? (prev['brief']?.toString() ?? ''),
+    };
+    step['tools'] = tools;
+    f['steps'] = steps; // _stepsOf 是拷贝，必须写回（FlowStore BUG-3 教训）
+    await _write(personaId, f);
+  }
+
+  /// 男主回复 → 消条目（完成步骤）
+  /// 标注（回#N 数字是"没回的第几条"？不——v2 用步骤序号）：
+  /// 简化：标注解析按步骤在清单里的显示序号（第1步、第2步）。
+  /// 无标注 → FIFO 消最老 pending 步（默认回最老的，不猜）。
+  /// 全部消完 → 流程 done。
+  static Future<void> feedReply(String personaId, String replyText) async {
+    if (personaId.isEmpty || replyText.trim().isEmpty) return;
+    await warm(personaId);
+    final f = _memCache;
+    if (f == null || f['status'] != 'running') return;
+    final steps = _stepsOf(f);
+    if (steps.isEmpty) return;
+    final marked = _parseMarkedNos(replyText);
+    var changed = false;
+    if (marked.isNotEmpty) {
+      // 精确消：标注 #N = 第 N 步（绝对序号，跟清单显示一致）
+      for (final no in marked) {
+        if (no >= 1 && no <= steps.length) {
+          final idx = no - 1;
+          if (steps[idx]['status'] != 'done') {
+            steps[idx]['status'] = 'done';
+            steps[idx]['reply'] = replyText.trim();
+            changed = true;
           }
-        } else if (pending.isNotEmpty) {
-          // FIFO：消最老一条（默认男主回最老的）
-          final idx = pending.removeAt(0);
-          items[idx]['done'] = true;
-          items[idx]['reply'] = replyText;
-        } else {
-          // 没有未消条目却说话 = 重复回复 / 主动说话
-          extraReplies++;
+        }
+      }
+    } else {
+      // FIFO：消最老 pending
+      for (var i = 0; i < steps.length; i++) {
+        if (steps[i]['status'] != 'done') {
+          steps[i]['status'] = 'done';
+          steps[i]['reply'] = replyText.trim();
+          changed = true;
+          break;
         }
       }
     }
-    return (items, extraReplies);
+    if (!changed) return;
+    f['steps'] = steps; // _stepsOf 是拷贝，必须写回（FlowStore BUG-3 教训）
+    // 推进 currentStep 到第一个 pending（或结束）
+    var nextCur = -1;
+    for (var i = 0; i < steps.length; i++) {
+      if (steps[i]['status'] != 'done') {
+        nextCur = i;
+        break;
+      }
+    }
+    if (nextCur < 0) {
+      f['currentStep'] = steps.length;
+      f['status'] = 'done';
+      await _write(personaId, f);
+      _log('对话流程', '✅ 全部回应完成，流程结束');
+    } else {
+      f['currentStep'] = nextCur;
+      await _write(personaId, f);
+      _log('对话流程', '✔ 消条目 → 当前第 ${nextCur + 1} 步');
+    }
   }
 
-  /// 解析男主回复里的消条目标注（兼容 PendingQueue 旧格式）
-  /// 返回绝对序号列表（如 [7, 8]）；无标注返回空
+  /// 解析男主回复里的消条目标注（第N步，1-based）
+  /// 兼容格式：<reply>回#1、#2</reply> / "reply":"回#1、#2" / 回待#1 / 回#1
   static List<int> _parseMarkedNos(String reply) {
     final nos = <int>{};
-    // <reply>回#7、#8</reply>
     for (final m
         in RegExp(r'<reply>([\s\S]*?)</reply>', caseSensitive: false)
             .allMatches(reply)) {
@@ -92,14 +211,12 @@ class ChatFlowStore {
         nos.add(int.tryParse(n.group(1)!) ?? 0);
       }
     }
-    // "reply":"回#7、#8"
     for (final m in RegExp(r'"reply"\s*:\s*"([^"]*)"').allMatches(reply)) {
       final raw = (m.group(1) ?? '').replaceAll(r'\"', '"');
       for (final n in RegExp(r'#(\d+)').allMatches(raw)) {
         nos.add(int.tryParse(n.group(1)!) ?? 0);
       }
     }
-    // 旧格式：回待#7 / 回复待#7 / 回#7（纯文本标注）
     for (final m in RegExp(r'回(?:复)?\s*待?#(\d+)').allMatches(reply)) {
       nos.add(int.tryParse(m.group(1)!) ?? 0);
     }
@@ -107,90 +224,155 @@ class ChatFlowStore {
     return nos.toList()..sort();
   }
 
-  /// 注入文本（对话流程清单；无内容返回 null）
+  // ---- 读取（注入）----
+
+  /// 当前流程（无则 null）
+  static Map<String, dynamic>? get(String personaId) => _memCache;
+
+  /// 是否有未消条目（检查轮/停止条用）
+  static bool hasPending(String personaId) {
+    final f = _memCache;
+    if (f == null || f['status'] != 'running') return false;
+    return _stepsOf(f).any((s) => s['status'] != 'done');
+  }
+
+  /// 注入文本（对话流程清单 + 决策点；无内容返回 null）
   static String? buildText(String personaId) {
-    final raw = ContextManager.instance.rawLines(personaId);
-    if (raw.isEmpty) return null;
-    final (items, extraReplies) = _build(raw);
-    if (items.isEmpty) return null;
-    // 只显示最近 _maxShow 条
-    final show = items.length > _maxShow
-        ? items.sublist(items.length - _maxShow)
-        : items;
-    final hidden = items.length - show.length;
+    final f = _memCache;
+    if (f == null || f.isEmpty) return null;
+    final status = f['status']?.toString() ?? '';
+    final steps = _stepsOf(f);
+    if (steps.isEmpty) return null;
+    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
     final sb = StringBuffer();
-    sb.writeln('【对话流程】（本次对话：✅=已回 ☐=还没回——先回 ☐ 的；✅ 的已处理完，别重复回）');
-    if (hidden > 0) sb.writeln('（更早 $hidden 条已处理）');
-    for (final it in show) {
-      final no = it['no'];
-      final ts = (it['ts'] as String?)?.isNotEmpty == true
-          ? '[${it['ts']}] '
-          : '';
-      final mark = it['done'] ? '✅' : '☐';
-      final tools = (it['tools'] as List).cast<String>();
-      final reply = (it['reply'] as String?)?.trim() ?? '';
-      var line = '$mark #$no $ts她：${it['userText']}';
-      if (it['done']) {
-        final toolPart = tools.isEmpty
-            ? ''
-            : '（${tools.join('；')}）';
-        final replyPart = reply.isEmpty ? '' : '→ 你回：$reply';
+    sb.writeln('【对话流程】目标：${f['goal']}');
+    if (status == 'done') {
+      sb.writeln('✅ 全部已回应（${steps.length} 步）。没有新消息就别再说话，'
+          '输出退出标记 {"need_continue": false}。');
+      return sb.toString();
+    }
+    // 步骤清单（最多显示 6 步）
+    final show = steps.length > 6 ? steps.sublist(steps.length - 6) : steps;
+    final hidden = steps.length - show.length;
+    if (hidden > 0) sb.writeln('（更早 $hidden 步已完成）');
+    for (var i = 0; i < show.length; i++) {
+      final step = show[i];
+      final st = step['status']?.toString() ?? 'pending';
+      final isCur = (st != 'done') && (steps.indexOf(step) == cur);
+      final mark = st == 'done'
+          ? '✅'
+          : (isCur ? '▶' : '☐');
+      final tools = _asMap(step['tools']);
+      final reply = (step['reply'] as String?)?.toString().trim() ?? '';
+      var line = '$mark 第${steps.indexOf(step) + 1}步 ${step['userText']}';
+      if (st == 'done') {
+        final toolPart = tools.isEmpty ? '' : '（工具：${_toolsBrief(tools)}）';
+        final replyPart = reply.isEmpty ? '' : '→ 你回：${_short(reply, 40)}';
         line += '$toolPart$replyPart';
       } else if (tools.isNotEmpty) {
-        line += '（处理中：${tools.join('；')}）';
+        line += '（处理中：${_toolsBrief(tools)}）';
       }
       sb.writeln(line);
+      // 决策点：当前步
+      if (isCur && tools.isNotEmpty) {
+        final dec = _decisionHint(tools);
+        if (dec.isNotEmpty) sb.writeln('   → 判断：$dec');
+      }
     }
-    final pendingCount = items.where((it) => !it['done']).length;
+    // 当前步无工具 → 提示直接回复
+    final curStep = cur >= 0 && cur < steps.length ? steps[cur] : null;
+    if (curStep != null &&
+        curStep['status'] != 'done' &&
+        _asMap(curStep['tools']).isEmpty) {
+      sb.writeln('→ 当前步：直接回复她就完成（要查东西先调工具再回复）。');
+    }
+    // 消条目规则提示（合并消教育）
+    final pendingCount = steps.where((s) => s['status'] != 'done').length;
     if (pendingCount > 0) {
-      sb.writeln('提示：还有 $pendingCount 条没回，优先回她。'
-          '一次回多条可标注 {"reply":"回#N、#M"} 一起消；'
-          '决定不回的不用消，挂着等她问。');
-    } else if (extraReplies > 0) {
-      sb.writeln('提示：你回复后没有新的用户消息，又说了 $extraReplies 次话——'
-          '确认不是重复回复；没有新事就直接输出退出标记 {"need_continue": false}，'
-          '别再唤醒自己。');
+      sb.writeln('提示：还有 $pendingCount 条没回，先回她。'
+          '${pendingCount > 1 ? '一次回多条可标注 {"reply":"回#N、#M"}（N=第几步）一起消；否则默认只消最老一条。' : ''}');
     }
+    // 重复回复警告（无未消条目却说话 → 由 buildText 的 done 分支覆盖；
+    // 这里防"已消完但流程还没标 done"的边界，其实 done 分支已处理）
     return sb.toString();
   }
 
-  /// 检查轮简报（唤醒提醒里用）：'还有 2 条没回：…' / '已全部回应'
+  /// 当前步决策点提示（根据工具结果机械生成，不靠 LLM）
+  /// 扫描全部工具：有失败 → 失败提示；有"没找到"类结果 → 没找到提示；
+  /// 全成功 → 回复完成提示。（8-09 18:3x：多工具时不能只看最后一个——
+  /// "查了没找到→又记录成功"，没找到的事实必须还在决策点上）
+  static String _decisionHint(Map<String, dynamic> tools) {
+    var anyFail = false;
+    var anyNotFound = false;
+    var anyOk = false;
+    for (final entry in tools.entries) {
+      final v = entry.value;
+      if (v is! Map) continue;
+      final ok = v['ok'] == true;
+      final brief = (v['brief'] ?? '').toString();
+      if (!ok) {
+        anyFail = true;
+      } else {
+        anyOk = true;
+        if (brief.contains('没找到') ||
+            brief.contains('没有找到') ||
+            brief.contains('无结果') ||
+            brief.contains('没有相关') ||
+            brief.contains('暂无')) {
+          anyNotFound = true;
+        }
+      }
+    }
+    if (anyFail) {
+      return '工具没成功。继续（换工具/换参数再查）？还是回复她结束这步？';
+    }
+    if (anyNotFound) {
+      return '查了没找到。继续查（换工具/换方式）？还是回复她结束这步？';
+    }
+    if (anyOk) {
+      return '工具已成功，回复她就完成这步。';
+    }
+    return '';
+  }
+
+  /// 检查轮简报：'还有 2 条没回：#1「…」'；无未回返回 null
   static String? checkBrief(String personaId) {
-    final raw = ContextManager.instance.rawLines(personaId);
-    if (raw.isEmpty) return null;
-    final (items, _) = _build(raw);
-    final pending = items.where((it) => !it['done']).toList();
+    final f = _memCache;
+    if (f == null || f['status'] != 'running') return null;
+    final steps = _stepsOf(f);
+    final pending = <Map<String, dynamic>>[];
+    for (var i = 0; i < steps.length; i++) {
+      if (steps[i]['status'] != 'done') pending.add(steps[i]);
+    }
     if (pending.isEmpty) return null;
     final briefs = pending
         .take(3)
-        .map((it) => '#${it['no']}「${it['userText']}」')
+        .map((s) => '第${steps.indexOf(s) + 1}步「${_short(s['userText'].toString(), 20)}」')
         .join('、');
     final more = pending.length > 3 ? ' 等${pending.length}条' : '';
     return '还有 ${pending.length} 条没回：$briefs$more——先回她，回完再结束；'
         '回多条可标注 {"reply":"回#N、#M"} 一起消。';
   }
 
-  // ---- 行解析 ----
+  // ---- 工具 ----
 
-  static String _tsOf(String line) {
-    final m = RegExp(r'\[([^\]]+)\]').firstMatch(line);
-    return m?.group(1) ?? '';
+  static Map<String, dynamic> _asMap(dynamic v) =>
+      v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
+
+  static String _toolsBrief(Map<String, dynamic> tools) {
+    final parts = <String>[];
+    tools.forEach((name, v) {
+      if (v is Map) {
+        final ok = v['ok'] == true ? '✅' : '❌';
+        final brief = (v['brief'] ?? '').toString();
+        parts.add('$name $ok${brief.isEmpty ? '' : '（${_short(brief, 30)}）'}');
+      }
+    });
+    return parts.join('；');
   }
 
-  /// 去前缀：'用户 [18:00]：我喜欢猫' → '我喜欢猫'
-  static String _strip(String line) {
-    final idx = line.indexOf('：');
-    return idx < 0 ? line : line.substring(idx + 1).trim();
-  }
-
-  /// 工具行摘要：'工具 [18:00]：record_memory ✅成功（非她发言）：已记录…'
-  /// → 'record_memory ✅ 已记录…'（截断 60 字）
-  static String _toolBrief(String line) {
-    final idx = line.indexOf('：');
-    if (idx < 0) return '';
-    var s = line.substring(idx + 1).trim();
-    s = s.replaceFirst('（非她发言）', '').replaceFirst('成功', '✅').replaceFirst('失败', '❌');
-    if (s.isEmpty) return '';
-    return s.length > 60 ? '${s.substring(0, 60)}…' : s;
+  static String _short(String s, [int n = 20]) {
+    final t = s.trim();
+    return t.length > n ? '${t.substring(0, n)}…' : t;
   }
 }

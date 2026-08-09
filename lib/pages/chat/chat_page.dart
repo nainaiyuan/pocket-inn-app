@@ -121,6 +121,7 @@ class _ChatPageState extends State<ChatPage>
     FlowStore.onChanged = _flowOnChanged;
     ToolCacheStore.logSink = (t, m) => DebugLogger.log(t, m);
     PendingQueueStore.logSink = (t, m) => DebugLogger.log(t, m);
+    ChatFlowStore.logSink = (t, m) => DebugLogger.log(t, m);
     ToolIntentParser.logSink = (t, m) => DebugLogger.log(t, m);
     multiBubbleLogSink = (t, m) => DebugLogger.log(t, m);
     _anim = AnimationController(
@@ -608,6 +609,9 @@ class _ChatPageState extends State<ChatPage>
     _lastAutoContinueAt = null;
     _continueFrozen = false; // 8-08 18:1x：用户说话 → 解除续话冻结
     _stopRequested = false; // 插话 = 用户主动说话，停止状态解除
+    // 8-09 18:2x（对话流程 v2）：插话也进对话流程（追加步骤）
+    ChatFlowStore.warm(pid);
+    unawaited(ChatFlowStore.feedUser(pid, text));
     // 8-08 15:5x：存下插话内容（插话轮男主没回 → 兜底轮带给她看）
     _interruptUserText = text;
     // 队列里可能还有旧收集消息（旧版/管家入队）→ 一起带上
@@ -1009,6 +1013,13 @@ class _ChatPageState extends State<ChatPage>
     FlowStore.warm(personaId);
     // 8-06 21:54：常用工具表预热
     FrequentToolsStore.warm(personaId);
+    // 8-09 18:2x（对话流程 v2）：用户消息 → 对话流程（立流程/追加步骤）。
+    // 男主忙时的插话路径（_interruptSend）在上面已 return 分流，
+    // 插话的 feed 在 _interruptSend 里做；这里只处理男主空闲时的正常消息。
+    if (systemEvent == null && t.trim().isNotEmpty) {
+      ChatFlowStore.warm(personaId);
+      unawaited(ChatFlowStore.feedUser(personaId, t));
+    }
     // 8-05 14:36 用户修正：测试对话 ≠ 关功能，而是独立"测试空间"——
     // 模拟 AI 聊天时所有数据（会话/消息/记忆/情绪/上下文总结）落到
     // ${真实persona}__mock__test 这个测试 key，功能照常跑、数据不混；
@@ -1928,6 +1939,16 @@ class _ChatPageState extends State<ChatPage>
                 ? '${briefForStep.substring(0, 120)}…'
                 : briefForStep,
           );
+          // 8-09 18:2x（对话流程 v2）：工具挂到对话流程当前步
+          // （决策点数据源：查了没找到 → 男主判断继续查还是回复结束）
+          unawaited(ChatFlowStore.feedTool(
+            personaId,
+            name,
+            ok: toolResult.ok,
+            brief: briefForStep.length > 120
+                ? '${briefForStep.substring(0, 120)}…'
+                : briefForStep,
+          ));
           // 8-08 02:2x 用户：男主查完不记一直查 → 查询结果自动进工具缓存
           // （下次直接看【工具缓存】别重复查；缓存有预算，超了男主整理）
           if (toolResult.ok && kQueryToolNames.contains(name)) {
@@ -2164,6 +2185,13 @@ class _ChatPageState extends State<ChatPage>
         if (removed.isNotEmpty) {
           DebugLogger.log('指令模块', '📥 待回复已消除 待#${removed.join('、')}（男主回复带编号）');
         }
+      }
+      // 8-09 18:2x（对话流程 v2）：男主回复 → 消对话流程条目
+      //（标注 回#N、#M 精确消多条=合并消；无标注 FIFO 消最老一条；
+      //  全部消完 → 流程 done）。与 PendingQueue 并存（队列为空时
+      //  对话流程是唯一消条目通道）。
+      if (allRoundText.isNotEmpty) {
+        unawaited(ChatFlowStore.feedReply(personaId, allRoundText));
       }
       // 指令模块：解析男主输出（#记录/#查记忆/#定时/#帮助/#model）→ 审批弹窗
       final commands = ButlerCommandParser.instance.parse(result.text.trim());
