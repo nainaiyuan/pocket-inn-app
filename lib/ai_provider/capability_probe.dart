@@ -484,12 +484,22 @@ class CapabilityProbe {
     );
   }
 
-  /// 思考链乐观推断：模型名含 reasoner/thinking，或 customBody 里配了
-  /// 思考相关参数（DeepSeek 思考模式靠 customBody 开启，探测请求不带
-  /// 思考参数时它不返回 reasoning_content，但不能因此判"不支持"）。
+  /// 思考链乐观推断：模型名含 reasoner/thinking、**DeepSeek 系 baseUrl**
+  /// （V3.2+ 全系支持思考模式，8-09 22:5x 用户：V4 明明有思考链却看不到——
+  /// 探测①b 参数格式若不被认 → 误判不支持 → 开关置灰 → 用户开不了），
+  /// 或 customBody 里配了思考相关参数。
+  /// DeepSeek 思考模式靠请求参数开启，探测请求不带思考参数时不返回
+  /// reasoning_content，但不能因此判"不支持"。
   bool _hintsReasoning(ResolvedApiConfig config) {
     final model = config.model.toLowerCase();
     if (model.contains('reasoner') || model.contains('thinking')) {
+      return true;
+    }
+    // 8-09 22:5x：DeepSeek 官方文档 V3.2+ 全系支持 thinking mode
+    // （deepseek-chat/deepseek-reasoner 及 V4 系列）——按 baseUrl 兜底
+    // 判支持，避免探测失败时把开关置灰（用户想开都开不了）。
+    final baseUrl = config.baseUrl.toLowerCase();
+    if (baseUrl.contains('deepseek')) {
       return true;
     }
     try {
