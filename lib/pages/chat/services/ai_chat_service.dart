@@ -1168,7 +1168,8 @@ class AiChatService {
     // 8-06 21:36 用户修正：待回复由【男主带编号主动管理】——
     // 他回复时标注"（回待#1、待#2）"，管家按编号消除（男主聪明，管家听话）。
     // 系统不猜他回了哪几条（自动算有漏洞：他决定不回的/只回一条的，系统分不清）。
-    final prView = ContextManager.instance.pendingRepliedView(ctxPid);
+    // 8-10 v3：【已回复·最近】块已删（历史流程区已含回复记录）——
+    // 待回复判断靠【当前流程】清单（✅/▶/☐）+ 下面这些队列。
     final pendingUser = PendingQueueStore.pendingUserText(ctxPid);
     final pendingButler = PendingQueueStore.pendingButlerText(ctxPid);
     // 8-06 23:55 用户：流程层——【当前流程】注入（男主自管，每轮可见）
@@ -1208,19 +1209,8 @@ class AiChatService {
     final chatFlowText =
         inFlow ? null : ChatFlowStore.buildText(ctxPid);
     final statusBlocks = <AIChatMessage>[
-      // 【当前情况】状态感知块（永远在，男主先看这个）
-      AIChatMessage(
-        role: 'system',
-        content: '【当前情况】（先看这个——你现在在哪，再决定怎么回）：\n'
-            '状态：${inFlow
-                ? '走流程中${flowGoal != null ? '「$flowGoal」' : '（设定弹窗中）'}'
-                : '正常对话'}\n'
-            '策略：${inFlow
-                ? '流程优先——她主对话说的话已收进【流程输入】，'
-                    '流程结束（finish/cancel）自动回到正常对话、待回复不会丢，'
-                    '到时记得接上；她觉得急的事你也可以先回（你判断）'
-                : '正常回复【待回复】'}',
-      ),
+      // 8-10 v3：不再有【当前情况】状态感知独立块——男主看下面的
+      // 【当前流程】清单就知道自己在哪、该做什么。
       if (!inFlow && pendingUser != null)
         AIChatMessage(
           role: 'system',
@@ -1231,12 +1221,13 @@ class AiChatService {
       if (chatFlowText != null && chatFlowText.isNotEmpty)
         AIChatMessage(
           role: 'system',
-          // 8-09 20:59（用户：大流程本来就在上下文，男主不该查）：
-          // 对话流程清单 = 全部待办，注入时明确"不用调工具查"——
-          // 男主看到清单直接处理，不需要 manage_flow status / manage_chat_flow status。
-          content: '【对话流程】（你的全部待办都在这——**不用调任何工具查流程**，'
-              '直接按清单处理：✅已回不用再回、☐/▶没回的处理、'
-              '复核判断补充还是结束）\n$chatFlowText',
+          // 8-10 v3：对话流程清单 = 当前+后续流程（✅=已回/▶=正在做/☐=后续）。
+          // 清单里"→ 判断"= 三选一（继续调工具/回复询问后继续/回复后消掉），
+          // "结尾命令"= 消掉大流程的动作。男主看到清单直接处理，不用查工具。
+          content: '【当前流程】（你的大流程清单——✅=已回（进历史流程）、'
+              '▶=当前正在做、☐=后续还没做。**不用调任何工具查流程**，'
+              '直接按清单处理；里面的"→ 判断"和"结尾命令"就是消流程的'
+              '动作，照用）\n$chatFlowText',
         ),
       if (inFlow && pendingUser != null)
         AIChatMessage(
@@ -1247,8 +1238,8 @@ class AiChatService {
       if (pendingButler != null)
         AIChatMessage(
           role: 'system',
-          content: '【系统消息】（管家/系统提醒——不用回，执行或判断即可；'
-              '觉得该让她知道才用 {"msg":"…"} 转达）\n$pendingButler',
+          content: '【系统消息 #A】（管家/系统提醒——处理完直接标"回#A"消掉，'
+              '不用回复她；觉得该让她知道才用 {"msg":"…"} 转达）\n$pendingButler',
         ),
       if (flowText != null && flowText.isNotEmpty)
         AIChatMessage(
@@ -1279,13 +1270,8 @@ class AiChatService {
       if (manualText.isNotEmpty)
         AIChatMessage(
           role: 'system',
-          content: '【工具使用手册】（你记的格式/坑，查这个别再反复试）\n$manualText',
-        ),
-      if (prView.replied.isNotEmpty)
-        AIChatMessage(
-          role: 'system',
-          content: '【已回复·最近】（你回过她的，不要重复回）\n'
-              '${prView.replied.join('\n')}',
+          content: '【工具笔记】（你自己维护的——用过的工具/格式/坑，'
+              '查这个别再反复试；用完把心得写进来）\n$manualText',
         ),
     ];
     final messages = <AIChatMessage>[
