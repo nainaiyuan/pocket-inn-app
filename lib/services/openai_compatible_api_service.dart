@@ -137,11 +137,17 @@ class OpenAICompatibleApiService implements IOpenAiApiService {
       OpenAICompatibleApiService._();
 
   // 建立连接 / 短请求（models、连通性测试）的超时。
-  static const Duration _connectionTimeout = Duration(seconds: 12);
+  // 8-11 05:2x（用户：长对话 DeepSeek 思考慢，12 秒根本不够——
+  // 测试连接/拉模型/探测全走这个，DeepSeek 思考模式负载高时
+  // 连接和响应都慢）12s → 30s。聊天主路径走 _chatCompletionTimeout
+  // （120s，流式响应头）和 _streamIdleTimeout（60s，流式行），不受影响。
+  static const Duration _connectionTimeout = Duration(seconds: 30);
   // 聊天补全请求等待响应头的超时，推理类模型首字节可能需要较长时间。
   static const Duration _chatCompletionTimeout = Duration(seconds: 120);
   // 流式响应中相邻两次数据之间的空闲超时，超过则视为卡住。
-  static const Duration _streamIdleTimeout = Duration(seconds: 60);
+  // 8-11 05:2x：DeepSeek 思考模式长对话，思考阶段可能长时间无 chunk——
+  // 60s → 120s，给思考留空间（用户：12 秒根本不够）
+  static const Duration _streamIdleTimeout = Duration(seconds: 120);
 
   // 拉取模型列表缓存时长
   static const Duration _modelsCacheDuration = Duration(minutes: 5);
