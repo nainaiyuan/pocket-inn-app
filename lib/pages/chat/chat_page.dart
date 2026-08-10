@@ -1157,6 +1157,21 @@ class _ChatPageState extends State<ChatPage>
       // 用户 8-03 01:52：用户指名道姓让男主调用某工具（如"调用recall_memory"）
       // 但 DeepSeek 可能不响应 → 检测到工具名时注入强制提示，确保男主真的调用
       final toolHint = _buildExplicitToolHint(t);
+      // 8-10 用户：管家分析出的信息（记忆/习惯/情感波动/技能触发/温控询问/
+      // 获准记忆/工具提示）→ 插到触发它的那句话的流程步骤后面，合并做——
+      // 不再塞进固定区（userProfile/taskState），男主处理那条时一起看一起做
+      if (systemEvent == null) {
+        for (final note in <String?>[
+          skillInjection,
+          keywordAsk,
+          ...recallInjection,
+          toolHint,
+        ]) {
+          if (note != null && note.trim().isNotEmpty) {
+            unawaited(ChatFlowStore.feedButlerNote(chatPid, note));
+          }
+        }
+      }
       // 用户 8-03 05:31：用户直接发 JSON 工具指令（兼容不同 AI 的指令格式）→
       // 不走男主主调用（男主收到 JSON 会空回复），直接进工具轮执行，
       // 用户 8-03 06:01：撤销用户消息直连工具——调工具是男主的技能，
@@ -1177,15 +1192,13 @@ class _ChatPageState extends State<ChatPage>
         storagePersonaId: chatPid,
         // 用户 8-03 02:41 模块化重构：技能注入 + 温控询问 + 获准记忆 → USER_PROFILE
         //（用户状态）；审批反馈 + 工具强制提示 → TASK_STATE（任务状态）
+        // 8-10 v3：技能注入/温控询问/获准记忆已改挂流程步骤（上面
+        // feedButlerNote），userProfile 只剩稳定用户设定
         userProfile: [
           _currentUserSetting(),
-          if (skillInjection != null) skillInjection,
-          if (keywordAsk != null) keywordAsk,
-          ...recallInjection,
         ].join('\n'),
         taskState: [
           if (_pendingFeedback != null) _pendingFeedback!,
-          if (toolHint != null) toolHint,
           // 8-04 18:34：疑似工具调用格式不对 → 提示男主正确格式（下轮注入）
           if (_formatHint != null) _formatHint!,
         ].join('\n'),

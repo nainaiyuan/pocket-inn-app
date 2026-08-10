@@ -134,6 +134,30 @@ class ChatFlowStore {
     };
   }
 
+  /// 管家分析备注 → 挂到最新用户步骤后面（8-10 用户定稿：用户说一句话，
+  /// 管家分析出的记忆/习惯/情感波动等信息，插到这句话的流程步骤后面，
+  /// 合并在一起做——不单独排队（不进#A）、不塞到正在处理的步骤）
+  static Future<void> feedButlerNote(String personaId, String text) async {
+    if (personaId.isEmpty || text.trim().isEmpty) return;
+    await warm(personaId);
+    final f = _memCache;
+    if (f == null || f['status'] != 'running') return;
+    final steps = _stepsOf(f);
+    if (steps.isEmpty) return;
+    final last = steps.last;
+    final notes =
+        (last['butlerNotes'] as List?)?.cast<Map<String, dynamic>>() ?? <Map<String, dynamic>>[];
+    final now = DateTime.now();
+    notes.add({
+      'ts': '${now.hour.toString().padLeft(2, '0')}:'
+          '${now.minute.toString().padLeft(2, '0')}',
+      'text': text.trim(),
+    });
+    last['butlerNotes'] = notes;
+    await _write(personaId, f);
+    _log('对话流程', '📎 管家备注挂步骤 ${steps.length}：${_short(text)}');
+  }
+
   /// 工具执行 → 挂到步骤（8-09 18:4x 改：挂载点 = 第一个未消步骤；
   /// 全部已消 → 挂最后一步。支持"先回复再干活"：男主回复消完条目后
   /// 继续调工具，工具挂到最后一步上，工作不会丢）
@@ -519,6 +543,13 @@ class ChatFlowStore {
         line += '（处理中：${_toolsBrief(tools)}）';
       }
       sb.writeln(line);
+      // 管家备注（8-10 用户：挂在触发它的那句话后面，合并做——
+      // 记忆/习惯/情感波动等分析信息，男主处理这条时一起看一起做）
+      final notes = (step['butlerNotes'] as List?)?.cast<Map<String, dynamic>>() ??
+          <Map<String, dynamic>>[];
+      for (final n in notes) {
+        sb.writeln('  - [${n['ts']}] 管家：${n['text']}');
+      }
       // 决策点：当前步
       if (isCur && tools.isNotEmpty) {
         final dec = _decisionHint(tools);
