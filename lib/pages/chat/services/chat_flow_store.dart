@@ -288,11 +288,15 @@ class ChatFlowStore {
   /// 8-10 22:1x（用户定稿，拆"消步骤"和"结束大流程"两个动作）：
   /// - **回#N（步骤序号）→ 消掉那一步**（不再要求必须带【结束】——
   ///   处理完一条就回#N 消掉，插话也是步骤，先回#N 消插话再继续大流程）
-  /// - **回#flowNo（大流程编号，清单顶部【对话流程 #N】）→ 强制结束
-  ///   整个大流程**（第一句原话 + 插话都归这个大流程，最后一句
-  ///   说"回#flowNo【结束】"才结束大流程）
+  /// - **结束大流程 = 输出总结论**：最后一句总结这一整个大流程
+  ///   （她第一句原话 + 插话都做完/聊到），总结句里**带齐所有步骤的
+  ///   回#N**（如"回#1、回#2"），再带【结束】标签。
+  /// - **大流程没有独立的"消"动作——只有所有步骤都消完，大流程才结束**
+  ///   （8-10 22:45 用户明确：确保里面步骤全部消掉才结束大流程；
+  ///   因此不存在"回#flowNo 强制结束"——那会绕过全消前提，已删除）
   /// - 【结束】标签本身只消步骤（回#N 精确 / 无标记 FIFO 最老），
-  ///   **不强制结束大流程**——中途误带【结束】不会提前结束
+  ///   **不强制结束大流程**——中途误带【结束】不会提前结束；
+  ///   带【结束】但还有步骤没回#N → endTagWarned 标记，检查轮提醒
   /// - 无回#N 无【结束】→ 纯对话，不消（回复挂步骤）
   /// - 所有步骤消完 → 流程自动 done（"中间的都消了才是结束大流程"）
   static Future<void> feedReply(String personaId, String replyText) async {
@@ -304,9 +308,6 @@ class ChatFlowStore {
     if (steps.isEmpty) return;
     final hasEndTag = replyText.contains('【结束】');
     final marked = _parseMarkedNos(replyText);
-    final flowNo = (f['flowNo'] as num?)?.toInt() ?? 0;
-    // 男主明确回大流程编号 → 强制结束整个大流程（用户 8-10 22:1x）
-    final endWholeFlow = flowNo > 0 && marked.contains(flowNo);
 
     if (!hasEndTag && marked.isEmpty) {
       // 纯对话（无回#N 无【结束】）→ 不消步骤（8-10 19:0x 用户拍板）：
@@ -365,7 +366,6 @@ class ChatFlowStore {
     var changed = false;
     if (marked.isNotEmpty) {
       for (final no in marked) {
-        if (no == flowNo) continue; // 流程号不消步骤（走下面强制结束）
         if (no >= 1 && no <= steps.length) {
           final idx = no - 1;
           if (steps[idx]['status'] != 'done') {
@@ -386,23 +386,8 @@ class ChatFlowStore {
         }
       }
     }
-    if (!changed && !endWholeFlow) return;
+    if (!changed) return;
     f['steps'] = steps; // _stepsOf 是拷贝，必须写回（FlowStore BUG-3 教训）
-
-    // 男主回大流程编号 → 强制结束整个大流程（所有步骤 done）
-    if (endWholeFlow) {
-      for (final s in steps) {
-        s['status'] = 'done';
-      }
-      f['steps'] = steps;
-      f['status'] = 'done';
-      f['currentStep'] = steps.length;
-      f.remove('endTagWarned');
-      await _write(personaId, f);
-      _log('对话流程',
-          '🔚 男主回大流程 #$flowNo → 强制结束大流程（共 ${steps.length} 步全部 done）');
-      return;
-    }
 
     // 还有没回的步骤 → 保留下次处理（流程不结束，唤醒男主走完）
     final stillPending = steps
