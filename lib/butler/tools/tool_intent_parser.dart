@@ -113,7 +113,8 @@ class ToolIntentParser {
     if (!hasToolName && !hasToolColon && !hasUnclosed) return null;
     return '你刚才提到工具调用，但格式不对，管家没有执行。'
         '正确格式：⟨工具:工具名⟩{"参数":"值"}⟨/工具⟩'
-        '（参数可省略；或用原生工具调用）。下次按这个格式写。';
+        '（参数可省略；或用原生工具调用）。'
+        '不确定格式就调 query_tool_formats 查，照模板写。';
   }
 
   /// 解析 ⟨工具:name⟩{json}⟨/工具⟩ 文本协议块（仅严格块）
