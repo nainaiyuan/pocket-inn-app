@@ -799,7 +799,15 @@ class ChatFlowStore {
       final tools = _asMap(curStep['tools']);
       final reply = (curStep['reply'] as String?)?.toString().trim() ?? '';
       final speaker = curStep['from'] == 'butler' ? '管家' : '她';
-      sb.writeln('▶ #$no [$ts]$fromMark $speaker：${curStep['userText']}');
+      // 8-11 03:2x（用户：男主做了还指他——箭头要变成打勾）：
+      // 已做 = 回过话 或 工具全 ✅ → 显示 ✅（打勾），不再用 ▶ 指着
+      final hasReply = reply.isNotEmpty;
+      final toolsOk = tools.isNotEmpty &&
+          tools.values.every((v) => v is Map && v['ok'] == true);
+      final done = hasReply || toolsOk;
+      final mark = done ? '✅' : '▶';
+      sb.writeln('$mark #$no [$ts]$fromMark $speaker：${curStep['userText']}'
+          '${done ? '（已做，待消）' : ''}');
       // 工具链（这条下面做了什么）
       for (final entry in tools.entries) {
         final v = entry.value;
@@ -832,6 +840,16 @@ class ChatFlowStore {
       sb.writeln('▶ 判断：继续？① 调工具 ② 回复/询问她后继续 '
           '③ 做完了 → 回#N 消掉（可一次消多个；最后一步带【结束】'
           '结束不唤醒；闲聊 → 直接带【结束】收尾）');
+      // 8-11 03:2x（用户：管家最后一句要和当前最后一步合并，男主直接
+      // 在最后一步判断，不用再被唤醒）：当前步是最后一个未消步骤 →
+      // 直接提示"做完带【结束】= 结束不唤醒"
+      final pendingCount =
+          steps.where((s) => s['status'] != 'done').length;
+      if (pendingCount <= 1) {
+        sb.writeln('管家：这是最后一个步骤——做完了直接带【结束】'
+            '总结结束（不会再唤醒你）；没做完 → 继续处理，'
+            '做完回#N 消掉');
+      }
     }
     // 8-10 00:5x（用户：男主消掉大流程自带结尾命令）——结尾命令清单，
     // 男主消掉大流程（最后一步回复）时回复末尾带一个：
