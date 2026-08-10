@@ -104,7 +104,8 @@ class ChatFlowStore {
     if (!_isTerminal(f) && f!['status'] == 'running') {
       // 处理中 → 插到当前步骤后面（先处理用户的话）
       final steps = _stepsOf(f);
-      final step = _newStep(text);
+      // 8-10 23:0x：插话步骤分配稳定编号（不挤占已有编号）
+      final step = _newStep(text, no: _nextStepNo(steps));
       var cur = -1;
       final curIdx = (f['currentStep'] as num?)?.toInt() ?? 0;
       if (curIdx >= 0 &&
@@ -133,17 +134,20 @@ class ChatFlowStore {
       'goal': _short(text, 30),
       'status': 'running',
       'currentStep': 0,
-      'steps': [_newStep(text)],
+      'steps': [_newStep(text, no: 1)], // 新流程第一步 = 编号 1
       'startedAt': DateTime.now().toIso8601String(),
     };
     await _write(personaId, flow);
     _log('对话流程', '📋 立流程 #${flow['flowNo']}：「${flow['goal']}」1 步');
   }
 
-  static Map<String, dynamic> _newStep(String text, {bool isReview = false}) {
+  static Map<String, dynamic> _newStep(String text,
+      {bool isReview = false, int? no}) {
     final now = DateTime.now();
     return {
-      'no': now.millisecondsSinceEpoch, // 时间戳 id（唯一）
+      // 8-10 23:0x（用户：插话/系统步骤要有稳定标签才能消）：no = 稳定
+      // 编号（创建时分配，插入新步骤不影响已有编号）；不传则时间戳兜底
+      'no': no ?? now.millisecondsSinceEpoch,
       'userText': text.trim(),
       'ts': '${now.hour.toString().padLeft(2, '0')}:'
           '${now.minute.toString().padLeft(2, '0')}',
@@ -152,6 +156,41 @@ class ChatFlowStore {
       'reply': '',
       if (isReview) 'isReview': true, // 8-09 18:33：复核步骤（男主回复后自动挂）
     };
+  }
+
+  // ---- 步骤稳定编号（8-10 23:0x 用户：插话/系统插入的都要有标签才能消）----
+  // 编号 = 步骤创建时分配的 no，插入新步骤（插话/闹钟）不影响已有编号，
+  // 男主回#N 永远对应同一个步骤。旧数据（无 no）fallback 按位置 index+1。
+
+  /// 步骤显示编号（优先 no 字段；旧数据 fallback 位置序号）
+  static int _stepNo(Map<String, dynamic> step, int index) {
+    final n = step['no'];
+    return (n is num && n.toInt() > 0) ? n.toInt() : index + 1;
+  }
+
+  /// 按编号找步骤下标（优先 no 字段匹配；旧数据 fallback 位置）→ -1 未找到
+  static int _stepIndexByNo(List<Map<String, dynamic>> steps, int no) {
+    for (var i = 0; i < steps.length; i++) {
+      final n = steps[i]['no'];
+      if (n is num && n.toInt() == no) return i;
+    }
+    if (no >= 1 && no <= steps.length) return no - 1; // 兼容旧数据
+    return -1;
+  }
+
+  /// 下一个稳定编号（现有最大 no + 1；全时间戳旧数据 → 按位置数+1）
+  static int _nextStepNo(List<Map<String, dynamic>> steps) {
+    var max = 0;
+    for (var i = 0; i < steps.length; i++) {
+      final n = steps[i]['no'];
+      if (n is num && n.toInt() > max) {
+        max = n.toInt();
+      } else if (n is! num) {
+        // 旧数据（时间戳 no）→ 按位置
+        if (i + 1 > max) max = i + 1;
+      }
+    }
+    return max + 1;
   }
 
   /// 管家分析备注 → 挂到最新用户步骤后面（8-10 用户定稿：用户说一句话，
@@ -184,9 +223,12 @@ class ChatFlowStore {
   static Future<void> insertButlerStep(String personaId, String text) async {
     if (personaId.isEmpty || text.trim().isEmpty) return;
     await warm(personaId);
-    final step = _newStep(text);
-    step['from'] = 'butler'; // 来源标记：管家插入（非用户消息）
     final f = _memCache;
+    final steps0 =
+        (f == null || f.isEmpty) ? <Map<String, dynamic>>[] : _stepsOf(f);
+    final step = _newStep(text,
+        no: steps0.isEmpty ? 1 : _nextStepNo(steps0)); // 稳定编号
+    step['from'] = 'butler'; // 来源标记：管家插入（非用户消息）
     if (!_isTerminal(f) && f!['status'] == 'running') {
       final steps = _stepsOf(f);
       if (steps.isEmpty) {
@@ -361,18 +403,17 @@ class ChatFlowStore {
       return;
     }
 
-    // 消步骤：回#N（步骤号）→ 精确消（8-10 22:1x：不再要求【结束】）；
+    // 消步骤：回#N（步骤号）→ 精确消（8-10 22:1x：不再要求【结束】；
+    // 8-10 23:0x：按稳定编号 no 匹配，不再按位置 index+1）；
     // 只有【结束】无标记 → FIFO 消最老 pending
     var changed = false;
     if (marked.isNotEmpty) {
       for (final no in marked) {
-        if (no >= 1 && no <= steps.length) {
-          final idx = no - 1;
-          if (steps[idx]['status'] != 'done') {
-            steps[idx]['status'] = 'done';
-            steps[idx]['reply'] = replyText.trim();
-            changed = true;
-          }
+        final idx = _stepIndexByNo(steps, no);
+        if (idx >= 0 && steps[idx]['status'] != 'done') {
+          steps[idx]['status'] = 'done';
+          steps[idx]['reply'] = replyText.trim();
+          changed = true;
         }
       }
     } else if (hasEndTag) {
@@ -510,12 +551,14 @@ class ChatFlowStore {
     final steps = _stepsOf(f);
     if (steps.isEmpty) return '没有步骤';
     if (nos.length < 2) return 'merge 至少要两个步骤编号';
-    if (nos.any((x) => x < 1 || x > steps.length)) {
-      return '编号超出范围（1-${steps.length}）';
+    // 8-10 23:0x：按稳定编号匹配（不再按位置）
+    final idxs = nos.map((x) => _stepIndexByNo(steps, x)).toList();
+    if (idxs.any((x) => x < 0)) {
+      return '编号不存在（对照清单里的 #N）';
     }
     // 8-09 20:18（用户：复核不能跳过）——复核不能参与合并，
     // 它是流程结尾的确认步骤，男主必须单独回答。
-    if (nos.any((x) => steps[x - 1]['isReview'] == true)) {
+    if (idxs.any((x) => steps[x]['isReview'] == true)) {
       return '复核步骤不能合并——它问的是"还有要补充的吗？要调整流程吗？'
           '还是确认结束？"必须单独回答（回复/调整/输出退出标记）';
     }
@@ -523,20 +566,21 @@ class ChatFlowStore {
     final nameText = (name ?? '').trim();
     final mergedText = nameText.isNotEmpty
         ? nameText
-        : '【合并】${nos.map((x) => _short(steps[x - 1]['userText'].toString(), 20)).join(' + ')}';
+        : '【合并】${idxs.map((x) => _short(steps[x]['userText'].toString(), 20)).join(' + ')}';
     final newStep = <String, dynamic>{
-      'no': DateTime.now().millisecondsSinceEpoch,
+      'no': _nextStepNo(steps), // 稳定编号
       'userText': mergedText,
       'ts': _hhmm(),
       'status': 'pending',
       'tools': <String, dynamic>{},
       'reply': '',
-      'mergedFrom': nos.map((x) => steps[x - 1]['userText'].toString()).toList(),
+      'mergedFrom':
+          idxs.map((x) => steps[x]['userText'].toString()).toList(),
     };
     // 被合并步骤的工具链合并进新步骤（不丢工作记录）
     final tools = <String, dynamic>{};
-    for (final x in nos) {
-      final st = steps[x - 1];
+    for (final x in idxs) {
+      final st = steps[x];
       final stTools = _asMap(st['tools']);
       stTools.forEach((name_, v) {
         final prev = (tools[name_] as Map?) ?? <String, dynamic>{};
@@ -551,11 +595,11 @@ class ChatFlowStore {
     }
     if (tools.isNotEmpty) newStep['tools'] = tools;
     // 重建步骤列表：删掉被合并的，新步骤插在第一个被合并步骤的位置
-    final sorted = [...nos]..sort();
-    final insertPos = sorted.first - 1;
+    final sorted = [...idxs]..sort();
+    final insertPos = sorted.first; // 8-10 23:0x：用下标（原 nos 编号已转 idxs）
     final newSteps = <Map<String, dynamic>>[];
     for (var i = 0; i < steps.length; i++) {
-      if (nos.contains(i + 1)) continue;
+      if (idxs.contains(i)) continue; // 8-10 23:0x：按稳定编号匹配
       newSteps.add(steps[i]);
     }
     newSteps.insert(insertPos.clamp(0, newSteps.length), newStep);
@@ -584,19 +628,21 @@ class ChatFlowStore {
     final steps = _stepsOf(f);
     if (steps.isEmpty) return '没有步骤';
     if (nos.isEmpty) return 'delete 需要至少一个步骤编号';
-    if (nos.any((x) => x < 1 || x > steps.length)) {
-      return '编号超出范围（1-${steps.length}）';
+    // 8-10 23:0x：按稳定编号匹配（不再按位置）
+    final idxs = nos.map((x) => _stepIndexByNo(steps, x)).toList();
+    if (idxs.any((x) => x < 0)) {
+      return '编号不存在（对照清单里的 #N）';
     }
     // 8-09 20:18（用户：复核不能跳过）——复核是管家插在大流程结尾的
     // 确认步骤，男主必须回答（补充/调整/确认结束），不能删掉绕过。
-    if (nos.any((x) => steps[x - 1]['isReview'] == true)) {
+    if (idxs.any((x) => steps[x]['isReview'] == true)) {
       return '复核步骤不能删除——它问的是"还有要补充的吗？要调整流程吗？'
           '还是确认结束？"必须回答（回复/调整/输出退出标记）';
     }
-    if (nos.length >= steps.length) return '不能删光所有步骤';
+    if (idxs.length >= steps.length) return '不能删光所有步骤';
     final newSteps = <Map<String, dynamic>>[];
     for (var i = 0; i < steps.length; i++) {
-      if (nos.contains(i + 1)) continue;
+      if (idxs.contains(i)) continue;
       newSteps.add(steps[i]);
     }
     f['steps'] = newSteps;
@@ -714,7 +760,7 @@ class ChatFlowStore {
       for (var i = 0; i < steps.length; i++) {
         final step = steps[i];
         final tools = _asMap(step['tools']);
-        sb.writeln('  第${i + 1}步「${_short(step['userText'].toString(), 20)}」'
+        sb.writeln('  第${_stepNo(step, i)}步「${_short(step['userText'].toString(), 20)}」'
             '${tools.isEmpty ? '（无工具）' : '工具：${_toolsBrief(tools)}'}');
         final dec = _decisionHint(tools);
         if (dec.isNotEmpty) sb.writeln('    → $dec');
@@ -745,7 +791,8 @@ class ChatFlowStore {
       }
     }
     if (curStep != null) {
-      final no = steps.indexOf(curStep) + 1;
+      // 8-10 23:0x：显示稳定编号（创建时分配，插话/闹钟插入不影响）
+      final no = _stepNo(curStep, steps.indexOf(curStep));
       // 8-10：管家插入的步骤（闹钟/系统事件）标【管家】来源
       final fromMark = curStep['from'] == 'butler' ? '【管家】' : '';
       final ts = (curStep['ts'] ?? '').toString();
@@ -762,12 +809,13 @@ class ChatFlowStore {
         sb.writeln('  - 你：调 ${entry.key} ${ok ? '✅' : '❌'}'
             '${brief.isEmpty ? '' : '：$brief'}');
       }
-      // 管家备注（8-10 用户：挂在触发它的那句话后面，合并做）
+      // 管家备注（8-10 用户：挂在触发它的那句话后面，合并做；
+      // 8-10 23:0x：备注不是独立步骤——跟随所在步骤一起消，不用单独回#N）
       final notes = (curStep['butlerNotes'] as List?)
               ?.cast<Map<String, dynamic>>() ??
           <Map<String, dynamic>>[];
       for (final n in notes) {
-        sb.writeln('  - [${n['ts']}] 管家：${n['text']}');
+        sb.writeln('  - [${n['ts']}] 管家：${n['text']}（随本步骤一起消）');
       }
       // 已回复内容（男主中途说过话但没消）
       if (reply.isNotEmpty) {
@@ -900,9 +948,9 @@ class ChatFlowStore {
             }
           }
           return false;
-        }) + 1;
+        });
         // 8-10 22:48（用户：总结轮 = 看一遍确认）：
-        return '总结轮：所有步骤都消了，但第 $badIdx 步工具没做完'
+        return '总结轮：所有步骤都消了，但第 ${_stepNo(steps[badIdx], badIdx)} 步工具没做完'
             '（❌/没找到）——先回去补充做完，再带【结束】总结结束。';
       }
       // 8-10 22:48（用户：大流程不能"自动结束"）：步骤全消但男主没带
@@ -941,7 +989,8 @@ class ChatFlowStore {
     final tail = endTagWarned
         ? '（你上轮带了【结束】但还有步骤没消——处理完剩下的再总结结束）'
         : '';
-    return '当前第 ${steps.indexOf(curStep) + 1} 步「'
+    final curNo = _stepNo(curStep, steps.indexOf(curStep));
+    return '当前第 $curNo 步「'
         '${_short(curStep['userText'].toString(), 20)}」还没消。$tail\n'
         '· 这条只是闲聊/不用干活 → 回复带【结束】直接收尾'
         '（消步骤+结束大流程，一轮结束，不会再唤醒你）；\n'
