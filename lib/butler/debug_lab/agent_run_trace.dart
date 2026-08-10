@@ -73,6 +73,10 @@ class TraceMessage {
   });
 
   /// 摘要式构造：content/reasoning 自动截断
+  /// 8-10 20:4x（用户：Xc1 误报"人设缺失"）：原来只留前 120 字符——
+  /// system 是「规则核心(长) + 你是「名字」」，人设段被截掉 → 分析器
+  /// 误判缺失。改：**保留头尾各一半**（头部=规则开头，尾部=人设"你是"），
+  /// c1/c2 判定才能看到关键段。
   factory TraceMessage.summarized({
     required String role,
     String content = '',
@@ -84,7 +88,9 @@ class TraceMessage {
     return TraceMessage(
       role: role,
       content: truncated
-          ? content.substring(0, maxContentChars)
+          ? content.substring(0, maxContentChars ~/ 2) +
+              '…[截断]…' +
+              content.substring(content.length - maxContentChars ~/ 2)
           : content,
       contentTruncated: truncated,
       toolCalls: toolCalls,

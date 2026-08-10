@@ -1417,13 +1417,19 @@ class _ChatPageState extends State<ChatPage>
         //   to each tool_call"。
         // - 修：只要原生路径有任何一个 call 缺 id → 整轮转文本协议（不混用），
         //   保证 assistant(tool_calls) 和 tool 消息严格一一配对。
-        final nativeCalls = thinkingOn
-            ? (hasReasoning &&
-                    result.toolCalls!.every(
-                        (c) => (c['id']?.toString() ?? '').isNotEmpty))
+        // 8-10 20:3x（用户日志复现：20:17:52 HTTP 400 仍发生）：
+        // 上次修复只对 thinkingOn=true 检查 id——**thinkingOn=false 时
+        // nativeCalls 直接收全部（不查 id）**，文本工具块（⟨工具:⟩ 解析，
+        // 无 id，如 add_record）照样进原生路径 → 400。
+        // 修：**有 id 才走原生，无 id 一律文本协议**（与 thinkingOn 无关）——
+        // 原生 tool_calls 按规范必带 id，缺 id 的只可能是文本块解析来的。
+        final allCallsHaveId = result.toolCalls!.every(
+            (c) => (c['id']?.toString() ?? '').isNotEmpty);
+        final nativeCalls = (thinkingOn && !hasReasoning)
+            ? <Map<String, dynamic>>[]
+            : (allCallsHaveId
                 ? result.toolCalls!
-                : <Map<String, dynamic>>[]
-            : result.toolCalls!;
+                : <Map<String, dynamic>>[]);
         if (result.toolCalls!.isNotEmpty && nativeCalls.isEmpty) {
           DebugLogger.log(
             'AI路由',
