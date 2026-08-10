@@ -196,11 +196,25 @@ class ChatFlowStore {
   /// 管家分析备注 → 挂到最新用户步骤后面（8-10 用户定稿：用户说一句话，
   /// 管家分析出的记忆/习惯/情感波动等信息，插到这句话的流程步骤后面，
   /// 合并在一起做——不单独排队（不进#A）、不塞到正在处理的步骤）
+  /// 8-11 03:2x（用户：没有步骤时管家判断就是第一步）——无执行中流程 →
+  /// 立新流程，管家判断 = 第一步（from='butler'），不再丢弃
   static Future<void> feedButlerNote(String personaId, String text) async {
     if (personaId.isEmpty || text.trim().isEmpty) return;
     await warm(personaId);
     final f = _memCache;
-    if (f == null || f['status'] != 'running') return;
+    if (f == null || f['status'] != 'running') {
+      final flow = <String, dynamic>{
+        'flowNo': await _nextFlowNo(),
+        'goal': _short(text, 30),
+        'status': 'running',
+        'currentStep': 0,
+        'steps': [_newStep(text, no: 1)..['from'] = 'butler'],
+        'startedAt': DateTime.now().toIso8601String(),
+      };
+      await _write(personaId, flow);
+      _log('对话流程', '📎 管家判断立流程 #${flow['flowNo']}：「${flow['goal']}」= 第一步');
+      return;
+    }
     final steps = _stepsOf(f);
     if (steps.isEmpty) return;
     final last = steps.last;
@@ -806,8 +820,22 @@ class ChatFlowStore {
           tools.values.every((v) => v is Map && v['ok'] == true);
       final done = hasReply || toolsOk;
       final mark = done ? '✅' : '▶';
-      sb.writeln('$mark #$no [$ts]$fromMark $speaker：${curStep['userText']}'
-          '${done ? '（已做，待消）' : ''}');
+      // 管家备注（8-10 用户：挂在触发它的那句话后面，合并做；
+      // 8-11 03:2x 用户：管家判断 = 第一步——显示在用户的话上面，
+      // 男主先看到要处理什么；随本步骤一起消，不用单独回#N）
+      final notes = (curStep['butlerNotes'] as List?)
+              ?.cast<Map<String, dynamic>>() ??
+          <Map<String, dynamic>>[];
+      if (notes.isNotEmpty) {
+        for (final n in notes) {
+          sb.writeln('$mark #$no [${n['ts']}] 管家：${n['text']}'
+              '（随本步骤一起消）');
+        }
+        sb.writeln('  她：${curStep['userText']}');
+      } else {
+        sb.writeln('$mark #$no [$ts]$fromMark $speaker：${curStep['userText']}'
+            '${done ? '（已做，待消）' : ''}');
+      }
       // 工具链（这条下面做了什么）
       for (final entry in tools.entries) {
         final v = entry.value;
@@ -816,14 +844,6 @@ class ChatFlowStore {
         final brief = (v['brief'] ?? '').toString();
         sb.writeln('  - 你：调 ${entry.key} ${ok ? '✅' : '❌'}'
             '${brief.isEmpty ? '' : '：$brief'}');
-      }
-      // 管家备注（8-10 用户：挂在触发它的那句话后面，合并做；
-      // 8-10 23:0x：备注不是独立步骤——跟随所在步骤一起消，不用单独回#N）
-      final notes = (curStep['butlerNotes'] as List?)
-              ?.cast<Map<String, dynamic>>() ??
-          <Map<String, dynamic>>[];
-      for (final n in notes) {
-        sb.writeln('  - [${n['ts']}] 管家：${n['text']}（随本步骤一起消）');
       }
       // 已回复内容（男主中途说过话但没消）
       if (reply.isNotEmpty) {
