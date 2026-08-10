@@ -158,6 +158,49 @@ class ChatFlowStore {
     _log('对话流程', '📎 管家备注挂步骤 ${steps.length}：${_short(text)}');
   }
 
+  /// 闹钟/系统事件触发 → 插到**当前处理步骤的后面**作为下一个步骤
+  /// （8-10 用户定稿：定时任务到点提醒男主，插到当前的话那里，
+  /// 就是当前在处理的步骤的后面，作为下一个步骤；无流程则立新流程）
+  static Future<void> insertButlerStep(String personaId, String text) async {
+    if (personaId.isEmpty || text.trim().isEmpty) return;
+    await warm(personaId);
+    final step = _newStep(text);
+    step['from'] = 'butler'; // 来源标记：管家插入（非用户消息）
+    final f = _memCache;
+    if (!_isTerminal(f) && f!['status'] == 'running') {
+      final steps = _stepsOf(f);
+      if (steps.isEmpty) {
+        f['steps'] = [step];
+        await _write(personaId, f);
+        return;
+      }
+      // 当前步骤 = 第一个未消步骤；全消 → 插末尾
+      var cur = -1;
+      for (var i = 0; i < steps.length; i++) {
+        if (steps[i]['status'] != 'done') {
+          cur = i;
+          break;
+        }
+      }
+      steps.insert(cur < 0 ? steps.length : cur + 1, step);
+      f['steps'] = steps;
+      await _write(personaId, f);
+      _log('对话流程', '⏰ 闹钟步骤插入 #${cur + 2} 位：${_short(text)}');
+      return;
+    }
+    // 无执行中流程 → 立新流程
+    final flow = <String, dynamic>{
+      'flowNo': await _nextFlowNo(),
+      'goal': _short(text, 30),
+      'status': 'running',
+      'currentStep': 0,
+      'steps': [step],
+      'startedAt': DateTime.now().toIso8601String(),
+    };
+    await _write(personaId, flow);
+    _log('对话流程', '⏰ 闹钟立新流程 #${flow['flowNo']}：「${flow['goal']}」');
+  }
+
   /// 工具执行 → 挂到步骤（8-09 18:4x 改：挂载点 = 第一个未消步骤；
   /// 全部已消 → 挂最后一步。支持"先回复再干活"：男主回复消完条目后
   /// 继续调工具，工具挂到最后一步上，工作不会丢）
@@ -534,7 +577,10 @@ class ChatFlowStore {
       // 它会让男主以为要"回#N"，把已回复的内容重复说。
       // 复核只在末尾作为整体判断引导出现（见下方"复核"段）。
       if (step['isReview'] == true) continue;
-      var line = '$mark 第${steps.indexOf(step) + 1}步 ${step['userText']}';
+      // 8-10：管家插入的步骤（闹钟/系统事件）标【管家】来源——
+      // 不是她说的，但也是要处理的下一个步骤
+      final fromMark = step['from'] == 'butler' ? '【管家】' : '';
+      var line = '$mark 第${steps.indexOf(step) + 1}步$fromMark ${step['userText']}';
       if (st == 'done') {
         final toolPart = tools.isEmpty ? '' : '（工具：${_toolsBrief(tools)}）';
         final replyPart = reply.isEmpty ? '' : '→ 你回：${_short(reply, 40)}';

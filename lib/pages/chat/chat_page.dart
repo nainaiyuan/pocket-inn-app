@@ -11,6 +11,7 @@ import '../../services/global_banner_service.dart';
 import '../../services/tool_approval_store.dart';
 import '../../services/global_timer_card_service.dart';
 import '../../services/card_task_store.dart';
+import '../../services/alarm_store.dart';
 import '../../services/setting_version_store.dart';
 import '../../services/record_tree_store.dart';
 import '../../services/working_pad_store.dart';
@@ -83,6 +84,7 @@ class _ChatPageState extends State<ChatPage>
   double _offset = 0;
   Panel _currentPanel = Panel.center;
   Timer? _notifyWakeTimer; // 8-06 notify_user 超时唤醒
+  Timer? _alarmTimer; // 8-10 定时任务检查器（闹钟到点 → 插流程步骤）
   /// 8-09 16:0x：FlowStore 变化通知回调引用（dispose 时注销用）
   VoidCallback? _flowOnChanged;
   Timer? _flowBarTimer; // 8-08 16:2x 流程条 2 秒轮询刷新（弹窗/底部进度同步）
@@ -129,6 +131,12 @@ class _ChatPageState extends State<ChatPage>
       duration: const Duration(milliseconds: 300),
     )..addListener(_onAnimTick);
     _state.addListener(_onStateChanged);
+    // 8-10：定时任务检查器（30 秒查一次，到点的闹钟 → 插当前流程步骤后面）
+    _alarmTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      final pid = _state.personaId;
+      if (pid == null || pid.isEmpty) return;
+      unawaited(_checkAlarms(pid));
+    });
     // 8-09 16:0x：2 秒轮询已退役——FlowStore.onChanged（_write 后通知）实时刷新，
     // 卡片/状态条与 FlowStore 同一数据源，步骤推进立即更新
     _load();
@@ -1683,6 +1691,11 @@ class _ChatPageState extends State<ChatPage>
             } else {
               toolResult = await _executeManageTask(args);
             }
+          } else if (name == 'manage_schedule') {
+            // 8-10 用户：定时任务（闹钟）——男主自管，本地保存到点提醒，
+            // 不需要她审批（她让男主设的闹钟，男主自己写自己查）
+            _appendToolBubble('⏰ 男主在整理定时任务…');
+            toolResult = await _executeManageScheduleTool(args);
           } else if (name == 'update_setting') {
             // 8-06 17:46-18:24 用户：男主主动优化设定 → 弹窗审批（可手动修改）
             // 弹窗本身就是审批动作，不再套确认框
@@ -3023,6 +3036,7 @@ class _ChatPageState extends State<ChatPage>
     _anim.removeListener(_onAnimTick);
     _anim.dispose();
     _notifyWakeTimer?.cancel(); // 8-06 notify_user 超时唤醒
+    _alarmTimer?.cancel(); // 8-10 定时任务检查器
     _flowBarTimer?.cancel(); // 8-08 16:2x 流程条轮询
     _inputCtrl.dispose(); // 8-08 15:1x：外部输入框 controller
     super.dispose();
@@ -7156,6 +7170,90 @@ class _ChatPageState extends State<ChatPage>
         r = const _ToolResult(false, '这个工具在设定会话里不能用');
     }
     return '${r.ok ? '✅' : '❌'} ${r.text}';
+  }
+
+  /// 定时任务管理（8-10 用户：男主写/查/删定时任务，本地保存到点提醒）
+  Future<_ToolResult> _executeManageScheduleTool(
+    Map<String, dynamic> args,
+  ) async {
+    final action = args['action']?.toString().trim() ?? '';
+    final store = AlarmStore.instance;
+    switch (action) {
+      case 'add':
+        final time = args['time']?.toString().trim() ?? '';
+        final text = args['text']?.toString().trim() ?? '';
+        if (time.isEmpty || text.isEmpty) {
+          return const _ToolResult(false, '新增失败：缺 time（HH:mm）或 text');
+        }
+        final m = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(time);
+        if (m == null) {
+          return const _ToolResult(false, '时间格式不对，要 HH:mm（如 19:30）');
+        }
+        final hh = int.parse(m.group(1)!);
+        final mm = int.parse(m.group(2)!);
+        if (hh > 23 || mm > 59) {
+          return const _ToolResult(false, '时间不对：小时 0-23、分钟 0-59');
+        }
+        final date = args['date']?.toString().trim() ?? '';
+        final item = await store.add(time, text, date: date);
+        return _ToolResult(
+          true,
+          '已设定时任务 #${item.id}：每天 $time 提醒「$text」'
+          '${date.isEmpty ? '（每天重复）' : '（$date 一次性）'}。'
+          '到点我会收到提醒，插入当前流程处理',
+        );
+      case 'list':
+        final list = await store.pending();
+        if (list.isEmpty) {
+          return const _ToolResult(true, '当前没有定时任务。需要定时提醒时用 '
+              'manage_schedule add（time=HH:mm, text=提醒内容）');
+        }
+        final sb = StringBuffer('当前定时任务：');
+        for (final e in list) {
+          sb.write('\n#${e.id} ${e.time} '
+              '${e.date.isEmpty ? '（每天）' : '（${e.date}）'}「${e.text}」');
+        }
+        return _ToolResult(true, sb.toString());
+      case 'delete':
+        final id = (args['id'] as num?)?.toInt();
+        if (id == null) {
+          return const _ToolResult(false, '删除失败：缺 id（先 list 查）');
+        }
+        final ok = await store.delete(id);
+        return ok
+            ? _ToolResult(true, '已删除定时任务 #$id')
+            : _ToolResult(false, '没找到定时任务 #$id（可能已删/已触发）');
+      default:
+        return _ToolResult(
+            false, 'action 不对，要 add / list / delete');
+    }
+  }
+
+  /// 定时任务检查器：到点的闹钟 → 插入流程步骤（8-10 用户：
+  /// 闹钟响了插到当前处理步骤的后面，作为下一个步骤）
+  Future<void> _checkAlarms(String personaId) async {
+    try {
+      final now = DateTime.now();
+      final hhmm = '${now.hour.toString().padLeft(2, '0')}:'
+          '${now.minute.toString().padLeft(2, '0')}';
+      final today = '${now.year}-${now.month.toString().padLeft(2, '0')}-'
+          '${now.day.toString().padLeft(2, '0')}';
+      final list = await AlarmStore.instance.pending();
+      for (final e in list) {
+        if (e.time != hhmm) continue;
+        // 一次性任务：日期对不上不触发
+        if (e.date.isNotEmpty && e.date != today) continue;
+        // 触发 → 插入流程步骤（男主处理完当前步骤就轮到它）
+        await ChatFlowStore.insertButlerStep(
+            personaId, '⏰ 定时提醒：${e.text}');
+        _appendToolBubble('⏰ 定时提醒到了：「${e.text}」');
+        if (e.date.isNotEmpty) {
+          await AlarmStore.instance.markDone(e.id); // 一次性 → 标记完成
+        }
+      }
+    } catch (err) {
+      DebugLogger.log('管家流程', '✖ 定时任务检查失败: $err');
+    }
   }
 
   /// 工具执行：query_setting_version（8-07 15:5x 用户：男主按需查某版某段

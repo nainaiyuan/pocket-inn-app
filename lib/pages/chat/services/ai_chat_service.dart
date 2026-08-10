@@ -507,6 +507,49 @@ class AiChatService {
     {
       'type': 'function',
       'function': {
+        'name': 'manage_schedule',
+        'description':
+            '定时任务（闹钟）管理——她让你"几点提醒我/叫我"时用，'
+            '或你自己想定时做某事（如定时写日记）时用。'
+            '写好后本地保存，到点自动提醒你（插到当前流程步骤后面），'
+            '不用她操心。操作：'
+            'add=新增（time 格式 HH:mm，text 提醒内容；'
+            'date 留空=每天这个点都提醒，date=yyyy-MM-dd=只提醒这一次）/ '
+            'list=查看全部没触发的定时任务 / '
+            'delete=删除（id 从 list 结果里看）。'
+            '男主自管工具，不需要她审批。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'action': {
+              'type': 'string',
+              'enum': ['add', 'list', 'delete'],
+              'description': 'add=新增 / list=查看 / delete=删除',
+            },
+            'time': {
+              'type': 'string',
+              'description': 'action=add 时必填，HH:mm 格式（24小时），如 19:30',
+            },
+            'text': {
+              'type': 'string',
+              'description': 'action=add 时必填，到点提醒你的内容',
+            },
+            'date': {
+              'type': 'string',
+              'description': 'action=add 时可选；空=每天重复；yyyy-MM-dd=只提醒这一次',
+            },
+            'id': {
+              'type': 'integer',
+              'description': 'action=delete 时必填，要删的定时任务 id（list 结果里有）',
+            },
+          },
+          'required': ['action'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
         'name': 'update_setting',
         'description':
             '维护两份档案（设定按【标签】分段，注入时带编号，你只改要动的那段，'
