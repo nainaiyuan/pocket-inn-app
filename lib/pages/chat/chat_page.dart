@@ -4394,6 +4394,10 @@ class _ChatPageState extends State<ChatPage>
       return rows;
     }
     String? firstMsgId;
+    // 8-11 06:1x（用户：思考链完全没了——男主输出顺序 reply→act→msg 时，
+    // 旧 i==0 把思考挂给了 act 动作气泡（不显示）→ msg 拿不到）：
+    // 思考链改挂**第一条 msg 气泡**（act 动作气泡不挂，msg 才是说话气泡）
+    var thinkingAttached = false;
     for (var i = 0; i < parts.length; i++) {
       final part = parts[i];
       final id =
@@ -4414,9 +4418,10 @@ class _ChatPageState extends State<ChatPage>
                   part.spans.first.kind == SpanKind.act)
               ? part.spans
               : null,
-          // 思考链只挂第一条 msg 气泡
-          thinkingChain: i == 0 ? cleanThinking : null,
+          // 思考链只挂第一条 msg 气泡（act 不挂）
+          thinkingChain: !thinkingAttached ? cleanThinking : null,
         );
+        thinkingAttached = true;
         _msgKey.currentState?.appendMessage(msg);
         rows.add(_BubbleRow(
           id,

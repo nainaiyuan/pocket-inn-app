@@ -380,8 +380,10 @@ void _jsonMapToBubbles(
   for (final entry in map.entries) {
     final key = entry.key.toLowerCase();
     // 8-10 20:5x：重复 key 修复后（msg_2/msg_3/act_2…），按基础名归类
+    // 8-11 06:1x（用户：msg2/msg3 丢失——男主直接写 "msg2" 无下划线，
+    // 旧正则 ^([a-z]+)_\d+$ 只认下划线版）→ [_0-9]* 兼容 msg2 / msg_2 / act2
     final base =
-        RegExp(r'^([a-z]+)_\d+$').firstMatch(key)?.group(1) ?? key;
+        RegExp(r'^([a-z]+)[_0-9]*$').firstMatch(key)?.group(1) ?? key;
     final value = entry.value;
     switch (base) {
       case 'msg':
