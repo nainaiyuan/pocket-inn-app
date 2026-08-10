@@ -92,24 +92,42 @@ class ChatFlowStore {
   // ---- 写入（管家机械活，男主零操作）----
 
   /// 用户消息 → 立流程/追加步骤
-  /// 无流程或已结束 → 立新流程（goal=第一条消息截断，steps=[这条]）；
-  /// 有执行中流程 → 追加步骤（她随时插话 = 追加，跟长任务插话一致）
+  /// 8-10 19:20（用户纠正）：分两种——
+  /// - **没在处理**（无 running 流程）：用户的话 = 新的大流程（当前流程）
+  /// - **处理中**（有 running 流程）：用户插话 = **插入的大流程**——
+  ///   插到当前处理步骤（当前工具调用所在步骤）的**后面**，先处理完
+  ///   用户的话（推为当前），后续步骤男主自己判断（处理完自动回后续）
   static Future<void> feedUser(String personaId, String text) async {
     if (personaId.isEmpty || text.trim().isEmpty) return;
     await warm(personaId);
     final f = _memCache;
     if (!_isTerminal(f) && f!['status'] == 'running') {
-      // 追加步骤（8-10 00:49：复核已去掉，无置顶逻辑）
-      // 8-10 19:13（用户）：她刚说的 = 当前要做的——自动推上来
+      // 处理中 → 插到当前步骤后面（先处理用户的话）
       final steps = _stepsOf(f);
-      steps.add(_newStep(text));
+      final step = _newStep(text);
+      var cur = -1;
+      final curIdx = (f['currentStep'] as num?)?.toInt() ?? 0;
+      if (curIdx >= 0 &&
+          curIdx < steps.length &&
+          steps[curIdx]['status'] != 'done') {
+        cur = curIdx;
+      }
+      if (cur < 0) {
+        for (var i = 0; i < steps.length; i++) {
+          if (steps[i]['status'] != 'done') {
+            cur = i;
+            break;
+          }
+        }
+      }
+      steps.insert(cur < 0 ? steps.length : cur + 1, step);
       f['steps'] = steps;
-      f['currentStep'] = steps.length - 1;
+      f['currentStep'] = cur < 0 ? steps.length : cur + 1; // 用户的话成为当前
       await _write(personaId, f);
-      _log('对话流程', '📥 追加步骤 ${steps.length}：${_short(text)}（推为当前步）');
+      _log('对话流程', '📥 用户插话插入 #${cur + 2} 位并推为当前步：${_short(text)}');
       return;
     }
-    // 立新流程（8-09 18:33：带流程编号）
+    // 没在处理 → 立新流程（8-09 18:33：带流程编号）
     final flow = <String, dynamic>{
       'flowNo': await _nextFlowNo(),
       'goal': _short(text, 30),
