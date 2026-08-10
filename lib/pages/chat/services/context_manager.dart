@@ -274,93 +274,97 @@ class ContextManager {
     return (pending: pending, replied: replied);
   }
 
-  /// 组装历史消息（摘要区 + 当前话题原文），插在 system 之后。
-  /// 当前话题原文超过预算时截断最旧部分（兜底；正常由总结触发清空）。
+  /// 组装历史消息（记忆摘要 + 历史流程 + 系统历史），插在 system 之后。
+  /// 8-10 v3：三区流程流水账——【历史流程】= 做完了的对话（原样细节+时间戳+
+  /// 历史#N 排序）；未回复的用户行不进这里（由动态块的当前/后续流程区接管）。
   List<AIChatMessage> buildHistoryMessages(String personaId, {String? modelHint}) {
     final out = <AIChatMessage>[];
 
-    // 恢复包（stateful 空闲超时后 AI 忘了 → 本次带"下次要带的上下文"接上；
-    // 用户 21:52：男主提前写好的分类存档，管家恢复时带上）
-    // 8-05 17:50 用户：恢复包 = 男主已总结过的上下文（精简版）→ 有它就
-    // 【替换】整个上下文（摘要+工具历史+历史对话），不重复带。
-    // 安全前提：恢复包只在空闲过半时写，写完用户继续聊会重置计时并重新
-    // 沉淀 → 超时恢复时恢复包一定是最新的、后面没有新对话 → 替换不丢内容。
+    // 存档（原"恢复包"——8-10 v3 不造概念：男主知道这是他整理过的上下文）
     final recovery = _recovery[personaId];
     if (recovery != null && recovery.isNotEmpty) {
       out.add(AIChatMessage(
         role: 'system',
-        content: '【MEMORY_SUMMARY·恢复包】（你提前写好的上下文存档）\n$recovery',
+        content: '【记忆摘要·存档】（你上次整理好的上下文存档，接上继续）\n$recovery',
       ));
       return out;
     }
 
-    // 摘要区（一条 system 消息，前缀稳定 → 缓存命中）
-    // 用户 8-03 02:41 模块化：长期记忆不拼 prompt，男主自己查工具；
-    // 摘要区只留"提醒索引"（每天要记得的事/影响后续对话的约定）
+    // 记忆摘要（男主自己维护：短期/长期；太长或再次唤醒时整理到这里）
     final summaries = _summaries[personaId];
     if (summaries != null && summaries.isNotEmpty) {
       final sb = StringBuffer(
-        '【男主摘要】（你上次洗牌时总结的——下次聊天必带；'
-        '它平时不动，只有工具历史+对话重新洗牌时才更新）');
+          '【记忆摘要】（你自己维护的——短期：最近的事/当前在做什么/'
+          '工具使用经验/临时安排；长期：她的稳定喜好/约定/关系/她反复强调的事。'
+          '上下文太长或再次唤醒时整理到这里，别丢）');
       for (final s in summaries) {
         sb.write('\n- $s');
       }
       out.add(AIChatMessage(role: 'system', content: sb.toString()));
     }
 
-    // 当前话题原文 —— 8-04 17:2x（用户：工具历史要独立分区，别混在对话里）：
-    // 工具行 → 【工具使用历史】system 块（时间+工具名+成败+失败原因，
-    // 不带调用过程/内容详情——记了什么按时间戳在互动历史里对应）；
-    // 用户/男主行 → 互动历史（user/assistant，保留时间戳）
-    // ⚠️ 不能用 insert(1)：无摘要时 out 为空 → RangeError 越界（重启后首条必崩）
+    // 历史流程（8-10 v3：做完了的对话，原样保留细节——她说了什么、
+    // 你查了什么、回了什么；工具行并进对应对话条目，不再单独分区）
     final t = _topics[personaId];
     if (t != null && t.raw.isNotEmpty) {
       var total = 0;
-      final lines = <AIChatMessage>[];
-      final toolLines = <String>[];
-      // 从尾部取（保留最近），预算内
+      final collected = <String>[];
       for (var i = t.raw.length - 1; i >= 0; i--) {
         total += t.raw[i].length;
         if (total > topicBudgetChars(personaId, modelHint: modelHint)) break;
-        final line = t.raw[i];
-        if (line.startsWith('工具')) {
-          toolLines.add(line);
-        } else if (line.startsWith('男主')) {
-          lines.add(AIChatMessage(
-              role: 'assistant', content: _stripPrefix(line, keepTs: true)));
-        } else {
-          lines.add(AIChatMessage(
-              role: 'user', content: _stripPrefix(line, keepTs: true)));
+        collected.add(t.raw[i]);
+      }
+      final kept = collected.reversed.toList(); // 时间顺序
+      // 最后男主行之后的用户行 = 未回复（不进历史流程，动态块接管）
+      var lastMaleIdx = -1;
+      for (var i = kept.length - 1; i >= 0; i--) {
+        if (kept[i].startsWith('男主')) {
+          lastMaleIdx = i;
+          break;
         }
       }
-      // 工具使用历史：独立 system 块（在互动历史之前）
-      // 8-04 17:3x（用户：跨天聊天要按日期分区，工具和对话才能对应）：
-      // 工具历史也按日期分组（【工具使用历史 · 2026/6/28】）
-      if (toolLines.isNotEmpty) {
+      // 配对成条目：用户行开条目，男主/工具行挂到最近条目
+      final entries = <List<String>>[];
+      for (var i = 0; i < kept.length; i++) {
+        final line = kept[i];
+        if (line.startsWith('用户')) {
+          if (lastMaleIdx >= 0 && i > lastMaleIdx) continue;
+          entries.add([line]);
+        } else if (entries.isNotEmpty) {
+          entries.last.add(line);
+        }
+      }
+      if (entries.isNotEmpty) {
         final sb = StringBuffer(
-            '【工具使用历史】（男主执行过的工具，时间戳与互动历史对应；'
-            '成功时记了什么、失败时原因是什么，按日期+时间在互动历史里对照）');
+            '【历史流程】（做完了的对话，原样保留细节——她说了什么、你查了什么、'
+            '回了什么；历史#N 单独排序，整理时写"历史#N~#M 还有用"保留原文）');
         DateTime? lastDay;
-        for (final l in toolLines.reversed) {
-          final ts = _toolTs(l);
-          final day = ts == null ? null : _tsDate(ts);
+        var hno = 0;
+        for (final e in entries) {
+          final ts0 = _lineTs(e.first);
+          final day = ts0 == null ? null : _tsDate(ts0);
           if (day != null && (lastDay == null || !_sameDay(day, lastDay))) {
-            sb.write('\n【工具使用历史 · ${_dateLabel(day)}】');
+            sb.write('\n【历史流程 · ${_dateLabel(day)}】');
             lastDay = day;
           }
-          sb.write('\n${_toolHistoryLine(l)}');
+          hno++;
+          sb.write('\n${_flowUserLine(e.first, hno)}');
+          for (var j = 1; j < e.length; j++) {
+            final l = e[j];
+            if (l.startsWith('工具')) {
+              sb.write('\n  ${_toolHistoryLine(l)}');
+            } else {
+              sb.write('\n  ${_flowMaleLine(l)}');
+            }
+          }
         }
         out.add(AIChatMessage(role: 'system', content: sb.toString()));
       }
-      // 历史分区（8-05 19:13 用户定稿定义）：
-      // 【系统历史】= 系统过去发的精简指令记录（几点/动作/完成或失败+原因），
-      //   如 '[19:00] 写日记 → ✅完成'——不是男主发言！
-      // 【聊天历史】= 用户和男主（AI）的对话，user/assistant 按时间线交替，
-      //   各带时间戳+日期分组。
+      // 系统历史（管家日志）——保留
       final butlerLog = _butlerLog[personaId];
       if (butlerLog != null && butlerLog.isNotEmpty) {
         final sb = StringBuffer(
-            '【系统历史】（系统自动执行过的指令记录：时间+动作+结果。'
+            '【系统历史】（管家自动执行过的指令记录：时间+动作+结果。'
             '男主可参考，如写日记/总结是否成功）');
         DateTime? lastDay;
         for (final l in butlerLog) {
@@ -373,19 +377,26 @@ class ContextManager {
         }
         out.add(AIChatMessage(role: 'system', content: sb.toString()));
       }
-      DateTime? lastDay;
-      for (final m in lines.reversed) {
-        final day = _tsDate(m.content);
-        if (day != null && (lastDay == null || !_sameDay(day, lastDay))) {
-          out.add(AIChatMessage(
-              role: 'system',
-              content: '【聊天历史 · ${_dateLabel(day)}】（该日期：几点谁说了什么）'));
-          lastDay = day;
-        }
-        out.add(m);
-      }
     }
     return out;
+  }
+
+  /// 行内时间戳：'用户 [06-28 17:01]：xxx' → '[06-28 17:01]'
+  static String? _lineTs(String line) =>
+      RegExp(r'\[[^\]]+\]').firstMatch(line)?.group(0);
+
+  /// 历史流程条目：用户行 → '历史#1 [16:00] 她：今晚吃什么？'
+  static String _flowUserLine(String line, int hno) {
+    final ts = _lineTs(line);
+    final rest = _stripPrefix(line);
+    return ts == null ? '历史#$hno 她：$rest' : '历史#$hno $ts 她：$rest';
+  }
+
+  /// 历史流程条目：男主行 → '  - [16:02] 你：回「火锅怎么样？」'
+  static String _flowMaleLine(String line) {
+    final ts = _lineTs(line);
+    final rest = _stripPrefix(line);
+    return ts == null ? '  - 你：$rest' : '  - $ts 你：$rest';
   }
 
   /// 记录管家自动指令日志（8-05 19:13 用户：管家历史 = 管家发的精简指令，
@@ -398,13 +409,6 @@ class ContextManager {
     // 只留最近 20 条（精简，不占窗口）
     final list = _butlerLog[personaId]!;
     if (list.length > 20) list.removeRange(0, list.length - 20);
-  }
-
-  /// 工具行提取时间戳：'工具 [06-28 17:01]：query_diary …' → '[06-28 17:01]'
-  static String? _toolTs(String rawLine) {
-    final m = RegExp(r'^工具 (\[[^\]]+\])：')
-        .firstMatch(rawLine.split('\n').first);
-    return m?.group(1);
   }
 
   /// 从时间戳解析日期：'[17:01]' → 今天；'[06-28 17:01]' → 今年6月28日
@@ -582,14 +586,14 @@ class ContextManager {
     final sb = StringBuffer();
     final summaries = _summaries[personaId];
     if (summaries != null && summaries.isNotEmpty) {
-      sb.write('【男主摘要】（你之前总结的提醒：约定/承诺/正在做的事）\n');
+      sb.write('【记忆摘要】（你之前总结的：约定/承诺/正在做的事）\n');
       for (final s in summaries) {
         sb.write('- $s\n');
       }
     }
     final recovery = _recovery[personaId];
     if (recovery != null && recovery.isNotEmpty) {
-      sb.write('\n【恢复包】（你上次空闲前写的存档）\n$recovery\n');
+      sb.write('\n【记忆摘要·存档】（你上次整理好的上下文存档）\n$recovery\n');
     }
     final raw = peekRaw(personaId);
     if (raw.trim().isNotEmpty) {
