@@ -100,11 +100,13 @@ class ChatFlowStore {
     final f = _memCache;
     if (!_isTerminal(f) && f!['status'] == 'running') {
       // 追加步骤（8-10 00:49：复核已去掉，无置顶逻辑）
+      // 8-10 19:13（用户）：她刚说的 = 当前要做的——自动推上来
       final steps = _stepsOf(f);
       steps.add(_newStep(text));
       f['steps'] = steps;
+      f['currentStep'] = steps.length - 1;
       await _write(personaId, f);
-      _log('对话流程', '📥 追加步骤 ${steps.length}：${_short(text)}');
+      _log('对话流程', '📥 追加步骤 ${steps.length}：${_short(text)}（推为当前步）');
       return;
     }
     // 立新流程（8-09 18:33：带流程编号）
@@ -184,8 +186,11 @@ class ChatFlowStore {
       }
       steps.insert(cur < 0 ? steps.length : cur + 1, step);
       f['steps'] = steps;
+      // 8-10 19:13（用户）：男主每次只看当前步——插入的步骤推为当前，
+      // 男主先处理提醒；处理完（消掉）自动回到原来的步骤
+      f['currentStep'] = cur < 0 ? steps.length : cur + 1;
       await _write(personaId, f);
-      _log('对话流程', '⏰ 闹钟步骤插入 #${cur + 2} 位：${_short(text)}');
+      _log('对话流程', '⏰ 闹钟步骤插入 #${cur + 2} 位并推为当前步：${_short(text)}');
       return;
     }
     // 无执行中流程 → 立新流程
@@ -217,10 +222,20 @@ class ChatFlowStore {
     final steps = _stepsOf(f);
     if (steps.isEmpty) return;
     var target = -1;
-    for (var i = 0; i < steps.length; i++) {
-      if (steps[i]['status'] != 'done' && steps[i]['isReview'] != true) {
-        target = i;
-        break;
+    // 8-10 19:13（用户：男主每次只看当前步）——工具挂当前步
+    //（男主调工具一定是为当前在做的这条）
+    final curIdx = (f['currentStep'] as num?)?.toInt() ?? 0;
+    if (curIdx >= 0 &&
+        curIdx < steps.length &&
+        steps[curIdx]['status'] != 'done') {
+      target = curIdx;
+    }
+    if (target < 0) {
+      for (var i = 0; i < steps.length; i++) {
+        if (steps[i]['status'] != 'done' && steps[i]['isReview'] != true) {
+          target = i;
+          break;
+        }
       }
     }
     if (target < 0) {
@@ -265,7 +280,7 @@ class ChatFlowStore {
     if (!hasEndTag) {
       // 不带【结束】→ 不消步骤（8-10 19:0x 用户拍板）：
       // 中途说话 ≠ 结束。回复文本挂到目标步骤（标了回#N 的第一个 /
-      // FIFO 第一个 pending）的 reply 字段，流程保持 running，
+      // 默认当前步）的 reply 字段，流程保持 running，
       // 下次唤醒男主继续——他必须打【结束】才算完。
       var target = -1;
       if (marked.isNotEmpty) {
@@ -277,6 +292,15 @@ class ChatFlowStore {
               break;
             }
           }
+        }
+      }
+      if (target < 0) {
+        // 8-10 19:13（用户：男主每次只看当前步）——默认挂当前步
+        final curIdx = (f['currentStep'] as num?)?.toInt() ?? 0;
+        if (curIdx >= 0 &&
+            curIdx < steps.length &&
+            steps[curIdx]['status'] != 'done') {
+          target = curIdx;
         }
       }
       if (target < 0) {
@@ -592,31 +616,35 @@ class ChatFlowStore {
           '{"need_continue": false}');
       return sb.toString();
     }
-    // ── 步骤清单（8-10 v3：只显示未回步骤——✅ 已回归【历史流程】区，
-    // 不重复显示；格式 #N [时间] 她/管家：内容 + 处理过程细节）──
+    // ── 步骤清单（8-10 19:13 用户：男主每次只看**当前做的那一步**——
+    // 消完自动推下一个上来，已消的进【历史流程】区，不报"还有几条没回"）──
     final doneCount = steps
         .where((s) => s['status'] == 'done' && s['isReview'] != true)
         .length;
     if (doneCount > 0) {
-      sb.writeln('（已消 $doneCount 条，细节在【历史流程】，不重复显示）');
+      sb.writeln('（已完成 $doneCount 条 → 历史，不重复显示）');
     }
-    for (var i = 0; i < steps.length; i++) {
-      final step = steps[i];
-      // 8-09 20:1x（用户实测）：复核步骤不在清单里占"第N步"位置——
-      // 它会让男主以为要"回#N"，把已回复的内容重复说。
-      if (step['isReview'] == true) continue;
-      final st = step['status']?.toString() ?? 'pending';
-      if (st == 'done') continue; // 已回 → 历史流程区
-      final isCur = steps.indexOf(step) == cur;
-      final mark = isCur ? '▶' : '☐';
+    // 当前步 = currentStep 指向的未消步骤（兜底：指向已消/越界 → 找第一个未消）
+    Map<String, dynamic>? curStep;
+    if (cur >= 0 && cur < steps.length && steps[cur]['status'] != 'done') {
+      curStep = steps[cur];
+    } else {
+      for (final s in steps) {
+        if (s['status'] != 'done') {
+          curStep = s;
+          break;
+        }
+      }
+    }
+    if (curStep != null) {
+      final no = steps.indexOf(curStep) + 1;
       // 8-10：管家插入的步骤（闹钟/系统事件）标【管家】来源
-      final fromMark = step['from'] == 'butler' ? '【管家】' : '';
-      final ts = (step['ts'] ?? '').toString();
-      final no = steps.indexOf(step) + 1;
-      final tools = _asMap(step['tools']);
-      final reply = (step['reply'] as String?)?.toString().trim() ?? '';
-      final speaker = step['from'] == 'butler' ? '管家' : '她';
-      sb.writeln('$mark #$no [$ts]$fromMark $speaker：${step['userText']}');
+      final fromMark = curStep['from'] == 'butler' ? '【管家】' : '';
+      final ts = (curStep['ts'] ?? '').toString();
+      final tools = _asMap(curStep['tools']);
+      final reply = (curStep['reply'] as String?)?.toString().trim() ?? '';
+      final speaker = curStep['from'] == 'butler' ? '管家' : '她';
+      sb.writeln('▶ #$no [$ts]$fromMark $speaker：${curStep['userText']}');
       // 工具链（这条下面做了什么）
       for (final entry in tools.entries) {
         final v = entry.value;
@@ -627,35 +655,26 @@ class ChatFlowStore {
             '${brief.isEmpty ? '' : '：$brief'}');
       }
       // 管家备注（8-10 用户：挂在触发它的那句话后面，合并做）
-      final notes = (step['butlerNotes'] as List?)?.cast<Map<String, dynamic>>() ??
+      final notes = (curStep['butlerNotes'] as List?)
+              ?.cast<Map<String, dynamic>>() ??
           <Map<String, dynamic>>[];
       for (final n in notes) {
         sb.writeln('  - [${n['ts']}] 管家：${n['text']}');
       }
-      // 已回复内容
+      // 已回复内容（男主中途说过话但没消）
       if (reply.isNotEmpty) {
         sb.writeln('  - 你回：「${_short(reply, 60)}」');
       }
       // 决策点：当前步（工具结果机械提示，8-09 18:3x）
-      if (isCur && tools.isNotEmpty) {
+      if (tools.isNotEmpty) {
         final dec = _decisionHint(tools);
         if (dec.isNotEmpty) sb.writeln('  → 判断：$dec');
       }
-      // ▶ 判断固定文本（8-10 v3：永远在最后，男主每动一步往后推一格；
-      // 8-10 19:0x：强调【结束】标签是消流程的唯一方式）
-      if (isCur) {
-        sb.writeln('▶ 判断：继续？① 调工具 ② 回复/询问她后继续 '
-            '③ 回复她后消掉（结尾一定带【结束】标签——不带=流程不消，'
-            '管家会再唤醒你）');
-      }
-    }
-    // 8-09 20:1x：复核已去掉（8-10 00:49），无复核引导。
-    // "没回"只数真实用户步骤（isReview != true）。
-    final realPendingCount =
-        steps.where((s) => s['status'] != 'done' && s['isReview'] != true).length;
-    if (realPendingCount > 1) {
-      sb.writeln('多条一起消：回复标 {"reply":"回#N、#M"}（N=编号）指定 + '
-          '结尾带【结束】标签一起消；不标默认只消最老一条（也要带【结束】）。');
+      // ▶ 判断固定文本（8-10 v3：永远在最后；19:0x：强调【结束】标签
+      // 是消流程的唯一方式）
+      sb.writeln('▶ 判断：继续？① 调工具 ② 回复/询问她后继续 '
+          '③ 回复她后消掉（结尾一定带【结束】标签——不带=流程不消，'
+          '管家会再唤醒你）');
     }
     // 8-10 00:5x（用户：男主消掉大流程自带结尾命令）——结尾命令清单，
     // 男主消掉大流程（最后一步回复）时回复末尾带一个：
@@ -779,28 +798,26 @@ class ChatFlowStore {
       return '已全部回应，流程待你确认结束——没有遗漏就输出退出标记 '
           '{"need_continue": false}。';
     }
-    // 8-09 18:33：pending 里最老的是复核步骤 → 引导回答完整性判断
-    // 8-09 20:1x：复核不算"没回"——先看有没有真实用户步骤 pending
-    // 8-10 19:0x：消流程唯一方式 = 回复结尾带【结束】标签（回#N 只是指定回哪条）
-    final realPending = pending.where((s) => s['isReview'] != true).toList();
-    if (realPending.isNotEmpty) {
-      final briefs = realPending
-          .take(3)
-          .map((s) => '第${steps.indexOf(s) + 1}步「${_short(s['userText'].toString(), 20)}」')
-          .join('、');
-      final more = realPending.length > 3 ? ' 等${realPending.length}条' : '';
-      return '还有 ${realPending.length} 条没回：$briefs$more——先回她；'
-          '做完的这条回复结尾带【结束】标签才算消掉，'
-          '回多条可标注 {"reply":"回#N、#M"} 指定一起消。';
+    // 8-10 19:13（用户：男主每次只看当前步，不报"还有几条没回"）——
+    // 唤醒只提示当前步：继续处理完，带【结束】消掉
+    final curIdx = (f['currentStep'] as num?)?.toInt() ?? 0;
+    Map<String, dynamic>? curStep;
+    if (curIdx >= 0 &&
+        curIdx < steps.length &&
+        steps[curIdx]['status'] != 'done') {
+      curStep = steps[curIdx];
+    } else {
+      for (final s in steps) {
+        if (s['status'] != 'done') {
+          curStep = s;
+          break;
+        }
+      }
     }
-    final briefs = pending
-        .take(3)
-        .map((s) => '第${steps.indexOf(s) + 1}步「${_short(s['userText'].toString(), 20)}」')
-        .join('、');
-    final more = pending.length > 3 ? ' 等${pending.length}条' : '';
-    return '还有 ${pending.length} 条没回：$briefs$more——先回她；'
-        '做完的这条回复结尾带【结束】标签才算消掉，'
-        '回多条可标注 {"reply":"回#N、#M"} 指定一起消。';
+    if (curStep == null) return null; // 全消（不该出现，防呆）
+    return '当前第 ${steps.indexOf(curStep) + 1} 步「'
+        '${_short(curStep['userText'].toString(), 20)}」还没做完——'
+        '继续处理，做完这条回复结尾带【结束】标签消掉。';
   }
 
   // ---- 工具 ----
