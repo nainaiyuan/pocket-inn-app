@@ -287,6 +287,17 @@ class ChatFlowStore {
     }
     if (!changed) return;
     f['steps'] = steps; // _stepsOf 是拷贝，必须写回（FlowStore BUG-3 教训）
+    // 8-10 v3（用户 17:48 拍板）：【结束】标签 = 男主明确"这条做完了"。
+    // 管家**绝不自动补**标签；男主打了 → 正常消步骤；若流程里还有
+    // 没回的步骤，标签只作用于标了回#N 的那条，其余保留（不丢）。
+    final hasEndTag = replyText.contains('【结束】');
+    if (hasEndTag) {
+      final stillPending = steps
+          .where((s) => s['status'] != 'done' && s['isReview'] != true)
+          .length;
+      _log('对话流程', '🔚 男主回复带【结束】标签'
+          '${stillPending > 0 ? '（还有 $stillPending 条没回，保留下次处理）' : ''}');
+    }
     // 8-09 20:1x（用户重新定义复核，纠正 18:33 实现）：
     // 【复核的真实语义】大流程结尾的"确认是否结束"步骤：
     // - 触发条件 = **这个流程（含插话小流程）里用过工具**。
@@ -560,65 +571,68 @@ class ChatFlowStore {
           '{"need_continue": false}');
       return sb.toString();
     }
-    // 步骤清单（最多显示 6 步）
-    final show = steps.length > 6 ? steps.sublist(steps.length - 6) : steps;
-    final hidden = steps.length - show.length;
-    if (hidden > 0) sb.writeln('（更早 $hidden 步已完成）');
-    for (var i = 0; i < show.length; i++) {
-      final step = show[i];
-      final st = step['status']?.toString() ?? 'pending';
-      final isCur = (st != 'done') && (steps.indexOf(step) == cur);
-      final mark = st == 'done'
-          ? '✅'
-          : (isCur ? '▶' : '☐');
-      final tools = _asMap(step['tools']);
-      final reply = (step['reply'] as String?)?.toString().trim() ?? '';
+    // ── 步骤清单（8-10 v3：只显示未回步骤——✅ 已回归【历史流程】区，
+    // 不重复显示；格式 #N [时间] 她/管家：内容 + 处理过程细节）──
+    final doneCount = steps
+        .where((s) => s['status'] == 'done' && s['isReview'] != true)
+        .length;
+    if (doneCount > 0) {
+      sb.writeln('（已消 $doneCount 条，细节在【历史流程】，不重复显示）');
+    }
+    for (var i = 0; i < steps.length; i++) {
+      final step = steps[i];
       // 8-09 20:1x（用户实测）：复核步骤不在清单里占"第N步"位置——
       // 它会让男主以为要"回#N"，把已回复的内容重复说。
-      // 复核只在末尾作为整体判断引导出现（见下方"复核"段）。
       if (step['isReview'] == true) continue;
-      // 8-10：管家插入的步骤（闹钟/系统事件）标【管家】来源——
-      // 不是她说的，但也是要处理的下一个步骤
+      final st = step['status']?.toString() ?? 'pending';
+      if (st == 'done') continue; // 已回 → 历史流程区
+      final isCur = steps.indexOf(step) == cur;
+      final mark = isCur ? '▶' : '☐';
+      // 8-10：管家插入的步骤（闹钟/系统事件）标【管家】来源
       final fromMark = step['from'] == 'butler' ? '【管家】' : '';
-      var line = '$mark 第${steps.indexOf(step) + 1}步$fromMark ${step['userText']}';
-      if (st == 'done') {
-        final toolPart = tools.isEmpty ? '' : '（工具：${_toolsBrief(tools)}）';
-        final replyPart = reply.isEmpty ? '' : '→ 你回：${_short(reply, 40)}';
-        line += '$toolPart$replyPart';
-      } else if (tools.isNotEmpty) {
-        line += '（处理中：${_toolsBrief(tools)}）';
+      final ts = (step['ts'] ?? '').toString();
+      final no = steps.indexOf(step) + 1;
+      final tools = _asMap(step['tools']);
+      final reply = (step['reply'] as String?)?.toString().trim() ?? '';
+      final speaker = step['from'] == 'butler' ? '管家' : '她';
+      sb.writeln('$mark #$no [$ts]$fromMark $speaker：${step['userText']}');
+      // 工具链（这条下面做了什么）
+      for (final entry in tools.entries) {
+        final v = entry.value;
+        if (v is! Map) continue;
+        final ok = v['ok'] == true;
+        final brief = (v['brief'] ?? '').toString();
+        sb.writeln('  - 你：调 ${entry.key} ${ok ? '✅' : '❌'}'
+            '${brief.isEmpty ? '' : '：$brief'}');
       }
-      sb.writeln(line);
-      // 管家备注（8-10 用户：挂在触发它的那句话后面，合并做——
-      // 记忆/习惯/情感波动等分析信息，男主处理这条时一起看一起做）
+      // 管家备注（8-10 用户：挂在触发它的那句话后面，合并做）
       final notes = (step['butlerNotes'] as List?)?.cast<Map<String, dynamic>>() ??
           <Map<String, dynamic>>[];
       for (final n in notes) {
         sb.writeln('  - [${n['ts']}] 管家：${n['text']}');
       }
-      // 决策点：当前步
+      // 已回复内容
+      if (reply.isNotEmpty) {
+        sb.writeln('  - 你回：「${_short(reply, 60)}」');
+      }
+      // 决策点：当前步（工具结果机械提示，8-09 18:3x）
       if (isCur && tools.isNotEmpty) {
         final dec = _decisionHint(tools);
-        if (dec.isNotEmpty) sb.writeln('   → 判断：$dec');
+        if (dec.isNotEmpty) sb.writeln('  → 判断：$dec');
       }
-    }
-    // 当前步无工具 → 提示男主判断：直接回复消掉 or 调工具再回复消掉
-    // 8-10 00:5x（用户：插话轮要让男主判断"直接回消掉还是要调用工具
-    // 再说话消掉"，每轮插话都这样）
-    final curStep = cur >= 0 && cur < steps.length ? steps[cur] : null;
-    if (curStep != null &&
-        curStep['status'] != 'done' &&
-        _asMap(curStep['tools']).isEmpty) {
-      sb.writeln('→ 当前步：判断——直接回复她消掉这条，'
-          '还是要先调工具（查东西/记记忆）再回复消掉？');
+      // ▶ 判断固定文本（8-10 v3：永远在最后，男主每动一步往后推一格）
+      if (isCur) {
+        sb.writeln('▶ 判断：继续？① 调工具 ② 回复/询问她后继续 '
+            '③ 回复她后消掉（打【结束】）');
+      }
     }
     // 8-09 20:1x：复核已去掉（8-10 00:49），无复核引导。
     // "没回"只数真实用户步骤（isReview != true）。
     final realPendingCount =
         steps.where((s) => s['status'] != 'done' && s['isReview'] != true).length;
-    if (realPendingCount > 0) {
-      sb.writeln('提示：还有 $realPendingCount 条没回（用户消息），先回她。'
-          '${realPendingCount > 1 ? '一次回多条可标注 {"reply":"回#N、#M"}（N=第几步）一起消；否则默认只消最老一条。' : ''}');
+    if (realPendingCount > 1) {
+      sb.writeln('多条可一起消：回复标 {"reply":"回#N、#M"}（N=编号）一起消；'
+          '不标默认只消最老一条。');
     }
     // 8-10 00:5x（用户：男主消掉大流程自带结尾命令）——结尾命令清单，
     // 男主消掉大流程（最后一步回复）时回复末尾带一个：
