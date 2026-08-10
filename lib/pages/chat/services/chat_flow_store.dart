@@ -196,25 +196,13 @@ class ChatFlowStore {
   /// 管家分析备注 → 挂到最新用户步骤后面（8-10 用户定稿：用户说一句话，
   /// 管家分析出的记忆/习惯/情感波动等信息，插到这句话的流程步骤后面，
   /// 合并在一起做——不单独排队（不进#A）、不塞到正在处理的步骤）
-  /// 8-11 03:2x（用户：没有步骤时管家判断就是第一步）——无执行中流程 →
-  /// 立新流程，管家判断 = 第一步（from='butler'），不再丢弃
+  /// 8-11 03:30（用户澄清）：管家是**提醒**（同步显示在用户的话上面），
+  /// 不是独立步骤——无执行中流程时丢弃（提醒必须挂在步骤上）
   static Future<void> feedButlerNote(String personaId, String text) async {
     if (personaId.isEmpty || text.trim().isEmpty) return;
     await warm(personaId);
     final f = _memCache;
-    if (f == null || f['status'] != 'running') {
-      final flow = <String, dynamic>{
-        'flowNo': await _nextFlowNo(),
-        'goal': _short(text, 30),
-        'status': 'running',
-        'currentStep': 0,
-        'steps': [_newStep(text, no: 1)..['from'] = 'butler'],
-        'startedAt': DateTime.now().toIso8601String(),
-      };
-      await _write(personaId, flow);
-      _log('对话流程', '📎 管家判断立流程 #${flow['flowNo']}：「${flow['goal']}」= 第一步');
-      return;
-    }
+    if (f == null || f['status'] != 'running') return;
     final steps = _stepsOf(f);
     if (steps.isEmpty) return;
     final last = steps.last;
