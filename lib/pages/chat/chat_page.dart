@@ -1423,18 +1423,29 @@ class _ChatPageState extends State<ChatPage>
         // 无 id，如 add_record）照样进原生路径 → 400。
         // 修：**有 id 才走原生，无 id 一律文本协议**（与 thinkingOn 无关）——
         // 原生 tool_calls 按规范必带 id，缺 id 的只可能是文本块解析来的。
-        final allCallsHaveId = result.toolCalls!.every(
-            (c) => (c['id']?.toString() ?? '').isNotEmpty);
+        // 8-10 21:0x（用户：文本协议是兜底，不该当主路径——各家 AI 能原生
+        // 就原生，DeepSeek 要传思考链也照传）：**补稳定 id 走原生，不降级**。
+        // 补 id 含轮次+序号（同轮同名工具不冲突），与循环里 tool 消息的
+        // toolCallId 一致 → assistant(tool_calls) 与 tool 消息严格一一配对。
+        for (var i = 0; i < result.toolCalls!.length; i++) {
+          final c = result.toolCalls![i];
+          if ((c['id']?.toString() ?? '').isEmpty) {
+            c['id'] = 'call_${toolLoop}_${i}_${c['name']?.toString() ?? ''}';
+            DebugLogger.log(
+              'AI路由',
+              '🔗 文本块 call 补原生 id：${c['id']}（走原生配对，不降级）',
+            );
+          }
+        }
+        // 唯一降级场景：思考模式开启但没返回思考（异常状态）→ 保守文本协议
         final nativeCalls = (thinkingOn && !hasReasoning)
             ? <Map<String, dynamic>>[]
-            : (allCallsHaveId
-                ? result.toolCalls!
-                : <Map<String, dynamic>>[]);
+            : result.toolCalls!;
         if (result.toolCalls!.isNotEmpty && nativeCalls.isEmpty) {
           DebugLogger.log(
             'AI路由',
-            '🛡 工具轮降级文本协议（思考链关/解析失败/工具 call 缺 id）→ '
-            '原生 tool_calls 不发了，防 DeepSeek 400',
+            '🛡 工具轮降级文本协议（思考模式异常：thinkingOn 但无 reasoning）→ '
+            '原生 tool_calls 不发了',
           );
         }
         final textToolResults = <String>[];
