@@ -386,7 +386,54 @@ class ChatFlowStore {
         }
       }
     }
-    if (!changed) return;
+    if (!changed) {
+      // 8-10 23:0x（用户实测：男主回#2 但流程只有 #1 → 无效编号
+      // 什么都不消、回复也不挂 → finishCheck 判"没说过话"打回 →
+      // 流程卡在 running，男主带【结束】也结束不了）：
+      // · 带【结束】但编号无效 → FIFO 兜底消最老（男主明确想结束），
+      //   消完落到下面 common 逻辑（还有 pending / 全消 done|总结轮）
+      // · 纯回#N 无效（无【结束】）→ 回复挂到当前步（男主说过话了，
+      //   finishCheck 才能通过），日志警告编号无效，不消步骤
+      if (hasEndTag) {
+        for (var i = 0; i < steps.length; i++) {
+          if (steps[i]['status'] != 'done') {
+            steps[i]['status'] = 'done';
+            steps[i]['reply'] = replyText.trim();
+            changed = true;
+            break;
+          }
+        }
+        if (changed) {
+          _log('对话流程',
+              '⚠️ 回#N 编号无效（${marked.join('、')}，流程只有 ${steps.length} 步），'
+              '按【结束】FIFO 兜底消最老');
+        }
+      } else {
+        var target = -1;
+        final curIdx = (f['currentStep'] as num?)?.toInt() ?? 0;
+        if (curIdx >= 0 &&
+            curIdx < steps.length &&
+            steps[curIdx]['status'] != 'done') {
+          target = curIdx;
+        } else {
+          for (var i = 0; i < steps.length; i++) {
+            if (steps[i]['status'] != 'done') {
+              target = i;
+              break;
+            }
+          }
+        }
+        if (target >= 0) {
+          steps[target]['reply'] = replyText.trim();
+          f['steps'] = steps;
+          await _write(personaId, f);
+          _log('对话流程',
+              '⚠️ 回#N 编号无效（${marked.join('、')}，流程只有 ${steps.length} 步），'
+              '回复挂到第 ${target + 1} 步（不消步骤）');
+        }
+        return;
+      }
+    }
     f['steps'] = steps; // _stepsOf 是拷贝，必须写回（FlowStore BUG-3 教训）
 
     // 还有没回的步骤 → 保留下次处理（流程不结束，唤醒男主走完）
@@ -731,11 +778,11 @@ class ChatFlowStore {
         final dec = _decisionHint(tools);
         if (dec.isNotEmpty) sb.writeln('  → 判断：$dec');
       }
-      // ▶ 判断固定文本（8-10 v3：永远在最后；19:0x：强调【结束】标签
-      // 是消流程的唯一方式）
+      // ▶ 判断固定文本（8-10 23:0x：更新为 v3 语义——回#N 消步骤 +
+      // 总结轮确认 + 闲聊【结束】收尾；删掉旧"结尾一定带【结束】才消"）
       sb.writeln('▶ 判断：继续？① 调工具 ② 回复/询问她后继续 '
-          '③ 回复她后消掉（结尾一定带【结束】标签——不带=流程不消，'
-          '管家会再唤醒你）');
+          '③ 做完了 → 回#N 消掉这条（步骤全消 → 总结轮看一遍 → '
+          '带【结束】总结结束；闲聊 → 直接带【结束】收尾）');
     }
     // 8-10 00:5x（用户：男主消掉大流程自带结尾命令）——结尾命令清单，
     // 男主消掉大流程（最后一步回复）时回复末尾带一个：
