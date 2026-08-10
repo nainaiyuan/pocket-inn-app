@@ -285,6 +285,16 @@ class ChatFlowStore {
   ///   流程保持 running，回复内容挂到对应步骤的 reply 字段（显示"你回：…"），
   ///   下次检查轮自动唤醒男主继续走，直到他打【结束】才算完。
   /// - 全部消完 → 流程 done（不再唤醒）。
+  /// 8-10 22:1x（用户定稿，拆"消步骤"和"结束大流程"两个动作）：
+  /// - **回#N（步骤序号）→ 消掉那一步**（不再要求必须带【结束】——
+  ///   处理完一条就回#N 消掉，插话也是步骤，先回#N 消插话再继续大流程）
+  /// - **回#flowNo（大流程编号，清单顶部【对话流程 #N】）→ 强制结束
+  ///   整个大流程**（第一句原话 + 插话都归这个大流程，最后一句
+  ///   说"回#flowNo【结束】"才结束大流程）
+  /// - 【结束】标签本身只消步骤（回#N 精确 / 无标记 FIFO 最老），
+  ///   **不强制结束大流程**——中途误带【结束】不会提前结束
+  /// - 无回#N 无【结束】→ 纯对话，不消（回复挂步骤）
+  /// - 所有步骤消完 → 流程自动 done（"中间的都消了才是结束大流程"）
   static Future<void> feedReply(String personaId, String replyText) async {
     if (personaId.isEmpty || replyText.trim().isEmpty) return;
     await warm(personaId);
@@ -294,12 +304,15 @@ class ChatFlowStore {
     if (steps.isEmpty) return;
     final hasEndTag = replyText.contains('【结束】');
     final marked = _parseMarkedNos(replyText);
+    final flowNo = (f['flowNo'] as num?)?.toInt() ?? 0;
+    // 男主明确回大流程编号 → 强制结束整个大流程（用户 8-10 22:1x）
+    final endWholeFlow = flowNo > 0 && marked.contains(flowNo);
 
-    if (!hasEndTag) {
-      // 不带【结束】→ 不消步骤（8-10 19:0x 用户拍板）：
+    if (!hasEndTag && marked.isEmpty) {
+      // 纯对话（无回#N 无【结束】）→ 不消步骤（8-10 19:0x 用户拍板）：
       // 中途说话 ≠ 结束。回复文本挂到目标步骤（标了回#N 的第一个 /
       // 默认当前步）的 reply 字段，流程保持 running，
-      // 下次唤醒男主继续——他必须打【结束】才算完。
+      // 下次唤醒男主继续——他必须回#N 消步骤 / 回#flowNo 结束。
       var target = -1;
       if (marked.isNotEmpty) {
         for (final no in marked) {
@@ -342,16 +355,17 @@ class ChatFlowStore {
       f['steps'] = steps; // _stepsOf 是拷贝，必须写回（FlowStore BUG-3 教训）
       await _write(personaId, f);
       _log('对话流程',
-          '💬 男主回复（无【结束】标签）→ 不消步骤，流程继续'
+          '💬 男主回复（无回#N 无【结束】）→ 不消步骤，流程继续'
           '（第 ${target + 1} 步还挂着，下次检查轮唤醒男主继续处理）');
       return;
     }
 
-    // 带【结束】→ 消步骤（标了回#N 的 / 没标 FIFO 最老）
+    // 消步骤：回#N（步骤号）→ 精确消（8-10 22:1x：不再要求【结束】）；
+    // 只有【结束】无标记 → FIFO 消最老 pending
     var changed = false;
     if (marked.isNotEmpty) {
-      // 精确消：标注 #N = 第 N 步（绝对序号，跟清单显示一致）
       for (final no in marked) {
+        if (no == flowNo) continue; // 流程号不消步骤（走下面强制结束）
         if (no >= 1 && no <= steps.length) {
           final idx = no - 1;
           if (steps[idx]['status'] != 'done') {
@@ -361,7 +375,7 @@ class ChatFlowStore {
           }
         }
       }
-    } else {
+    } else if (hasEndTag) {
       // FIFO：消最老 pending
       for (var i = 0; i < steps.length; i++) {
         if (steps[i]['status'] != 'done') {
@@ -372,8 +386,22 @@ class ChatFlowStore {
         }
       }
     }
-    if (!changed) return;
+    if (!changed && !endWholeFlow) return;
     f['steps'] = steps; // _stepsOf 是拷贝，必须写回（FlowStore BUG-3 教训）
+
+    // 男主回大流程编号 → 强制结束整个大流程（所有步骤 done）
+    if (endWholeFlow) {
+      for (final s in steps) {
+        s['status'] = 'done';
+      }
+      f['steps'] = steps;
+      f['status'] = 'done';
+      f['currentStep'] = steps.length;
+      await _write(personaId, f);
+      _log('对话流程',
+          '🔚 男主回大流程 #$flowNo → 强制结束大流程（共 ${steps.length} 步全部 done）');
+      return;
+    }
 
     // 还有没回的步骤 → 保留下次处理（流程不结束，唤醒男主走完）
     final stillPending = steps
@@ -390,16 +418,16 @@ class ChatFlowStore {
       f['currentStep'] = nextCur < 0 ? steps.length : nextCur;
       await _write(personaId, f);
       _log('对话流程',
-          '🔚 【结束】消了 ${marked.isNotEmpty ? marked.length : 1} 条，'
+          '🔚 消了 ${marked.isNotEmpty ? marked.length : 1} 条，'
           '还有 $stillPending 条没回 → 流程继续（检查轮唤醒男主走完）');
       return;
     }
 
-    // 全部消完 → done（8-10 00:49：不复核不二次唤醒；【结束】=男主已确认结束）
+    // 全部消完 → done（8-10 00:49：不复核不二次唤醒；全部步骤消完 = 大流程自然结束）
     f['status'] = 'done';
     f['currentStep'] = steps.length;
     await _write(personaId, f);
-    _log('对话流程', '🔚 【结束】标签消掉大流程 → 流程结束，不再唤醒');
+    _log('对话流程', '🔚 全部步骤消完 → 大流程结束，不再唤醒');
   }
 
   /// 8-09 19:3x（用户设计定稿 9.4/9.8）：融合 = 男主自己判断重新编排步骤。
