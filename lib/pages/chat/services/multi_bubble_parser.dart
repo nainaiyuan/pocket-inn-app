@@ -379,8 +379,11 @@ void _jsonMapToBubbles(
 ) {
   for (final entry in map.entries) {
     final key = entry.key.toLowerCase();
+    // 8-10 20:5x：重复 key 修复后（msg_2/msg_3/act_2…），按基础名归类
+    final base =
+        RegExp(r'^([a-z]+)_\d+$').firstMatch(key)?.group(1) ?? key;
     final value = entry.value;
-    switch (key) {
+    switch (base) {
       case 'msg':
         final t = value?.toString() ?? '';
         if (t.trim().isNotEmpty) {
@@ -406,8 +409,28 @@ void _jsonMapToBubbles(
 
 Object? _tryDecode(String text) {
   try {
-    return jsonDecode(text);
+    return jsonDecode(_dedupeJsonKeys(text));
   } catch (_) {
     return null;
   }
+}
+
+/// 8-10 20:5x（用户：响应里有两条 msg 但气泡只显示一条/内容丢失）：
+/// 模型偶尔把多个 msg 塞进同一个 JSON 对象（{"msg":"a","msg":"b"}）——
+/// jsonDecode 对重复 key 后者覆盖前者 → 第一条 msg 直接丢失。
+/// 修：解码前把重复 key 改名（msg → msg_2/msg_3），解码后 _jsonMapToBubbles
+/// 按基础名归类，重复内容全部按出现顺序还原成气泡。
+/// 负向后顾 (?<!\\) 排除字符串值里的转义引号（值内裸引号不合法，安全）。
+String _dedupeJsonKeys(String json) {
+  final seen = <String, int>{};
+  return json.replaceAllMapped(
+    RegExp(r'(?<!\\)"([a-zA-Z_]+)"\s*:'),
+    (m) {
+      final key = m.group(1)!;
+      final n = (seen[key] ?? 0) + 1;
+      seen[key] = n;
+      if (n == 1) return m.group(0)!;
+      return '"${key}_$n":';
+    },
+  );
 }

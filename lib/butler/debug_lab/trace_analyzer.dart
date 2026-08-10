@@ -190,8 +190,13 @@ class TraceAnalyzer {
     ));
 
     // c2: 当前状态块
+    // 8-10 20:5x（用户：Xc2 误报"【当前情况】缺失"）：v3 重构（8-10）
+    // 删了【当前情况】独立块，男主看【当前流程】清单就知道自己在哪——
+    // 检查同步更新：两个块名都认。
     final hasState = msgs.any((m) =>
-        m.isSystem && m.content.contains('【当前情况】'));
+        m.isSystem &&
+        (m.content.contains('【当前情况】') ||
+            m.content.contains('【当前流程】')));
     out.add(TraceCheckResult(
       checkId: 'c2',
       name: '上下文·【当前情况】状态块',
