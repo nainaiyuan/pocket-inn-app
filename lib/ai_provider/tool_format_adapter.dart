@@ -155,7 +155,7 @@ String _sanitizeInvokeText(String text) {
   return t;
 }
 
-/// 剥掉所有流式标记 + 工具调用区域（tool_calls…</tool_calls> 或裸 invoke 块）
+/// 剥掉所有流式标记 + 工具调用区域（`tool_calls…</tool_calls>` 或裸 invoke 块）
 String stripAnthropicInvokeBlocks(String text) {
   final t = _sanitizeInvokeText(text);
   var r = t
