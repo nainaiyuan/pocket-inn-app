@@ -158,12 +158,24 @@ String _sanitizeInvokeText(String text) {
 /// 剥掉所有流式标记 + 工具调用区域（tool_calls…</tool_calls> 或裸 invoke 块）
 String stripAnthropicInvokeBlocks(String text) {
   final t = _sanitizeInvokeText(text);
-  return t
+  var r = t
+      // 8-11 06:0x（用户：气泡残留 "<"）：<|tool_calls|> 开标签被
+      // _sanitizeInvokeText 清洗成 <tool_calls|> 后，旧正则从 tool_calls
+      // 开始剥 → 前面的 "<" 单独残留 → 气泡显示 "…忘了。<"。
+      // 改成从 "<" 起整块剥（覆盖 <|tool_calls|> / <tool_calls|> / <tool_calls>）。
       .replaceAll(
-          RegExp(r'tool_calls[\s\S]*?</tool_calls>', caseSensitive: false),
+          RegExp(r'<[^>]*tool_calls[\s\S]*?</tool_calls>', caseSensitive: false),
           '')
       .replaceAll(_invokeRe, '')
       .trim();
+  // 模型只写 `<|tool_calls|>` 开头 + invoke 块、没写 `</tool_calls>` 闭合时，
+  // 剥完 invoke 会剩开标签壳（`<tool_calls|>` / `<|tool_calls|>`）→ 清掉。
+  // 带尖括号才匹配，正文里的 "tool_calls" 单词不受影响。
+  r = r
+      .replaceAll(
+          RegExp(r'<\s*\|?\s*tool_calls\s*\|?\s*>?', caseSensitive: false), '')
+      .trim();
+  return r;
 }
 
 /// 从文本解析 Anthropic invoke 工具调用（清洗污染后匹配）
