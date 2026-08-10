@@ -1204,11 +1204,38 @@ class AiChatService {
                     userAlreadyReplied: userAlreadyReplied)
                 : '（空）')
             : message);
+    // 8-11 04:4x（用户：大流程清单 = 最后一条 user 消息）：提前算
+    // inFlow/chatFlowText——finalBlock（📄 显示）和 messages 组装都要用。
+    // 每次对话=一个流程，她的每句话都是步骤，清单本身就是男主的工作。
+    final inFlow =
+        FlowStore.isActive(ctxPid) || FlowStore.settingDialogActive;
+    final chatFlowText =
+        inFlow ? null : ChatFlowStore.buildText(ctxPid);
+    // 8-11 04:5x（用户：后续还没做的单独放一边，标签隔开，不污染
+    // 【当前流程】工作区）——独立区【后续待处理】，当前步做完自动移上来
+    final pendingFlowText =
+        inFlow ? null : ChatFlowStore.pendingText(ctxPid);
+    // 8-11 04:5x（用户：顺序 = 上【上下文参考】→ 中【当前流程】→
+    // 下【后续待处理】；最后一条不是"她的话/当前输入"）📄 与实际一致
+    final showFlowAsLast =
+        !isLight && chatFlowText != null && chatFlowText.isNotEmpty;
+    final flowBlock = showFlowAsLast
+        ? '【当前流程】（你当前要处理的工作——她的话在▶当前步里；'
+            '按清单做，做完回#N 标记做完自动推下一条）\n$chatFlowText'
+        : null;
+    final pendingBlock =
+        (showFlowAsLast &&
+                pendingFlowText != null &&
+                pendingFlowText.isNotEmpty)
+            ? '\n\n【后续待处理】（还没做的，放当前工作下面——'
+                '**现在不用处理**；做完当前步自动移上来一条，'
+                '处理完的移上去当【上下文参考】）\n$pendingFlowText'
+            : '';
     lastPromptText = isLight
-        ? '【轻量期】stateful 刚全量带过/重扔过，服务端上下文还热——本次只发当前消息：\n\n'
-            '【User·当前消息】\n$userText'
+        ? '【轻量期】stateful 刚全量带过/重扔过，服务端上下文还热——'
+            '本次只发当前消息：\n\n$userText'
         : '【System】\n$systemPrompt$historyText\n\n'
-            '【User·当前消息】（这是用户刚刚发的消息，只需要回复这一条）\n$userText';
+            '${flowBlock ?? '【她刚说的话】\n$userText'}$pendingBlock';
     DebugLogger.log('Prompt', '本次组装完成（${lastPromptText!.length} 字，可点 📄 查看）');
     // 完整内容落库（按时间存，重启后仍可查）
     unawaited(ChatStorageService().savePromptLog(personaId, lastPromptText!));
@@ -1223,14 +1250,14 @@ class AiChatService {
     // 待回复判断靠【当前流程】清单（✅/▶/☐）+ 下面这些队列。
     final pendingUser = PendingQueueStore.pendingUserText(ctxPid);
     final pendingButler = PendingQueueStore.pendingButlerText(ctxPid);
-    // 8-06 23:55 用户：流程层——【当前流程】注入（男主自管，每轮可见）
-    // 执行中她发来的消息会被收集（PendingQueueStore），男主专注流程；
-    // 被打断（stopped）会看到停在哪、她说了什么 → 决定 resume 还是先回复
-    final flowText = FlowStore.text(ctxPid);
+    // 8-06 23:55 用户：流程层——执行中她发来的消息会被收集
+    // （PendingQueueStore），男主专注流程；被打断（stopped）会看到
+    // 停在哪、她说了什么 → 决定 resume 还是先回复
+    // （flowText/taskListText/flowHint 已删 8-11 05:0x 用户拍板长任务不要了）
     // 8-07 19:5x 用户：状态感知——男主每轮先知道"当前在哪"再决定怎么回
     // （走流程 / 等工具结果 / 正常对话）；流程中她主对话说的话进【流程输入】，
     // 流程结束自动回到【待回复】<user>（编号不变，不会丢）
-    final inFlow = FlowStore.isActive(ctxPid) || FlowStore.settingDialogActive;
+    // （inFlow 已在上方 userText 前声明，8-11 04:4x）
     final flowGoal = FlowStore.goalOf(ctxPid);
     // 8-07 21:52 用户：状态块组装日志（男主自查"我这轮看到了什么"）
     DebugLogger.log(
@@ -1240,25 +1267,18 @@ class AiChatService {
       ' 流程输入=${inFlow && pendingUser != null ? '有' : '无'}'
       ' 系统消息=${pendingButler != null ? '有' : '无'}',
     );
-    // 8-08 15:2x（设计文档六，GPT 10 问 3 定案）：目标对照清单——
-    // 管家机械生成（✅已完成/☐未完成/本步已用工具/完成条件），不靠 LLM 记忆
-    final taskListText = FlowStore.taskList(ctxPid);
     // 8-08 15:2x（设计文档四，GPT 10 问 2）：工具手册注入（上下文预算，精简）
     // 男主查一次格式就记住，不用反复试
     final manualText = ToolManualStore.text(ctxPid);
     // 8-08 15:2x（设计文档八）：工具测试任务块（进度/当前测什么）
     final testBlock = ToolTestStore.block(ctxPid);
-    // 8-08 21:5x（GPT10问第7条 state_hint 专区）：软提示统一进状态块——
-    // 工具重复（FlowStore.stateHint，机械生成）+ 本轮软提示（查询类≥3/连续
-    // 拒绝≥2，chat_page 累积传入）。区分 tool_result=工具真实返回 vs
-    // state_hint=管家提示，防模型误认提示为工具内容。
-    final flowHint = FlowStore.stateHint(ctxPid);
+    // 本轮软提示（查询类≥3/连续拒绝≥2，chat_page 累积传入）
     final extraHints = (stateHints ?? const <String>[]).join('\n');
     // 8-09 18:1x（用户设计定稿：每次对话=一个流程）：对话流程清单——
     // 用户每条消息=一个条目，✅已回/☐没回 + 工具链 + 回复；每次唤醒注入，
     // 男主看到就不会弄混、不漏、不重复回。流程中不注入（走【当前流程】）。
-    final chatFlowText =
-        inFlow ? null : ChatFlowStore.buildText(ctxPid);
+    // （chatFlowText 已在上方 userText 前声明，8-11 04:4x——移作
+    // 最后一条 user【当前流程】，不再放状态块；flowHint 已删 8-11 05:0x）
     final statusBlocks = <AIChatMessage>[
       // 8-10 v3：不再有【当前情况】状态感知独立块——男主看下面的
       // 【当前流程】清单就知道自己在哪、该做什么。
@@ -1269,18 +1289,24 @@ class AiChatService {
               '要消必须显式标注 {"reply":"回#N"}（JSON 字段），一句话可回多条；'
               '不回就挂着，她问起来你老实说）\n$pendingUser',
         ),
-      if (chatFlowText != null && chatFlowText.isNotEmpty)
+      // 8-11 04:5x（用户：后续待处理放【当前流程】【后面/下面】——
+      // "当前工作完了，自动把下面的移上来一个"；处理完的移上去当参考。
+      // 顺序 = 上【上下文参考】→ 中【当前流程】→ 下【后续待处理】。
+      // 工具轮：两个区都留状态块（工具轮最后一条是工具结果）
+      if (toolRound && chatFlowText != null && chatFlowText.isNotEmpty)
         AIChatMessage(
           role: 'system',
-          // 8-10 19:13（用户：男主每次只看当前做的那一步——▶=当前这条，
-          // 做完自动推下一个上来；✅已做的进【历史流程】区，不报"还有几条没回"）。
-          // 清单里"→ 判断"和"▶ 判断"= 三选一（继续调工具/回复询问后继续/
-          // 回复后打【结束】消大流程），"结尾命令"= 消掉大流程的动作。
-          // 男主看到清单直接处理，不用查工具。
-          content: '【当前流程】（你正在做的这条大流程——▶=当前在做；'
-              '做完自动推下一条上来，✅已做的进【历史流程】区。'
-              '**不用调任何工具查流程**，直接按清单处理；'
-              '里面的"→ 判断"和"▶ 判断"就是三选一，照用）\n$chatFlowText',
+          content: '【当前流程】（你现在要处理的工作——'
+              '▶=当前正在处理的这条；**不用调任何工具查流程**，'
+              '直接按清单处理；"→ 判断"和"▶ 判断"就是三选一，照用）'
+              '\n$chatFlowText',
+        ),
+      if (toolRound && pendingFlowText != null && pendingFlowText.isNotEmpty)
+        AIChatMessage(
+          role: 'system',
+          content: '【后续待处理】（还没做的，放当前工作下面——'
+              '**现在不用处理**；做完当前步自动移上来一条，'
+              '处理完的移上去当【上下文参考】）\n$pendingFlowText',
         ),
       if (inFlow && pendingUser != null)
         AIChatMessage(
@@ -1317,26 +1343,14 @@ class AiChatService {
           content: '【系统消息 #A】（管家/系统提醒——处理完直接标"回#A"消掉，'
               '不用回复她；觉得该让她知道才用 {"msg":"…"} 转达）\n$pendingButler',
         ),
-      if (flowText != null && flowText.isNotEmpty)
+      // 8-11 05:0x（用户 8-10 拍板"长任务的都不要了"）：
+      // 旧长任务注入全删——旧【当前流程】卡片、【任务清单】、
+      // FlowStore 状态提示都不再注入（任务都插流程里，见对话流程清单）
+      if (extraHints.isNotEmpty)
         AIChatMessage(
           role: 'system',
-          content: '【当前流程】（旧长任务卡片，已停用——长任务直接做，'
-              '做完回复她消掉；有遗留卡片就按它收尾，工具类步骤做完会自动推进）\n$flowText'
-              '\n（执行中她发来的消息管家会收集，不用管，专注执行；'
-              '被她打断会收到【系统事件】，你决定继续还是先回复她）',
-        ),
-      if (taskListText != null && taskListText.isNotEmpty)
-        AIChatMessage(
-          role: 'system',
-          content: '【任务清单】（管家机械生成的目标对照——哪个做了哪个没做，'
-              '对照检查别空转）\n$taskListText',
-        ),
-      if (flowHint.isNotEmpty || extraHints.isNotEmpty)
-        AIChatMessage(
-          role: 'system',
-          content: '【状态提示】（管家软提示——不是工具结果，供你参考判断；'
-              '觉得该让她知道才用 {"msg":"…"} 转达，不用回复这条）\n'
-              '${flowHint.isNotEmpty ? '$flowHint\n' : ''}$extraHints',
+          content: '【软提示】（管家提示——不是工具结果，供你参考判断；'
+              '觉得该让她知道才用 {"msg":"…"} 转达，不用回复这条）\n$extraHints',
         ),
       if (testBlock.isNotEmpty)
         AIChatMessage(
@@ -1352,15 +1366,24 @@ class AiChatService {
     ];
     final messages = <AIChatMessage>[
       if (!isLight) AIChatMessage(role: 'system', content: systemPrompt),
-      if (!isLight) ...statusBlocks,
+      // 8-11 04:4x（用户：历史放当前处理位置的上面作上下文参考）：
+      // 顺序 = 人设 → 历史参考（已聊过的，不用回复不用做）→
+      // 状态块（【当前流程】= 当前正在处理的工作 + 后续待处理）→ 本轮输入。
+      // 男主先看历史保持连贯，再看当前工作位置动手，不会被"最后一条
+      // 用户消息"误导成"只回消息、跳过流程"。
       if (historyMsgs.isNotEmpty) ...[
         AIChatMessage(
           role: 'system',
-          content: '【上下文说明】以下是已聊过的历史（摘要/工具/系统/聊天分区），'
-              '最后一条【当前用户消息】才是要回复的。',
+          content: '【上下文参考】（已处理过的历史：摘要/工具/系统/聊天分区）'
+              '——只作参考保持人设和记忆连贯，**不用回复、不用处理、'
+              '不要重复做**。布局：上面是已处理的（这里参考），'
+              '中间【当前流程】=当前正在处理的（她的话在▶当前步里），'
+              '下面【后续待处理】=还没做的。历史里的事如果已经做过，'
+              '就不要再做一遍。',
         ),
         ...historyMsgs,
       ],
+      if (!isLight) ...statusBlocks,
     ];
     // 工具轮消息顺序（8-05 18:56 用户定稿）：工具相关在前，用户消息最后——
     // AI 按数组顺序读，最后一条 user 才是"要回复的"。
@@ -1382,8 +1405,8 @@ class AiChatService {
       if (userMsg != null && userMsg.isNotEmpty) {
         messages.add(AIChatMessage(
           role: 'user',
-          content: '【用户当前消息】（这是用户刚发的消息，'
-              '你刚调用的工具结果在上面——基于结果回复这条）\n$userMsg',
+          content: '【当前输入】（本轮触发：她刚说的话——'
+              '你刚调用的工具结果在上面，基于结果处理当前步（▶））\n$userMsg',
         ));
       }
     } else {
@@ -1394,7 +1417,27 @@ class AiChatService {
               '针对它回应或调用工具处理）\n$butlerInstruction',
         ));
       }
-      messages.add(AIChatMessage(role: 'user', content: message));
+      // 8-11 04:5x（用户：最后一条 = 工作区【当前流程】（她的话在▶
+      // 当前步里，不重复放"她的话"）+ 下面【后续待处理】（还没做的，
+      // 标签隔开，做完当前步自动移上来一条）。无流程（纯闲聊）时回退
+      // 到她的话）
+      if (!isLight &&
+          chatFlowText != null &&
+          chatFlowText.isNotEmpty) {
+        final flowPart = '【当前流程】（你当前要处理的工作——'
+            '她的话在▶当前步里；按清单做，做完回#N 标记做完自动推下一条）'
+            '\n$chatFlowText';
+        final pendingPart =
+            (pendingFlowText != null && pendingFlowText.isNotEmpty)
+                ? '\n\n【后续待处理】（还没做的，放当前工作下面——'
+                    '**现在不用处理**；做完当前步自动移上来一条，'
+                    '处理完的移上去当【上下文参考】）\n$pendingFlowText'
+                : '';
+        messages.add(AIChatMessage(
+            role: 'user', content: '$flowPart$pendingPart'));
+      } else {
+        messages.add(AIChatMessage(role: 'user', content: message));
+      }
     }
     // ── Agent Debug Lab 埋点（8-09）：begin + 记录实际发出的 messages ──
     TraceSession.instance.begin(

@@ -621,6 +621,15 @@ class _ChatPageState extends State<ChatPage>
     // 8-09 18:2x（对话流程 v2）：插话也进对话流程（追加步骤）
     ChatFlowStore.warm(pid);
     unawaited(ChatFlowStore.feedUser(pid, text));
+    // 8-11 04:3x（用户实测：插话没记入上下文）：插话走 systemEvent 路径
+    // 发男主，generateReply 里 systemEvent != null 不 feed 用户消息 →
+    // 插话原文不进【上下文参考】互动历史，男主回复后（步骤一消）上下文里
+    // 就没了（用户看到：发给男主的内容有男主回复、没她的插话）。
+    // 这里显式 feed（记入互动历史 + 原文落库；feedUserMessage 自带
+    // appendContextRaw，男主后续轮次还能看到插话原文；非待回复，不双回）
+    final _interruptChatPid =
+        _useTestSpace(pid) ? '$pid${AIProviderManager.mockTestSuffix}' : pid;
+    ContextManager.instance.feedUserMessage(_interruptChatPid, text);
     // 8-08 15:5x：存下插话内容（插话轮男主没回 → 兜底轮带给她看）
     _interruptUserText = text;
     // 队列里可能还有旧收集消息（旧版/管家入队）→ 一起带上

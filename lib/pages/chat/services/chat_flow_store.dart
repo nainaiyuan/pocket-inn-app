@@ -857,6 +857,10 @@ class ChatFlowStore {
       // 断言"这是最后一步"——应该询问男主判断后续还有没有步骤）
       final pendingCount =
           steps.where((s) => s['status'] != 'done').length;
+      // 8-11 04:5x（用户：后续还没做的【不要插进当前流程清单】——
+      // 单独标签【后续待处理】放一边，不污染当前工作区；当前步做完
+      // 自动把下面的移上来一个，处理完的移上去当【上下文参考】。
+      // 所以 buildText 只输出当前正在处理的，后续清单走 pendingText()）
       if (pendingCount <= 1) {
         sb.writeln('管家：判断一下——这个大流程后续还有没有步骤？'
             '没有 → 回#N 标完后直接带【结束】总结结束（不会再唤醒你）；'
@@ -871,6 +875,38 @@ class ChatFlowStore {
         '· {"need_continue": true} → 续命：还有事要做，唤醒继续干活\n'
         '· {"next_action": "merge"} → 与后续大流程合二为一（剩余步骤'
         '合并一起处理）');
+    return sb.toString();
+  }
+
+  /// 8-11 04:5x（用户：后续还没做的【单独放一边，标签隔开】——
+  /// 不插进【当前流程】工作区；当前步做完自动移上来一条，
+  /// 处理完的移上去当【上下文参考】）
+  /// 还没做的步骤清单（不含当前步）；没有后续 → null。
+  static String? pendingText(String personaId) {
+    final cache = _memCache;
+    if (cache == null) return null;
+    final f = cache[personaId];
+    if (f == null || f['closed'] == true) return null;
+    final steps = (f['steps'] as List?)?.cast<Map<String, dynamic>>();
+    if (steps == null || steps.isEmpty) return null;
+    final cur = f['cur'] as int? ?? 0;
+    final pending = <String>[];
+    for (var i = 0; i < steps.length; i++) {
+      final s = steps[i];
+      if (s['status'] == 'done') continue;
+      if (i == cur) continue;
+      final no = _stepNo(s, i);
+      final fromMark = s['from'] == 'butler' ? '【管家】' : '';
+      final spk = s['from'] == 'butler' ? '管家' : '她';
+      pending.add(
+          '☐ #$no $fromMark $spk：${_short(s['userText'].toString(), 24)}');
+    }
+    if (pending.isEmpty) return null;
+    final sb = StringBuffer();
+    sb.writeln('（还没做，当前步做完自动移上来一条）');
+    for (final line in pending) {
+      sb.writeln(line);
+    }
     return sb.toString();
   }
 
