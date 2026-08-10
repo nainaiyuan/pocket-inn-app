@@ -854,12 +854,23 @@ class _ChatPageState extends State<ChatPage>
     final chatFlowStatus = ChatFlowStore.statusOf(pid);
     final maleChoseContinue = _maleChoseContinue;
     _maleChoseContinue = false;
-    if (chatFlowStatus == 'done' && !maleChoseContinue) {
+    // 8-10 21:5x（用户：manage_task 失败后男主消流程 → done 不唤醒 → 失败被遗忘）：
+    // 本轮有工具失败（_lastRoundToolFailed）→ 即使 done 也唤醒男主处理，
+    // 检查轮会带失败提醒。处理完（下轮无新失败）自然恢复"done 不唤醒"。
+    final toolFailed = _lastRoundToolFailed;
+    _lastRoundToolFailed = false;
+    if (chatFlowStatus == 'done' && !maleChoseContinue && !toolFailed) {
       DebugLogger.log(
         '管家流程',
         '🔕 对话流程已结束（done），不唤醒（用户 8-10：消掉大流程不二次唤醒）',
       );
       return;
+    }
+    if (toolFailed) {
+      DebugLogger.log(
+        '管家流程',
+        '🔔 本轮有工具失败 → done 也唤醒男主处理（manage_task 缺参数等）',
+      );
     }
     if (maleChoseContinue) {
       DebugLogger.log(
@@ -982,10 +993,17 @@ class _ChatPageState extends State<ChatPage>
     }
     // 8-09 18:1x（对话流程）：检查轮带待回清单（还有几条没回）
     final chatFlowBrief = ChatFlowStore.checkBrief(pid);
+    // 8-10 21:5x：工具失败提醒（本轮有失败才带，用完即清）
+    final toolFailedNote = _lastRoundToolFailed
+        ? '⚠️ 刚才有工具调用失败了（看上面工具结果里的 ❌）：'
+            '能补参数重试就补调工具重试；不需要处理就说明原因后正常结束。\n'
+        : '';
+    _lastRoundToolFailed = false;
     await _sendMsg(
       '',
       systemEvent: '【系统自动提醒——这不是用户消息，不用回复这条提醒本身】\n'
           '现在是"结束检查"：上一轮你已回复完，用户没有说话。\n'
+          '$toolFailedNote'
           '$pausedJudge'
           '${chatFlowBrief != null ? '（对话流程：$chatFlowBrief）\n' : ''}'
           '请判断有没有必须继续的事：\n'
@@ -2128,6 +2146,11 @@ class _ChatPageState extends State<ChatPage>
             textToolResults.add(
               '【工具 $name】${toolResult.ok ? '✅成功' : '❌失败'}：${toolResult.text}',
             );
+          }
+          // 8-10 21:5x（用户：manage_task 失败被遗忘）：工具失败（用户拒绝
+          // 不算——那是正常交互）→ 标记本轮有失败 → done 也唤醒男主处理
+          if (!toolResult.ok && !toolResult.text.startsWith('用户拒绝')) {
+            _lastRoundToolFailed = true;
           }
           // 防死循环：同一工具连续调用 ≥3 次 → 停止本轮
           final n = (consecutiveToolCounts[name] ?? 0) + 1;
@@ -3787,6 +3810,11 @@ class _ChatPageState extends State<ChatPage>
   // 8-08 15:2x（设计九，GPT：Provider 挂掉时男主会说话解释，不直接弹窗）：
   // AI 全失败 → 排队注入系统事件让男主解释（上限 1 次，再次失败弹窗兜底）
   String? _pendingProviderErrorEvent;
+
+  // 8-10 21:5x（用户：manage_task 失败后男主消流程 → done 不唤醒 → 失败被遗忘）：
+  // 本轮有工具失败（用户拒绝不算）→ 即使流程 done 也唤醒男主处理失败。
+  // 检查轮注入失败提醒，处理完重置。
+  bool _lastRoundToolFailed = false;
   bool _providerErrorInjected = false;
 
   // 8-08 15:5x（用户反馈：插话后男主光调工具没回用户）：
@@ -4594,38 +4622,58 @@ class _ChatPageState extends State<ChatPage>
       }
     } catch (_) {}
     FocusManager.instance.primaryFocus?.unfocus();
-    final approved = await showDialog<bool>(
-      context: context,
-      // 8-09 20:5x（用户实测：误点弹窗边缘 → 弹窗关闭 → 被当"拒绝"，
-      // 男主说"我拒绝"）：授权弹窗必须明确点按钮，点外面关不掉
-      // （barrierDismissible:false），防误触把"没点"当成"拒绝"。
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFFFDF7F9),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('🔧$stepCtx 男主想$toolName'),
-        content: Text(
-          description,
-          style: const TextStyle(fontSize: 14, height: 1.5),
+    // 8-10 21:5x（用户：点了确认但男主没收到，卡住没再唤醒）：
+    // showDialog 万一挂起（context 失效/Navigator.pop 失败/弹窗被吞）→
+    // await 永久挂起 → 工具轮卡死 → 检查轮不触发 → 男主再也不醒。
+    // 兜底：2 分钟超时强制当拒绝（弹窗还开着就关掉），结果照常回传男主，
+    // 绝不卡死。异常（context 失效）也当拒绝。
+    bool? approved;
+    try {
+      approved = await showDialog<bool>(
+        context: context,
+        // 8-09 20:5x（用户实测：误点弹窗边缘 → 弹窗关闭 → 被当"拒绝"，
+        // 男主说"我拒绝"）：授权弹窗必须明确点按钮，点外面关不掉
+        // （barrierDismissible:false），防误触把"没点"当成"拒绝"。
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFFFDF7F9),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text('🔧$stepCtx 男主想$toolName'),
+          content: Text(
+            description,
+            style: const TextStyle(fontSize: 14, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text(
+                '不允许',
+                style: TextStyle(color: Color(0xFF8A7A80)),
+              ),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFC896B4),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('允许'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text(
-              '不允许',
-              style: TextStyle(color: Color(0xFF8A7A80)),
-            ),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFC896B4),
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('允许'),
-          ),
-        ],
-      ),
-    );
+      ).timeout(
+        const Duration(minutes: 2),
+        onTimeout: () {
+          DebugLogger.log('指令模块', '⏰ 审批弹窗 2 分钟未确认，超时当拒绝（防卡死）');
+          try {
+            Navigator.of(context, rootNavigator: true).pop();
+          } catch (_) {}
+          return false;
+        },
+      );
+    } catch (_) {
+      DebugLogger.log('指令模块', '⚠️ 审批弹窗异常（context 失效？）→ 当拒绝，不卡死');
+      approved = false;
+    }
     // 弹窗关闭后再收一次，防止焦点残留弹键盘
     FocusManager.instance.primaryFocus?.unfocus();
     return approved == true;
@@ -4640,33 +4688,50 @@ class _ChatPageState extends State<ChatPage>
     final split = ButlerCommandParser.instance.splitCategory(content);
     final category = split.category;
     final body = split.content;
-    final approved = await showDialog<bool>(
-      context: context,
-      // 8-09 20:5x：同 _approveToolCall——防误触把"没点"当"拒绝"
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFFFDF7F9),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('💌 男主想记住这个'),
-        content: Text(
-          '「$body」\n\n类别：$category\n\n要让他记住吗？',
-          style: const TextStyle(fontSize: 14, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('不记', style: TextStyle(color: Color(0xFF8A7A80))),
+    // 8-10 21:5x：同 _approveToolCall——弹窗挂起会卡死工具轮/唤醒链，
+    // 2 分钟超时当拒绝（防卡死），异常也当拒绝
+    bool? approved;
+    try {
+      approved = await showDialog<bool>(
+        context: context,
+        // 8-09 20:5x：同 _approveToolCall——防误触把"没点"当"拒绝"
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFFFDF7F9),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('💌 男主想记住这个'),
+          content: Text(
+            '「$body」\n\n类别：$category\n\n要让他记住吗？',
+            style: const TextStyle(fontSize: 14, height: 1.5),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFC896B4),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('不记', style: TextStyle(color: Color(0xFF8A7A80))),
             ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('让他记住'),
-          ),
-        ],
-      ),
-    );
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFC896B4),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('让他记住'),
+            ),
+          ],
+        ),
+      ).timeout(
+        const Duration(minutes: 2),
+        onTimeout: () {
+          DebugLogger.log('指令模块', '⏰ 记录确认弹窗 2 分钟未确认，超时当拒绝（防卡死）');
+          try {
+            Navigator.of(context, rootNavigator: true).pop();
+          } catch (_) {}
+          return false;
+        },
+      );
+    } catch (_) {
+      DebugLogger.log('指令模块', '⚠️ 记录确认弹窗异常 → 当拒绝，不卡死');
+      approved = false;
+    }
     FocusManager.instance.primaryFocus?.unfocus();
     if (approved == true) {
       // 写入记忆库（[类别] 前缀存储，男主 #查记忆 可按类别筛）
@@ -5730,7 +5795,13 @@ class _ChatPageState extends State<ChatPage>
     final taskId = args['task_id']?.toString().trim() ?? '';
     final action = args['action']?.toString().trim() ?? '';
     if (taskId.isEmpty) {
-      return const _ToolResult(false, '管理失败：缺任务 ID');
+      // 8-10 21:5x（用户：manage_task 缺 task_id 失败，男主不知道补什么）：
+      // 错误信息写明怎么修——先查任务拿到 ID 再 manage_task
+      return const _ToolResult(
+        false,
+        '管理失败：缺 task_id 参数。先查任务列表/卡片状态拿到任务 ID，'
+        '再 manage_task（action=…, task_id=…）',
+      );
     }
     final svc = GlobalTimerCardService.instance;
     final isCurrent = svc.isActive && svc.taskId == taskId;
