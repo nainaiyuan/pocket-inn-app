@@ -845,36 +845,15 @@ class ChatFlowStore {
         final dec = _decisionHint(tools);
         if (dec.isNotEmpty) sb.writeln('  → 判断：$dec');
       }
-      // ▶ 判断固定文本（8-10 23:0x：更新为 v3 语义——回#N 标步骤做完 +
-      // 总结轮确认 + 闲聊【结束】收尾；8-11 03:1x：可一次标多条，
-      // 最后一步带【结束】= 消大流程不唤醒；8-11 04:0x：步骤用"做/标"，
-      // "消"只指消大流程）
-      sb.writeln('▶ 判断：继续？① 调工具 ② 回复/询问她后继续 '
-          '③ 做完了 → 回#N 标记做完（可一次标多条；最后一步带【结束】'
-          '消掉大流程不唤醒；闲聊 → 直接带【结束】收尾）');
-      // 8-11 03:2x（用户：管家最后一句要和当前最后一步合并，男主直接
-      // 在最后一步判断，不用再被唤醒）；8-11 03:32（用户纠正：管家不能
-      // 断言"这是最后一步"——应该询问男主判断后续还有没有步骤）
-      final pendingCount =
-          steps.where((s) => s['status'] != 'done').length;
-      // 8-11 04:5x（用户：后续还没做的【不要插进当前流程清单】——
-      // 单独标签【后续待处理】放一边，不污染当前工作区；当前步做完
-      // 自动把下面的移上来一个，处理完的移上去当【上下文参考】。
-      // 所以 buildText 只输出当前正在处理的，后续清单走 pendingText()）
-      if (pendingCount <= 1) {
-        sb.writeln('管家：判断一下——这个大流程后续还有没有步骤？'
-            '没有 → 回#N 标完后直接带【结束】总结结束（不会再唤醒你）；'
-            '还有 → 继续处理（追加步骤/调工具/回复她）');
-      }
+      // 8-11 07:0x（用户：判断点太多误导男主——删掉"▶ 判断：继续？①②③"
+      // 固定文本和"管家：判断一下后续还有没有步骤"问句；没有"后续步"
+      // 概念，男主每步当场判断；引导固定一行，不跟着步骤变）
+      sb.writeln('—— 做完标回#N；全部标完带【结束】结束');
     }
-    // 8-10 00:5x（用户：男主消掉大流程自带结尾命令）——结尾命令清单，
-    // 男主消掉大流程（最后一步回复）时回复末尾带一个：
-    // - 结束（不唤醒）/ 续命继续干活 / 与后续大流程合二为一
-    sb.writeln('结尾命令（回复末尾带一个，管家识别，不会显示给她）：\n'
-        '· {"need_continue": false} → 结束，不再唤醒\n'
-        '· {"need_continue": true} → 续命：还有事要做，唤醒继续干活\n'
-        '· {"next_action": "merge"} → 与后续大流程合二为一（剩余步骤'
-        '合并一起处理）');
+    // 8-10 00:5x（用户：男主消掉大流程自带结尾命令）——8-11 07:0x
+    // 缩成一行（男主翻 prompt 教程有详细说明，这里只给速查）
+    sb.writeln('结尾（回复末尾带一个，不显示给她）：'
+        '{"need_continue":false}结束 / true续命 / {"next_action":"merge"}合并');
     return sb.toString();
   }
 
@@ -917,7 +896,6 @@ class ChatFlowStore {
   static String _decisionHint(Map<String, dynamic> tools) {
     var anyFail = false;
     var anyNotFound = false;
-    var anyOk = false;
     for (final entry in tools.entries) {
       final v = entry.value;
       if (v is! Map) continue;
@@ -926,7 +904,6 @@ class ChatFlowStore {
       if (!ok) {
         anyFail = true;
       } else {
-        anyOk = true;
         if (brief.contains('没找到') ||
             brief.contains('没有找到') ||
             brief.contains('无结果') ||
@@ -936,14 +913,13 @@ class ChatFlowStore {
         }
       }
     }
+    // 8-11 07:0x（用户：成功时"→ 判断：工具已成功，回复她就完成这步"
+    // 贴工具记录后面很烦——事实清楚不用教）→ 只保留异常提示
     if (anyFail) {
       return '工具没成功。继续（换工具/换参数再查）？还是回复她结束这步？';
     }
     if (anyNotFound) {
       return '查了没找到。继续查（换工具/换方式）？还是回复她结束这步？';
-    }
-    if (anyOk) {
-      return '工具已成功，回复她就完成这步。';
     }
     return '';
   }
