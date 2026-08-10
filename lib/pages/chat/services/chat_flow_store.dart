@@ -413,6 +413,7 @@ class ChatFlowStore {
       } else {
         f.remove('endTagWarned');
       }
+      f.remove('summarizePending'); // 男主继续干活 → 退出总结轮状态
       await _write(personaId, f);
       _log('对话流程',
           '🔚 消了 ${marked.isNotEmpty ? marked.length : 1} 条，'
@@ -420,12 +421,30 @@ class ChatFlowStore {
       return;
     }
 
-    // 全部消完 → done（8-10 00:49：不复核不二次唤醒；全部步骤消完 = 大流程自然结束）
-    f['status'] = 'done';
+    // 全部消完：
+    // - 男主带【结束】（总结论/闲聊收尾）→ 男主主动确认结束 → done
+    // - 男主只回#N 消完（没带【结束】）→ 不 done！进**总结轮**（8-10
+    //   22:48 用户：大流程不能"自动结束"——男主可能误以为做完了
+    //   （插话轮卡住被唤醒后草草处理）。总结轮 = 唤醒男主看一遍整个
+    //   大流程（每步工具状态 ✅/❌），确认没有遗漏/要补充的，
+    //   才带【结束】总结结束；有遗漏 → 先补充做完）
+    if (hasEndTag) {
+      f['status'] = 'done';
+      f['currentStep'] = steps.length;
+      f.remove('endTagWarned');
+      f.remove('summarizePending');
+      await _write(personaId, f);
+      _log('对话流程', '🔚 男主带【结束】总结 → 大流程结束，不再唤醒');
+      return;
+    }
+    f['status'] = 'running'; // 保持 running → 检查轮唤醒总结轮
     f['currentStep'] = steps.length;
+    f['summarizePending'] = true; // checkBrief 显示总结轮提示
     f.remove('endTagWarned');
     await _write(personaId, f);
-    _log('对话流程', '🔚 全部步骤消完 → 大流程结束，不再唤醒');
+    _log('对话流程',
+        '🔎 步骤全消但男主没带【结束】→ 总结轮：唤醒男主看一遍确认'
+        '（有没有遗漏/要补充的），确认后带【结束】总结结束');
   }
 
   /// 8-09 19:3x（用户设计定稿 9.4/9.8）：融合 = 男主自己判断重新编排步骤。
@@ -639,25 +658,23 @@ class ChatFlowStore {
           '没有新消息就别再说话，输出退出标记 {"need_continue": false}。');
       return sb.toString();
     }
-    // 全部已回应但流程没结束（男主没输出退出标记）→ 收尾检查：
-    // 回复 ≠ 结束，工作义务还在——提示男主检查每步的工具链有没有 ❌/没找到
-    // 8-10 00:49（用户：去掉二次复核）：不再有复核步骤分支，
-    // 全部回应后直接收尾检查（确认做完 → 输出退出标记结束）。
+    // 全部步骤已消但流程没结束 → 总结轮（8-10 22:48 用户：大流程不能
+    // "自动结束"，男主总结确认才结束）——列出所有步骤的工具状态，
+    // 男主看一遍：有没有遗漏/要补充的 → 带【结束】总结结束
     final allReplied = steps.every((s) => s['status'] == 'done');
     if (allReplied) {
-      sb.writeln('✅ 已全部回应。收尾检查（回复≠结束，工作做完才结束）：');
+      sb.writeln('✅ 所有步骤都消了。总结轮——看一遍有没有遗漏/要补充的：');
       for (var i = 0; i < steps.length; i++) {
         final step = steps[i];
         final tools = _asMap(step['tools']);
-        if (tools.isEmpty) continue;
         sb.writeln('  第${i + 1}步「${_short(step['userText'].toString(), 20)}」'
-            '工具：${_toolsBrief(tools)}');
+            '${tools.isEmpty ? '（无工具）' : '工具：${_toolsBrief(tools)}'}');
         final dec = _decisionHint(tools);
         if (dec.isNotEmpty) sb.writeln('    → $dec');
       }
-      sb.writeln('没做完的（工具 ❌/没找到）→ 继续做完再结束；'
-          '确认都做完了 → 回复末尾带结束命令结束流程：'
-          '{"need_continue": false}');
+      sb.writeln('有遗漏/没做完的（工具 ❌/没找到）→ 先补充做完再结束；'
+          '确认全部做完 → 带【结束】标签总结结束'
+          '（sys 字段写"【结束】"，总结这一整个大流程）');
       return sb.toString();
     }
     // ── 步骤清单（8-10 19:13 用户：男主每次只看**当前做的那一步**——
@@ -818,7 +835,7 @@ class ChatFlowStore {
         }
       }
       if (hasUnfinished) {
-        return '已全部回应，但第 ${steps.indexWhere((s) {
+        final badIdx = steps.indexWhere((s) {
           final tools = _asMap(s['tools']);
           if (tools.isEmpty) return false;
           for (final v in tools.values) {
@@ -836,8 +853,18 @@ class ChatFlowStore {
             }
           }
           return false;
-        }) + 1} 步有工具没做完（❌/没找到）——回去继续做完，'
-            '做完输出退出标记结束流程。';
+        }) + 1;
+        // 8-10 22:48（用户：总结轮 = 看一遍确认）：
+        return '总结轮：所有步骤都消了，但第 $badIdx 步工具没做完'
+            '（❌/没找到）——先回去补充做完，再带【结束】总结结束。';
+      }
+      // 8-10 22:48（用户：大流程不能"自动结束"）：步骤全消但男主没带
+      // 【结束】→ 总结轮：男主看一遍所有步骤（工具 ✅/❌），确认没有
+      // 遗漏/要补充的，才带【结束】总结结束；有遗漏 → 先补充做完
+      if (f['summarizePending'] == true) {
+        return '总结轮：所有步骤都消了。看一遍整个大流程有没有遗漏/'
+            '要补充的——没有 → 带【结束】总结结束（总结这一整个大流程）；'
+            '有 → 先补充做完再结束。';
       }
       return '已全部回应，流程待你确认结束——没有遗漏就输出退出标记 '
           '{"need_continue": false}。';
