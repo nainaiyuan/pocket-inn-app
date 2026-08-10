@@ -747,7 +747,9 @@ class ChatFlowStore {
     final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
     final sb = StringBuffer();
     final flowNo = f['flowNo'];
-    sb.writeln('【对话流程${flowNo != null ? ' #$flowNo' : ''}】目标：${f['goal']}');
+    // 8-11 04:0x（用户：不要目标——目标就是处理完下面小流程、消掉大流程，
+    // 流程天然如此，不用单独写一行）
+    sb.writeln('【对话流程${flowNo != null ? ' #$flowNo' : ''}】');
     if (status == 'done') {
       sb.writeln('✅ 流程已结束（全部回应 + 你确认无工作遗漏）。'
           '没有新消息就别再说话，输出退出标记 {"need_continue": false}。');
@@ -758,7 +760,7 @@ class ChatFlowStore {
     // 男主看一遍：有没有遗漏/要补充的 → 带【结束】总结结束
     final allReplied = steps.every((s) => s['status'] == 'done');
     if (allReplied) {
-      sb.writeln('✅ 所有步骤都消了。总结轮——看一遍有没有遗漏/要补充的：');
+      sb.writeln('✅ 所有步骤都做完了。总结轮——看一遍有没有遗漏/要补充的：');
       for (var i = 0; i < steps.length; i++) {
         final step = steps[i];
         final tools = _asMap(step['tools']);
@@ -803,6 +805,8 @@ class ChatFlowStore {
       final speaker = curStep['from'] == 'butler' ? '管家' : '她';
       // 8-11 03:2x（用户：男主做了还指他——箭头要变成打勾）：
       // 已做 = 回过话 或 工具全 ✅ → 显示 ✅（打勾），不再用 ▶ 指着
+      // 8-11 04:0x（用户：没有"待消"——做是小流程的事，消是大流程的事；
+      // 步骤只有 做了✅ / 没做▶，不标"已做待消"）
       final hasReply = reply.isNotEmpty;
       final toolsOk = tools.isNotEmpty &&
           tools.values.every((v) => v is Map && v['ok'] == true);
@@ -821,8 +825,7 @@ class ChatFlowStore {
         }
         sb.writeln('  她：${curStep['userText']}');
       } else {
-        sb.writeln('$mark #$no [$ts]$fromMark $speaker：${curStep['userText']}'
-            '${done ? '（已做，待消）' : ''}');
+        sb.writeln('$mark #$no [$ts]$fromMark $speaker：${curStep['userText']}');
       }
       // 工具链（这条下面做了什么）
       for (final entry in tools.entries) {
@@ -842,12 +845,13 @@ class ChatFlowStore {
         final dec = _decisionHint(tools);
         if (dec.isNotEmpty) sb.writeln('  → 判断：$dec');
       }
-      // ▶ 判断固定文本（8-10 23:0x：更新为 v3 语义——回#N 消步骤 +
-      // 总结轮确认 + 闲聊【结束】收尾；8-11 03:1x：可一次消多个，
-      // 最后一步带【结束】= 结束不唤醒）
+      // ▶ 判断固定文本（8-10 23:0x：更新为 v3 语义——回#N 标步骤做完 +
+      // 总结轮确认 + 闲聊【结束】收尾；8-11 03:1x：可一次标多条，
+      // 最后一步带【结束】= 消大流程不唤醒；8-11 04:0x：步骤用"做/标"，
+      // "消"只指消大流程）
       sb.writeln('▶ 判断：继续？① 调工具 ② 回复/询问她后继续 '
-          '③ 做完了 → 回#N 消掉（可一次消多个；最后一步带【结束】'
-          '结束不唤醒；闲聊 → 直接带【结束】收尾）');
+          '③ 做完了 → 回#N 标记做完（可一次标多条；最后一步带【结束】'
+          '消掉大流程不唤醒；闲聊 → 直接带【结束】收尾）');
       // 8-11 03:2x（用户：管家最后一句要和当前最后一步合并，男主直接
       // 在最后一步判断，不用再被唤醒）；8-11 03:32（用户纠正：管家不能
       // 断言"这是最后一步"——应该询问男主判断后续还有没有步骤）
@@ -855,7 +859,7 @@ class ChatFlowStore {
           steps.where((s) => s['status'] != 'done').length;
       if (pendingCount <= 1) {
         sb.writeln('管家：判断一下——这个大流程后续还有没有步骤？'
-            '没有 → 回#N 消掉后直接带【结束】总结结束（不会再唤醒你）；'
+            '没有 → 回#N 标完后直接带【结束】总结结束（不会再唤醒你）；'
             '还有 → 继续处理（追加步骤/调工具/回复她）');
       }
     }
@@ -977,14 +981,14 @@ class ChatFlowStore {
           return false;
         });
         // 8-10 22:48（用户：总结轮 = 看一遍确认）：
-        return '总结轮：所有步骤都消了，但第 ${_stepNo(steps[badIdx], badIdx)} 步工具没做完'
+        return '总结轮：所有步骤都做完了，但第 ${_stepNo(steps[badIdx], badIdx)} 步工具没做完'
             '（❌/没找到）——先回去补充做完，再带【结束】总结结束。';
       }
-      // 8-10 22:48（用户：大流程不能"自动结束"）：步骤全消但男主没带
+      // 8-10 22:48（用户：大流程不能"自动结束"）：步骤全做完但男主没带
       // 【结束】→ 总结轮：男主看一遍所有步骤（工具 ✅/❌），确认没有
-      // 遗漏/要补充的，才带【结束】总结结束；有遗漏 → 先补充做完
+      // 遗漏/要补充的，才带【结束】消掉大流程；有遗漏 → 先补充做完
       if (f['summarizePending'] == true) {
-        return '总结轮：所有步骤都消了。看一遍整个大流程有没有遗漏/'
+        return '总结轮：所有步骤都做完了。看一遍整个大流程有没有遗漏/'
             '要补充的——没有 → 带【结束】总结结束（总结这一整个大流程）；'
             '有 → 先补充做完再结束。';
       }
@@ -992,7 +996,7 @@ class ChatFlowStore {
           '{"need_continue": false}。';
     }
     // 8-10 19:13（用户：男主每次只看当前步，不报"还有几条没回"）——
-    // 唤醒只提示当前步：继续处理完，带【结束】消掉
+    // 唤醒只提示当前步：继续处理完，带【结束】消掉大流程
     final curIdx = (f['currentStep'] as num?)?.toInt() ?? 0;
     Map<String, dynamic>? curStep;
     if (curIdx >= 0 &&
@@ -1007,21 +1011,21 @@ class ChatFlowStore {
         }
       }
     }
-    if (curStep == null) return null; // 全消（不该出现，防呆）
-    // 8-10 22:1x（用户：男主带【结束】但还有步骤没消 → 不结束大流程）：
+    if (curStep == null) return null; // 全做完（不该出现，防呆）
+    // 8-10 22:1x（用户：男主带【结束】但还有步骤没做完 → 不结束大流程）：
     // 提醒男主处理完剩下的再总结结束，别以为带【结束】就完了
     final endTagWarned = f['endTagWarned'] == true;
-    // 8-10 22:2x（用户：闲聊一轮收尾，别无限嵌套）：男主回复了但没消
-    // 步骤 → 提示分两种：闲聊 → 带【结束】直接收尾；干活 → 回#N 消掉
+    // 8-10 22:2x（用户：闲聊一轮收尾，别无限嵌套）：男主回复了但没做
+    // 完步骤 → 提示分两种：闲聊 → 带【结束】直接收尾；干活 → 回#N 标完
     final tail = endTagWarned
-        ? '（你上轮带了【结束】但还有步骤没消——处理完剩下的再总结结束）'
+        ? '（你上轮带了【结束】但还有步骤没做完——处理完剩下的再总结结束）'
         : '';
     final curNo = _stepNo(curStep, steps.indexOf(curStep));
     return '当前第 $curNo 步「'
-        '${_short(curStep['userText'].toString(), 20)}」还没消。$tail\n'
+        '${_short(curStep['userText'].toString(), 20)}」还没做完。$tail\n'
         '· 这条只是闲聊/不用干活 → 回复带【结束】直接收尾'
-        '（消步骤+结束大流程，一轮结束，不会再唤醒你）；\n'
-        '· 还要继续干活 → 继续处理，做完回复里带 回#N 消掉那一步。';
+        '（做完步骤+消掉大流程，一轮结束，不会再唤醒你）；\n'
+        '· 还要继续干活 → 继续处理，做完回复里带 回#N 标记那一步做完。';
   }
 
   // ---- 工具 ----
