@@ -245,11 +245,13 @@ class ChatFlowStore {
     await _write(personaId, f);
   }
 
-  /// 男主回复 → 消条目（完成步骤）
-  /// 标注（回#N 数字是"没回的第几条"？不——v2 用步骤序号）：
-  /// 简化：标注解析按步骤在清单里的显示序号（第1步、第2步）。
-  /// 无标注 → FIFO 消最老 pending 步（默认回最老的，不猜）。
-  /// 全部消完 → 流程 done。
+  /// 男主回复 → 处理步骤
+  /// 8-10 19:0x（用户拍板，纠正"回复即消"bug）：
+  /// - 回复**带【结束】标签** → 才消步骤（标了回#N 的 / 没标 FIFO 最老）
+  /// - 回复**不带【结束】** → 不消！男主只是中途说话（②回复/询问她后继续），
+  ///   流程保持 running，回复内容挂到对应步骤的 reply 字段（显示"你回：…"），
+  ///   下次检查轮自动唤醒男主继续走，直到他打【结束】才算完。
+  /// - 全部消完 → 流程 done（不再唤醒）。
   static Future<void> feedReply(String personaId, String replyText) async {
     if (personaId.isEmpty || replyText.trim().isEmpty) return;
     await warm(personaId);
@@ -257,9 +259,54 @@ class ChatFlowStore {
     if (f == null || f['status'] != 'running') return;
     final steps = _stepsOf(f);
     if (steps.isEmpty) return;
+    final hasEndTag = replyText.contains('【结束】');
     final marked = _parseMarkedNos(replyText);
+
+    if (!hasEndTag) {
+      // 不带【结束】→ 不消步骤（8-10 19:0x 用户拍板）：
+      // 中途说话 ≠ 结束。回复文本挂到目标步骤（标了回#N 的第一个 /
+      // FIFO 第一个 pending）的 reply 字段，流程保持 running，
+      // 下次唤醒男主继续——他必须打【结束】才算完。
+      var target = -1;
+      if (marked.isNotEmpty) {
+        for (final no in marked) {
+          if (no >= 1 && no <= steps.length) {
+            final idx = no - 1;
+            if (steps[idx]['status'] != 'done') {
+              target = idx;
+              break;
+            }
+          }
+        }
+      }
+      if (target < 0) {
+        for (var i = 0; i < steps.length; i++) {
+          if (steps[i]['status'] != 'done' && steps[i]['isReview'] != true) {
+            target = i;
+            break;
+          }
+        }
+      }
+      if (target < 0) {
+        for (var i = 0; i < steps.length; i++) {
+          if (steps[i]['status'] != 'done') {
+            target = i;
+            break;
+          }
+        }
+      }
+      if (target < 0) return;
+      steps[target]['reply'] = replyText.trim();
+      f['steps'] = steps; // _stepsOf 是拷贝，必须写回（FlowStore BUG-3 教训）
+      await _write(personaId, f);
+      _log('对话流程',
+          '💬 男主回复（无【结束】标签）→ 不消步骤，流程继续'
+          '（第 ${target + 1} 步还挂着，下次检查轮唤醒男主继续处理）');
+      return;
+    }
+
+    // 带【结束】→ 消步骤（标了回#N 的 / 没标 FIFO 最老）
     var changed = false;
-    var repliedReal = false; // 本轮消掉的条目里有真实用户步骤吗（复核追加条件）
     if (marked.isNotEmpty) {
       // 精确消：标注 #N = 第 N 步（绝对序号，跟清单显示一致）
       for (final no in marked) {
@@ -268,7 +315,6 @@ class ChatFlowStore {
           if (steps[idx]['status'] != 'done') {
             steps[idx]['status'] = 'done';
             steps[idx]['reply'] = replyText.trim();
-            if (steps[idx]['isReview'] != true) repliedReal = true;
             changed = true;
           }
         }
@@ -279,7 +325,6 @@ class ChatFlowStore {
         if (steps[i]['status'] != 'done') {
           steps[i]['status'] = 'done';
           steps[i]['reply'] = replyText.trim();
-          if (steps[i]['isReview'] != true) repliedReal = true;
           changed = true;
           break;
         }
@@ -287,56 +332,32 @@ class ChatFlowStore {
     }
     if (!changed) return;
     f['steps'] = steps; // _stepsOf 是拷贝，必须写回（FlowStore BUG-3 教训）
-    // 8-10 v3（用户 17:48 拍板）：【结束】标签 = 男主明确"这条做完了"。
-    // 管家**绝不自动补**标签；男主打了 → 正常消步骤；若流程里还有
-    // 没回的步骤，标签只作用于标了回#N 的那条，其余保留（不丢）。
-    final hasEndTag = replyText.contains('【结束】');
-    if (hasEndTag) {
-      final stillPending = steps
-          .where((s) => s['status'] != 'done' && s['isReview'] != true)
-          .length;
-      _log('对话流程', '🔚 男主回复带【结束】标签'
-          '${stillPending > 0 ? '（还有 $stillPending 条没回，保留下次处理）' : ''}');
-    }
-    // 8-09 20:1x（用户重新定义复核，纠正 18:33 实现）：
-    // 【复核的真实语义】大流程结尾的"确认是否结束"步骤：
-    // - 触发条件 = **这个流程（含插话小流程）里用过工具**。
-    //   不管大流程还是小流程，只要调过工具 → 大流程结尾默认插复核，
-    //   问男主：有补充吗？要调整流程吗？还是确认结束？
-    // - **没调工具**（纯对话/纯插话）→ 默认流程已结束，不插复核。
-    // - 男主**没确认** → 复核留在末尾；下个大流程（新用户消息）开始时
-    //   复核置顶到第一步，男主先确认旧流程再处理新消息。
-    // 防循环：消掉复核步骤本身不追加（repliedReal=false 已挡）；已有
-    // pending 复核不重复追加。
-    final allDone = steps.every((s) => s['status'] == 'done');
-    final hasPendingReview =
-        steps.any((s) => s['isReview'] == true && s['status'] != 'done');
-    if (allDone && repliedReal && !hasPendingReview) {
-      // 8-10 00:49（用户：去掉二次复核）——大流程全部消完 → 直接结束。
-      // 男主模式 = 先干活再回复：回复（消掉大流程）本身就是结束，
-      // 不再插复核二次唤醒确认（男主想补充会在最后回复里说；
-      // 有下一个大流程 → 检查轮带清单唤醒男主继续走）。
-      // 8-09 21:0x 规则保留在 finishCheck：男主没跟用户说过话就
-      // 想结束（输出退出标记）→ 打回先补一句。
-      f['status'] = 'done';
-      f['currentStep'] = steps.length;
+
+    // 还有没回的步骤 → 保留下次处理（流程不结束，唤醒男主走完）
+    final stillPending = steps
+        .where((s) => s['status'] != 'done' && s['isReview'] != true)
+        .length;
+    if (stillPending > 0) {
+      var nextCur = -1;
+      for (var i = 0; i < steps.length; i++) {
+        if (steps[i]['status'] != 'done') {
+          nextCur = i;
+          break;
+        }
+      }
+      f['currentStep'] = nextCur < 0 ? steps.length : nextCur;
       await _write(personaId, f);
-      _log('对话流程', '✔ 大流程已全部回应 → 直接结束（无复核，不二次唤醒）');
+      _log('对话流程',
+          '🔚 【结束】消了 ${marked.isNotEmpty ? marked.length : 1} 条，'
+          '还有 $stillPending 条没回 → 流程继续（检查轮唤醒男主走完）');
       return;
     }
-    // 推进 currentStep 到第一个 pending（或标全部已回）
-    var nextCur = -1;
-    for (var i = 0; i < steps.length; i++) {
-      if (steps[i]['status'] != 'done') {
-        nextCur = i;
-        break;
-      }
-    }
-    f['currentStep'] = nextCur < 0 ? steps.length : nextCur;
+
+    // 全部消完 → done（8-10 00:49：不复核不二次唤醒；【结束】=男主已确认结束）
+    f['status'] = 'done';
+    f['currentStep'] = steps.length;
     await _write(personaId, f);
-    _log('对话流程', nextCur < 0
-        ? '✔ 全部已回应（流程待男主退出标记结束）'
-        : '✔ 消条目 → 当前第 ${nextCur + 1} 步');
+    _log('对话流程', '🔚 【结束】标签消掉大流程 → 流程结束，不再唤醒');
   }
 
   /// 8-09 19:3x（用户设计定稿 9.4/9.8）：融合 = 男主自己判断重新编排步骤。
@@ -620,10 +641,12 @@ class ChatFlowStore {
         final dec = _decisionHint(tools);
         if (dec.isNotEmpty) sb.writeln('  → 判断：$dec');
       }
-      // ▶ 判断固定文本（8-10 v3：永远在最后，男主每动一步往后推一格）
+      // ▶ 判断固定文本（8-10 v3：永远在最后，男主每动一步往后推一格；
+      // 8-10 19:0x：强调【结束】标签是消流程的唯一方式）
       if (isCur) {
         sb.writeln('▶ 判断：继续？① 调工具 ② 回复/询问她后继续 '
-            '③ 回复她后消掉（打【结束】）');
+            '③ 回复她后消掉（结尾一定带【结束】标签——不带=流程不消，'
+            '管家会再唤醒你）');
       }
     }
     // 8-09 20:1x：复核已去掉（8-10 00:49），无复核引导。
@@ -631,8 +654,8 @@ class ChatFlowStore {
     final realPendingCount =
         steps.where((s) => s['status'] != 'done' && s['isReview'] != true).length;
     if (realPendingCount > 1) {
-      sb.writeln('多条可一起消：回复标 {"reply":"回#N、#M"}（N=编号）一起消；'
-          '不标默认只消最老一条。');
+      sb.writeln('多条一起消：回复标 {"reply":"回#N、#M"}（N=编号）指定 + '
+          '结尾带【结束】标签一起消；不标默认只消最老一条（也要带【结束】）。');
     }
     // 8-10 00:5x（用户：男主消掉大流程自带结尾命令）——结尾命令清单，
     // 男主消掉大流程（最后一步回复）时回复末尾带一个：
@@ -758,6 +781,7 @@ class ChatFlowStore {
     }
     // 8-09 18:33：pending 里最老的是复核步骤 → 引导回答完整性判断
     // 8-09 20:1x：复核不算"没回"——先看有没有真实用户步骤 pending
+    // 8-10 19:0x：消流程唯一方式 = 回复结尾带【结束】标签（回#N 只是指定回哪条）
     final realPending = pending.where((s) => s['isReview'] != true).toList();
     if (realPending.isNotEmpty) {
       final briefs = realPending
@@ -765,16 +789,18 @@ class ChatFlowStore {
           .map((s) => '第${steps.indexOf(s) + 1}步「${_short(s['userText'].toString(), 20)}」')
           .join('、');
       final more = realPending.length > 3 ? ' 等${realPending.length}条' : '';
-      return '还有 ${realPending.length} 条没回：$briefs$more——先回她，回完再结束；'
-          '回多条可标注 {"reply":"回#N、#M"} 一起消。';
+      return '还有 ${realPending.length} 条没回：$briefs$more——先回她；'
+          '做完的这条回复结尾带【结束】标签才算消掉，'
+          '回多条可标注 {"reply":"回#N、#M"} 指定一起消。';
     }
     final briefs = pending
         .take(3)
         .map((s) => '第${steps.indexOf(s) + 1}步「${_short(s['userText'].toString(), 20)}」')
         .join('、');
     final more = pending.length > 3 ? ' 等${pending.length}条' : '';
-    return '还有 ${pending.length} 条没回：$briefs$more——先回她，回完再结束；'
-        '回多条可标注 {"reply":"回#N、#M"} 一起消。';
+    return '还有 ${pending.length} 条没回：$briefs$more——先回她；'
+        '做完的这条回复结尾带【结束】标签才算消掉，'
+        '回多条可标注 {"reply":"回#N、#M"} 指定一起消。';
   }
 
   // ---- 工具 ----
