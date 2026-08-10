@@ -5799,13 +5799,34 @@ class _ChatPageState extends State<ChatPage>
     final settingPid = _settingPid();
     final book = await SettingVersionStore.load(settingPid);
     final current = type == 'user' ? book.currentUser : book.currentMale;
+    // 8-10 v3（5.8 分支）：base_version=N → 基于历史版本 vN 的全文做操作
+    // （不写 = 基于当前生效版）。拼接 = 基于版本A + update 某段为版本B内容。
+    // 版本号 = 按时间排序的序号（v1=最老…vN=最新，跟弹窗版本树一致）。
+    final baseVersion = (args['base_version'] as num?)?.toInt();
+    var base = current;
+    var baseNote = '';
+    if (baseVersion != null && baseVersion > 0) {
+      final sorted = book.versions
+          .where((v) => v.type == type)
+          .toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      if (baseVersion > sorted.length) {
+        return _ToolResult(
+          false,
+          '没有版本 v$baseVersion（$typeName 现有 v1~v${sorted.length}，'
+          'v1=最老、v${sorted.length}=最新）。不带 base_version = 基于当前生效版改',
+        );
+      }
+      base = sorted[baseVersion - 1].content;
+      baseNote = '（基于 v$baseVersion 分支）';
+    }
     String newText;
     String opDesc;
     if (action == 'replace') {
       newText = content;
-      opDesc = '整体重写$typeName${reason.isEmpty ? '' : '：$reason'}';
+      opDesc = '整体重写$typeName$baseNote${reason.isEmpty ? '' : '：$reason'}';
     } else {
-      final sections = _parseSettingSections(current);
+      final sections = _parseSettingSections(base);
       final idx = tag.isEmpty
           ? -1
           : sections.indexWhere((sec) => sec.tag == tag);
@@ -6094,8 +6115,22 @@ class _ChatPageState extends State<ChatPage>
     var needPick = false;
     var hasCurrentVersion = true;
     var pickVersions = <SettingVersion>[];
+    // 8-10 v3（5.8 版本树）：历史版本概览（按时间排序 v1..vN + 当前生效），
+    // 弹窗标题下展示；v0 初始 = 第一个版本（最老的）
+    var histVersionTree = <String>[];
     if (settingPid != null && settingType != null) {
       final book = await SettingVersionStore.load(settingPid);
+      final sorted = book.versions
+          .where((v) => v.type == settingType)
+          .toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      histVersionTree = [
+        for (var i = 0; i < sorted.length; i++)
+          'v${i + 1}${sorted[i].isCurrent ? '（当前生效）' : ''}',
+      ];
+      if (histVersionTree.isNotEmpty) {
+        histVersionTree = ['v0 初始', ...histVersionTree];
+      }
       hasCurrentVersion = book.versions.any(
         (v) => v.type == settingType && v.isCurrent,
       );
@@ -6162,7 +6197,9 @@ class _ChatPageState extends State<ChatPage>
           Future<void> sendToMale(String userMsg) async {
             fbCtrl.clear();
             setState(() => busy = true);
-            history.add('她说：$userMsg');
+            // 8-10 v3（5.8 工具内标签）：卡片会话里的对话带标签，
+            // 男主分清"这是工具里她说的，不是新消息"
+            history.add('【工具·用户】她说：$userMsg');
             final reply = await _askMaleInSession(
               personaId: pid,
               settingPid: _settingPid(),
@@ -6177,7 +6214,7 @@ class _ChatPageState extends State<ChatPage>
                   : null,
               testStep: testStep,
             );
-            history.add('男主说：$reply');
+            history.add('【工具·男主】男主说：$reply');
             // 8-07 16:1x：男主确认了解完需求出【最终方案】→ 才亮「就用这版」；
             // 只出【新方案】=还在了解/迭代，按钮不出现
             final finalIdx = reply.indexOf('【最终方案】');
@@ -6307,7 +6344,7 @@ class _ChatPageState extends State<ChatPage>
                 orElse: () => versions.last,
               );
               history.add(
-                '她说：我弃用了 v${dropped.v} 这版（内容：'
+                '【工具·用户】她说：我弃用了 v${dropped.v} 这版（内容：'
                 '${dropped.text}）。你可以参考里面的想法，但别直接用。',
               );
               versions.removeWhere((x) => x.v == v);
@@ -6425,6 +6462,21 @@ class _ChatPageState extends State<ChatPage>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // 8-10 v3（5.8 版本树）：v0 初始=根，历史版本分支概览
+                  if (histVersionTree.isNotEmpty)
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF3EEF7),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '🌳 版本树：${histVersionTree.join(' → ')}',
+                        style: const TextStyle(fontSize: 12, height: 1.4),
+                      ),
+                    ),
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
