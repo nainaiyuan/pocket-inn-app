@@ -2100,6 +2100,18 @@ class _ChatPageState extends State<ChatPage>
             );
           } else if (isContinue) {
             // continue（文本块格式）：不收集结果
+            // 8-10 20:5x（用户 400 日志：call_2_add_record 无响应消息）：
+            // **原生路径必须配对**——assistant(tool_calls) 里的每个 call
+            // 都要有 tool 响应，continue_speaking/resolve_pending 被男主
+            // 原生调用时（butlerTools 里有定义）走这里不 add → DeepSeek
+            // 400 "did not have response messages"。补 tool 消息配对。
+            if (nativeCalls.isNotEmpty) {
+              toolMessages.add(AIChatMessage(
+                role: 'tool',
+                content: '【工具 $name】✅已执行（继续/标记回复，无需回传结果）',
+                toolCallId: call['id']?.toString() ?? 'call_${toolLoop}_$name',
+              ));
+            }
           } else {
             // 文本块：结果收集，最后合并注入 user 消息
             textToolResults.add(
