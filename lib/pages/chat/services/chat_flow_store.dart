@@ -877,16 +877,16 @@ class ChatFlowStore {
     // 8-10 22:1x（用户：男主带【结束】但还有步骤没消 → 不结束大流程）：
     // 提醒男主处理完剩下的再总结结束，别以为带【结束】就完了
     final endTagWarned = f['endTagWarned'] == true;
-    if (endTagWarned) {
-      return '⚠️ 你上轮带了【结束】但还有步骤没回#N 消掉——大流程没结束。'
-          '处理完剩下的步骤，最后总结一句带回齐的回#N +【结束】才结束大流程。'
-          '当前第 ${steps.indexOf(curStep) + 1} 步「'
-          '${_short(curStep['userText'].toString(), 20)}」还没做完——'
-          '继续处理，做完这条回复里带 回#N 消掉。';
-    }
+    // 8-10 22:2x（用户：闲聊一轮收尾，别无限嵌套）：男主回复了但没消
+    // 步骤 → 提示分两种：闲聊 → 带【结束】直接收尾；干活 → 回#N 消掉
+    final tail = endTagWarned
+        ? '（你上轮带了【结束】但还有步骤没消——处理完剩下的再总结结束）'
+        : '';
     return '当前第 ${steps.indexOf(curStep) + 1} 步「'
-        '${_short(curStep['userText'].toString(), 20)}」还没做完——'
-        '继续处理，做完这条回复里带 回#N 消掉那一步。';
+        '${_short(curStep['userText'].toString(), 20)}」还没消。$tail\n'
+        '· 这条只是闲聊/不用干活 → 回复带【结束】直接收尾'
+        '（消步骤+结束大流程，一轮结束，不会再唤醒你）；\n'
+        '· 还要继续干活 → 继续处理，做完回复里带 回#N 消掉那一步。';
   }
 
   // ---- 工具 ----
