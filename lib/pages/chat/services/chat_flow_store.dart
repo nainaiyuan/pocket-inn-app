@@ -397,6 +397,7 @@ class ChatFlowStore {
       f['steps'] = steps;
       f['status'] = 'done';
       f['currentStep'] = steps.length;
+      f.remove('endTagWarned');
       await _write(personaId, f);
       _log('对话流程',
           '🔚 男主回大流程 #$flowNo → 强制结束大流程（共 ${steps.length} 步全部 done）');
@@ -416,6 +417,17 @@ class ChatFlowStore {
         }
       }
       f['currentStep'] = nextCur < 0 ? steps.length : nextCur;
+      // 8-10 22:1x（用户：总结论才结束大流程）：男主带【结束】但还有
+      // 步骤没回#N → 不结束；标记提醒（checkBrief 下次唤醒时提示他
+      // 处理完剩下的再总结结束）。正常回#N 消步骤 → 清标记。
+      if (hasEndTag) {
+        f['endTagWarned'] = true;
+        _log('对话流程',
+            '⚠️ 男主带【结束】但还有 $stillPending 条没消 → 不结束大流程'
+            '（总结论才结束），标记提醒');
+      } else {
+        f.remove('endTagWarned');
+      }
       await _write(personaId, f);
       _log('对话流程',
           '🔚 消了 ${marked.isNotEmpty ? marked.length : 1} 条，'
@@ -426,6 +438,7 @@ class ChatFlowStore {
     // 全部消完 → done（8-10 00:49：不复核不二次唤醒；全部步骤消完 = 大流程自然结束）
     f['status'] = 'done';
     f['currentStep'] = steps.length;
+    f.remove('endTagWarned');
     await _write(personaId, f);
     _log('对话流程', '🔚 全部步骤消完 → 大流程结束，不再唤醒');
   }
@@ -861,9 +874,19 @@ class ChatFlowStore {
       }
     }
     if (curStep == null) return null; // 全消（不该出现，防呆）
+    // 8-10 22:1x（用户：男主带【结束】但还有步骤没消 → 不结束大流程）：
+    // 提醒男主处理完剩下的再总结结束，别以为带【结束】就完了
+    final endTagWarned = f['endTagWarned'] == true;
+    if (endTagWarned) {
+      return '⚠️ 你上轮带了【结束】但还有步骤没回#N 消掉——大流程没结束。'
+          '处理完剩下的步骤，最后总结一句带回齐的回#N +【结束】才结束大流程。'
+          '当前第 ${steps.indexOf(curStep) + 1} 步「'
+          '${_short(curStep['userText'].toString(), 20)}」还没做完——'
+          '继续处理，做完这条回复里带 回#N 消掉。';
+    }
     return '当前第 ${steps.indexOf(curStep) + 1} 步「'
         '${_short(curStep['userText'].toString(), 20)}」还没做完——'
-        '继续处理，做完这条回复结尾带【结束】标签消掉。';
+        '继续处理，做完这条回复里带 回#N 消掉那一步。';
   }
 
   // ---- 工具 ----
