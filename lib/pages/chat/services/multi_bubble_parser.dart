@@ -385,8 +385,14 @@ void _jsonMapToBubbles(
     final value = entry.value;
     switch (base) {
       case 'msg':
-        final t = value?.toString() ?? '';
-        if (t.trim().isNotEmpty) {
+        var t = value?.toString() ?? '';
+        // 8-10 21:5x（用户：男主把【结束】写进 msg → 气泡直接显示"【结束】"）：
+        // 结束标签应放 sys（不显示）——男主偶尔写进 msg（格式错误）→ 剥掉；
+        // 剥完为空（纯标签消息）→ 当 sys 收集（流程照常消，但不显示气泡）
+        t = t.replaceAll('【结束】', '').trim();
+        if (t.isEmpty && (value?.toString() ?? '').contains('【结束】')) {
+          sysParts.add(value.toString().trim());
+        } else if (t.isNotEmpty) {
           bubbles.add(BubblePart(BubbleKind.msg, [
             BubbleSpan(SpanKind.text, t),
           ]));

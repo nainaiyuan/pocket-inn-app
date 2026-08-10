@@ -4923,6 +4923,16 @@ class _ChatPageState extends State<ChatPage>
         '原话': 'quote', '引语': 'quote',
         '时间': 'time', '类别': 'category', '分类': 'category',
       },
+      // 8-10 21:5x（用户：男主 add_record 报"没写原话"被拦）：
+      // add_record 没归一化表 → 男主写中文 key（原话/内容/路径…）→
+      // text/path 取不到 → 记录失败。补中文→英文映射。
+      'add_record': {
+        '分类路径': 'path', '路径': 'path', '分类': 'path', '挂到': 'path',
+        '类别': 'path', '原话': 'text', '内容': 'text', '文本': 'text',
+        '记录': 'text', '话': 'text', '摘要': 'summary', '总结': 'summary',
+        '关键词组': 'keyword_groups', '关键词': 'keyword_groups',
+        '关键词组合': 'keyword_groups',
+      },
     };
     final table = aliases[toolName];
     if (table == null) return args;
