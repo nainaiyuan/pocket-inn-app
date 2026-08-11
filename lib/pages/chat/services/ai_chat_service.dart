@@ -1218,8 +1218,9 @@ class AiChatService {
     final showFlowAsLast =
         !isLight && chatFlowText != null && chatFlowText.isNotEmpty;
     final flowBlock = showFlowAsLast
-        ? '【当前流程】（你当前要处理的工作——她的话在▶当前步里；'
-            '做完标回#N，全部标完带【结束】）\n$chatFlowText'
+        ? '【当前工作区】（你当前要处理的工作——▶=正在处理的这条，'
+            '☐=还没轮到的；标完回#N，全部标完 → 说"大流程也结束了"'
+            '+ 写摘要 save_summary）\n$chatFlowText'
         : null;
     lastPromptText = isLight
         ? '【轻量期】stateful 刚全量带过/重扔过，服务端上下文还热——'
@@ -1287,9 +1288,9 @@ class AiChatService {
       if (toolRound && chatFlowText != null && chatFlowText.isNotEmpty)
         AIChatMessage(
           role: 'system',
-          content: '【当前流程】（你现在要处理的工作——'
-              '▶=当前正在处理的这条；做完标回#N；全部标完带【结束】）'
-              '\n$chatFlowText',
+          content: '【当前工作区】（你现在要处理的工作——'
+              '▶=正在处理的这条；标完回#N；全部标完 → 说"大流程也结束了"'
+              '+ 写摘要 save_summary）\n$chatFlowText',
         ),
       if (inFlow && pendingUser != null)
         AIChatMessage(
@@ -1360,7 +1361,7 @@ class AiChatService {
           content: '【上下文参考】（已处理过的历史：摘要/工具/系统/聊天分区）'
               '——只作参考保持人设和记忆连贯，**不用回复、不用处理、'
               '不要重复做**。布局：上面是已处理的（这里参考），'
-              '中间【当前工作区】=当前正在处理的（正在处理 + 未处理消息区）。'
+              '中间【当前工作区】=正在处理的（▶）+ 还没轮到的（☐）。'
               '历史里的事如果已经做过，就不要再做一遍。',
         ),
         ...historyMsgs,
@@ -1407,9 +1408,9 @@ class AiChatService {
           chatFlowText.isNotEmpty) {
         messages.add(AIChatMessage(
             role: 'user',
-            content: '【当前流程】（你当前要处理的工作——'
-                '她的话在▶当前步里；做完标回#N，全部标完带【结束】）'
-                '\n$chatFlowText'));
+            content: '【当前工作区】（你当前要处理的工作——'
+                '▶=正在处理的这条；标完回#N；全部标完 → 说"大流程也结束了"'
+                '+ 写摘要 save_summary）\n$chatFlowText'));
       } else {
         messages.add(AIChatMessage(role: 'user', content: message));
       }
