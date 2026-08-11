@@ -2439,7 +2439,29 @@ class _ChatPageState extends State<ChatPage>
             );
           }
         } else {
-          unawaited(ChatFlowStore.finish(personaId));
+          // 8-11 19:0x（用户 19:09）：管家不兜底——没标完 = 没做完。
+          // 男主带大流程结束标记但还有步骤没标 done → 不归档，提示补标
+          final pendingNos = ChatFlowStore.pendingNos(personaId);
+          if (pendingNos.isNotEmpty) {
+            _pendingInterruptEvent =
+                '你说大流程结束了，但还有 ${pendingNos.join('、')} '
+                '没标处理完。你没标 = 没做完：都处理完了就回#N 标掉，'
+                '（最后一条标完时带上"大流程也结束了"+写摘要 save_summary），'
+                '我再归档。';
+            DebugLogger.log('管家流程',
+                '🔚 男主带结束标记但还有 ${pendingNos.length} 条没标完'
+                ' → 不归档，提示补标');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('男主带结束标记但还有 ${pendingNos.length} 条没标完，已提醒补标'),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
+          } else {
+            unawaited(ChatFlowStore.finish(personaId));
+          }
         }
       } else if (exitSignal == false) {
         _continueFrozen = false;

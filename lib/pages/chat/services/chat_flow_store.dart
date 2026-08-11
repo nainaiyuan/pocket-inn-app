@@ -586,31 +586,33 @@ class ChatFlowStore {
     return null;
   }
 
+  /// 8-11 19:0x（用户 19:09 固定结束流程）：未标 done 的步骤编号列表。
+  /// 归档前检查用——管家不自动标，没标完 = 没做完，提示男主补标。
+  static List<int> pendingNos(String personaId) {
+    final f = _memCache;
+    if (f == null) return const [];
+    final steps = _stepsOf(f);
+    final nos = <int>[];
+    for (var i = 0; i < steps.length; i++) {
+      if (steps[i]['status'] != 'done') {
+        nos.add(_stepNo(steps[i], i));
+      }
+    }
+    return nos;
+  }
+
   static Future<void> finish(String personaId) async {
     if (personaId.isEmpty) return;
     await warm(personaId);
     final f = _memCache;
     if (f == null || f['status'] != 'running') return;
-    // 8-11 19:0x（用户 19:04/19:07 固定结束流程）：正常路径 = 男主自己
-    // 逐条标（最后一条自己标 + 带大流程结束标记 + 写摘要），管家只归档。
-    // 这里自动标 done = **漏标兜底**：男主说大流程结束 = 确认全部完成，
-    // 万一前面漏标的自动补标归档（不唤醒男主，只记录）
-    final steps = _stepsOf(f);
-    var autoDone = 0;
-    for (final s in steps) {
-      if (s['status'] != 'done') {
-        s['status'] = 'done';
-        autoDone++;
-      }
-    }
-    if (autoDone > 0) {
-      _log('对话流程', '🔚 男主说结束，$autoDone 条未标步骤自动视为完成');
-    }
+    // 8-11 19:0x（用户 19:09）：管家**不兜底**——男主没标结束 = 没做完。
+    // 归档前调用方（chat_page）已确认步骤全标完；这里只做归档。
     f['status'] = 'done';
-    f['currentStep'] = steps.length;
+    f['currentStep'] = (_stepsOf(f).length);
     await _write(personaId, f);
     _log('对话流程', '🔚 男主输出退出标记，流程结束（固定结束流程：'
-        '处理最后一条 → 说结束 → 写摘要 → 管家归档合并历史）');
+        '男主自己标完所有消息 → 带大流程结束标记 → 写摘要 → 管家归档）');
   }
 
   /// 解析男主回复里的消条目标注（第N步，1-based）
@@ -749,11 +751,11 @@ class ChatFlowStore {
         '（可一次回多条 回#1、#2）；插话也是平行消息，还没轮到就暂挂，'
         '轮到了你自己判断：补充当前任务 / 修改当前任务 / 插入新任务'
         '（先做插话，做完回原任务）/ 不做了（她叫停当前任务）');
-    sb.writeln('—— 固定结束流程：处理到最后一条时**自己标它结束**'
-        '（回#N：这条做完了，管家不替你标）→ 在这条回复上带'
+    sb.writeln('—— 固定结束流程：自己逐条标（回#N），处理到最后一条时'
+        '**自己标它结束**（管家不替你标，你没标=没做完）→ 在这条回复上带'
         '"大流程也结束了"（结束标记）→ 写摘要（save_summary，这个大流程'
-        '讲了什么）→ 管家检测全标完+大流程结束 → 归档合并历史，'
-        '之后不再唤醒你。');
+        '讲了什么）→ 管家检测**全标完**+大流程结束才归档，缺一样都'
+        '不算结束（管家不补标、不替写摘要，只提示你）。');
     return sb.toString();
   }
 
