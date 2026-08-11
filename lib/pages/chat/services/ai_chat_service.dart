@@ -53,6 +53,18 @@ class AiChatService {
   }
 
   /// Agent Debug Lab：AIChatMessage → TraceMessage（摘要式）
+  /// 8-11 21:5x：固定块判断——SystemTemplate 全文（设定）和
+  /// 【系统指令】类独立调用指令不记录（用户：设定不用看）。
+  /// 动态块（【当前工作区】【待回复】【历史流程】等）全量保留。
+  static bool _isFixedPromptBlock(AIChatMessage m, String systemPrompt) {
+    if (m.role != 'system') return false;
+    final c = m.content.trim();
+    if (c.isEmpty) return false;
+    if (c == systemPrompt.trim()) return true; // 固定设定全文
+    if (c.startsWith('【系统指令】你是')) return true; // 独立调用指令
+    return false;
+  }
+
   static TraceMessage _toTraceMessage(AIChatMessage m) =>
       TraceMessage.summarized(
         role: m.role,
@@ -1460,8 +1472,14 @@ class AiChatService {
         'isFirstRun': _contextRestored.length == 1,
       },
     );
+    // 8-11 21:5x（用户：固定设定不用看，只看变化）：记录前过滤固定块——
+    // SystemTemplate 全文（设定）替换成短标记；动态块（工作区/待办/历史/
+    // 工具结果）全量保留，男主每轮真实收到什么一目了然。
     TraceSession.instance.recordFirstMessages(
-      messages.map(_toTraceMessage).toList(),
+      messages
+          .where((m) => !_isFixedPromptBlock(m, systemPrompt))
+          .map(_toTraceMessage)
+          .toList(),
     );
     late final AIProviderResult result;
     try {

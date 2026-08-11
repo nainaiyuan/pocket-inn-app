@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../butler/debug_lab/agent_run_trace.dart';
+import '../../butler/debug_lab/trace_store.dart';
 import '../../butler/debug_lab/trace_session.dart';
 import '../../services/global_banner_service.dart';
 import '../../services/tool_approval_store.dart';
@@ -113,6 +114,9 @@ class _ChatPageState extends State<ChatPage>
     super.initState();
     _localStore.init();
     DebugLogger.init();
+    // 8-11 21:5x（用户：每轮 prompt 输入/输出要能回看）：
+    // Agent 轨迹接 SharedPreferences 持久化（默认内存，重启就丢）
+    TraceStore.configure(SharedPrefsTraceStorage());
     // 8-07 21:48 用户：日志增强——纯 Dart store 的日志钩子统一接 DebugLogger
     FlowStore.logSink = (t, m) => DebugLogger.log(t, m);
     // 8-09 16:0x（用户：流程卡片动态显示）：FlowStore 变化 → 立即刷新 UI

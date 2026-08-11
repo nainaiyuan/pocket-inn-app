@@ -51,7 +51,10 @@ class TraceToolCall {
 /// 全文细节要看时查 DebugLogger 日志（日志全量落盘）。
 class TraceMessage {
   /// 单条消息内容保留上限（字符）
-  static const int maxContentChars = 120;
+  /// 8-11 21:5x（用户：看不见男主每轮 prompt 到底收到什么）：固定设定
+  /// 在埋点处已过滤，剩下的动态块（【当前工作区】/待办/历史/工具结果）
+  /// 就是用户要看的 → 全量存（上限 2000，超长仍截断防膨胀）。
+  static const int maxContentChars = 2000;
 
   /// 思考链保留上限（字符）
   static const int maxReasoningChars = 80;

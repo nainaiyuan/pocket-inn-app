@@ -9,6 +9,8 @@ library;
 
 import 'dart:convert';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'agent_run_trace.dart';
 
 /// 存储后端接口（可注入）
@@ -24,6 +26,28 @@ abstract class TraceStorage {
 }
 
 /// 内存存储（默认，测试/回放用）
+/// SharedPreferences 持久化后端（8-11 21:5x 用户：要在平板上看男主每轮
+/// prompt 输入/输出 → 轨迹必须落盘，不能只有内存）
+class SharedPrefsTraceStorage implements TraceStorage {
+  @override
+  Future<String?> load(String key) async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString(key);
+  }
+
+  @override
+  Future<bool> save(String key, String value) async {
+    final p = await SharedPreferences.getInstance();
+    return p.setString(key, value);
+  }
+
+  @override
+  Future<List<String>> keys() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getKeys().where((k) => k.startsWith('agent_trace_')).toList();
+  }
+}
+
 class MemoryTraceStorage implements TraceStorage {
   final Map<String, String> _data = {};
   final List<String> _order = [];

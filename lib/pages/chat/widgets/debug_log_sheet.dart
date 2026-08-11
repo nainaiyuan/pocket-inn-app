@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 
 import '../../../butler/flow/butler_flow.dart';
 import '../../../utils/debug_logger.dart';
+import '../../../services/parse_utils.dart';
+import '../../../butler/debug_lab/agent_run_trace.dart';
+import '../../../butler/debug_lab/trace_store.dart';
 import '../../butler/butler_self_test_page.dart';
 import '../../butler/butler_skill_library_page.dart';
 import '../../debug/debug_toolbox_page.dart';
@@ -30,6 +33,7 @@ class _DebugLogSheet extends StatefulWidget {
 
 class _DebugLogSheetState extends State<_DebugLogSheet> {
   String _filter = '全部';
+  bool _showRounds = false; // true = 每轮视图（男主每轮收到什么/回了什么）
   bool _showFlows = false; // false = 日志行视图，true = 流程树视图
   bool _anchorsOnly = false; // true = 只看关键锚点行（🔧📦📋▶⏰🔔⏸❌⚠️）
 
@@ -103,6 +107,21 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
                   onSelected: (_) => setState(() => _showFlows = true),
                 ),
                 const SizedBox(width: 6),
+                ChoiceChip(
+                  label: const Text('每轮', style: TextStyle(fontSize: 11)),
+                  selected: _showRounds,
+                  selectedColor: const Color(0xFF7FB5B5),
+                  labelStyle: TextStyle(
+                    color: _showRounds ? Colors.white : Colors.white70,
+                  ),
+                  side: BorderSide(
+                    color: _showRounds
+                        ? const Color(0xFF7FB5B5)
+                        : Colors.white24,
+                  ),
+                  onSelected: (_) => setState(() => _showRounds = true),
+                ),
+                const SizedBox(width: 6),
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
                   child: const Text('关闭', style: TextStyle(color: Colors.white70)),
@@ -161,7 +180,11 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
               ],
             ),
             const Divider(color: Colors.white24),
-            if (!_showFlows) ...[
+            if (_showRounds) ...[
+              // 8-11 21:5x（用户：看不见男主每轮 prompt 发生了什么）：
+              // 每轮输入（动态块，固定设定已过滤）+ 男主回复命令 + 变化标记
+              _RoundsView(scrollController: scrollCtrl),
+            ] else if (!_showFlows) ...[
               // 只看关键锚点 + 一键复制（08-08 新增：日志太长找不到关键行）
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
@@ -545,4 +568,254 @@ class _FlowCard extends StatelessWidget {
         return '○';
     }
   }
+}
+
+// ────────────────────────────────────────────────────────────
+// 每轮视图（8-11 21:5x 用户：看不见男主每轮 prompt 收到什么/回了什么）
+// ────────────────────────────────────────────────────────────
+class _RoundsView extends StatefulWidget {
+  final ScrollController scrollController;
+
+  const _RoundsView({required this.scrollController});
+
+  @override
+  State<_RoundsView> createState() => _RoundsViewState();
+}
+
+class _RoundsViewState extends State<_RoundsView> {
+  late Future<List<AgentRunTrace>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = TraceStore.instance.all(limit: 30);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<AgentRunTrace>>(
+      future: _future,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return const Center(
+            child: Text('读取轨迹…',
+                style: TextStyle(color: Colors.white38, fontSize: 12)),
+          );
+        }
+        final rounds = snap.data ?? const <AgentRunTrace>[];
+        if (rounds.isEmpty) {
+          return const Center(
+            child: Text(
+              '还没有每轮记录。\n发一条消息给男主，这里就能看到\n'
+              '他每轮收到什么、回了什么命令。',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.6),
+            ),
+          );
+        }
+        return ListView.builder(
+          controller: widget.scrollController,
+          padding: const EdgeInsets.only(bottom: 12),
+          itemCount: rounds.length,
+          itemBuilder: (context, i) {
+            // 上一轮 = 更新的轮次（all 倒序：最新在前）
+            final prev = i + 1 < rounds.length ? rounds[i + 1] : null;
+            return _RoundCard(round: rounds[i], prev: prev);
+          },
+        );
+      },
+    );
+  }
+}
+
+class _RoundCard extends StatefulWidget {
+  final AgentRunTrace round;
+  final AgentRunTrace? prev; // 上一轮（更早一次回复），diff 参照
+
+  const _RoundCard({required this.round, this.prev});
+
+  @override
+  State<_RoundCard> createState() => _RoundCardState();
+}
+
+class _RoundCardState extends State<_RoundCard> {
+  bool _expanded = false;
+
+  /// 本轮输入块（固定块已过滤）——标题行 = 块首行，正文 = 剩余
+  List<(String, String, String)> get _inputBlocks {
+    final out = <(String, String, String)>[];
+    for (final m in widget.round.firstMessages) {
+      final c = m.content.trim();
+      if (c.isEmpty && m.toolCalls.isEmpty) continue;
+      final title = c.split('\n').first;
+      final body = c.length > title.length ? c.substring(title.length).trim() : '';
+      out.add((m.role, title, body));
+    }
+    for (final m in widget.round.secondMessages) {
+      final c = m.content.trim();
+      if (c.isEmpty && m.toolCalls.isEmpty) continue;
+      final title = c.split('\n').first;
+      final body = c.length > title.length ? c.substring(title.length).trim() : '';
+      out.add((m.role, title, body));
+    }
+    return out;
+  }
+
+  /// diff：上一轮没有的块 = 🆕 新增；有但内容不同 = 🔄 变化；相同 = 未变
+  String _diffMark(String title, String body, int index) {
+    final prev = widget.prev;
+    if (prev == null) return '🆕';
+    final prevBlocks = <String>[];
+    for (final m in [...prev.firstMessages, ...prev.secondMessages]) {
+      final c = m.content.trim();
+      if (c.isEmpty) continue;
+      prevBlocks.add('${m.role}|${c.split('\n').first}|${c.substring(c.split('\n').first.length).trim()}');
+    }
+    final mine = '$title|$body';
+    // 同位置或任意位置有同标题 → 比内容
+    for (final p in prevBlocks) {
+      final pTitle = p.split('|')[1];
+      if (pTitle == title) {
+        return p == mine ? '·' : '🔄';
+      }
+    }
+    return '🆕';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.round;
+    final kind = r.isToolRound ? '🔧工具轮' : '💬用户轮';
+    final time = _fmtTime(r.startedAt);
+    final blocks = _inputBlocks;
+    final toolCalls = r.modelToolCalls;
+    final exit = parseExitSignal(r.modelText ?? '');
+    final next = parseNextAction(r.modelText ?? '');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF232342),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: InkWell(
+        onTap: () => setState(() => _expanded = !_expanded),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(kind, style: const TextStyle(color: Color(0xFF7FB5B5), fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(width: 6),
+                  Text(time, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                  const Spacer(),
+                  if (exit == true)
+                    const Text('🔚结束', style: TextStyle(color: Color(0xFFE0A0A0), fontSize: 11))
+                  else if (exit == false)
+                    const Text('🔁续命', style: TextStyle(color: Color(0xFFA0C8E0), fontSize: 11)),
+                  if (toolCalls.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Text('🛠${toolCalls.length}', style: const TextStyle(color: Color(0xFFC896B4), fontSize: 11)),
+                  ],
+                  const SizedBox(width: 6),
+                  Icon(_expanded ? Icons.expand_less : Icons.expand_more, color: Colors.white38, size: 18),
+                ],
+              ),
+              if (r.userInput.trim().isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '她：${_short(r.userInput, 60)}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ],
+              if (_expanded) ...[
+                const Divider(color: Colors.white12, height: 16),
+                // 输入动态块
+                if (blocks.isEmpty)
+                  const Text('（本轮只有固定设定，无动态块）',
+                      style: TextStyle(color: Colors.white38, fontSize: 11))
+                else
+                  for (var i = 0; i < blocks.length; i++) ...[
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 26,
+                          child: Text(
+                            _diffMark(blocks[i].$2, blocks[i].$3, i),
+                            style: TextStyle(
+                              color: _diffMark(blocks[i].$2, blocks[i].$3, i) == '·'
+                                  ? Colors.white24
+                                  : const Color(0xFFFFD28A),
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            '${blocks[i].$1 == 'user' ? '📨' : '🧩'} ${blocks[i].$2}'
+                            '${blocks[i].$3.isNotEmpty ? '\n${blocks[i].$3}' : ''}',
+                            style: TextStyle(
+                              color: _diffMark(blocks[i].$2, blocks[i].$3, i) == '·'
+                                  ? Colors.white30
+                                  : Colors.white70,
+                              fontSize: 11,
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                  ],
+                // 男主回复命令
+                const Divider(color: Colors.white12, height: 16),
+                const Text('➡️ 男主回复命令',
+                    style: TextStyle(color: Color(0xFFC896B4), fontSize: 11, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                if (toolCalls.isNotEmpty)
+                  for (final tc in toolCalls)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 2),
+                      child: Text(
+                        '🛠 ${tc.name}(${_argsBrief(tc.arguments)})',
+                        style: const TextStyle(color: Color(0xFFA8D8B9), fontSize: 11),
+                      ),
+                    ),
+                if ((r.modelText ?? '').trim().isNotEmpty)
+                  Text(
+                    '💬 ${r.modelText!.trim()}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.5),
+                  ),
+                if (next != null && next != 'merge')
+                  Text('🔀 next_action=$next',
+                      style: const TextStyle(color: Color(0xFFA0C8E0), fontSize: 11)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _fmtTime(DateTime? dt) {
+  if (dt == null) return '--:--';
+  final h = dt.hour.toString().padLeft(2, '0');
+  final m = dt.minute.toString().padLeft(2, '0');
+  final s = dt.second.toString().padLeft(2, '0');
+  return '$h:$m:$s';
+}
+
+String _short(String s, int max) =>
+    s.length > max ? '${s.substring(0, max)}…' : s;
+
+String _argsBrief(Map<String, dynamic> args) {
+  if (args.isEmpty) return '';
+  final parts = args.entries.map((e) => '${e.key}=${_short(e.value.toString(), 24)}');
+  return parts.join('，');
 }
