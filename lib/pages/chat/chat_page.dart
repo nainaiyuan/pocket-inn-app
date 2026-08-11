@@ -483,7 +483,6 @@ class _ChatPageState extends State<ChatPage>
     if (flow == null) {
       _autoContinuePid = null;
       _autoContinueCount = 0;
-      _lastAutoContinueAt = null;
       _continueFrozen = false; // 8-08 18:1x：停止也解除续话冻结
       _interruptRoundActive = false;
       _interruptFollowUpDone = false;
@@ -533,7 +532,6 @@ class _ChatPageState extends State<ChatPage>
       _lastAutoResumeStep = -1;
       _autoContinuePid = null;
       _autoContinueCount = 0;
-      _lastAutoContinueAt = null;
       _continueFrozen = false;
       _interruptRoundActive = false;
       _interruptFollowUpDone = false;
@@ -562,7 +560,6 @@ class _ChatPageState extends State<ChatPage>
     // 8-08 15:5x：停止 → 同时重置续话/插话状态
     _autoContinuePid = null;
     _autoContinueCount = 0;
-    _lastAutoContinueAt = null;
     _continueFrozen = false; // 8-08 18:1x：停止也解除续话冻结
     _interruptRoundActive = false;
     _interruptFollowUpDone = false;
@@ -618,7 +615,6 @@ class _ChatPageState extends State<ChatPage>
     // 用户说话了 → 重置男主续话计数
     _autoContinuePid = null;
     _autoContinueCount = 0;
-    _lastAutoContinueAt = null;
     _continueFrozen = false; // 8-08 18:1x：用户说话 → 解除续话冻结
     _stopRequested = false; // 插话 = 用户主动说话，停止状态解除
     _maleChoseContinue = false; // 8-10 00:5x：用户说话 → 重置结尾命令标志
@@ -940,7 +936,6 @@ class _ChatPageState extends State<ChatPage>
       if (!pausedByUser) {
         _autoContinuePid = null;
         _autoContinueCount = 0;
-        _lastAutoContinueAt = null;
         _continueFrozen = false;
         return;
       }
@@ -953,25 +948,17 @@ class _ChatPageState extends State<ChatPage>
     }
     // ②' 男主已明确判定无需继续（need_continue:false）→ 不再唤醒
     //（8-08 18:1x GPT：next_action 为空 + 无 running 任务 → 停止 resume）
-    // 8-12 04:1x（用户：除非下面还有 T2 才唤醒）：有新流程被 finish()
-    // 提升为 running（排队 T2 自动轮到）→ 不冻结，检查轮唤醒处理下一个；
-    // 只有 done/无流程时才冻结（男主已说结束，安静等用户）。
-    if (_continueFrozen && chatFlowStatus != 'running') {
+    // 8-12 05:2x（用户拍板：唤醒模型只有两种"不再唤醒"——消大流程归档、
+    // 静默结束（need_continue:false，唤醒后直接结束不说话））：
+    // 冻结**一律生效**（之前只拦非 running——男主静默结束后还会被检查轮
+    // 再叫，不对）。有排队 T2 被 finish() 提升为 running 时，chat_page
+    // 在 finish 后主动解除冻结（_continueFrozen=false）→ 检查轮立即唤醒
+    // 处理下一个（不等用户说话）。
+    if (_continueFrozen) {
       DebugLogger.log(
         '管家流程',
-        '🔒 续话冻结：男主已判定无需继续，等用户说话（不再自动唤醒）',
-      );
-      return;
-    }
-    // ②'' 续话最小间隔 25 秒（8-08 17:2x 日志复盘：防"续话→调工具→再续话"风暴）。
-    // 用户刚说话（_lastAutoContinueAt 为 null）不限制——第一轮续话立即允许
-    final now = DateTime.now();
-    if (_lastAutoContinueAt != null &&
-        now.difference(_lastAutoContinueAt!) <
-            const Duration(seconds: 25)) {
-      DebugLogger.log(
-        '管家流程',
-        '🔕 续话跳过（距上次 ${now.difference(_lastAutoContinueAt!).inSeconds}s < 25s，防唤醒风暴）',
+        '🔒 男主静默结束（need_continue:false）→ 不再唤醒，'
+        '等用户说话（流程未归档的，下次她说话时工作区提醒补 end_TN + 摘要）',
       );
       return;
     }
@@ -983,13 +970,11 @@ class _ChatPageState extends State<ChatPage>
     if (_autoContinueCount >= 3) {
       _autoContinuePid = null;
       _autoContinueCount = 0;
-      _lastAutoContinueAt = null;
       _continueFrozen = false;
       DebugLogger.log('管家流程', '🔔 男主续话已达 3 次上限，停止（等用户说话）');
       return;
     }
     _autoContinueCount++;
-    _lastAutoContinueAt = now;
     // 8-08 17:3x：续话计数变化 → 刷新停止条显示（男主续话中要能看到停止）
     if (mounted) setState(() {});
     DebugLogger.log(
@@ -1037,10 +1022,11 @@ class _ChatPageState extends State<ChatPage>
           '没有 → 说一句自然的结束语，并在这条回复的末尾加上退出标记：'
           '{"need_continue": false}（管家识别这个标记，不会显示给她；'
           '加了这个标记，系统就不会再自动唤醒你）。\n'
-          '（8-12 05:1x 补充：工作区有【当前工作区】流程时，结束 = '
-          '最后一条 JSON 的 sys 写 end_TN（N=流程编号）+ 调 save_summary '
-          '归档——只写 need_continue:false 不会归档，流程会保持"全部处理完"'
-          '等你写结束标记。）\n'
+          '（8-12 05:2x 用户拍板：两种"不再唤醒"——① 工作区有【当前工作区】'
+          '流程 → 最后一条 JSON 的 sys 写 end_TN（N=流程编号）+ 调 '
+          'save_summary 归档；② 直接写 {"need_continue": false} = 静默结束'
+          '（不再唤醒，流程保持不归档；下次她说话时工作区会提醒你补 '
+          'end_TN + 摘要归档）。）\n'
           '注意：刚做完的事不用再调工具确认（流程已结束就别重复 finish），'
           '没有新事做就直接说结束语。'
           '（8-09 17:5x 补充）如果你刚回复她时漏记了新信息（她说过的'
@@ -1089,7 +1075,6 @@ class _ChatPageState extends State<ChatPage>
     if (systemEvent == null && t.trim().isNotEmpty) {
       _autoContinuePid = null;
       _autoContinueCount = 0;
-      _lastAutoContinueAt = null;
       _stopRequested = false; // 用户说话了 → 停止状态解除
     }
     // 8-08 15:5x：本轮男主输出信息（finally 用——判断"男主这轮说了话没"、
@@ -2518,6 +2503,16 @@ class _ChatPageState extends State<ChatPage>
             // finish() 自动提升为当前，检查点⑤唤醒处理下一个（T2）；
             // 没有 → 安静等用户。
             await ChatFlowStore.finish(personaId);
+            // 8-12 05:2x（用户：排队 T1 要等 25 秒才轮到 = 等好久）：
+            // finish 提升排队流程为 running 后，解除冻结 → 检查轮立即
+            // 唤醒处理下一个（不等用户说话、不等 25 秒）。
+            if (ChatFlowStore.statusOf(personaId) == 'running') {
+              _continueFrozen = false;
+              DebugLogger.log(
+                '管家流程',
+                '🔜 排队流程已提升为当前（running），解除冻结，检查轮立即唤醒处理',
+              );
+            }
           }
         }
       } else if (exitSignal == false) {
@@ -3937,7 +3932,6 @@ class _ChatPageState extends State<ChatPage>
   // 8-08 15:5x（用户需求：男主回复后自动唤醒判断要不要继续说，最多 3 次；
   // 用户说话重置；流程场景走 _maybeAutoResume 不受此限）
   int _autoContinueCount = 0; // 用户消息之间男主主动续话次数
-  DateTime? _lastAutoContinueAt; // 8-08 17:2x：上次续话时间（最小间隔 25s 防风暴）
   String? _autoContinuePid;
   // 8-08 18:1x（GPT 意见：结束检查轮 + 明确退出状态）：
   // 男主输出 need_continue:false / next_action:null → 冻结自动唤醒，
