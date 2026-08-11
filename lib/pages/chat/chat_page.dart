@@ -1498,6 +1498,11 @@ class _ChatPageState extends State<ChatPage>
             ),
         ];
         var loopExceeded = false;
+        // 8-12 02:4x（用户：T1 工作区挂着 T0 的工具结果）：工具执行是
+        // 异步的，结果回来时流程可能已切换（结束/拆插话）——执行前
+        // snapshot 当前流程编号，挂步骤/存缓存时校验，不串流程
+        final toolFlowNo =
+            ChatFlowStore.get(personaId)?['flowNo']?.toString();
         for (final call in result.toolCalls!) {
           final name = call['name']?.toString() ?? '';
           // 8-08 19:0x（GPT 18:59 + 用户 19:04 定稿）：插话轮禁工具——
@@ -2117,6 +2122,7 @@ class _ChatPageState extends State<ChatPage>
             brief: briefForStep.length > 120
                 ? '${briefForStep.substring(0, 120)}…'
                 : briefForStep,
+            flowNo: toolFlowNo,
           ));
           // 8-08 02:2x 用户：男主查完不记一直查 → 查询结果自动进工具缓存
           // 8-11 18:0x（用户 17:57 设计：缓存区 = 男主外置大脑）：
@@ -2131,11 +2137,11 @@ class _ChatPageState extends State<ChatPage>
           if (toolResult.ok && (kQueryToolNames.contains(name) || isLong)) {
             if (resultText.isNotEmpty) {
               // 8-12 02:1x（用户：外置大脑的编号要对应 T1）——缓存条目
-              // 带大流程编号 [T1]，男主/管家能按大流程查这轮的工具记录
-              final flowNow = ChatFlowStore.get(personaId);
+              // 带大流程编号 [T1]，男主/管家能按大流程查这轮的工具记录；
+              // 用执行前 snapshot 的 flowNo（工具结果迟到时不串新流程）
               final flowTag =
-                  (flowNow != null && (flowNow['flowNo']?.toString().isNotEmpty ?? false))
-                      ? ' [${flowNow['flowNo']}]'
+                  (toolFlowNo != null && toolFlowNo.isNotEmpty)
+                      ? ' [$toolFlowNo]'
                       : '';
               await ToolCacheStore.add(
                   personaId, '$toolNo$flowTag $name：$resultText');

@@ -271,11 +271,16 @@ class ChatFlowStore {
   /// 看到复核步骤带"查了没找到"更混乱。优先挂第一个未消真实步骤；
   /// 只有复核 pending → 挂复核（男主复核阶段补充干活）；全消 → 挂最后一步。
   static Future<void> feedTool(String personaId, String toolName,
-      {required bool ok, String? brief}) async {
+      {required bool ok, String? brief, String? flowNo}) async {
     if (personaId.isEmpty || toolName.isEmpty) return;
     await warm(personaId);
     final f = _memCache;
     if (f == null || f['status'] != 'running') return;
+    // 8-12 02:4x（用户：T1 工作区挂着 T0 的工具结果）：工具执行是异步的，
+    // 结果回来时流程可能已切换（旧流程结束/插话拆新流程）→ 校验工具
+    // 执行时的流程编号，不匹配不挂（结果已在上下文工具消息里，男主
+    // 看得到；避免串到新流程步骤上）
+    if (flowNo != null && (f['flowNo']?.toString() != flowNo)) return;
     final steps = _stepsOf(f);
     if (steps.isEmpty) return;
     var target = -1;
