@@ -1038,9 +1038,12 @@ class ChatFlowStore {
   }
 
   /// T0 全部消息简报（8-12 05:1x 用户：日志"她："只显示本轮触发，
-  /// 应该写上 T0 里面所有话，比如 M1 和 M2，而不是单单 M2）：
-  /// '☐ M1：我喜欢猫｜✅ M2：我也喜欢狗'（无流程/无她的话返回 ''）
-  static String allUserTextsBrief(String personaId) {
+  /// 应该写上 T0 里面所有话，比如 M1 和 M2，而不是单单 M2；
+  /// 8-12 06:0x 用户补充：男主的话也要全部——"她：M2"下面男主回 M1
+  /// 看着像矛盾，简报要带上男主对每条的回话）：
+  /// '✅ M1：我喜欢猫（男主回：我也喜欢）｜✅ S1：管家：…｜☐ M2：…'
+  /// （无流程/无步骤返回 ''）
+  static String allFlowBrief(String personaId) {
     final f = _memCache;
     if (f == null || f.isEmpty) return '';
     final steps = _stepsOf(f);
@@ -1048,10 +1051,17 @@ class ChatFlowStore {
     final parts = <String>[];
     for (var i = 0; i < steps.length; i++) {
       final s = steps[i];
-      if (s['from'] == 'butler') continue; // 只要她的话（管家消息不算）
       final no = _stepNo(s, i);
       final mark = s['status'] == 'done' ? '✅' : '☐';
-      parts.add('$mark M$no：${_short(s['userText'].toString(), 24)}');
+      final text = s['userText'].toString().trim();
+      if (s['from'] == 'butler') {
+        // 男主消息（S 步）：管家说的话
+        parts.add('$mark S$no：${_short(text, 24)}');
+      } else {
+        final reply = (s['reply'] as String?)?.toString().trim() ?? '';
+        final replyNote = reply.isEmpty ? '' : '（男主回：${_short(reply, 20)}）';
+        parts.add('$mark M$no：${_short(text, 24)}$replyNote');
+      }
     }
     if (parts.isEmpty) return '';
     final flowNo = f['flowNo'];

@@ -57,14 +57,20 @@ class PromptLog {
     }
   }
 
-  /// 轮输出：男主回复命令 + 工具调用
+  /// 轮输出：男主思考 + 回复命令 + 工具调用
   static Future<void> appendReply({
+    String? reasoning,
     String? modelText,
     List<String>? toolCallBriefs,
   }) async {
     try {
       final f = await _file();
       final sb = StringBuffer();
+      // 8-12 06:0x（用户：ds 调用工具要返回工具思考）：DeepSeek 思考模式
+      // 的 reasoning_content 原样记进日志（工具轮/回复前想什么一目了然）
+      if (reasoning != null && reasoning.trim().isNotEmpty) {
+        sb.writeln('🧠 思考：${reasoning.trim()}');
+      }
       if (toolCallBriefs != null && toolCallBriefs.isNotEmpty) {
         sb.writeln('🛠 工具调用：${toolCallBriefs.join('；')}');
       }
