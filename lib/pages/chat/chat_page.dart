@@ -1306,7 +1306,7 @@ class _ChatPageState extends State<ChatPage>
           } else {
             final rewriteEvent = '你的回复没有按格式输出（缺少 JSON 块），'
                 '已被打回，用户没看到。请按格式重写（JSON 对象，每个占一行）：'
-                '{"reply":"回aN"}（标注回哪条，可省）'
+                '{"reply":"回MN"}（标注回哪条，可省）'
                 '+ {"act":"动作/神态"}（可选）+ {"msg":"你说的话"}。'
                 '除 JSON 对象外不要输出任何其他文字；一次说多句 = 多个 {"msg":..} 对象。';
             DebugLogger.log('AI路由', '⛔ 男主无标签回复，打回重写（第 $_formatFailCount 次）');
@@ -2101,7 +2101,7 @@ class _ChatPageState extends State<ChatPage>
           //   上下文只留一行摘要 + "完整结果已存工具缓存"（不塞满每轮）
           final resultText = toolResult.text.trim();
           final isLong = resultText.length > 300;
-          // 8-11 20:1x（用户 20:12）：工具编号 T1/T2…独立分配——
+          // 8-11 20:15（用户拍板）：工具编号 C1/C2…独立分配——
           // 结果行带编号，男主看到成功/失败可报编号查详细记录
           final toolNo = await ToolCacheStore.nextToolNo();
           if (toolResult.ok && (kQueryToolNames.contains(name) || isLong)) {
@@ -2448,7 +2448,7 @@ class _ChatPageState extends State<ChatPage>
           if (pendingNos.isNotEmpty) {
             _pendingInterruptEvent =
                 '你说大流程结束了，但还有 ${pendingNos.join('、')} '
-                '没标处理完。你没标 = 没做完：都处理完了就回aN 标掉，'
+                '没标处理完。你没标 = 没做完：都处理完了就回MN 标掉，'
                 '（最后一条标完时带上"大流程也结束了"+写摘要 save_summary），'
                 '我再归档。';
             DebugLogger.log('管家流程',
@@ -5312,8 +5312,8 @@ class _ChatPageState extends State<ChatPage>
   /// 无参数 → 概览；{action: add_frequent/remove_frequent, name} 维护常用表）
   /// 8-11 18:0x（用户 17:57 设计）：工具结果行 = 参数（名=值）+ ✅/❌ + 一句话 + 怎么办。
   /// 短结果直接进上下文；超长（>300 字）→ 上下文只留摘要 + 提示查缓存（外置大脑）。
-  /// 8-11 20:1x（用户 20:12）：结果行带工具编号 T1/T2…——三套编号不混
-  /// （大流程 1A / 消息 a1 / 工具 T1）；男主想查详细记录报编号即可。
+  /// 8-11 20:15（用户拍板）：结果行带工具编号 C1/C2…——三套编号不混
+  /// （大流程 T1/T2 / 消息 M1/M2 / 工具 C1/C2）；男主想查详细记录报编号即可。
   String _toolResultLine(
       String toolNo, String name, Map<String, dynamic> args, _ToolResult r) {
     final okMark = r.ok ? '✅成功' : '❌失败';
@@ -7958,7 +7958,7 @@ class _ChatPageState extends State<ChatPage>
         // 8-11 20:1x（用户：工具编号查详细记录）——报 T 编号查具体条目
         final no = args['no']?.toString() ?? args['编号']?.toString() ?? '';
         if (no.isEmpty) {
-          return _ToolResult(false, 'manage_tool_cache 动作=view 要带 编号（如 编号=T1）');
+          return _ToolResult(false, 'manage_tool_cache 动作=view 要带 编号（如 编号=C1）');
         }
         final v = await ToolCacheStore.view(personaId, no);
         return _ToolResult(true, v);
@@ -7966,7 +7966,7 @@ class _ChatPageState extends State<ChatPage>
         return _ToolResult(
           false,
           'manage_tool_cache 参数：action=add（要 content）/clear/status/'
-          'view（要 编号=T1）',
+          'view（要 编号=C1）',
         );
     }
   }
