@@ -11,6 +11,7 @@ import 'chat_storage_service.dart';
 import '../../../models/chat_message.dart';
 import '../../../butler/context/context_tracker.dart';
 import '../../../butler/debug_lab/agent_run_trace.dart';
+import '../../../butler/debug_lab/prompt_log.dart';
 import '../../../butler/debug_lab/trace_store.dart';
 import '../../../butler/debug_lab/trace_session.dart';
 import '../../../butler/system_template.dart' show SystemTemplate;
@@ -1461,6 +1462,24 @@ class AiChatService {
       }
     }
     // ── Agent Debug Lab 埋点（8-09）：begin + 记录实际发出的 messages ──
+    // 8-12 01:5x（用户：每轮 prompt 全部直接记录到文件，随时能翻能复制）：
+    // 完整 messages（固定设定+动态块，不截断）追加写 agent_prompt_log.txt
+    unawaited(PromptLog.appendInput(
+      personaName: personaName,
+      isToolRound: toolRound,
+      userInput: message,
+      blocks: messages.map((m) {
+        final sb = StringBuffer('【${m.role}】');
+        if ((m.content ?? '').trim().isNotEmpty) {
+          sb.write('\n${m.content}');
+        }
+        final tcs = m.toolCalls ?? const [];
+        if (tcs.isNotEmpty) {
+          sb.write('\n🛠 ${tcs.map((c) => c['name']).join('、')}');
+        }
+        return sb.toString();
+      }).toList(),
+    ));
     TraceSession.instance.begin(
       ctxPid,
       message,
@@ -1698,6 +1717,13 @@ class AiChatService {
     // ── Agent Debug Lab 埋点：无待处理工具 → 本轮结束并存轨迹 ──
     if (!hasToolCalls) {
       TraceSession.instance.finish(result.text);
+      // 8-12 01:5x：男主回复命令同样落文件（找 bug 不用翻日志）
+      unawaited(PromptLog.appendReply(
+        modelText: result.text,
+        toolCallBriefs: (result.toolCalls ?? const [])
+            .map((c) => '${c['name']}(${c['arguments']})')
+            .toList(),
+      ));
     }
     return result;
   }

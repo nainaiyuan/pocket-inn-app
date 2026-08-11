@@ -7,6 +7,7 @@ import '../../../butler/flow/butler_flow.dart';
 import '../../../utils/debug_logger.dart';
 import '../../../services/parse_utils.dart';
 import '../../../butler/debug_lab/agent_run_trace.dart';
+import '../../../butler/debug_lab/prompt_log.dart';
 import '../../../butler/debug_lab/trace_store.dart';
 import '../../butler/butler_self_test_page.dart';
 import '../../butler/butler_skill_library_page.dart';
@@ -623,6 +624,57 @@ class _RoundsViewState extends State<_RoundsView> {
     });
   }
 
+  /// 8-12 01:5x（用户：每轮 prompt 全部记录，直接看不用复制给管家）：
+  /// 打开完整记录文件（agent_prompt_log.txt，含固定设定+动态块+男主回复）
+  Future<void> _showPromptLog() async {
+    final text = await PromptLog.readAll();
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF1A1A33),
+        insetPadding: const EdgeInsets.all(12),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 8, 0),
+                child: Row(
+                  children: [
+                    const Text('📄 完整记录文件（所有轮次）',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close,
+                          color: Colors.white54, size: 18),
+                      onPressed: () => Navigator.of(ctx).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: SelectableText(
+                    text,
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 11, height: 1.5),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -633,6 +685,13 @@ class _RoundsViewState extends State<_RoundsView> {
             const Text('每轮记录（最近30条）',
                 style: TextStyle(color: Colors.white54, fontSize: 11)),
             const Spacer(),
+            TextButton.icon(
+              onPressed: _showPromptLog,
+              icon: const Icon(Icons.article_outlined,
+                  size: 13, color: Color(0xFFC896B4)),
+              label: const Text('完整记录文件',
+                  style: TextStyle(color: Color(0xFFC896B4), fontSize: 11)),
+            ),
             TextButton.icon(
               onPressed: _refresh,
               icon: const Icon(Icons.refresh, size: 13, color: Color(0xFF7FB5B5)),
