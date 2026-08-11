@@ -33,8 +33,8 @@ class _DebugLogSheet extends StatefulWidget {
 
 class _DebugLogSheetState extends State<_DebugLogSheet> {
   String _filter = '全部';
-  bool _showRounds = false; // true = 每轮视图（男主每轮收到什么/回了什么）
-  bool _showFlows = false; // false = 日志行视图，true = 流程树视图
+  // 8-11 22:2x（用户：开关切换不方便）：三视图互斥枚举，不再多 bool 打架
+  _DbgView _view = _DbgView.logs;
   bool _anchorsOnly = false; // true = 只看关键锚点行（🔧📦📋▶⏰🔔⏸❌⚠️）
 
   /// 关键锚点标记（断点定位用，对应 A/B/C/D 判定卡）
@@ -79,47 +79,47 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
                 // 视图切换：日志 / 流程
                 ChoiceChip(
                   label: const Text('日志', style: TextStyle(fontSize: 11)),
-                  selected: !_showFlows,
+                  selected: _view == _DbgView.logs,
                   selectedColor: const Color(0xFFC896B4),
                   labelStyle: TextStyle(
-                    color: !_showFlows ? Colors.white : Colors.white70,
+                    color: _view == _DbgView.logs ? Colors.white : Colors.white70,
                   ),
                   side: BorderSide(
-                    color: !_showFlows
+                    color: _view == _DbgView.logs
                         ? const Color(0xFFC896B4)
                         : Colors.white24,
                   ),
-                  onSelected: (_) => setState(() => _showFlows = false),
+                  onSelected: (_) => setState(() => _view = _DbgView.logs),
                 ),
                 const SizedBox(width: 6),
                 ChoiceChip(
                   label: const Text('流程', style: TextStyle(fontSize: 11)),
-                  selected: _showFlows,
+                  selected: _view == _DbgView.flows,
                   selectedColor: const Color(0xFFC896B4),
                   labelStyle: TextStyle(
-                    color: _showFlows ? Colors.white : Colors.white70,
+                    color: _view == _DbgView.flows ? Colors.white : Colors.white70,
                   ),
                   side: BorderSide(
-                    color: _showFlows
+                    color: _view == _DbgView.flows
                         ? const Color(0xFFC896B4)
                         : Colors.white24,
                   ),
-                  onSelected: (_) => setState(() => _showFlows = true),
+                  onSelected: (_) => setState(() => _view = _DbgView.flows),
                 ),
                 const SizedBox(width: 6),
                 ChoiceChip(
                   label: const Text('每轮', style: TextStyle(fontSize: 11)),
-                  selected: _showRounds,
+                  selected: _view == _DbgView.rounds,
                   selectedColor: const Color(0xFF7FB5B5),
                   labelStyle: TextStyle(
-                    color: _showRounds ? Colors.white : Colors.white70,
+                    color: _view == _DbgView.rounds ? Colors.white : Colors.white70,
                   ),
                   side: BorderSide(
-                    color: _showRounds
+                    color: _view == _DbgView.rounds
                         ? const Color(0xFF7FB5B5)
                         : Colors.white24,
                   ),
-                  onSelected: (_) => setState(() => _showRounds = true),
+                  onSelected: (_) => setState(() => _view = _DbgView.rounds),
                 ),
                 const SizedBox(width: 6),
                 TextButton(
@@ -180,11 +180,13 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
               ],
             ),
             const Divider(color: Colors.white24),
-            if (_showRounds) ...[
+            if (_view == _DbgView.rounds) ...[
               // 8-11 21:5x（用户：看不见男主每轮 prompt 发生了什么）：
               // 每轮输入（动态块，固定设定已过滤）+ 男主回复命令 + 变化标记
               _RoundsView(scrollController: scrollCtrl),
-            ] else if (!_showFlows) ...[
+            ] else if (_view == _DbgView.flows) ...[
+              _FlowTreeView(scrollController: scrollCtrl),
+            ] else ...[
               // 只看关键锚点 + 一键复制（08-08 新增：日志太长找不到关键行）
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
@@ -257,7 +259,7 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
               const SizedBox(height: 6),
             ],
             Expanded(
-              child: _showFlows
+              child: _view == _DbgView.flows
                   ? _FlowTreeView(scrollController: scrollCtrl)
                   : SingleChildScrollView(
                       controller: scrollCtrl,
@@ -591,39 +593,66 @@ class _RoundsViewState extends State<_RoundsView> {
     _future = TraceStore.instance.all(limit: 30);
   }
 
+  void _refresh() {
+    setState(() {
+      _future = TraceStore.instance.all(limit: 30);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<AgentRunTrace>>(
-      future: _future,
-      builder: (context, snap) {
-        if (snap.connectionState != ConnectionState.done) {
-          return const Center(
-            child: Text('读取轨迹…',
-                style: TextStyle(color: Colors.white38, fontSize: 12)),
-          );
-        }
-        final rounds = snap.data ?? const <AgentRunTrace>[];
-        if (rounds.isEmpty) {
-          return const Center(
-            child: Text(
-              '还没有每轮记录。\n发一条消息给男主，这里就能看到\n'
-              '他每轮收到什么、回了什么命令。',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.6),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text('每轮记录（最近30条）',
+                style: TextStyle(color: Colors.white54, fontSize: 11)),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: _refresh,
+              icon: const Icon(Icons.refresh, size: 13, color: Color(0xFF7FB5B5)),
+              label: const Text('刷新',
+                  style: TextStyle(color: Color(0xFF7FB5B5), fontSize: 11)),
             ),
-          );
-        }
-        return ListView.builder(
-          controller: widget.scrollController,
-          padding: const EdgeInsets.only(bottom: 12),
-          itemCount: rounds.length,
-          itemBuilder: (context, i) {
-            // 上一轮 = 更新的轮次（all 倒序：最新在前）
-            final prev = i + 1 < rounds.length ? rounds[i + 1] : null;
-            return _RoundCard(round: rounds[i], prev: prev);
-          },
-        );
-      },
+          ],
+        ),
+        Expanded(
+          child: FutureBuilder<List<AgentRunTrace>>(
+            future: _future,
+            builder: (context, snap) {
+              if (snap.connectionState != ConnectionState.done) {
+                return const Center(
+                  child: Text('读取轨迹…',
+                      style: TextStyle(color: Colors.white38, fontSize: 12)),
+                );
+              }
+              final rounds = snap.data ?? const <AgentRunTrace>[];
+              if (rounds.isEmpty) {
+                return const Center(
+                  child: Text(
+                    '还没有每轮记录。\n发一条消息给男主，这里就能看到\n'
+                    '他每轮收到什么、回了什么命令。',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: Colors.white38, fontSize: 12, height: 1.6),
+                  ),
+                );
+              }
+              return ListView.builder(
+                controller: widget.scrollController,
+                padding: const EdgeInsets.only(bottom: 12),
+                itemCount: rounds.length,
+                itemBuilder: (context, i) {
+                  // 上一轮 = 更新的轮次（all 倒序：最新在前）
+                  final prev = i + 1 < rounds.length ? rounds[i + 1] : null;
+                  return _RoundCard(round: rounds[i], prev: prev);
+                },
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -819,3 +848,6 @@ String _argsBrief(Map<String, dynamic> args) {
   final parts = args.entries.map((e) => '${e.key}=${_short(e.value.toString(), 24)}');
   return parts.join('，');
 }
+
+/// 8-11 22:2x：调试弹层三视图（互斥枚举，避免多 bool 状态打架）
+enum _DbgView { logs, flows, rounds }
