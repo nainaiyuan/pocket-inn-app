@@ -96,16 +96,19 @@ class ChatFlowStore {
   /// - **没在处理**（无 running 流程）：用户的话 = 新的大流程（当前工作区）
   /// - **处理中**（有 running 流程）：用户插话 = 新消息进**未处理消息区**。
   ///   **大流程内所有消息平行**（#1、#2、#3…），插话 = 平行消息之一，
-  ///   可以暂挂（先做别的，回头再处理它）；不做 A/B/C/D 分类判断
-  ///   （用户：取消任务这个选项是危险的，男主可能拿来漏回消息）
+  ///   可暂挂（先做别的，回头再处理，最后一起清）；男主处理插话时
+  ///   **自己判断**：补充当前任务 / 修改当前任务 / 插入新任务（先做插话，
+  ///   做完回原任务）/ 不做了（她叫停当前任务）（8-11 18:2x 用户：
+  ///   男主收到插话必须判断该干嘛，不能跳过）
   static Future<void> feedUser(String personaId, String text) async {
     if (personaId.isEmpty || text.trim().isEmpty) return;
     await warm(personaId);
     final f = _memCache;
     if (!_isTerminal(f) && f!['status'] == 'running') {
       // 处理中 → 插话 = 新消息进**未处理消息区**（8-11 18:2x 用户：
-      // 大流程内所有消息平行，插话 = 平行消息之一，可暂挂先做别的，
-      // 回头再处理；不做 A/B/C/D 分类，不打断当前处理）
+      // 大流程内所有消息平行，插话 = 平行消息之一：可暂挂先做别的，
+      // 回头再处理；男主处理时自己判断 补充/修改/插入/不做了。
+      // 不打断当前处理）
       final steps = _stepsOf(f);
       // 8-10 23:0x：插话步骤分配稳定编号（不挤占已有编号）
       final step = _newStep(text, no: _nextStepNo(steps));
@@ -116,7 +119,7 @@ class ChatFlowStore {
       await _write(personaId, f);
       _log('对话流程',
           '📥 用户插话进未处理区 #${step['no']}：${_short(text)}'
-          '（平行消息，可暂挂先做别的，回头再处理）');
+          '（平行消息：可暂挂，处理时男主判断 补充/修改/插入/不做了）');
       return;
     }
     // 没在处理 → 立新流程（8-09 18:33：带流程编号）
@@ -718,8 +721,10 @@ class ChatFlowStore {
     }
     if (pendingList.isNotEmpty) {
       sb.writeln('未处理消息区（还没处理的，回复时标注你回的是哪条：回#N；'
-          '可一次回多条 回#1、#2；插话也是平行消息，可暂挂先做别的，'
-          '回头再处理）：');
+          '可一次回多条 回#1、#2。插话也是平行消息——不想现在处理就暂挂'
+          '（先做别的，回头再处理它，最后一起清）；要处理时你自己判断：'
+          '补充当前任务 / 修改当前任务 / 插入新任务（先做插话，做完回原任务）'
+          '/ 不做了（她叫停当前任务））：');
       for (final s in pendingList) {
         final no = _stepNo(s, steps.indexOf(s));
         final fromMark = s['from'] == 'butler' ? '【管家】' : '';
