@@ -5,6 +5,7 @@ import '../../../butler/context/context_tracker.dart';
 import '../../../services/chat_database_service.dart';
 import '../../../services/storage_service.dart';
 import '../../../utils/debug_logger.dart';
+import 'chat_flow_store.dart';
 import 'chat_storage_service.dart';
 
 /// 上下文管理器 —— DeepSeek 无后端记忆，靠它让男主"记得"聊天。
@@ -329,6 +330,12 @@ class ContextManager {
         final line = kept[i];
         if (line.startsWith('用户')) {
           if (lastMaleIdx >= 0 && i > lastMaleIdx) continue;
+          // 8-12 06:2x（用户：男主先处理M1说结束M1，她插入M2，管家才执行
+          // M1结束 → end_M1 回复行落在 M2 行后面 → 历史配对把 M2 当已回复、
+          // end_M1 挂到 M2 头上（"M2 进历史"））：当前 running 流程里还没
+          // 处理的待办步骤（☐）不进"做完了的历史"——没做完的对话由
+          // 工作区/动态块接管，等男主处理完（标 done）自然回到历史
+          if (_isPendingFlowStep(personaId, line)) continue;
           entries.add([line]);
         } else if (entries.isNotEmpty) {
           entries.last.add(line);
@@ -384,6 +391,34 @@ class ContextManager {
   /// 行内时间戳：'用户 [06-28 17:01]：xxx' → '[06-28 17:01]'
   static String? _lineTs(String line) =>
       RegExp(r'\[[^\]]+\]').firstMatch(line)?.group(0);
+
+  /// 8-12 06:2x（"M2 进历史"修复）：该用户行是否 = 当前 running 流程里
+  /// 还没处理的待办步骤（☐）。历史流程只放"做完了的对话"——竞态场景
+  /// （男主工具轮中间她插话，男主回复行落在插话行后面）会把没做的插话
+  /// 误配成"已回复"，这里按 文本+时间戳 对工作区 ☐ 步骤，命中就跳过。
+  /// 男主处理完（标 done）后该行自然回到历史。
+  static bool _isPendingFlowStep(String personaId, String userLine) {
+    try {
+      final f = ChatFlowStore.get(personaId);
+      if (f == null || (f['status']?.toString() ?? '') != 'running') {
+        return false;
+      }
+      final content = _stripPrefix(userLine).trim();
+      if (content.isEmpty) return false;
+      final tsMatch = RegExp(r'\[([^\]]+)\]').firstMatch(userLine);
+      final lineTs = tsMatch?.group(1)?.trim() ?? '';
+      for (final s in (f['steps'] as List? ?? const [])) {
+        if (s is! Map) continue;
+        if ((s['status']?.toString() ?? '') == 'done') continue;
+        if ((s['userText']?.toString() ?? '').trim() != content) continue;
+        final sTs = (s['ts']?.toString() ?? '').trim();
+        // 缺时间戳任一侧 → 只按文本匹配（宁多跳不少跳，☐ 不占历史位）
+        if (sTs.isEmpty || lineTs.isEmpty) return true;
+        if (sTs == lineTs) return true;
+      }
+    } catch (_) {}
+    return false;
+  }
 
   /// 历史流程条目：用户行 → '历史#1 [16:00] 她：今晚吃什么？'
   static String _flowUserLine(String line, int hno) {
