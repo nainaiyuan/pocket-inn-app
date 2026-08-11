@@ -1219,7 +1219,7 @@ class AiChatService {
         !isLight && chatFlowText != null && chatFlowText.isNotEmpty;
     final flowBlock = showFlowAsLast
         ? '【当前工作区】（你当前要处理的工作——▶=正在处理的这条，'
-            '☐=待办（一条条看过去，每条都要处理判断）；标完回#N，'
+            '☐=待办（一条条看过去，每条都要处理判断）；标完回aN，'
             '全部标完 → 说"大流程也结束了"+ 写摘要 save_summary）'
             '\n$chatFlowText'
         : null;
@@ -1278,7 +1278,7 @@ class AiChatService {
         AIChatMessage(
           role: 'system',
           content: '【待回复】（主对话她说的——一般要回，特殊情况可不回；'
-              '要消必须显式标注 {"reply":"回#N"}（JSON 字段），一句话可回多条；'
+              '要消必须显式标注 {"reply":"回aN"}（JSON 字段），一句话可回多条；'
               '不回就挂着，她问起来你老实说）\n$pendingUser',
         ),
       // 8-11 04:5x（用户：后续待处理放【当前流程】【后面/下面】——
@@ -1291,14 +1291,14 @@ class AiChatService {
           role: 'system',
           content: '【当前工作区】（你现在要处理的工作——'
               '▶=正在处理的这条；☐=待办（一条条看过去，每条都要处理判断）；'
-              '标完回#N；全部标完 → 说"大流程也结束了"+ 写摘要 save_summary）'
+              '标完回aN；全部标完 → 说"大流程也结束了"+ 写摘要 save_summary）'
               '\n$chatFlowText',
         ),
       if (inFlow && pendingUser != null)
         AIChatMessage(
           role: 'system',
           content: '【流程输入】（流程进行中她主对话说的——插进流程，'
-              '你判断继续流程还是重置；要回她也用 {"reply":"回#N"} 标注消掉）\n$pendingUser',
+              '你判断继续流程还是重置；要回她也用 {"reply":"回aN"} 标注消掉）\n$pendingUser',
         ),
       // 8-10 v3（5.8 卡片提示）：设定弹窗/卡片工具进行中 → 注入卡片会话规则
       //（不进主 prompt，只在用卡片工具时出现）
@@ -1326,8 +1326,9 @@ class AiChatService {
       if (pendingButler != null)
         AIChatMessage(
           role: 'system',
-          content: '【系统消息 #A】（管家/系统提醒——处理完直接标"回#A"消掉，'
-              '不用回复她；觉得该让她知道才用 {"msg":"…"} 转达）\n$pendingButler',
+          content: '【系统消息】（标【管家】的消息，也是待办之一，有 a 编号'
+              '——处理完直接标"回aN"，不用回复她；'
+              '觉得该让她知道才用 {"msg":"…"} 转达）\n$pendingButler',
         ),
       // 8-11 05:0x（用户 8-10 拍板"长任务的都不要了"）：
       // 旧长任务注入全删——旧【当前流程】卡片、【任务清单】、
@@ -1412,7 +1413,7 @@ class AiChatService {
             role: 'user',
             content: '【当前工作区】（你当前要处理的工作——'
                 '▶=正在处理的这条；☐=待办（一条条看过去，每条都要处理判断）；'
-                '标完回#N；全部标完 → 说"大流程也结束了"+ 写摘要 save_summary）'
+                '标完回aN；全部标完 → 说"大流程也结束了"+ 写摘要 save_summary）'
                 '\n$chatFlowText'));
       } else {
         messages.add(AIChatMessage(role: 'user', content: message));

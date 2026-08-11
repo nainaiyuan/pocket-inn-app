@@ -37,14 +37,16 @@ class ChatFlowStore {
 
   /// 流程编号（8-09 18:33 用户设计）：每个流程一个编号（流程#N），
   /// 男主/用户可引用（合并、插话判断）。计数器持久化，全局自增。
-  static Future<int> _nextFlowNo() async {
+  /// 8-11 20:1x（用户 20:12）：大流程编号 = 1A/2A/3A…（数字+字母，
+  /// 不和里面消息的 a1/a2 混，也不和工具 T1 混）。
+  static Future<String> _nextFlowNo() async {
     try {
       final p = await SharedPreferences.getInstance();
       final n = p.getInt(_counterKey) ?? 0;
       await p.setInt(_counterKey, n + 1);
-      return n + 1;
+      return '${n + 1}A';
     } catch (_) {
-      return DateTime.now().millisecondsSinceEpoch % 100000;
+      return '${DateTime.now().millisecondsSinceEpoch % 100000}A';
     }
   }
 
@@ -401,7 +403,7 @@ class ChatFlowStore {
         f['steps'] = steps;
         await _write(personaId, f);
         _log('对话流程',
-            '⚠️ 回#N 编号无效（${marked.join('、')}，未处理区 ${steps.length} 条）'
+            '⚠️ 回aN 编号无效（${marked.join('、')}，未处理区 ${steps.length} 条）'
             '→ 不自动消，回复挂当前步');
       }
       return;
@@ -617,22 +619,31 @@ class ChatFlowStore {
 
   /// 解析男主回复里的消条目标注（第N步，1-based）
   /// 兼容格式：`<reply>回#1、#2</reply>` / `"reply":"回#1、#2"` / 回待#1 / 回#1
+  /// 8-11 20:1x（用户 20:12）：消息编号 = a1/a2…（a 前缀），
+  /// 兼容旧 #1（旧数据/旧习惯）。只认 a 前缀或 # 前缀，避免把
+  /// 大流程 1A 里的数字误当消息编号。
   static List<int> _parseMarkedNos(String reply) {
     final nos = <int>{};
+    void collect(String s) {
+      for (final m in RegExp(r'a(\d+)', caseSensitive: false).allMatches(s)) {
+        nos.add(int.tryParse(m.group(1)!) ?? 0);
+      }
+      for (final m in RegExp(r'#(\d+)').allMatches(s)) {
+        nos.add(int.tryParse(m.group(1)!) ?? 0);
+      }
+    }
+
     for (final m
         in RegExp(r'<reply>([\s\S]*?)</reply>', caseSensitive: false)
             .allMatches(reply)) {
-      for (final n in RegExp(r'#(\d+)').allMatches(m.group(1) ?? '')) {
-        nos.add(int.tryParse(n.group(1)!) ?? 0);
-      }
+      collect(m.group(1) ?? '');
     }
     for (final m in RegExp(r'"reply"\s*:\s*"([^"]*)"').allMatches(reply)) {
-      final raw = (m.group(1) ?? '').replaceAll(r'\"', '"');
-      for (final n in RegExp(r'#(\d+)').allMatches(raw)) {
-        nos.add(int.tryParse(n.group(1)!) ?? 0);
-      }
+      collect((m.group(1) ?? '').replaceAll(r'\"', '"'));
     }
-    for (final m in RegExp(r'回(?:复)?\s*待?#(\d+)').allMatches(reply)) {
+    for (final m
+        in RegExp(r'回(?:复)?\s*待?#?a?(\d+)', caseSensitive: false)
+            .allMatches(reply)) {
       nos.add(int.tryParse(m.group(1)!) ?? 0);
     }
     nos.remove(0);
@@ -710,11 +721,11 @@ class ChatFlowStore {
           <Map<String, dynamic>>[];
       if (notes.isNotEmpty) {
         for (final n in notes) {
-          sb.writeln('$mark #$no [${n['ts']}] 管家：${n['text']}');
+          sb.writeln('$mark a$no [${n['ts']}] 管家：${n['text']}');
         }
         sb.writeln('  她：${curStep['userText']}');
       } else {
-        sb.writeln('$mark #$no [$ts]$fromMark $speaker：${curStep['userText']}');
+        sb.writeln('$mark a$no [$ts]$fromMark $speaker：${curStep['userText']}');
       }
       // 工具链（这条下面做了什么）
       for (final entry in tools.entries) {
@@ -743,13 +754,13 @@ class ChatFlowStore {
       final fromMark = s['from'] == 'butler' ? '【管家】' : '';
       final ts = (s['ts'] ?? '').toString();
       final spk = s['from'] == 'butler' ? '管家' : '她';
-      sb.writeln('☐ #$no [$ts]$fromMark $spk：'
+      sb.writeln('☐ a$no [$ts]$fromMark $spk：'
           '${_short(s['userText'].toString(), 30)}（待办）');
     }
     // 引导：平行 + 插话判断 + 结束流程（8-11 19:4x 精简，对齐 GPT：
     // 固定层只放规则，流程细节这里一句话讲完，不叠话术）
     sb.writeln('—— 上面都是待办事项（参考）：一条条看过去，能一起做的'
-        '就一起做（回#N 标你处理的是哪条，可一次回多条 回#1、#2）。'
+        '就一起做（回aN 标你处理的是哪条，可一次回多条 回a1、回a2）。'
         '每条都要处理，判断：补充/修改/插入（先做插话，做完回原任务）'
         '/不做了（她叫停）——不能跳过任何一条');
     sb.writeln('—— 结束：全部标完 → 说"大流程也结束了" + 写摘要'
@@ -779,7 +790,7 @@ class ChatFlowStore {
       final fromMark = s['from'] == 'butler' ? '【管家】' : '';
       final spk = s['from'] == 'butler' ? '管家' : '她';
       pending.add(
-          '☐ #$no $fromMark $spk：${_short(s['userText'].toString(), 24)}');
+          '☐ a$no $fromMark $spk：${_short(s['userText'].toString(), 24)}');
     }
     if (pending.isEmpty) return null;
     final sb = StringBuffer();
@@ -873,7 +884,7 @@ class ChatFlowStore {
     final pendingCount = pending.length;
     return '还有 $pendingCount 条未处理消息。当前第 $curNo 条「'
         '${_short(curStep['userText'].toString(), 20)}」还没处理。\n'
-        '· 回复时标注你回的是哪条（回#N），可一次回多条（回#1、#2）；\n'
+        '· 回复时标注你回的是哪条（回aN），可一次回多条（回a1、回a2）；\n'
         '· 全部处理完 → 固定结束流程：说"大流程做完了" + 写摘要'
         '（save_summary）。';
   }

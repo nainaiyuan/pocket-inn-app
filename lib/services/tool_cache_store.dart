@@ -23,9 +23,45 @@ class ToolCacheStore {
   static const String _prefix = 'tool_cache_';
   static const int maxEntries = 10;
 
+  /// 工具调用编号计数器 key（8-11 20:1x 用户：工具编号 T1/T2…独立，
+  /// 不和消息 a1/a2、大流程 1A 混；男主看到结果行编号可查详情）
+  static const String _toolNoKey = 'tool_call_no_counter';
+  static int? _toolNoCache;
+
   static List<String>? _memCache;
 
   static String _key(String personaId) => '$_prefix$personaId';
+
+  /// 分配下一个工具调用编号（T1、T2…）
+  static Future<String> nextToolNo() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      var n = _toolNoCache;
+      if (n == null) {
+        n = p.getInt(_toolNoKey) ?? 0;
+      }
+      n += 1;
+      _toolNoCache = n;
+      await p.setInt(_toolNoKey, n);
+      return 'T$n';
+    } catch (_) {
+      return 'T${DateTime.now().millisecondsSinceEpoch % 100000}';
+    }
+  }
+
+  /// 按编号查缓存条目（manage_tool_cache 动作=view 用；8-11 20:1x 用户：
+  /// 男主看到结果行 T 编号 → 想查详细记录就报编号查大脑）
+  static Future<String> view(String personaId, String no) async {
+    final entries = await _read(personaId);
+    final key = no.trim().toUpperCase();
+    for (final e in entries) {
+      if (e.startsWith(key) || e.contains('[$key]') || e.contains('（$key）')) {
+        return e;
+      }
+    }
+    return '工具缓存里没有编号 $no 的记录（现有 ${entries.length} 条，'
+        '用 动作=status 看全部）';
+  }
 
   /// 单例缓存读（warm 后同步读，避免每轮 await）
   static void warm(String personaId) {

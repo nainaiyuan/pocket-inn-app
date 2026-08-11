@@ -1306,7 +1306,7 @@ class _ChatPageState extends State<ChatPage>
           } else {
             final rewriteEvent = '你的回复没有按格式输出（缺少 JSON 块），'
                 '已被打回，用户没看到。请按格式重写（JSON 对象，每个占一行）：'
-                '{"reply":"回#N"}（标注回哪条，可省）'
+                '{"reply":"回aN"}（标注回哪条，可省）'
                 '+ {"act":"动作/神态"}（可选）+ {"msg":"你说的话"}。'
                 '除 JSON 对象外不要输出任何其他文字；一次说多句 = 多个 {"msg":..} 对象。';
             DebugLogger.log('AI路由', '⛔ 男主无标签回复，打回重写（第 $_formatFailCount 次）');
@@ -2101,9 +2101,12 @@ class _ChatPageState extends State<ChatPage>
           //   上下文只留一行摘要 + "完整结果已存工具缓存"（不塞满每轮）
           final resultText = toolResult.text.trim();
           final isLong = resultText.length > 300;
+          // 8-11 20:1x（用户 20:12）：工具编号 T1/T2…独立分配——
+          // 结果行带编号，男主看到成功/失败可报编号查详细记录
+          final toolNo = await ToolCacheStore.nextToolNo();
           if (toolResult.ok && (kQueryToolNames.contains(name) || isLong)) {
             if (resultText.isNotEmpty) {
-              await ToolCacheStore.add(personaId, '$name：$resultText');
+              await ToolCacheStore.add(personaId, '$toolNo $name：$resultText');
             }
           }
           // 8-07 00:1x：审批拒绝系统事件化——拒绝结果同时收集，
@@ -2134,7 +2137,7 @@ class _ChatPageState extends State<ChatPage>
                 // 工具消息在系统分区，天然不是用户说的话——不用额外解释
                 // 8-11 18:0x（用户 17:57）：结果行 = 参数（名=值）+✅/❌+
                 // 一句话+怎么办；超长 → 摘要+提示查缓存（外置大脑）
-                content: _toolResultLine(name, args, toolResult),
+                content: _toolResultLine(toolNo, name, args, toolResult),
                 toolCallId: call['id']?.toString() ?? 'call_${toolLoop}_$name',
               ),
             );
@@ -2154,7 +2157,7 @@ class _ChatPageState extends State<ChatPage>
             }
           } else {
             // 文本块：结果收集，最后合并注入 user 消息
-            textToolResults.add(_toolResultLine(name, args, toolResult));
+            textToolResults.add(_toolResultLine(toolNo, name, args, toolResult));
           }
           // 8-10 21:5x（用户：manage_task 失败被遗忘）：工具失败（用户拒绝
           // 不算——那是正常交互）→ 标记本轮有失败 → done 也唤醒男主处理
@@ -2445,7 +2448,7 @@ class _ChatPageState extends State<ChatPage>
           if (pendingNos.isNotEmpty) {
             _pendingInterruptEvent =
                 '你说大流程结束了，但还有 ${pendingNos.join('、')} '
-                '没标处理完。你没标 = 没做完：都处理完了就回#N 标掉，'
+                '没标处理完。你没标 = 没做完：都处理完了就回aN 标掉，'
                 '（最后一条标完时带上"大流程也结束了"+写摘要 save_summary），'
                 '我再归档。';
             DebugLogger.log('管家流程',
@@ -5309,16 +5312,18 @@ class _ChatPageState extends State<ChatPage>
   /// 无参数 → 概览；{action: add_frequent/remove_frequent, name} 维护常用表）
   /// 8-11 18:0x（用户 17:57 设计）：工具结果行 = 参数（名=值）+ ✅/❌ + 一句话 + 怎么办。
   /// 短结果直接进上下文；超长（>300 字）→ 上下文只留摘要 + 提示查缓存（外置大脑）。
+  /// 8-11 20:1x（用户 20:12）：结果行带工具编号 T1/T2…——三套编号不混
+  /// （大流程 1A / 消息 a1 / 工具 T1）；男主想查详细记录报编号即可。
   String _toolResultLine(
-      String name, Map<String, dynamic> args, _ToolResult r) {
+      String toolNo, String name, Map<String, dynamic> args, _ToolResult r) {
     final okMark = r.ok ? '✅成功' : '❌失败';
     final argsBrief = _toolArgsBrief(args);
     final text = r.text.trim();
-    var line = '【工具 $name】参数（$argsBrief）$okMark';
+    var line = '【工具 $name $toolNo】参数（$argsBrief）$okMark';
     if (text.isEmpty) return '$line。';
     if (text.length > 300) {
-      line += '：${text.substring(0, 120)}…（完整结果已存工具缓存，'
-          '需要时 manage_tool_cache 查）';
+      line += '：${text.substring(0, 120)}…（完整结果已存工具缓存 $toolNo，'
+          '需要时 manage_tool_cache 动作=view 编号=$toolNo 查）';
     } else {
       line += '：$text';
     }
@@ -7949,10 +7954,19 @@ class _ChatPageState extends State<ChatPage>
           true,
           n == 0 ? '工具缓存是空的（add 记入）' : '工具缓存 $n 条：\n$t',
         );
+      case 'view':
+        // 8-11 20:1x（用户：工具编号查详细记录）——报 T 编号查具体条目
+        final no = args['no']?.toString() ?? args['编号']?.toString() ?? '';
+        if (no.isEmpty) {
+          return _ToolResult(false, 'manage_tool_cache 动作=view 要带 编号（如 编号=T1）');
+        }
+        final v = await ToolCacheStore.view(personaId, no);
+        return _ToolResult(true, v);
       default:
         return _ToolResult(
           false,
-          'manage_tool_cache 参数：action=add（要 content）/clear/status',
+          'manage_tool_cache 参数：action=add（要 content）/clear/status/'
+          'view（要 编号=T1）',
         );
     }
   }
