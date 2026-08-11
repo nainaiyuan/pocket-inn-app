@@ -30,4 +30,12 @@ class PrefsTraceStorage implements TraceStorage {
   @override
   Future<List<String>> keys() async =>
       prefs.getKeys().toList(growable: false);
+
+  @override
+  Future<String?> loadFixedPrompt() async =>
+      prefs.getString('agent_trace_fixed_prompt');
+
+  @override
+  Future<bool> saveFixedPrompt(String value) async =>
+      prefs.setString('agent_trace_fixed_prompt', value);
 }
