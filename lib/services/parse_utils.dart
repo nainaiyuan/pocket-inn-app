@@ -79,9 +79,11 @@ bool? parseExitSignal(String raw) {
   if (RegExp(r'"?next_action"?\s*[:：]\s*("?null"?|none|无|空)').hasMatch(t)) {
     return true;
   }
-  // ③ 固定结束指令（8-11 21:5x 用户：不让男主自由说中文——
-  // 统一说「消大流程」；兼容旧引导的"大流程也结束了"）
-  if (t.contains('消大流程') || t.contains('大流程也结束了')) {
+  // ③ 固定结束指令（8-11 21:58 用户：英文指令，一个就够——
+  // end_flow，避免中文和内容冲突；兼容旧引导的「消大流程」/旧中文）
+  if (RegExp(r'end_flow', caseSensitive: false).hasMatch(t) ||
+      t.contains('消大流程') ||
+      t.contains('大流程也结束了')) {
     return true;
   }
   return null;
@@ -116,9 +118,14 @@ String stripExitSignal(String text) {
     ),
     '',
   );
-  // 8-11 21:5x：固定结束指令「消大流程」从显示文本剥离
+  // 8-11 21:58：固定结束指令 end_flow 从显示文本剥离
   // （男主写在 sys 字段或文本里，都不能漏给用户看）
-  t = t.replaceAll(RegExp(r'[「『]?消大流程[」』]?', caseSensitive: false), '');
+  t = t.replaceAll(
+    RegExp(r'\{\s*"?end_flow"?\s*[:：]\s*(true|false)\s*,?\s*\}',
+        caseSensitive: false),
+    '',
+  );
+  t = t.replaceAll(RegExp(r'end_flow', caseSensitive: false), '');
   // 裸标记（前面不是 { 、 或 " → 不在 JSON 对象里）
   t = t
       .replaceAll(
