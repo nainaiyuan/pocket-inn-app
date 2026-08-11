@@ -590,13 +590,21 @@ class ChatFlowStore {
 
   /// 8-11 19:0x（用户 19:09 固定结束流程）：未标 done 的步骤编号列表。
   /// 归档前检查用——管家不自动标，没标完 = 没做完，提示男主补标。
+  /// 8-11 20:3x（用户 20:34 澄清）：结束检查用的待处理编号——
+  /// **跳过插话**（from == 'user_interrupt'）：男主带结束标签时，插话
+  /// 没标完**不阻塞归档**，由 finish() 自动拆到下一个大流程当独立任务
+  /// （用户手速快连发，插话不能跟着旧大流程消掉）。
+  /// 只有正常消息步骤没标完才打回补标（8-11 19:09 用户：没标完=没做完）。
+  /// 注：只此一处调用（chat_page 结束检查）；checkBrief 不经过这里，
+  /// 男主处理中仍能看到全部待办（含插话，每条都要处理判断）。
   static List<int> pendingNos(String personaId) {
     final f = _memCache;
     if (f == null) return const [];
     final steps = _stepsOf(f);
     final nos = <int>[];
     for (var i = 0; i < steps.length; i++) {
-      if (steps[i]['status'] != 'done') {
+      if (steps[i]['status'] != 'done' &&
+          steps[i]['from'] != 'user_interrupt') {
         nos.add(_stepNo(steps[i], i));
       }
     }
@@ -634,8 +642,8 @@ class ChatFlowStore {
         'steps': newSteps,
         'startedAt': DateTime.now().toIso8601String(),
         // 8-11 20:2x：男主可能没意识到有插话 → 管家备注说明（男主唤醒时看到）
-        'butlerNote': '上个大流程你带结束标记时，她还有 ${lateInterrupts.length} 条'
-            '话刚发出来没看到，管家自动开的新任务，处理一下',
+        'butlerNote': '上个大流程结束时她还有 ${lateInterrupts.length} 条话'
+            '没处理完，管家自动开的新任务，处理一下',
       };
       await _write(personaId, flow);
       _log('对话流程',
