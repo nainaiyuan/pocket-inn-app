@@ -597,15 +597,18 @@ class ChatFlowStore {
   /// 只有正常消息步骤没标完才打回补标（8-11 19:09 用户：没标完=没做完）。
   /// 注：只此一处调用（chat_page 结束检查）；checkBrief 不经过这里，
   /// 男主处理中仍能看到全部待办（含插话，每条都要处理判断）。
-  static List<int> pendingNos(String personaId) {
+  /// 8-11 23:5x：返回带前缀编号（M1/B3）——管家消息 B、用户消息 M，
+  /// 男主一眼知道补标哪条；调用处只 chat_page 一处。
+  static List<String> pendingNos(String personaId) {
     final f = _memCache;
     if (f == null) return const [];
     final steps = _stepsOf(f);
-    final nos = <int>[];
+    final nos = <String>[];
     for (var i = 0; i < steps.length; i++) {
       if (steps[i]['status'] != 'done' &&
           steps[i]['from'] != 'user_interrupt') {
-        nos.add(_stepNo(steps[i], i));
+        final n = _stepNo(steps[i], i);
+        nos.add('${steps[i]['from'] == 'butler' ? 'B' : 'M'}$n');
       }
     }
     return nos;
@@ -675,6 +678,10 @@ class ChatFlowStore {
         nos.add(int.tryParse(m.group(1)!) ?? 0);
       }
       for (final m in RegExp(r'#(\d+)').allMatches(s)) {
+        nos.add(int.tryParse(m.group(1)!) ?? 0);
+      }
+      // 8-11 23:5x：管家消息 B 编号（回B1 消管家消息）
+      for (final m in RegExp(r'B(\d+)', caseSensitive: false).allMatches(s)) {
         nos.add(int.tryParse(m.group(1)!) ?? 0);
       }
     }
@@ -754,6 +761,7 @@ class ChatFlowStore {
     }
     if (curStep != null) {
       final no = _stepNo(curStep, steps.indexOf(curStep));
+      final noMark = curStep['from'] == 'butler' ? 'B' : 'M'; // 8-11 23:5x：管家消息 B 前缀
       final fromMark = curStep['from'] == 'butler' ? '【管家】' : '';
       final ts = (curStep['ts'] ?? '').toString();
       final tools = _asMap(curStep['tools']);
@@ -774,7 +782,7 @@ class ChatFlowStore {
         }
         sb.writeln('  她：${curStep['userText']}');
       } else {
-        sb.writeln('$mark M$no [$ts]$fromMark $speaker：${curStep['userText']}');
+        sb.writeln('$mark $noMark$no [$ts]$fromMark $speaker：${curStep['userText']}');
       }
       // 工具链（这条下面做了什么）
       for (final entry in tools.entries) {
@@ -800,16 +808,18 @@ class ChatFlowStore {
       if (s['status'] == 'done') continue;
       if (i == curIdx0) continue; // 当前步已在上方显示
       final no = _stepNo(s, i);
+      final noMark = s['from'] == 'butler' ? 'B' : 'M'; // 8-11 23:5x
       final fromMark = s['from'] == 'butler' ? '【管家】' : '';
       final ts = (s['ts'] ?? '').toString();
       final spk = s['from'] == 'butler' ? '管家' : '她';
-      sb.writeln('☐ M$no [$ts]$fromMark $spk：'
+      sb.writeln('☐ $noMark$no [$ts]$fromMark $spk：'
           '${_short(s['userText'].toString(), 30)}（待办）');
     }
     // 引导：平行 + 插话判断 + 结束流程（8-11 19:4x 精简，对齐 GPT：
     // 固定层只放规则，流程细节这里一句话讲完，不叠话术）
     sb.writeln('—— 上面都是待办事项（参考）：一条条看过去，能一起做的'
-        '就一起做（回MN 标你处理的是哪条，可一次回多条 回M1、回M2）。'
+        '就一起做（回MN 标你处理的是哪条，可一次回多条 回M1、回M2；'
+        '管家消息用 回BN，如 回B1）。'
         '每条都要处理，判断：补充/修改/插入（先做插话，做完回原任务）'
         '/不做了（她叫停）——不能跳过任何一条');
     sb.writeln('—— 结束：全部标完 → 最后一条 sys 写 end_flow + 调 save_summary'
@@ -836,10 +846,11 @@ class ChatFlowStore {
       if (s['status'] == 'done') continue;
       if (i == cur) continue;
       final no = _stepNo(s, i);
+      final noMark = s['from'] == 'butler' ? 'B' : 'M'; // 8-11 23:5x
       final fromMark = s['from'] == 'butler' ? '【管家】' : '';
       final spk = s['from'] == 'butler' ? '管家' : '她';
       pending.add(
-          '☐ M$no $fromMark $spk：${_short(s['userText'].toString(), 24)}');
+          '☐ $noMark$no $fromMark $spk：${_short(s['userText'].toString(), 24)}');
     }
     if (pending.isEmpty) return null;
     final sb = StringBuffer();

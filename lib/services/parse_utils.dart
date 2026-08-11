@@ -81,7 +81,9 @@ bool? parseExitSignal(String raw) {
   }
   // ③ 固定结束指令（8-11 21:58 用户：英文指令，一个就够——
   // end_flow，避免中文和内容冲突；兼容旧引导的「消大流程」/旧中文）
-  if (RegExp(r'end_flow', caseSensitive: false).hasMatch(t) ||
+  // 8-11 23:5x（用户：男主把 end_flow 拼成 end_fow → 没结束被反复唤醒）：
+  // 常见拼写变体容错（end_fow / endflow 都认，避免男主手滑白忙一轮）
+  if (RegExp(r'end_?f(?:lo)?w', caseSensitive: false).hasMatch(t) ||
       t.contains('消大流程') ||
       t.contains('大流程也结束了')) {
     return true;
