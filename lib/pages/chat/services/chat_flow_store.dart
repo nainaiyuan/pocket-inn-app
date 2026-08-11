@@ -117,7 +117,7 @@ class ChatFlowStore {
       // 不推为当前——男主正在处理的保持不变，插话在未处理区等判断
       await _write(personaId, f);
       _log('对话流程',
-          '📥 用户插话进大流程 #${step['no']}（平行，暂挂还没轮到）：'
+          '📥 用户插话进大流程 #${step['no']}（平行，进待办清单）：'
           '${_short(text)}（处理时男主判断 补充/修改/插入/不做了）');
       return;
     }
@@ -661,10 +661,10 @@ class ChatFlowStore {
     final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
     final sb = StringBuffer();
     final flowNo = f['flowNo'];
-    // 8-11 18:3x（用户 18:30）：【当前工作区】= 大流程，内所有消息**平行**
-    // （#1、#2、#3…），正在处理的标 ▶/✅（子分支挂下面），还没轮到的标 ☐
-    // （暂挂）。大流程编号 = 管家自动生成（flowNo），男主也可自己引用。
-    // 未处理区是另一回事（男主没被唤醒时连发的消息，醒来后组织进大流程）
+    // 8-11 19:5x（用户 19:53）：【当前工作区】= 大流程，内所有消息 = **待办事项**
+    // （#1、#2、#3… 平行），给男主做参考：一条条看过去，能一起做的就一起做，
+    // 每条都要处理判断（不能因为"还没轮到"就不看）。正在处理的标 ▶/✅
+    // （子分支挂下面），还没处理的标 ☐（待办）。
     sb.writeln('【当前工作区${flowNo != null ? ' #$flowNo' : ''}】');
     if (status == 'done') {
       sb.writeln('✅ 流程已结束（你确认无工作遗漏）。没有新消息就别再说话，'
@@ -733,7 +733,7 @@ class ChatFlowStore {
         if (dec.isNotEmpty) sb.writeln('  → 判断：$dec');
       }
     }
-    // 还没轮到的（平行暂挂）：其他非 done 消息 ☐ 列出
+    // 待办事项（参考）：其他非 done 消息 ☐ 列出——男主一条条看过去
     final curIdx0 = curStep == null ? -1 : steps.indexOf(curStep);
     for (var i = 0; i < steps.length; i++) {
       final s = steps[i];
@@ -744,13 +744,14 @@ class ChatFlowStore {
       final ts = (s['ts'] ?? '').toString();
       final spk = s['from'] == 'butler' ? '管家' : '她';
       sb.writeln('☐ #$no [$ts]$fromMark $spk：'
-          '${_short(s['userText'].toString(), 30)}（还没轮到）');
+          '${_short(s['userText'].toString(), 30)}（待办）');
     }
     // 引导：平行 + 插话判断 + 结束流程（8-11 19:4x 精简，对齐 GPT：
     // 固定层只放规则，流程细节这里一句话讲完，不叠话术）
-    sb.writeln('—— 消息都平行：回#N 标你处理的是哪条（可一次回多条'
-        ' 回#1、#2）；插话=平行消息，还没轮到就暂挂，轮到了判断：'
-        '补充/修改/插入（先做插话，做完回原任务）/不做了（她叫停）');
+    sb.writeln('—— 上面都是待办事项（参考）：一条条看过去，能一起做的'
+        '就一起做（回#N 标你处理的是哪条，可一次回多条 回#1、#2）。'
+        '每条都要处理，判断：补充/修改/插入（先做插话，做完回原任务）'
+        '/不做了（她叫停）——不能跳过任何一条');
     sb.writeln('—— 结束：全部标完 → 说"大流程也结束了" + 写摘要'
         '（save_summary）→ 管家归档，不再唤醒你（你没标完=没做完，'
         '管家不替标）。');
