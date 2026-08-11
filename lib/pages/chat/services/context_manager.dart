@@ -451,27 +451,17 @@ class ContextManager {
     final ts = m.group(1)!;
     final name = m.group(2)!.trim();
     final status = m.group(3)!;
+    // 8-12 02:1x（用户：男主写了摘要，历史里不该保留工作轮的过程，
+    // 应该剥离，具体细节查外置大脑）：成功工具行只留 工具名+状态
+    // （结果内容不写进历史——外置大脑工具缓存条目带大流程编号可查）；
+    // 失败保留原因（异常信息男主需要参考，不能丢）。
     if (status == '✅成功') {
-      final summary = _toolResultSummary(rawLine);
-      return summary.isEmpty
-          ? '- $ts $name ✅成功'
-          : '- $ts $name ✅成功：$summary';
+      return '- $ts $name ✅成功';
     }
     final reason = first.contains('❌失败：')
         ? first.split('❌失败：').last.trim()
         : '';
     return reason.isEmpty ? '- $ts $name ❌失败' : '- $ts $name ❌失败：$reason';
-  }
-
-  /// 工具结果摘要（成功时给男主看）：取「（非她发言）：」之后的内容，
-  /// 去换行、截 ~100 字；没有结果文本返回空串（不硬拼摘要）。
-  static String _toolResultSummary(String rawLine) {
-    final idx = rawLine.indexOf('（非她发言）：');
-    if (idx < 0) return '';
-    var s = rawLine.substring(idx + '（非她发言）：'.length).trim();
-    s = s.replaceAll(RegExp(r'\s+'), ' ');
-    if (s.isEmpty) return '';
-    return s.length > 100 ? '${s.substring(0, 100)}…' : s;
   }
 
   /// 去掉行前缀（'用户 [17:05]：xxx' / '用户：xxx'）

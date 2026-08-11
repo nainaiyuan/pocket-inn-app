@@ -2130,7 +2130,15 @@ class _ChatPageState extends State<ChatPage>
           final toolNo = await ToolCacheStore.nextToolNo();
           if (toolResult.ok && (kQueryToolNames.contains(name) || isLong)) {
             if (resultText.isNotEmpty) {
-              await ToolCacheStore.add(personaId, '$toolNo $name：$resultText');
+              // 8-12 02:1x（用户：外置大脑的编号要对应 T1）——缓存条目
+              // 带大流程编号 [T1]，男主/管家能按大流程查这轮的工具记录
+              final flowNow = ChatFlowStore.get(personaId);
+              final flowTag =
+                  (flowNow != null && (flowNow['flowNo']?.toString().isNotEmpty ?? false))
+                      ? ' [${flowNow['flowNo']}]'
+                      : '';
+              await ToolCacheStore.add(
+                  personaId, '$toolNo$flowTag $name：$resultText');
             }
           }
           // 8-07 00:1x：审批拒绝系统事件化——拒绝结果同时收集，
