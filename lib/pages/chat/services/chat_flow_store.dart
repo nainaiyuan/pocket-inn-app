@@ -147,11 +147,39 @@ class ChatFlowStore {
     await warm(personaId);
     final f = _memCache;
     if (!_isTerminal(f) && f!['status'] == 'running') {
-      // 处理中 → 插话 = 新消息**直接进大流程**（8-11 18:3x 用户：
+      final steps = _stepsOf(f);
+      final allDone =
+          steps.isNotEmpty && steps.every((s) => s['status'] == 'done');
+      // 8-12 04:5x（用户：男主已回完所有消息但还没说结束，下一句不该再
+      // 叠成 M2——"T0 无限叠加到 T一亿"；编号要唯一，一轮对话一个流程）：
+      // 全部处理完 + 男主已回 → 新消息 = **新流程排队**（T+N，唯一编号），
+      // 等男主 end_T0 + 摘要归档后自动轮到（检查点⑤唤醒处理下一个）。
+      // 旧流程保持 running（工作区显示 ✅ 全部处理完 + 下面排队 T1）。
+      // 8-12 04:5x（防 T0 无限叠步骤）：步骤超过 20 条也拆排队
+      // （安全网——男主长时间没回时的连发消息不把单流程撑爆）。
+      if (allDone || steps.length >= 20) {
+        final flow = <String, dynamic>{
+          'flowNo': await _nextFlowNo(),
+          'goal': _short(text, 30),
+          'status': 'pending', // 排队中（当前流程归档后轮到）
+          'currentStep': 0,
+          'steps': [_newStep(text, no: 1)], // 新流程第一步 = M1
+          'startedAt': DateTime.now().toIso8601String(),
+          'butlerNote': allDone
+              ? '上个大流程已全部处理完（等你写结束标记归档），'
+                  '她又有新消息，管家自动排队成新流程，处理完上面的自动轮到'
+              : '当前流程待办太多（超过 20 条），新消息自动拆成排队新流程',
+        };
+        await _enqueue(personaId, flow);
+        _log('对话流程',
+            '📦 ${allDone ? '当前流程已全部处理完（等结束标记）' : '当前流程待办超 20 条'}'
+            ' → 新消息排队成 ${flow['flowNo']}（不再叠 M 步骤）');
+        return;
+      }
+      // 处理中（还有没回完的）→ 插话 = 新消息**直接进大流程**（8-11 18:3x 用户：
       // 大流程内所有消息平行，插话跟第一条平行 = M2/M3… 待办；
       // 8-12 03:4x 用户澄清：男主还没说结束时的插话 = M2（当前流程
       // 待办），只有男主说 end_TN 时的插话才拆成新流程排队）
-      final steps = _stepsOf(f);
       // 8-10 23:0x：插话步骤分配稳定编号（不挤占已有编号）
       final step = _newStep(text, no: _nextStepNo(steps));
       step['from'] = 'user_interrupt'; // 插话标记（GPT：进当前任务判断）
@@ -803,6 +831,20 @@ class ChatFlowStore {
     final allReplied = steps.every((s) => s['status'] == 'done');
     if (allReplied) {
       sb.writeln('✅ 所有消息都处理完了。');
+      // 8-12 04:5x（用户：全处理完后新消息拆排队成 T+N）：全 done 时
+      // 也要让男主看到下面排队的 T1——不然他以为没新消息，直接归档后
+      // T1 才轮到（"下面还有排队的新流程才继续唤醒你"）
+      final q = queuedFlows(personaId);
+      if (q.isNotEmpty) {
+        sb.writeln('—— 下面排队的新流程（处理完上面这个自动轮到）：');
+        for (final qf in q) {
+          final qSteps = _stepsOf(qf);
+          final qText = qSteps.isEmpty
+              ? ''
+              : qSteps.first['userText']?.toString() ?? '';
+          sb.writeln('☐ ${qf['flowNo']}（${_short(qText, 30)}）');
+        }
+      }
       sb.writeln('· 做完了 → 最后一条 JSON 的 sys 写 end_TN（N=大流程编号）'
           '+ 写摘要（save_summary），管家归档合并历史，之后不再唤醒你'
           '（下面还有排队的新流程才继续唤醒）；');
@@ -883,12 +925,12 @@ class ChatFlowStore {
       sb.writeln('—— 判断（看完全部待办，从这里开始决定）');
       sb.writeln(decLines.join('\n'));
     }
-    // 8-12 03:4x（用户澄清）：工作期间插话 = 当前流程 M 待办；
-    // 只有男主说 end_TN 时的插话才拆成排队流程（显示在工作区下面）
+    // 排队的新流程（8-12 03:4x：男主说 end_TN 时的插话拆排队；
+    // 8-12 04:5x：全处理完后新消息也拆排队）——正常情况显示在
+    // 当前流程待办下面（"处理完上面这个自动轮到"）
     final q = queuedFlows(personaId);
     if (q.isNotEmpty) {
-      sb.writeln('—— 下面排队的新流程（男主说结束时她插的话，'
-          '处理完上面这个自动轮到）：');
+      sb.writeln('—— 下面排队的新流程（处理完上面这个自动轮到）：');
       for (final qf in q) {
         final qSteps = _stepsOf(qf);
         final qText = qSteps.isEmpty
@@ -1006,9 +1048,15 @@ class ChatFlowStore {
     }
     if (pending.isEmpty) {
       // 全部处理完 → 固定结束流程（8-11 19:0x 用户 19:04/19:07）
+      // 8-12 04:5x：全 done + 有排队 → 归档后自动轮到 T1（会唤醒），
+      // 没有排队 → 不再唤醒
+      final q = queuedFlows(personaId);
+      final qNote = q.isEmpty
+          ? '之后不再唤醒你。'
+          : '归档后自动轮到下面排队的新流程（'
+              '${q.map((x) => x['flowNo']).join('、')}）。';
       return '全部消息都处理完了：最后一条 JSON 的 sys 写 end_TN'
-          '（结束标记）+ 写摘要（save_summary），管家归档合并历史，'
-          '之后不再唤醒你。';
+          '（结束标记）+ 写摘要（save_summary），管家归档合并历史，$qNote';
     }
     // 还有未处理 → 列出未处理编号（8-12 04:1x 用户：不要"当前第 N 条"
     // 标记——误导男主一直处理 M1；清单本身在工作区，这里只报数）
