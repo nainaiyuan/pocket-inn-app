@@ -591,10 +591,25 @@ class ChatFlowStore {
     await warm(personaId);
     final f = _memCache;
     if (f == null || f['status'] != 'running') return;
+    // 8-11 19:0x（用户 19:04 固定结束流程）：男主说大流程结束 =
+    // 确认全部完成 → 未标 done 的步骤**自动标 done**（不用逐条回#N），
+    // 流程归档，管家不再因"忘标步骤"唤醒男主
+    final steps = _stepsOf(f);
+    var autoDone = 0;
+    for (final s in steps) {
+      if (s['status'] != 'done') {
+        s['status'] = 'done';
+        autoDone++;
+      }
+    }
+    if (autoDone > 0) {
+      _log('对话流程', '🔚 男主说结束，$autoDone 条未标步骤自动视为完成');
+    }
     f['status'] = 'done';
-    f['currentStep'] = (_stepsOf(f).length);
+    f['currentStep'] = steps.length;
     await _write(personaId, f);
-    _log('对话流程', '🔚 男主输出退出标记，流程结束');
+    _log('对话流程', '🔚 男主输出退出标记，流程结束（固定结束流程：'
+        '处理最后一条 → 说结束 → 写摘要 → 管家归档合并历史）');
   }
 
   /// 解析男主回复里的消条目标注（第N步，1-based）
@@ -656,8 +671,9 @@ class ChatFlowStore {
     // 全部处理完（未处理区空）→ 男主自己判断结束（GPT 完成检查）
     final allReplied = steps.every((s) => s['status'] == 'done');
     if (allReplied) {
-      sb.writeln('✅ 所有消息都处理完了。你自己判断——还有要做的吗？');
-      sb.writeln('· 做完了 → 说结束 + 写摘要（save_summary），流程归档；');
+      sb.writeln('✅ 所有消息都处理完了。');
+      sb.writeln('· 做完了 → 说"大流程做完了"（结束标记）+ 写摘要'
+          '（save_summary），管家自动归档合并历史，之后不再唤醒你；');
       sb.writeln('· 还有事 → 继续处理。');
       return sb.toString();
     }
@@ -727,14 +743,15 @@ class ChatFlowStore {
       sb.writeln('☐ #$no [$ts]$fromMark $spk：'
           '${_short(s['userText'].toString(), 30)}（还没轮到）');
     }
-    // 引导：平行 + 插话判断 + 男主自己判断结束（GPT 完成检查）
+    // 引导：平行 + 插话判断 + 固定结束流程（8-11 19:0x 用户 19:04）
     sb.writeln('—— 消息都平行：回复时标你处理的是哪条 回#N'
         '（可一次回多条 回#1、#2）；插话也是平行消息，还没轮到就暂挂，'
         '轮到了你自己判断：补充当前任务 / 修改当前任务 / 插入新任务'
         '（先做插话，做完回原任务）/ 不做了（她叫停当前任务）');
-    sb.writeln('—— 全部处理完 → 你自己判断结束（需求完成？关联消息全处理？'
-        '插话处理？工具结果用了？还有未完成事项？）');
-    sb.writeln('—— 做完了 → 说结束 + 写摘要（save_summary）；没做完 → 继续。');
+    sb.writeln('—— 固定结束流程（不用逐条标）：处理完最后一条 → '
+        '说"大流程做完了"（结束标记）→ 写摘要（save_summary，这个大流程'
+        '讲了什么）→ 管家自动把没标的步骤标完、归档、合并进历史；'
+        '之后不再唤醒你。');
     return sb.toString();
   }
 
@@ -828,9 +845,9 @@ class ChatFlowStore {
       if (steps[i]['status'] != 'done') pending.add(steps[i]);
     }
     if (pending.isEmpty) {
-      // 全部处理完 → 男主自己判断结束（GPT 完成检查）
-      return '全部消息都处理完了。你自己判断：做完了 → 说结束 + 写摘要'
-          '（save_summary）；还有事 → 继续处理。';
+      // 全部处理完 → 固定结束流程（8-11 19:0x 用户 19:04）
+      return '全部消息都处理完了：说"大流程做完了"（结束标记）+ 写摘要'
+          '（save_summary），管家自动归档合并历史，之后不再唤醒你。';
     }
     // 还有未处理 → 提示当前步 + 未处理数
     final curIdx = (f['currentStep'] as num?)?.toInt() ?? 0;
@@ -853,7 +870,8 @@ class ChatFlowStore {
     return '还有 $pendingCount 条未处理消息。当前第 $curNo 条「'
         '${_short(curStep['userText'].toString(), 20)}」还没处理。\n'
         '· 回复时标注你回的是哪条（回#N），可一次回多条（回#1、#2）；\n'
-        '· 全部处理完 → 你自己判断结束（说结束 + 写摘要）。';
+        '· 全部处理完 → 固定结束流程：说"大流程做完了" + 写摘要'
+        '（save_summary）。';
   }
 
   // ---- 工具 ----
