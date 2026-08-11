@@ -181,6 +181,18 @@ class _ChatPageState extends State<ChatPage>
       FlowStore.warm(pid);
       if (!FlowStore.isRunning(pid)) return;
       final flow = await FlowStore.get(pid);
+      // 8-12 06:5x（用户：写完摘要+end_T0 还不停唤醒）：开机先清僵尸——
+      // 工具测试建的旧任务没人收尾会无限唤醒；测试已不在跑 = 僵尸 →
+      // 直接取消，连"上次任务未完成"的提示都不弹（那不是真任务）
+      final goal = flow?['goal']?.toString() ?? '';
+      if (goal == '测试所有工具' && !ToolTestStore.isRunning(pid)) {
+        await FlowStore.cancel(pid);
+        DebugLogger.log(
+          '管家流程',
+          '🧟 开机清理：工具测试僵尸任务已取消（测试早结束了，任务没人收尾）',
+        );
+        return;
+      }
       final steps = (flow?['steps'] as List?)?.length ?? 0;
       final rawCur = (flow?['currentStep'] as num?)?.toInt() ?? 0;
       if (steps == 0) return;
@@ -767,6 +779,22 @@ class _ChatPageState extends State<ChatPage>
     if (_generating) return; // 已在生成（并发保护）
     final flow = await FlowStore.get(pid);
     if (flow == null || flow['status'] != 'running') return;
+    // 8-12 06:5x（用户：男主写完摘要+发完 end_T0 还不停唤醒）：僵尸旧任务
+    // 检测——manage_tool_test start 建的 FlowStore 任务（goal=测试所有工具）
+    // 没人收尾（report/abort 只动 ToolTestStore 自己的状态），任务永远
+    // running → 检查点⑤无限续跑唤醒男主，而男主工作区看不到旧任务、
+    // 永远无法结束它。测试已不在跑（done/aborted）而任务还 running
+    // = 僵尸 → 直接收掉，不唤醒男主。
+    final goal = flow['goal']?.toString() ?? '';
+    if (goal == '测试所有工具' && !ToolTestStore.isRunning(pid)) {
+      await FlowStore.cancel(pid);
+      DebugLogger.log(
+        '管家流程',
+        '🧟 僵尸旧任务检测：工具测试已结束但 FlowStore 任务没收尾'
+        '（长任务系统 8-10 已停用）→ 自动取消，不再唤醒',
+      );
+      return;
+    }
     final cur = (flow['currentStep'] as num?)?.toInt() ?? 0;
     if (_autoResumePid != pid) {
       // 换了任务 → 重置计数
@@ -789,6 +817,10 @@ class _ChatPageState extends State<ChatPage>
     if (_autoResumeRounds >= 3) {
       // 同一步连续 3 轮没推进 → 停止自动续跑，让男主交代
       DebugLogger.log('管家流程', '🔔 自动续跑 3 轮无进展，停止（等用户指示）');
+      // 8-12 06:5x（用户：写完摘要+end_T0 还不停唤醒）：旧任务 3 轮无进展
+      // = 僵尸（长任务系统 8-10 已停用，任务无法推进、男主工作区也看不到）
+      // → 直接取消收掉；之前只发消息 + 重置计数，下一轮检查点⑤又无限续跑
+      await FlowStore.cancel(pid);
       _autoResumePid = null;
       _autoResumeRounds = 0;
       _lastAutoResumeStep = -1;
@@ -1971,6 +2003,30 @@ class _ChatPageState extends State<ChatPage>
                   bug: args['bug']?.toString(),
                 ),
               );
+              // 8-12 06:5x（用户：男主写完摘要+end_T0 还不停唤醒）：测试
+              // 全部测完（report 后 ToolTestStore 变 done）→ 收掉 start 建的
+              // FlowStore 旧任务——之前没人收尾，僵尸 running → 检查点⑤
+              // 无限续跑唤醒男主，而男主工作区看不到旧任务、永远无法结束
+              if (!ToolTestStore.isRunning(personaId)) {
+                await FlowStore.finish(personaId);
+                DebugLogger.log(
+                  '管家流程',
+                  '🧪 工具测试已全部完成 → 收掉旧任务（防僵尸唤醒）',
+                );
+              }
+            } else if (action == 'abort') {
+              toolResult = _ToolResult(
+                true,
+                await ToolTestStore.abort(personaId),
+              );
+              // 8-12 06:5x：中止同样收掉旧任务（防僵尸）
+              if (!ToolTestStore.isRunning(personaId)) {
+                await FlowStore.cancel(personaId);
+                DebugLogger.log(
+                  '管家流程',
+                  '🧪 工具测试已中止 → 取消旧任务（防僵尸唤醒）',
+                );
+              }
             } else if (action == 'status') {
               toolResult = _ToolResult(
                 true,
