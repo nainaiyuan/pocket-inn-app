@@ -2095,14 +2095,15 @@ class _ChatPageState extends State<ChatPage>
                 : briefForStep,
           ));
           // 8-08 02:2x 用户：男主查完不记一直查 → 查询结果自动进工具缓存
-          // （下次直接看【工具缓存】别重复查；缓存有预算，超了男主整理）
-          if (toolResult.ok && kQueryToolNames.contains(name)) {
-            var brief = toolResult.text.trim();
-            if (brief.length > 150) {
-              brief = '${brief.substring(0, 150)}…';
-            }
-            if (brief.isNotEmpty) {
-              await ToolCacheStore.add(personaId, '$name 查到：$brief');
+          // 8-11 18:0x（用户 17:57 设计：缓存区 = 男主外置大脑）：
+          // · 查询类工具结果 → 自动进缓存（男主下次直接查缓存，不重复查）
+          // · **超长结果（>300 字，工具全查/大段数据）→ 完整存缓存**，
+          //   上下文只留一行摘要 + "完整结果已存工具缓存"（不塞满每轮）
+          final resultText = toolResult.text.trim();
+          final isLong = resultText.length > 300;
+          if (toolResult.ok && (kQueryToolNames.contains(name) || isLong)) {
+            if (resultText.isNotEmpty) {
+              await ToolCacheStore.add(personaId, '$name：$resultText');
             }
           }
           // 8-07 00:1x：审批拒绝系统事件化——拒绝结果同时收集，
@@ -2131,8 +2132,9 @@ class _ChatPageState extends State<ChatPage>
                 role: 'tool',
                 // 8-06 00:51 用户：调用工具=需要审批；成功调用=审批通过。
                 // 工具消息在系统分区，天然不是用户说的话——不用额外解释
-                content:
-                    '【工具 $name】${toolResult.ok ? '✅成功（审批通过）' : '❌失败（审批未过）'}：${toolResult.text}',
+                // 8-11 18:0x（用户 17:57）：结果行 = 参数（名=值）+✅/❌+
+                // 一句话+怎么办；超长 → 摘要+提示查缓存（外置大脑）
+                content: _toolResultLine(name, args, toolResult),
                 toolCallId: call['id']?.toString() ?? 'call_${toolLoop}_$name',
               ),
             );
@@ -2152,9 +2154,7 @@ class _ChatPageState extends State<ChatPage>
             }
           } else {
             // 文本块：结果收集，最后合并注入 user 消息
-            textToolResults.add(
-              '【工具 $name】${toolResult.ok ? '✅成功' : '❌失败'}：${toolResult.text}',
-            );
+            textToolResults.add(_toolResultLine(name, args, toolResult));
           }
           // 8-10 21:5x（用户：manage_task 失败被遗忘）：工具失败（用户拒绝
           // 不算——那是正常交互）→ 标记本轮有失败 → done 也唤醒男主处理
@@ -5285,6 +5285,40 @@ class _ChatPageState extends State<ChatPage>
 
   /// 工具执行：list_tools（男主查工具：{category} 分类详情 / {name} 单个 /
   /// 无参数 → 概览；{action: add_frequent/remove_frequent, name} 维护常用表）
+  /// 8-11 18:0x（用户 17:57 设计）：工具结果行 = 参数（名=值）+ ✅/❌ + 一句话 + 怎么办。
+  /// 短结果直接进上下文；超长（>300 字）→ 上下文只留摘要 + 提示查缓存（外置大脑）。
+  String _toolResultLine(
+      String name, Map<String, dynamic> args, _ToolResult r) {
+    final okMark = r.ok ? '✅成功' : '❌失败';
+    final argsBrief = _toolArgsBrief(args);
+    final text = r.text.trim();
+    var line = '【工具 $name】参数（$argsBrief）$okMark';
+    if (text.isEmpty) return '$line。';
+    if (text.length > 300) {
+      line += '：${text.substring(0, 120)}…（完整结果已存工具缓存，'
+          '需要时 manage_tool_cache 查）';
+    } else {
+      line += '：$text';
+    }
+    if (!r.ok && !text.startsWith('用户拒绝')) {
+      line += '。→ 看失败原因换参数/换方式重试，或回复她结束这步';
+    }
+    return line;
+  }
+
+  /// 工具参数摘要（名=值，值截断；空参数 → 无参数）
+  String _toolArgsBrief(Map<String, dynamic> args) {
+    if (args.isEmpty) return '无参数';
+    final parts = <String>[];
+    args.forEach((k, v) {
+      final s = (v?.toString() ?? '').trim();
+      if (s.isEmpty || s == 'null') return;
+      final short = s.length > 12 ? '${s.substring(0, 12)}…' : s;
+      parts.add('$k=$short');
+    });
+    return parts.isEmpty ? '无参数' : parts.join('、');
+  }
+
   Future<_ToolResult> _executeListToolsTool(Map<String, dynamic> args) async {
     final action = args['action']?.toString();
     final name = args['name']?.toString() ?? '';

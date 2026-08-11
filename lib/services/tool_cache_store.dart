@@ -93,25 +93,15 @@ class ToolCacheStore {
     return n > 0 ? '工具缓存已清空（$n 条）' : '工具缓存本来就是空的';
   }
 
-  /// 注入文本（男主上下文用）：带预算截断 + 超限提示整理
+  /// 注入文本（男主上下文用）：**外置大脑模式**（8-11 18:0x 用户 17:57）——
+  /// 不全量注入内容，只报条数 + 提示查缓存。男主需要具体内容时主动用
+  /// manage_tool_cache 查（长数据不每轮塞满上下文，但男主不失忆）。
   static String text(String personaId) {
     final entries = _memCache ?? <String>[];
     if (entries.isEmpty) return '';
-    final sb = StringBuffer();
-    var budget = 800;
-    for (var i = 0; i < entries.length; i++) {
-      final line = '· ${entries[i]}';
-      if (line.length > budget) {
-        sb.writeln('· ${line.substring(0, budget)}…（截断）');
-        budget = 0;
-        break;
-      }
-      sb.writeln(line);
-      budget -= line.length;
-    }
     final overflow = entries.length > maxEntries ? '（超出上限，整理后清空）' : '';
-    return '${sb.toString().trim()}\n'
-        '——工具缓存 ${entries.length} 条$overflow：干完活把要长期用的整理进'
+    return '共 ${entries.length} 条$overflow——需要看具体内容用 '
+        'manage_tool_cache 动作=status 查；干完活把要长期用的整理进'
         '记录（record_memory）或便签（manage_pad），然后 clear 清空';
   }
 
