@@ -767,11 +767,11 @@ class ChatFlowStore {
       final tools = _asMap(curStep['tools']);
       final reply = (curStep['reply'] as String?)?.toString().trim() ?? '';
       final speaker = curStep['from'] == 'butler' ? '管家' : '她';
-      final hasReply = reply.isNotEmpty;
-      final toolsOk = tools.isNotEmpty &&
-          tools.values.every((v) => v is Map && v['ok'] == true);
-      final done = hasReply || toolsOk;
-      final mark = done ? '✅' : '▶';
+      // 8-12 01:4x（用户：M1 前面 ✓ 误导男主判断——有回复/工具成功就自动
+      // ✅，男主以为这条做完了，实际工具失败没做完）：不自动标 ✅，
+      // 当前步统一 ▶（正在处理）。男主自己看内容+工具链（✅/❌）判断
+      // 做没做完，做完才标 end_MN（标完步骤消失）。
+      final mark = '▶';
       // 管家备注（挂用户消息后面 = GPT 管家分析绑定消息）
       final notes = (curStep['butlerNotes'] as List?)
               ?.cast<Map<String, dynamic>>() ??

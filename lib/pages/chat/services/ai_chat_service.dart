@@ -11,6 +11,7 @@ import 'chat_storage_service.dart';
 import '../../../models/chat_message.dart';
 import '../../../butler/context/context_tracker.dart';
 import '../../../butler/debug_lab/agent_run_trace.dart';
+import '../../../butler/debug_lab/trace_store.dart';
 import '../../../butler/debug_lab/trace_session.dart';
 import '../../../butler/system_template.dart' show SystemTemplate;
 import '../../../services/chat_database_service.dart';
@@ -1472,6 +1473,12 @@ class AiChatService {
         'isFirstRun': _contextRestored.length == 1,
       },
     );
+    // 8-12 01:4x（用户：每轮视图想看完整 prompt）：固定块过滤前先把
+    // SystemTemplate 全文存一份全局（每轮覆盖，不随轮次膨胀），
+    // 每轮卡片「查看完整输入」用它 + 动态块还原男主实际收到的输入。
+    if (systemPrompt.trim().isNotEmpty) {
+      TraceStore.instance.saveFixedPrompt(systemPrompt);
+    }
     // 8-11 21:5x（用户：固定设定不用看，只看变化）：记录前过滤固定块——
     // SystemTemplate 全文（设定）替换成短标记；动态块（工作区/待办/历史/
     // 工具结果）全量保留，男主每轮真实收到什么一目了然。

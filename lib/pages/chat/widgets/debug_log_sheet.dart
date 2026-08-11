@@ -735,6 +735,93 @@ class _RoundCardState extends State<_RoundCard> {
     return '🆕';
   }
 
+  /// 8-12 01:4x：完整输入弹窗 = 固定设定（全局一份）+ 本轮动态块
+  Future<void> _showFullInput(BuildContext context) async {
+    final fixed = await TraceStore.instance.loadFixedPrompt();
+    if (!context.mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF1A1A33),
+        insetPadding: const EdgeInsets.all(12),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 8, 0),
+                child: Row(
+                  children: [
+                    const Text('📄 男主本轮完整输入',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close,
+                          color: Colors.white54, size: 18),
+                      onPressed: () => Navigator.of(ctx).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (fixed != null && fixed.trim().isNotEmpty) ...[
+                        const Text('【固定设定】',
+                            style: TextStyle(
+                                color: Color(0xFF7FB5B5),
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 4),
+                        Text(fixed,
+                            style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 11,
+                                height: 1.5)),
+                        const Divider(color: Colors.white12, height: 20),
+                      ],
+                      const Text('【动态块（本轮）】',
+                          style: TextStyle(
+                              color: Color(0xFF7FB5B5),
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      for (final m in [
+                        ...widget.round.firstMessages,
+                        ...widget.round.secondMessages,
+                      ])
+                        if (m.content.trim().isNotEmpty ||
+                            m.toolCalls.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: Text(
+                              '${m.role == 'user' ? '📨' : '🧩'} ${m.content.trim()}'
+                              '${m.toolCalls.isEmpty ? '' : '\n🛠 ${m.toolCalls.map((t) => t.name).join('、')}'}',
+                              style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 11,
+                                  height: 1.5),
+                            ),
+                          ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final r = widget.round;
@@ -825,7 +912,25 @@ class _RoundCardState extends State<_RoundCard> {
                     ),
                     const SizedBox(height: 3),
                   ],
-                // 男主回复命令
+                // 8-12 01:4x（用户：每轮视图想看完整 prompt）：固定设定
+                // 全局存了一份（每轮覆盖），点开 = 固定设定 + 动态块还原
+                // 男主实际收到的完整输入
+                const Divider(color: Colors.white12, height: 16),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => _showFullInput(context),
+                    icon: const Icon(Icons.article_outlined,
+                        size: 14, color: Color(0xFFA0C8E0)),
+                    label: const Text('📄 查看完整输入（含固定设定）',
+                        style: TextStyle(
+                            color: Color(0xFFA0C8E0), fontSize: 11)),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      minimumSize: const Size(0, 28),
+                    ),
+                  ),
+                ),
                 const Divider(color: Colors.white12, height: 16),
                 const Text('➡️ 男主回复命令',
                     style: TextStyle(color: Color(0xFFC896B4), fontSize: 11, fontWeight: FontWeight.bold)),

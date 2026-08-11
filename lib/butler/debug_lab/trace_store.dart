@@ -25,6 +25,10 @@ abstract class TraceStorage {
 
   /// 列出所有 key（按时间倒序）
   Future<List<String>> keys();
+
+  /// 全局固定设定（SystemTemplate 全文，只存一份）
+  Future<String?> loadFixedPrompt();
+  Future<bool> saveFixedPrompt(String value);
 }
 
 /// 内存存储（默认，测试/回放用）
@@ -48,6 +52,18 @@ class SharedPrefsTraceStorage implements TraceStorage {
     final p = await SharedPreferences.getInstance();
     return p.getKeys().where((k) => k.startsWith('agent_trace_')).toList();
   }
+
+  @override
+  Future<String?> loadFixedPrompt() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString('agent_trace_fixed_prompt');
+  }
+
+  @override
+  Future<bool> saveFixedPrompt(String value) async {
+    final p = await SharedPreferences.getInstance();
+    return p.setString('agent_trace_fixed_prompt', value);
+  }
 }
 
 class MemoryTraceStorage implements TraceStorage {
@@ -67,6 +83,16 @@ class MemoryTraceStorage implements TraceStorage {
   @override
   Future<List<String>> keys() async =>
       _order.reversed.toList(growable: false);
+
+  String? _fixedPrompt;
+  @override
+  Future<String?> loadFixedPrompt() async => _fixedPrompt;
+
+  @override
+  Future<bool> saveFixedPrompt(String value) async {
+    _fixedPrompt = value;
+    return true;
+  }
 }
 
 /// 轨迹仓库（单例，可注入后端）
@@ -115,6 +141,15 @@ class TraceStore {
   static final StreamController<String> _revisionController =
       StreamController<String>.broadcast();
   static Stream<String> get revisionStream => _revisionController.stream;
+
+  /// 全局固定设定（SystemTemplate 全文，每轮覆盖存一份，8-12 01:4x
+  /// 用户：每轮视图想看完整 prompt——动态块已存，固定块补这一份）
+  Future<String?> loadFixedPrompt() => _storage.loadFixedPrompt();
+
+  Future<void> saveFixedPrompt(String value) async {
+    if (value.trim().isEmpty) return;
+    await _storage.saveFixedPrompt(value);
+  }
 
   /// 读取单条
   Future<AgentRunTrace?> load(String personaId, String runId) async {
