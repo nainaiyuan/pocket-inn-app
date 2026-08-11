@@ -1282,8 +1282,6 @@ class AiChatService {
     // 系统不猜他回了哪几条（自动算有漏洞：他决定不回的/只回一条的，系统分不清）。
     // 8-10 v3：【已回复·最近】块已删（历史流程区已含回复记录）——
     // 待回复判断靠【当前流程】清单（✅/▶/☐）+ 下面这些队列。
-    final pendingUser = PendingQueueStore.pendingUserText(ctxPid);
-    final pendingButler = PendingQueueStore.pendingButlerText(ctxPid);
     // 8-06 23:55 用户：流程层——执行中她发来的消息会被收集
     // （PendingQueueStore），男主专注流程；被打断（stopped）会看到
     // 停在哪、她说了什么 → 决定 resume 还是先回复
@@ -1297,9 +1295,7 @@ class AiChatService {
     DebugLogger.log(
       '状态块',
       '📋 状态=${inFlow ? (flowGoal != null ? '走流程「$flowGoal」' : '设定弹窗中') : '正常对话'}'
-      ' 待回复=${pendingUser != null ? '${pendingUser.split('\n').length}条' : '无'}'
-      ' 流程输入=${inFlow && pendingUser != null ? '有' : '无'}'
-      ' 系统消息=${pendingButler != null ? '有' : '无'}',
+      ' 待回复=无（主对话全走工作区）',
     );
     // 8-08 15:2x（设计文档四，GPT 10 问 2）：工具手册注入（上下文预算，精简）
     // 男主查一次格式就记住，不用反复试
@@ -1316,13 +1312,6 @@ class AiChatService {
     final statusBlocks = <AIChatMessage>[
       // 8-10 v3：不再有【当前情况】状态感知独立块——男主看下面的
       // 【当前流程】清单就知道自己在哪、该做什么。
-      if (!inFlow && pendingUser != null)
-        AIChatMessage(
-          role: 'system',
-          content: '【待回复】（主对话她说的——一般要回，特殊情况可不回；'
-              '要消必须显式标注 {"reply":"end_MN"}（JSON 字段），一句话可回多条；'
-              '不回就挂着，她问起来你老实说）\n$pendingUser',
-        ),
       // 8-11 04:5x（用户：后续待处理放【当前流程】【后面/下面】——
       // "当前工作完了，自动把下面的移上来一个"；处理完的移上去当参考。
       // 顺序 = 上【上下文参考】→ 中【当前流程】→ 下【后续待处理】。
@@ -1336,51 +1325,9 @@ class AiChatService {
               '标完 end_MN；全部标完 → 最后一条 sys 写 end_TN + 调 save_summary）'
               '\n$chatFlowText',
         ),
-      if (inFlow && pendingUser != null)
-        AIChatMessage(
-          role: 'system',
-          content: '【流程输入】（流程进行中她主对话说的——插进流程，'
-              '你判断继续流程还是重置；要回她也用 {"reply":"end_MN"} 标注消掉）\n$pendingUser',
-        ),
-      // 8-10 v3（5.8 卡片提示）：设定弹窗/卡片工具进行中 → 注入卡片会话规则
-      //（不进主 prompt，只在用卡片工具时出现）
-      if (inFlow)
-        AIChatMessage(
-          role: 'system',
-          content: '【卡片·会话中】你在处理一个卡片工具（还没结束）：\n'
-              '· 互动类 = 循环：改了 → 展示给她看 → 等她反馈 → 再改 → 再展示…'
-              '直到她同意，分支才结束。不能一轮就结束，不能当普通对话\n'
-              '· 工具内标签：她说话【工具·用户】/你说话【工具·男主】——'
-              '分清工具里发生了什么\n'
-              '· 你的操作结果全给你（改成了什么，完整内容，'
-              '如"喜欢猫 → 喜欢猫和狗"）；每一步操作 = 小分支，带时间\n'
-              '· 版本树：v0（初始）是根，版本从它分支；你只看基础说明'
-              '（版本N+改了哪些段+操作类型+改成了什么），候选版本全文'
-              '不塞进你上下文；她页面看完整内容\n'
-              '· 版本操作（自己选）：① 拼接——把某几版的内容拼成新版本'
-              '（版本A 的某段 + 版本B 的某段）② 分支——基于某一版再写'
-              '分支扩展，继续改/扩展成新版本\n'
-              '· 她的话是卡片分支里的对话，不是新消息，继续处理这个工具\n'
-              '· 能说：确认修改、解释原因、问她想改成什么、按她反馈反复改'
-              '到她满意；不能说：替她做决定（必须她确认）\n'
-              '· 工具结束（她确认/拒绝/点掉）→ 记录结果，收尾，走下一个流程',
-        ),
-      if (pendingButler != null)
-        AIChatMessage(
-          role: 'system',
-          content: '【系统消息】（标【管家】的消息，也是待办之一，有 a 编号'
-              '——处理完直接标"end_MN"，不用回复她；'
-              '觉得该让她知道才用 {"msg":"…"} 转达）\n$pendingButler',
-        ),
       // 8-11 05:0x（用户 8-10 拍板"长任务的都不要了"）：
       // 旧长任务注入全删——旧【当前流程】卡片、【任务清单】、
       // FlowStore 状态提示都不再注入（任务都插流程里，见对话流程清单）
-      if (extraHints.isNotEmpty)
-        AIChatMessage(
-          role: 'system',
-          content: '【软提示】（管家提示——不是工具结果，供你参考判断；'
-              '觉得该让她知道才用 {"msg":"…"} 转达，不用回复这条）\n$extraHints',
-        ),
       if (testBlock.isNotEmpty)
         AIChatMessage(
           role: 'system',
