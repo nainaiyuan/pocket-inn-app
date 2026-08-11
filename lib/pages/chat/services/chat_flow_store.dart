@@ -591,9 +591,10 @@ class ChatFlowStore {
     await warm(personaId);
     final f = _memCache;
     if (f == null || f['status'] != 'running') return;
-    // 8-11 19:0x（用户 19:04 固定结束流程）：男主说大流程结束 =
-    // 确认全部完成 → 未标 done 的步骤**自动标 done**（不用逐条回#N），
-    // 流程归档，管家不再因"忘标步骤"唤醒男主
+    // 8-11 19:0x（用户 19:04/19:07 固定结束流程）：正常路径 = 男主自己
+    // 逐条标（最后一条自己标 + 带大流程结束标记 + 写摘要），管家只归档。
+    // 这里自动标 done = **漏标兜底**：男主说大流程结束 = 确认全部完成，
+    // 万一前面漏标的自动补标归档（不唤醒男主，只记录）
     final steps = _stepsOf(f);
     var autoDone = 0;
     for (final s in steps) {
@@ -672,8 +673,8 @@ class ChatFlowStore {
     final allReplied = steps.every((s) => s['status'] == 'done');
     if (allReplied) {
       sb.writeln('✅ 所有消息都处理完了。');
-      sb.writeln('· 做完了 → 说"大流程做完了"（结束标记）+ 写摘要'
-          '（save_summary），管家自动归档合并历史，之后不再唤醒你；');
+      sb.writeln('· 做完了 → 在这条回复上带"大流程也结束了"（结束标记）'
+          '+ 写摘要（save_summary），管家归档合并历史，之后不再唤醒你；');
       sb.writeln('· 还有事 → 继续处理。');
       return sb.toString();
     }
@@ -743,14 +744,15 @@ class ChatFlowStore {
       sb.writeln('☐ #$no [$ts]$fromMark $spk：'
           '${_short(s['userText'].toString(), 30)}（还没轮到）');
     }
-    // 引导：平行 + 插话判断 + 固定结束流程（8-11 19:0x 用户 19:04）
+    // 引导：平行 + 插话判断 + 固定结束流程（8-11 19:0x 用户 19:04/19:07）
     sb.writeln('—— 消息都平行：回复时标你处理的是哪条 回#N'
         '（可一次回多条 回#1、#2）；插话也是平行消息，还没轮到就暂挂，'
         '轮到了你自己判断：补充当前任务 / 修改当前任务 / 插入新任务'
         '（先做插话，做完回原任务）/ 不做了（她叫停当前任务）');
-    sb.writeln('—— 固定结束流程（不用逐条标）：处理完最后一条 → '
-        '说"大流程做完了"（结束标记）→ 写摘要（save_summary，这个大流程'
-        '讲了什么）→ 管家自动把没标的步骤标完、归档、合并进历史；'
+    sb.writeln('—— 固定结束流程：处理到最后一条时**自己标它结束**'
+        '（回#N：这条做完了，管家不替你标）→ 在这条回复上带'
+        '"大流程也结束了"（结束标记）→ 写摘要（save_summary，这个大流程'
+        '讲了什么）→ 管家检测全标完+大流程结束 → 归档合并历史，'
         '之后不再唤醒你。');
     return sb.toString();
   }
@@ -845,9 +847,10 @@ class ChatFlowStore {
       if (steps[i]['status'] != 'done') pending.add(steps[i]);
     }
     if (pending.isEmpty) {
-      // 全部处理完 → 固定结束流程（8-11 19:0x 用户 19:04）
-      return '全部消息都处理完了：说"大流程做完了"（结束标记）+ 写摘要'
-          '（save_summary），管家自动归档合并历史，之后不再唤醒你。';
+      // 全部处理完 → 固定结束流程（8-11 19:0x 用户 19:04/19:07）
+      return '全部消息都处理完了：在这条回复上带"大流程也结束了"'
+          '（结束标记）+ 写摘要（save_summary），管家归档合并历史，'
+          '之后不再唤醒你。';
     }
     // 还有未处理 → 提示当前步 + 未处理数
     final curIdx = (f['currentStep'] as num?)?.toInt() ?? 0;
