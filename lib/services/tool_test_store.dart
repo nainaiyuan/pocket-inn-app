@@ -182,6 +182,10 @@ class ToolTestStore {
     if (t == null) return '';
     final tested = (t['tested'] as List?) ?? <Map<String, dynamic>>[];
     final cur = t['current'];
+    // 8-12 03:1x（用户：当前工作区上面怎么有【工具测试】进度null——
+    // 没测试任务不该注入）：没有进行中的测试且没有已测记录 → 不注入
+    // （残留/从未开始的空任务不显示，男主不被无关块干扰）
+    if (t['status'] != 'running' && tested.isEmpty) return '';
     final sb = StringBuffer();
     sb.writeln('【工具测试】');
     sb.writeln('进度 ${t['progress']}（${t['status'] == 'running' ? '进行中' : t['status']}）');
