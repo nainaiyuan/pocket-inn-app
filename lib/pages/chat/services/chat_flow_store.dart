@@ -92,20 +92,20 @@ class ChatFlowStore {
   // ---- 写入（管家机械活，男主零操作）----
 
   /// 用户消息 → 立流程/追加步骤
-  /// 8-11 18:0x（GPT 九节）：分两种——
+  /// 8-11 18:2x（用户重新定义模型）：分两种——
   /// - **没在处理**（无 running 流程）：用户的话 = 新的大流程（当前工作区）
-  /// - **处理中**（有 running 流程）：用户插话 = 新消息进**未处理消息区**，
-  ///   男主自己判断：A 补充当前任务 / B 修改任务 / C 插入任务（先处理插话，
-  ///   完成后返回原任务）/ D 取消（GPT 九节，系统不自动决定）
+  /// - **处理中**（有 running 流程）：用户插话 = 新消息进**未处理消息区**。
+  ///   **大流程内所有消息平行**（#1、#2、#3…），插话 = 平行消息之一，
+  ///   可以暂挂（先做别的，回头再处理它）；不做 A/B/C/D 分类判断
+  ///   （用户：取消任务这个选项是危险的，男主可能拿来漏回消息）
   static Future<void> feedUser(String personaId, String text) async {
     if (personaId.isEmpty || text.trim().isEmpty) return;
     await warm(personaId);
     final f = _memCache;
     if (!_isTerminal(f) && f!['status'] == 'running') {
-      // 处理中 → 插话 = 新消息进**未处理消息区**（8-11 18:0x GPT 九节：
-      // 男主工作中收到用户消息 → 他自己判断：A 补充当前任务 /
-      // B 修改任务 / C 插入任务（先处理插话，完成后返回原任务）/
-      // D 取消。系统不自动决定插到哪里，不打断当前处理）
+      // 处理中 → 插话 = 新消息进**未处理消息区**（8-11 18:2x 用户：
+      // 大流程内所有消息平行，插话 = 平行消息之一，可暂挂先做别的，
+      // 回头再处理；不做 A/B/C/D 分类，不打断当前处理）
       final steps = _stepsOf(f);
       // 8-10 23:0x：插话步骤分配稳定编号（不挤占已有编号）
       final step = _newStep(text, no: _nextStepNo(steps));
@@ -116,7 +116,7 @@ class ChatFlowStore {
       await _write(personaId, f);
       _log('对话流程',
           '📥 用户插话进未处理区 #${step['no']}：${_short(text)}'
-          '（男主判断 A补充/B修改/C插入/D取消）');
+          '（平行消息，可暂挂先做别的，回头再处理）');
       return;
     }
     // 没在处理 → 立新流程（8-09 18:33：带流程编号）
@@ -718,7 +718,8 @@ class ChatFlowStore {
     }
     if (pendingList.isNotEmpty) {
       sb.writeln('未处理消息区（还没处理的，回复时标注你回的是哪条：回#N；'
-          '可一次回多条 回#1、#2；插话按 A补充/B修改/C插入/D取消 判断）：');
+          '可一次回多条 回#1、#2；插话也是平行消息，可暂挂先做别的，'
+          '回头再处理）：');
       for (final s in pendingList) {
         final no = _stepNo(s, steps.indexOf(s));
         final fromMark = s['from'] == 'butler' ? '【管家】' : '';
