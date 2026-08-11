@@ -92,23 +92,22 @@ class ChatFlowStore {
   // ---- 写入（管家机械活，男主零操作）----
 
   /// 用户消息 → 立流程/追加步骤
-  /// 8-11 18:2x（用户重新定义模型）：分两种——
-  /// - **没在处理**（无 running 流程）：用户的话 = 新的大流程（当前工作区）
-  /// - **处理中**（有 running 流程）：用户插话 = 新消息进**未处理消息区**。
-  ///   **大流程内所有消息平行**（#1、#2、#3…），插话 = 平行消息之一，
-  ///   可暂挂（先做别的，回头再处理，最后一起清）；男主处理插话时
-  ///   **自己判断**：补充当前任务 / 修改当前任务 / 插入新任务（先做插话，
-  ///   做完回原任务）/ 不做了（她叫停当前任务）（8-11 18:2x 用户：
-  ///   男主收到插话必须判断该干嘛，不能跳过）
+  /// 8-11 18:3x（用户 18:30 定义模型）：分两种——
+  /// - **没在处理**（无 running 流程）：用户的话 = 新的大流程（当前工作区）；
+  ///   男主没被唤醒时连发的多条 = 未处理区，醒来后组织进大流程（平行）
+  /// - **处理中**（有 running 流程）：用户插话 = **直接进大流程**，跟第一条
+  ///   平行（排在后面 = 暂挂，还没轮到它，男主先处理第一句话的东西）。
+  ///   男主处理插话时**自己判断**：补充当前任务 / 修改当前任务 /
+  ///   插入新任务（先做插话，做完回原任务）/ 不做了（她叫停当前任务）
+  ///   （8-11 18:2x 用户：男主收到插话必须判断该干嘛，不能跳过）
   static Future<void> feedUser(String personaId, String text) async {
     if (personaId.isEmpty || text.trim().isEmpty) return;
     await warm(personaId);
     final f = _memCache;
     if (!_isTerminal(f) && f!['status'] == 'running') {
-      // 处理中 → 插话 = 新消息进**未处理消息区**（8-11 18:2x 用户：
-      // 大流程内所有消息平行，插话 = 平行消息之一：可暂挂先做别的，
-      // 回头再处理；男主处理时自己判断 补充/修改/插入/不做了。
-      // 不打断当前处理）
+      // 处理中 → 插话 = 新消息**直接进大流程**（8-11 18:3x 用户：
+      // 大流程内所有消息平行，插话跟第一条平行，排在后面=暂挂（还没轮到）；
+      // 男主处理时自己判断 补充/修改/插入/不做了。不打断当前处理）
       final steps = _stepsOf(f);
       // 8-10 23:0x：插话步骤分配稳定编号（不挤占已有编号）
       final step = _newStep(text, no: _nextStepNo(steps));
@@ -118,8 +117,8 @@ class ChatFlowStore {
       // 不推为当前——男主正在处理的保持不变，插话在未处理区等判断
       await _write(personaId, f);
       _log('对话流程',
-          '📥 用户插话进未处理区 #${step['no']}：${_short(text)}'
-          '（平行消息：可暂挂，处理时男主判断 补充/修改/插入/不做了）');
+          '📥 用户插话进大流程 #${step['no']}（平行，暂挂还没轮到）：'
+          '${_short(text)}（处理时男主判断 补充/修改/插入/不做了）');
       return;
     }
     // 没在处理 → 立新流程（8-09 18:33：带流程编号）
@@ -644,8 +643,10 @@ class ChatFlowStore {
     final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
     final sb = StringBuffer();
     final flowNo = f['flowNo'];
-    // 8-11 18:0x（GPT 模型）：【当前工作区】= 正在处理 + 未处理消息区
-    // 大流程编号 = 管家自动生成（flowNo），男主也可自己引用
+    // 8-11 18:3x（用户 18:30）：【当前工作区】= 大流程，内所有消息**平行**
+    // （#1、#2、#3…），正在处理的标 ▶/✅（子分支挂下面），还没轮到的标 ☐
+    // （暂挂）。大流程编号 = 管家自动生成（flowNo），男主也可自己引用。
+    // 未处理区是另一回事（男主没被唤醒时连发的消息，醒来后组织进大流程）
     sb.writeln('【当前工作区${flowNo != null ? ' #$flowNo' : ''}】');
     if (status == 'done') {
       sb.writeln('✅ 流程已结束（你确认无工作遗漏）。没有新消息就别再说话，'
@@ -672,7 +673,6 @@ class ChatFlowStore {
         }
       }
     }
-    sb.writeln('正在处理：');
     if (curStep != null) {
       final no = _stepNo(curStep, steps.indexOf(curStep));
       final fromMark = curStep['from'] == 'butler' ? '【管家】' : '';
@@ -714,27 +714,24 @@ class ChatFlowStore {
         if (dec.isNotEmpty) sb.writeln('  → 判断：$dec');
       }
     }
-    // 未处理消息区（GPT 七节）：还没处理的消息全列出，男主可一次回多条
-    final pendingList = <Map<String, dynamic>>[];
-    for (final s in steps) {
-      if (s['status'] != 'done') pendingList.add(s);
+    // 还没轮到的（平行暂挂）：其他非 done 消息 ☐ 列出
+    final curIdx0 = curStep == null ? -1 : steps.indexOf(curStep);
+    for (var i = 0; i < steps.length; i++) {
+      final s = steps[i];
+      if (s['status'] == 'done') continue;
+      if (i == curIdx0) continue; // 当前步已在上方显示
+      final no = _stepNo(s, i);
+      final fromMark = s['from'] == 'butler' ? '【管家】' : '';
+      final ts = (s['ts'] ?? '').toString();
+      final spk = s['from'] == 'butler' ? '管家' : '她';
+      sb.writeln('☐ #$no [$ts]$fromMark $spk：'
+          '${_short(s['userText'].toString(), 30)}（还没轮到）');
     }
-    if (pendingList.isNotEmpty) {
-      sb.writeln('未处理消息区（还没处理的，回复时标注你回的是哪条：回#N；'
-          '可一次回多条 回#1、#2。插话也是平行消息——不想现在处理就暂挂'
-          '（先做别的，回头再处理它，最后一起清）；要处理时你自己判断：'
-          '补充当前任务 / 修改当前任务 / 插入新任务（先做插话，做完回原任务）'
-          '/ 不做了（她叫停当前任务））：');
-      for (final s in pendingList) {
-        final no = _stepNo(s, steps.indexOf(s));
-        final fromMark = s['from'] == 'butler' ? '【管家】' : '';
-        final ts = (s['ts'] ?? '').toString();
-        final spk = s['from'] == 'butler' ? '管家' : '她';
-        sb.writeln('  ☐ #$no [$ts]$fromMark $spk：'
-            '${_short(s['userText'].toString(), 30)}');
-      }
-    }
-    // 引导：男主自己判断结束（GPT 完成检查）
+    // 引导：平行 + 插话判断 + 男主自己判断结束（GPT 完成检查）
+    sb.writeln('—— 消息都平行：回复时标你处理的是哪条 回#N'
+        '（可一次回多条 回#1、#2）；插话也是平行消息，还没轮到就暂挂，'
+        '轮到了你自己判断：补充当前任务 / 修改当前任务 / 插入新任务'
+        '（先做插话，做完回原任务）/ 不做了（她叫停当前任务）');
     sb.writeln('—— 全部处理完 → 你自己判断结束（需求完成？关联消息全处理？'
         '插话处理？工具结果用了？还有未完成事项？）');
     sb.writeln('—— 做完了 → 说结束 + 写摘要（save_summary）；没做完 → 继续。');
