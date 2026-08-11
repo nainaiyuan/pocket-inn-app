@@ -1463,12 +1463,19 @@ class AiChatService {
     }
     // ── Agent Debug Lab 埋点（8-09）：begin + 记录实际发出的 messages ──
     // 8-12 01:5x（用户：每轮 prompt 全部直接记录到文件，随时能翻能复制）：
-    // 完整 messages（固定设定+动态块，不截断）追加写 agent_prompt_log.txt
+    // messages（不截断）追加写 agent_prompt_log.txt；固定设定只记一次
+    // （8-12 02:0x 用户：固定的没必要重复记），动态块每轮全量
+    final fixedBlock = systemPrompt.trim().isEmpty
+        ? null
+        : systemPrompt;
     unawaited(PromptLog.appendInput(
       personaName: personaName,
       isToolRound: toolRound,
       userInput: message,
-      blocks: messages.map((m) {
+      fixedBlock: fixedBlock,
+      dynamicBlocks: messages
+          .where((m) => !_isFixedPromptBlock(m, systemPrompt))
+          .map((m) {
         final sb = StringBuffer('【${m.role}】');
         if (m.content.trim().isNotEmpty) {
           sb.write('\n${m.content}');
