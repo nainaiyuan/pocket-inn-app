@@ -50,6 +50,46 @@ class ChatFlowStore {
     }
   }
 
+  // ---- 排队流程（8-12 03:3x 用户：插话自己生成 T2 放工作区 T1 下面
+  // 排队，不放待回复；处理完 T1 自动轮到）----
+  // _queueCache：内存缓存（buildText 同步读）；SharedPreferences 持久化
+  static final Map<String, List<Map<String, dynamic>>> _queueCache = {};
+
+  static String _queueKey(String personaId) => 'chat_flow_queue_$personaId';
+
+  static Future<List<Map<String, dynamic>>> _readQueue(String personaId) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_queueKey(personaId));
+      if (raw == null || raw.isEmpty) return <Map<String, dynamic>>[];
+      return (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
+    } catch (_) {
+      return <Map<String, dynamic>>[];
+    }
+  }
+
+  static Future<void> _writeQueue(
+      String personaId, List<Map<String, dynamic>> q) async {
+    _queueCache[personaId] = q;
+    final p = await SharedPreferences.getInstance();
+    if (q.isEmpty) {
+      await p.remove(_queueKey(personaId));
+    } else {
+      await p.setString(_queueKey(personaId), jsonEncode(q));
+    }
+  }
+
+  /// 排队流程（读内存缓存，buildText 同步用）
+  static List<Map<String, dynamic>> queuedFlows(String personaId) =>
+      _queueCache[personaId] ?? const <Map<String, dynamic>>[];
+
+  static Future<void> _enqueue(
+      String personaId, Map<String, dynamic> flow) async {
+    final q = await _readQueue(personaId);
+    q.add(flow);
+    await _writeQueue(personaId, q);
+  }
+
   static Future<void> warm(String personaId) async {
     if (personaId.isEmpty) return;
     try {
@@ -60,6 +100,7 @@ class ChatFlowStore {
       } else {
         _memCache = null;
       }
+      _queueCache[personaId] = await _readQueue(personaId);
     } catch (_) {
       _memCache = null;
     }
@@ -97,30 +138,28 @@ class ChatFlowStore {
   /// 8-11 18:3x（用户 18:30 定义模型）：分两种——
   /// - **没在处理**（无 running 流程）：用户的话 = 新的大流程（当前工作区）；
   ///   男主没被唤醒时连发的多条 = 未处理区，醒来后组织进大流程（平行）
-  /// - **处理中**（有 running 流程）：用户插话 = **直接进大流程**，跟第一条
-  ///   平行（排在后面 = 暂挂，还没轮到它，男主先处理第一句话的东西）。
-  ///   男主处理插话时**自己判断**：补充当前任务 / 修改当前任务 /
-  ///   插入新任务（先做插话，做完回原任务）/ 不做了（她叫停当前任务）
-  ///   （8-11 18:2x 用户：男主收到插话必须判断该干嘛，不能跳过）
+  /// - **处理中**（有 running 流程）：用户插话 = **新大流程排队**（8-12
+  ///   03:3x 用户：插话自己生成 T2 放工作区 T1 下面排队，不放待回复；
+  ///   处理完 T1 自动轮到 T2）。
   static Future<void> feedUser(String personaId, String text) async {
     if (personaId.isEmpty || text.trim().isEmpty) return;
     await warm(personaId);
     final f = _memCache;
     if (!_isTerminal(f) && f!['status'] == 'running') {
-      // 处理中 → 插话 = 新消息**直接进大流程**（8-11 18:3x 用户：
-      // 大流程内所有消息平行，插话跟第一条平行，排在后面=暂挂（还没轮到）；
-      // 男主处理时自己判断 补充/修改/插入/不做了。不打断当前处理）
-      final steps = _stepsOf(f);
-      // 8-10 23:0x：插话步骤分配稳定编号（不挤占已有编号）
-      final step = _newStep(text, no: _nextStepNo(steps));
-      step['from'] = 'user_interrupt'; // 插话标记（GPT：进当前任务判断）
-      steps.add(step); // 挂未处理区末尾，男主判断怎么处理
-      f['steps'] = steps;
-      // 不推为当前——男主正在处理的保持不变，插话在未处理区等判断
-      await _write(personaId, f);
+      // 处理中 → 插话 = **新大流程排队**（8-12 03:3x 用户：插话自己
+      // 生成 T2 放工作区 T1 下面排队，不放待回复；处理完 T1 自动轮到）
+      final flow = <String, dynamic>{
+        'flowNo': await _nextFlowNo(),
+        'goal': _short(text, 30),
+        'status': 'pending', // 排队中（还没轮到）
+        'currentStep': 0,
+        'steps': [_newStep(text, no: 1)],
+        'startedAt': DateTime.now().toIso8601String(),
+      };
+      await _enqueue(personaId, flow);
       _log('对话流程',
-          '📥 用户插话进大流程 #${step['no']}（平行，进待办清单）：'
-          '${_short(text)}（处理时男主判断 补充/修改/插入/不做了）');
+          '📥 插话生成新流程 ${flow['flowNo']} 排队（工作区 T1 下面）：'
+          '${_short(text)}（处理完当前流程自动轮到）');
       return;
     }
     // 没在处理 → 立新流程（8-09 18:33：带流程编号）
@@ -666,6 +705,18 @@ class ChatFlowStore {
     await _write(personaId, f);
     _log('对话流程', '🔚 男主输出退出标记，流程结束（固定结束流程：'
         '男主自己标完所有消息 → 带大流程结束标记 → 写摘要 → 管家归档）');
+    // 8-12 03:3x（用户：排队来吧）：有排队流程 → 提升第一个为当前
+    // （running），检查点⑤看到 running 自动续跑唤醒男主处理下一个
+    final q = await _readQueue(personaId);
+    if (q.isNotEmpty) {
+      final next = q.removeAt(0);
+      next['status'] = 'running';
+      await _writeQueue(personaId, q);
+      await _write(personaId, next);
+      _log('对话流程',
+          '🔜 排队流程 ${next['flowNo']} 提升为当前（${_short(
+              next['goal']?.toString() ?? '', 24)}），自动轮到');
+    }
   }
 
   /// 解析男主回复里的消条目标注（第N步，1-based）
@@ -820,13 +871,27 @@ class ChatFlowStore {
       sb.writeln('☐ $noMark$no [$ts]$fromMark $spk：'
           '${_short(s['userText'].toString(), 30)}（待办）');
     }
+    // 8-12 03:3x（用户：插话排队成新流程）：工作区 T1 下面显示排队的
+    // 新流程（她插话生成的），处理完当前自动轮到
+    final q = queuedFlows(personaId);
+    if (q.isNotEmpty) {
+      sb.writeln('—— 下面排队的新流程（她插话，你处理完上面的自动轮到）：');
+      for (final qf in q) {
+        final qSteps = _stepsOf(qf);
+        final qText = qSteps.isEmpty
+            ? ''
+            : qSteps.first['userText']?.toString() ?? '';
+        sb.writeln('☐ ${qf['flowNo']}（${_short(qText, 30)}）');
+      }
+    }
     // 引导：平行 + 插话判断 + 结束流程（8-11 19:4x 精简，对齐 GPT：
     // 固定层只放规则，流程细节这里一句话讲完，不叠话术）
     sb.writeln('—— 上面都是待办事项（参考）：一条条看过去，能一起做的'
         '就一起做（end_MN 标你处理的是哪条，可一次回多条 end_M1、end_M2；'
         '管家消息用 end_SN，如 end_S1）。'
-        '每条都要处理，判断：补充/修改/插入（先做插话，做完回原任务）'
-        '/不做了（她叫停）——不能跳过任何一条');
+        '每条都要处理，判断：补充/修改/插入'
+        '/不做了（她叫停）——不能跳过任何一条；'
+        '她插话 = 下面排队的新流程，处理完这个自动轮到');
     sb.writeln('—— 结束：全部标完 → 最后一条 sys 写 end_TN + 调 save_summary'
         '（save_summary）→ 管家归档，不再唤醒你（你没标完=没做完，'
         '管家不替标）。');
