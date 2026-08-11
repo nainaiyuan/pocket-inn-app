@@ -1764,6 +1764,26 @@ class _ChatPageState extends State<ChatPage>
             // 8-08 02:1x 用户：工具工作缓存——男主干活中间数据（自管免审批）
             _appendToolBubble('🗃️ 男主在整理工具缓存…');
             toolResult = await _executeManageToolCache(args);
+          } else if (name == 'save_summary') {
+            // 8-11 20:2x（用户：男主说没有 save_summary）：正常轮执行分支——
+            // 固定结束流程写摘要（大流程讲了什么）；range 可选
+            final content = (args['content']?.toString() ?? '').trim();
+            if (content.isEmpty) {
+              toolResult = const _ToolResult(
+                false,
+                'save_summary 要带 content（摘要内容：这个大流程讲了什么）',
+              );
+            } else {
+              final range =
+                  (args['range']?.toString() ?? '').trim().isEmpty
+                      ? '大流程摘要'
+                      : args['range'].toString();
+              await ContextManager.instance
+                  .appendSummary(personaId, '（$range）$content');
+              DebugLogger.log('上下文管理',
+                  '✅ 男主调 save_summary 写摘要（$range，${content.length} 字）');
+              toolResult = _ToolResult(true, '摘要已保存：$content');
+            }
           } else if (name == 'manage_flow') {            // 8-06 23:55 用户：流程层——男主自管（免审批）
             // 8-10 03:0x 用户拍板：长任务=普通对话流程，manage_flow 停用。
             // 只放行收尾动作（finish/cancel/status 处理遗留卡片），创建/推进/续跑类一律拒绝。
@@ -4994,6 +5014,10 @@ class _ChatPageState extends State<ChatPage>
       'manage_tool_cache': {
         '动作': 'action', '操作': 'action',
         '工具': 'tool', '结果': 'result',
+      },
+      'save_summary': {
+        '内容': 'content', '摘要': 'content', '总结': 'content',
+        '范围': 'range', '区间': 'range',
       },
       'manage_tool_manual': {
         '动作': 'action', '操作': 'action',

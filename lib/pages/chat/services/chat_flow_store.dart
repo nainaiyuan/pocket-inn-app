@@ -608,6 +608,41 @@ class ChatFlowStore {
     await warm(personaId);
     final f = _memCache;
     if (f == null || f['status'] != 'running') return;
+    // 8-11 20:2x（用户 20:28）：男主带结束标签后、归档前才进来的插话
+    // （用户手速快连发两条——第一条男主处理完带结束标记，第二条才到；
+    // 19:09 检查时它还不存在，男主不可能标它）→ **自动拆到下一个任务**，
+    // 不跟着旧大流程一起消掉，也不让男主疑惑。
+    final steps = _stepsOf(f);
+    final lateInterrupts =
+        steps.where((s) => s['status'] != 'done').toList();
+    if (lateInterrupts.isNotEmpty) {
+      final newSteps = <Map<String, dynamic>>[];
+      for (var i = 0; i < lateInterrupts.length; i++) {
+        final s = Map<String, dynamic>.from(lateInterrupts[i]);
+        s['no'] = i + 1; // 新流程重新编号 M1/M2…
+        s['status'] = 'pending';
+        s['reply'] = '';
+        s['tools'] = <String, dynamic>{};
+        s.remove('from');
+        newSteps.add(s);
+      }
+      final flow = <String, dynamic>{
+        'flowNo': await _nextFlowNo(),
+        'goal': _short(lateInterrupts.first['userText'].toString(), 30),
+        'status': 'running',
+        'currentStep': 0,
+        'steps': newSteps,
+        'startedAt': DateTime.now().toIso8601String(),
+        // 8-11 20:2x：男主可能没意识到有插话 → 管家备注说明（男主唤醒时看到）
+        'butlerNote': '上个大流程你带结束标记时，她还有 ${lateInterrupts.length} 条'
+            '话刚发出来没看到，管家自动开的新任务，处理一下',
+      };
+      await _write(personaId, flow);
+      _log('对话流程',
+          '📦 男主结束时有 ${lateInterrupts.length} 条插话（结束标签后才到）'
+          '→ 自动拆成新任务 T${flow['flowNo']}，不跟着消');
+      return; // 旧流程已被新流程取代（对话原文已进历史 topics，不丢）
+    }
     // 8-11 19:0x（用户 19:09）：管家**不兜底**——男主没标结束 = 没做完。
     // 归档前调用方（chat_page）已确认步骤全标完；这里只做归档。
     f['status'] = 'done';
@@ -680,6 +715,9 @@ class ChatFlowStore {
     // 每条都要处理判断（不能因为"还没轮到"就不看）。正在处理的标 ▶/✅
     // （子分支挂下面），还没处理的标 ☐（待办）。
     sb.writeln('【当前工作区${flowNo != null ? ' #$flowNo' : ''}】');
+    // 8-11 20:2x：拆出来的新任务带管家备注（男主可能没意识到有插话）
+    final bNote = (f['butlerNote'] as String?)?.toString().trim() ?? '';
+    if (bNote.isNotEmpty) sb.writeln('💡 $bNote');
     if (status == 'done') {
       sb.writeln('✅ 流程已结束（你确认无工作遗漏）。没有新消息就别再说话，'
           '输出退出标记 {"need_continue": false}。');

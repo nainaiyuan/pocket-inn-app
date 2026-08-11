@@ -855,7 +855,35 @@ class AiChatService {
         },
       },
     },
+    saveSummaryTool,
   ];
+  /// 8-11 20:2x（用户：男主说没有 save_summary）：主工具清单里补上——
+  /// 固定结束流程要求写摘要（save_summary），原来只在 summarizeTools
+  /// （窗口满专用）里，男主正常调报"没有这个工具"。
+  static const Map<String, dynamic> saveSummaryTool = {
+    'type': 'function',
+    'function': {
+      'name': 'save_summary',
+      'description':
+          '写摘要。固定结束流程要求：大流程全做完 → 写这个大流程讲了什么；'
+          '窗口快满时系统叫你总结最近对话也可以用。',
+      'parameters': {
+        'type': 'object',
+        'properties': {
+          'content': {
+            'type': 'string',
+            'description': '摘要内容：这个大流程讲了什么/影响后续的提醒，简短',
+          },
+          'range': {
+            'type': 'string',
+            'description': '可选。覆盖范围说明（如"大流程T1"）；不传自动标',
+          },
+        },
+        'required': ['content'],
+      },
+    },
+  };
+
   /// 总结专用工具（8-05 19:19 用户：男主只需要调用工具写摘要，不输出文本）。
   /// 窗口满 → 管家发【当前管家】指令 → 男主调 save_summary 写入摘要（含范围）。
   static const List<Map<String, dynamic>> summarizeTools = [
