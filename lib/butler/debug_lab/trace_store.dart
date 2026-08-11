@@ -12,6 +12,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../utils/debug_logger.dart';
 import 'agent_run_trace.dart';
 
 /// 存储后端接口（可注入）
@@ -93,10 +94,18 @@ class TraceStore {
 
   /// 保存轨迹
   Future<void> save(AgentRunTrace trace) async {
-    await _storage.save(
-      _key(trace.personaId, trace.runId),
-      jsonEncode(trace.toJson()),
-    );
+    final key = _key(trace.personaId, trace.runId);
+    final json = jsonEncode(trace.toJson());
+    final ok = await _storage.save(key, json);
+    // 8-12 01:1x（用户：每轮视图空白）：写入失败直接打日志，
+    // 不再静默丢——之前 save 返回 bool 但没人检查
+    if (!ok) {
+      DebugLogger.log('轨迹',
+          '⚠️ 轨迹保存失败 key=$key len=${json.length}（${trace.userInput.length > 20 ? trace.userInput.substring(0, 20) + '…' : trace.userInput}）');
+    } else {
+      DebugLogger.log('轨迹',
+          '💾 轨迹已存 key=$key len=${json.length}');
+    }
     await _trim(trace.personaId);
     _revisionController.add(trace.runId); // 通知 UI 自动刷新（8-11 22:2x）
   }
