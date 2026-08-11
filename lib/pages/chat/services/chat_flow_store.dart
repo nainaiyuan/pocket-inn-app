@@ -1065,7 +1065,9 @@ class ChatFlowStore {
     }
     if (parts.isEmpty) return '';
     final flowNo = f['flowNo'];
-    return 'T$flowNo 全部消息：${parts.join('｜')}';
+    // 8-12 06:3x（用户日志看到 "TT0"）：flowNo 本身带 T 前缀（'T0'），
+    // 这里不能再拼 'T'——直接 'T0 全部消息：…'（工作区 #T0 一直是对的）
+    return '$flowNo 全部消息：${parts.join('｜')}';
   }
 
   static String? checkBrief(String personaId) {
