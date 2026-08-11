@@ -1470,7 +1470,7 @@ class AiChatService {
       userInput: message,
       blocks: messages.map((m) {
         final sb = StringBuffer('【${m.role}】');
-        if ((m.content ?? '').trim().isNotEmpty) {
+        if (m.content.trim().isNotEmpty) {
           sb.write('\n${m.content}');
         }
         final tcs = m.toolCalls ?? const [];
