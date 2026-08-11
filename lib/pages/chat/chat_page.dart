@@ -870,19 +870,25 @@ class _ChatPageState extends State<ChatPage>
     // 8-10 21:5x（用户：manage_task 失败后男主消流程 → done 不唤醒 → 失败被遗忘）：
     // 本轮有工具失败（_lastRoundToolFailed）→ 即使 done 也唤醒男主处理，
     // 检查轮会带失败提醒。处理完（下轮无新失败）自然恢复"done 不唤醒"。
+    // 8-12 04:1x（用户拍板：标了 end_TN+摘要=结束，不管中间有没有做完）：
+    // done 一律不唤醒——男主写了摘要 = 他检查过了，失败结果也写在
+    // 工具链（❌）/摘要里，不再因工具失败二次唤醒（那正是反复唤醒的
+    // 另一个来源）。有排队新流程 → finish() 已提升为 running（statusOf
+    // = 'running'），走下方检查轮唤醒处理下一个（T2）；没有 → 安静等用户。
     final toolFailed = _lastRoundToolFailed;
     _lastRoundToolFailed = false;
-    if (chatFlowStatus == 'done' && !maleChoseContinue && !toolFailed) {
+    if (chatFlowStatus == 'done' && !maleChoseContinue) {
       DebugLogger.log(
         '管家流程',
-        '🔕 对话流程已结束（done），不唤醒（用户 8-10：消掉大流程不二次唤醒）',
+        '🔕 对话流程已结束（done），不唤醒（用户 8-12：标了 end_TN+摘要=结束；'
+        '有排队 T2 会由 finish 提升为 running 自动轮到）',
       );
       return;
     }
     if (toolFailed) {
       DebugLogger.log(
         '管家流程',
-        '🔔 本轮有工具失败 → done 也唤醒男主处理（manage_task 缺参数等）',
+        '🔔 本轮有工具失败（流程未结束 → 检查轮带失败提醒，男主判断重试还是结束）',
       );
     }
     if (maleChoseContinue) {
@@ -947,7 +953,10 @@ class _ChatPageState extends State<ChatPage>
     }
     // ②' 男主已明确判定无需继续（need_continue:false）→ 不再唤醒
     //（8-08 18:1x GPT：next_action 为空 + 无 running 任务 → 停止 resume）
-    if (_continueFrozen) {
+    // 8-12 04:1x（用户：除非下面还有 T2 才唤醒）：有新流程被 finish()
+    // 提升为 running（排队 T2 自动轮到）→ 不冻结，检查轮唤醒处理下一个；
+    // 只有 done/无流程时才冻结（男主已说结束，安静等用户）。
+    if (_continueFrozen && chatFlowStatus != 'running') {
       DebugLogger.log(
         '管家流程',
         '🔒 续话冻结：男主已判定无需继续，等用户说话（不再自动唤醒）',
@@ -1007,11 +1016,12 @@ class _ChatPageState extends State<ChatPage>
     // 8-09 18:1x（对话流程）：检查轮带待回清单（还有几条没回）
     final chatFlowBrief = ChatFlowStore.checkBrief(pid);
     // 8-10 21:5x：工具失败提醒（本轮有失败才带，用完即清）
-    final toolFailedNote = _lastRoundToolFailed
+    // 8-12 04:1x：改用上方捕获的 toolFailed（原代码读 _lastRoundToolFailed
+    // 已被顶部清零 → 永远为空，死代码）
+    final toolFailedNote = toolFailed
         ? '⚠️ 刚才有工具调用失败了（看上面工具结果里的 ❌）：'
             '能补参数重试就补调工具重试；不需要处理就说明原因后正常结束。\n'
         : '';
-    _lastRoundToolFailed = false;
     await _sendMsg(
       '',
       systemEvent: '【系统自动提醒——这不是用户消息，不用回复这条提醒本身】\n'
@@ -2485,29 +2495,13 @@ class _ChatPageState extends State<ChatPage>
             );
           }
         } else {
-          // 8-11 19:0x（用户 19:09）：管家不兜底——没标完 = 没做完。
-          // 男主带大流程结束标记但还有步骤没标 done → 不归档，提示补标
-          final pendingNos = ChatFlowStore.pendingNos(personaId);
-          if (pendingNos.isNotEmpty) {
-            _pendingInterruptEvent =
-                '你说大流程结束了，但还有 ${pendingNos.join('、')} '
-                '没标处理完。你没标 = 没做完：都处理完了就 end_MN 标掉，'
-                '（最后一条标完时 JSON 的 sys 写 end_TN +调 save_summary），'
-                '我再归档。';
-            DebugLogger.log('管家流程',
-                '🔚 男主带结束标记但还有 ${pendingNos.length} 条没标完'
-                ' → 不归档，提示补标');
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('男主带结束标记但还有 ${pendingNos.length} 条没标完，已提醒补标'),
-                  duration: const Duration(seconds: 2),
-                ),
-              );
-            }
-          } else {
-            unawaited(ChatFlowStore.finish(personaId));
-          }
+          // 8-12 04:1x（用户拍板）：只要男主标了 end_TN + save_summary
+          // 就结束——不管中间有没有标完 end_MN（他写了摘要 = 他检查过了，
+          // 只是忘记打结束标签）。不再打回补标（那正是反复唤醒死循环的
+          // 根因：打回 → 男主补标 → 又打回）。有排队新流程（她插话）→
+          // finish() 自动提升为当前，检查点⑤唤醒处理下一个（T2）；
+          // 没有 → 安静等用户。
+          await ChatFlowStore.finish(personaId);
         }
       } else if (exitSignal == false) {
         _continueFrozen = false;

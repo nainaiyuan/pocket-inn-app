@@ -634,12 +634,9 @@ class ChatFlowStore {
   }
 
   /// 8-11 19:0x（用户 19:09 固定结束流程）：未标 done 的步骤编号列表。
-  /// 归档前检查用——管家不自动标，没标完 = 没做完，提示男主补标。
-  /// 8-11 20:3x（用户 20:34 澄清）：结束检查用的待处理编号——
-  /// **跳过插话**（from == 'user_interrupt'）：男主带结束标签时，插话
-  /// 没标完**不阻塞归档**，由 finish() 自动拆到下一个大流程当独立任务
-  /// （用户手速快连发，插话不能跟着旧大流程消掉）。
-  /// 只有正常消息步骤没标完才打回补标（8-11 19:09 用户：没标完=没做完）。
+  /// 8-12 04:1x（用户拍板）：已不再用于归档前打回补标——男主标了
+  /// end_TN + save_summary 就直接归档（写了摘要=检查过了，忘标 end_MN
+  /// 不阻塞）。保留此方法供日志/排查参考。
   /// 注：只此一处调用（chat_page 结束检查）；checkBrief 不经过这里，
   /// 男主处理中仍能看到全部待办（含插话，每条都要处理判断）。
   /// 8-11 23:5x：返回带前缀编号（M1/B3）——管家消息 B、用户消息 M，
@@ -668,9 +665,14 @@ class ChatFlowStore {
     // （用户手速快连发两条——第一条男主处理完带结束标记，第二条才到；
     // 19:09 检查时它还不存在，男主不可能标它）→ **自动拆到下一个任务**，
     // 不跟着旧大流程一起消掉，也不让男主疑惑。
+    // 8-12 04:1x（用户拍板：标了 end_TN+摘要=结束，不管中间有没有标完）：
+    // 只拆"用户插话"（from == user_interrupt）——男主忘了标 end_MN 的
+    // 普通消息不拆（他写了摘要 = 他检查过了，只是忘记打结束标签），
+    // 不因没标完打回、不唤醒（防无限唤醒）。
     final steps = _stepsOf(f);
-    final lateInterrupts =
-        steps.where((s) => s['status'] != 'done').toList();
+    final lateInterrupts = steps
+        .where((s) => s['status'] != 'done' && s['from'] == 'user_interrupt')
+        .toList();
     if (lateInterrupts.isNotEmpty) {
       // 8-12 03:4x（用户澄清）：男主说 end_TN 时的插话（手速快连发）
       // → 拆成新流程**排队**（T1/T2 放工作区当前流程下面），当前流程
@@ -700,7 +702,8 @@ class ChatFlowStore {
           '→ 自动排队成新流程（T1/T2…），当前流程正常归档');
     }
     // 8-11 19:0x（用户 19:09）：管家**不兜底**——男主没标结束 = 没做完。
-    // 归档前调用方（chat_page）已确认步骤全标完；这里只做归档。
+    // 8-12 04:1x（用户拍板）：结束判定改为"男主标了 end_TN + save_summary
+    // 就归档"（他写了摘要 = 他检查过了），不再要求每条都标完 end_MN。
     f['status'] = 'done';
     f['currentStep'] = (_stepsOf(f).length);
     await _write(personaId, f);
@@ -779,13 +782,14 @@ class ChatFlowStore {
     final status = f['status']?.toString() ?? '';
     final steps = _stepsOf(f);
     if (steps.isEmpty) return null;
-    final cur = (f['currentStep'] as num?)?.toInt() ?? 0;
     final sb = StringBuffer();
     final flowNo = f['flowNo'];
     // 8-11 19:5x（用户 19:53）：【当前工作区】= 大流程，内所有消息 = **待办事项**
-    // （#1、#2、#3… 平行），给男主做参考：一条条看过去，能一起做的就一起做，
-    // 每条都要处理判断（不能因为"还没轮到"就不看）。正在处理的标 ▶/✅
-    // （子分支挂下面），还没处理的标 ☐（待办）。
+    // （M1、M2、M3… 平行），给男主做参考：一条条看过去，能一起做的就一起做，
+    // 每条都要处理判断（不能因为"还没轮到"就不看）。
+    // 8-12 04:1x（用户：去掉"当前在M1"标记）：不再标 ▶ 当前步——会误导
+    // 男主一直处理 M1。全部 ☐ 平铺，工具链挂在对应消息下面（标记打在工具上），
+    // 男主自己按顺序处理，做完标 end_MN（标完步骤消失）。
     sb.writeln('【当前工作区${flowNo != null ? ' #$flowNo' : ''}】');
     // 8-11 20:2x：拆出来的新任务带管家备注（男主可能没意识到有插话）
     final bNote = (f['butlerNote'] as String?)?.toString().trim() ?? '';
@@ -800,77 +804,84 @@ class ChatFlowStore {
     if (allReplied) {
       sb.writeln('✅ 所有消息都处理完了。');
       sb.writeln('· 做完了 → 最后一条 JSON 的 sys 写 end_TN（N=大流程编号）'
-          '+ 写摘要（save_summary），管家归档合并历史，之后不再唤醒你；');
+          '+ 写摘要（save_summary），管家归档合并历史，之后不再唤醒你'
+          '（下面还有排队的新流程才继续唤醒）；');
       sb.writeln('· 还有事 → 继续处理。');
       return sb.toString();
     }
-    // 正在处理：当前步
-    Map<String, dynamic>? curStep;
-    if (cur >= 0 && cur < steps.length && steps[cur]['status'] != 'done') {
-      curStep = steps[cur];
-    } else {
-      for (final s in steps) {
-        if (s['status'] != 'done') {
-          curStep = s;
-          break;
-        }
-      }
-    }
-    if (curStep != null) {
-      final no = _stepNo(curStep, steps.indexOf(curStep));
-      final noMark = curStep['from'] == 'butler' ? 'S' : 'M'; // 8-11 23:5x：管家消息 S 前缀（System 系统消息，用户：管家=系统）
-      final fromMark = curStep['from'] == 'butler' ? '【管家】' : '';
-      final ts = (curStep['ts'] ?? '').toString();
-      final tools = _asMap(curStep['tools']);
-      final reply = (curStep['reply'] as String?)?.toString().trim() ?? '';
-      final speaker = curStep['from'] == 'butler' ? '管家' : '她';
-      // 8-12 01:4x（用户：M1 前面 ✓ 误导男主判断——有回复/工具成功就自动
-      // ✅，男主以为这条做完了，实际工具失败没做完）：不自动标 ✅，
-      // 当前步统一 ▶（正在处理）。男主自己看内容+工具链（✅/❌）判断
-      // 做没做完，做完才标 end_MN（标完步骤消失）。
-      final mark = '▶';
+    // 8-12 04:1x（用户：去掉"当前在M1"标记——会误导男主一直处理 M1）：
+    // 不再标 ▶ 当前步。所有未处理消息平铺成 ☐ 待办清单（按 M1、M2… 顺序）。
+    // 8-12 04:3x（用户：无法确定哪个是未处理 → 每条显示"最后一步"；
+    // 判断块只放 M1M2 后面一个，不插在每条中间）：每条 = 消息行 +
+    // 工具链（精简成一行）+ 最后一步（男主回了啥精简/最后一个工具结果/无）；
+    // 看完所有待办后才有"判断"块（有工具失败/没找到才动态出现，往后挪）。
+    // 内部 currentStep 仍保留（工具/回复挂载点用），只是不再注入显示。
+    final pendingMs = <Map<String, dynamic>>[]; // 收集待办，判断块用
+    for (var i = 0; i < steps.length; i++) {
+      final s = steps[i];
+      if (s['status'] == 'done') continue;
+      pendingMs.add(s);
+      final no = _stepNo(s, i);
+      final noMark = s['from'] == 'butler' ? 'S' : 'M'; // 8-11 23:5x：管家消息 S 前缀（System 系统消息，用户：管家=系统）
+      final fromMark = s['from'] == 'butler' ? '【管家】' : '';
+      final ts = (s['ts'] ?? '').toString();
+      final spk = s['from'] == 'butler' ? '管家' : '她';
+      final tools = _asMap(s['tools']);
+      final reply = (s['reply'] as String?)?.toString().trim() ?? '';
       // 管家备注（挂用户消息后面 = GPT 管家分析绑定消息）
-      final notes = (curStep['butlerNotes'] as List?)
+      final notes = (s['butlerNotes'] as List?)
               ?.cast<Map<String, dynamic>>() ??
           <Map<String, dynamic>>[];
       if (notes.isNotEmpty) {
         for (final n in notes) {
-          sb.writeln('$mark M$no [${n['ts']}] 管家：${n['text']}');
+          sb.writeln('☐ $noMark$no [${n['ts']}] 管家：${n['text']}');
         }
-        sb.writeln('  她：${curStep['userText']}');
+        sb.writeln('  她：${s['userText']}');
       } else {
-        sb.writeln('$mark $noMark$no [$ts]$fromMark $speaker：${curStep['userText']}');
+        sb.writeln('☐ $noMark$no [$ts]$fromMark $spk：${s['userText']}');
       }
-      // 工具链（这条下面做了什么）
-      for (final entry in tools.entries) {
-        final v = entry.value;
-        if (v is! Map) continue;
-        final ok = v['ok'] == true;
-        final brief = (v['brief'] ?? '').toString();
-        sb.writeln('  - 你：调 ${entry.key}（处理 $noMark$no）${ok ? '✅' : '❌'}'
-            '${brief.isEmpty ? '' : '：$brief'}');
-      }
-      if (reply.isNotEmpty) {
-        sb.writeln('  - 你回：「${_short(reply, 60)}」');
-      }
+      // 工具链（精简成一行：名字 + ✅/❌ + 短结果，标记打在工具上）
       if (tools.isNotEmpty) {
-        final dec = _decisionHint(tools);
-        if (dec.isNotEmpty) sb.writeln('  → 判断：$dec');
+        final parts = <String>[];
+        for (final entry in tools.entries) {
+          final v = entry.value;
+          if (v is! Map) continue;
+          final ok = v['ok'] == true;
+          final brief = (v['brief'] ?? '').toString();
+          parts.add('${entry.key} ${ok ? '✅' : '❌'}'
+              '${brief.isEmpty ? '' : '：${_short(brief, 16)}'}');
+        }
+        sb.writeln('  - 工具（处理 $noMark$no）：${parts.join('｜')}');
+      }
+      // 最后一步：男主回了啥（精简）／最后一个工具结果（精简）／无
+      if (reply.isNotEmpty) {
+        sb.writeln('  - 最后一步：你回：「${_short(reply, 40)}」');
+      } else if (tools.isNotEmpty) {
+        final lastEntry = tools.entries.last;
+        final v = lastEntry.value;
+        final ok = v is Map && v['ok'] == true;
+        final brief = v is Map ? (v['brief'] ?? '').toString() : '';
+        sb.writeln('  - 最后一步：${lastEntry.key} ${ok ? '✅' : '❌'}'
+            '${brief.isEmpty ? '' : '：${_short(brief, 30)}'}');
+      } else {
+        sb.writeln('  - 最后一步：无');
       }
     }
-    // 待办事项（参考）：其他非 done 消息 ☐ 列出——男主一条条看过去
-    final curIdx0 = curStep == null ? -1 : steps.indexOf(curStep);
-    for (var i = 0; i < steps.length; i++) {
-      final s = steps[i];
-      if (s['status'] == 'done') continue;
-      if (i == curIdx0) continue; // 当前步已在上方显示
-      final no = _stepNo(s, i);
-      final noMark = s['from'] == 'butler' ? 'S' : 'M'; // 8-11 23:5x
-      final fromMark = s['from'] == 'butler' ? '【管家】' : '';
-      final ts = (s['ts'] ?? '').toString();
-      final spk = s['from'] == 'butler' ? '管家' : '她';
-      sb.writeln('☐ $noMark$no [$ts]$fromMark $spk：'
-          '${_short(s['userText'].toString(), 30)}（待办）');
+    // 判断块：只放 M1M2 后面一个（男主看完待办从这里开始决定；
+    // 有工具失败/没找到才动态出现，有工具就往后挪）。不插在每条中间。
+    final decLines = <String>[];
+    for (final s in pendingMs) {
+      final tools = _asMap(s['tools']);
+      if (tools.isEmpty) continue;
+      final dec = _decisionHint(tools);
+      if (dec.isEmpty) continue;
+      final no = _stepNo(s, steps.indexOf(s));
+      final noMark = s['from'] == 'butler' ? 'S' : 'M';
+      decLines.add('  · $noMark$no：$dec');
+    }
+    if (decLines.isNotEmpty) {
+      sb.writeln('—— 判断（看完全部待办，从这里开始决定）');
+      sb.writeln(decLines.join('\n'));
     }
     // 8-12 03:4x（用户澄清）：工作期间插话 = 当前流程 M 待办；
     // 只有男主说 end_TN 时的插话才拆成排队流程（显示在工作区下面）
@@ -888,14 +899,18 @@ class ChatFlowStore {
     }
     // 引导：平行 + 插话判断 + 结束流程（8-11 19:4x 精简，对齐 GPT：
     // 固定层只放规则，流程细节这里一句话讲完，不叠话术）
+    // 8-12 04:1x（用户拍板）：结束 = 男主标了 end_TN + save_summary 就归档，
+    // 不用每条都标完 end_MN——他写了摘要 = 他检查过了（只是忘记打结束标签），
+    // 管家不因没标完打回（那会造成反复唤醒死循环）。
     sb.writeln('—— 上面都是待办事项（参考）：一条条看过去，能一起做的'
         '就一起做（end_MN 标你处理的是哪条，可一次回多条 end_M1、end_M2；'
         '管家消息用 end_SN，如 end_S1）。'
         '每条都要处理，判断：补充/修改/插入（先做插话，做完回原任务）'
         '/不做了（她叫停）——不能跳过任何一条');
-    sb.writeln('—— 结束：全部标完 → 最后一条 sys 写 end_TN + 调 save_summary'
-        '（save_summary）→ 管家归档，不再唤醒你（你没标完=没做完，'
-        '管家不替标）。');
+    sb.writeln('—— 结束：做完后最后一条 sys 写 end_TN + 调 save_summary'
+        '（save_summary）→ 管家归档，不再唤醒你。'
+        '不用每条都标完 end_MN——你写了摘要 = 你检查过了；'
+        '下面还有排队的新流程（T2）才继续唤醒你。');
     return sb.toString();
   }
 
@@ -995,29 +1010,17 @@ class ChatFlowStore {
           '（结束标记）+ 写摘要（save_summary），管家归档合并历史，'
           '之后不再唤醒你。';
     }
-    // 还有未处理 → 提示当前步 + 未处理数
-    final curIdx = (f['currentStep'] as num?)?.toInt() ?? 0;
-    Map<String, dynamic>? curStep;
-    if (curIdx >= 0 &&
-        curIdx < steps.length &&
-        steps[curIdx]['status'] != 'done') {
-      curStep = steps[curIdx];
-    } else {
-      for (final s in steps) {
-        if (s['status'] != 'done') {
-          curStep = s;
-          break;
-        }
-      }
-    }
-    if (curStep == null) return null;
-    final curNo = _stepNo(curStep, steps.indexOf(curStep));
-    final pendingCount = pending.length;
-    return '还有 $pendingCount 条未处理消息。当前第 $curNo 条「'
-        '${_short(curStep['userText'].toString(), 20)}」还没处理。\n'
+    // 还有未处理 → 列出未处理编号（8-12 04:1x 用户：不要"当前第 N 条"
+    // 标记——误导男主一直处理 M1；清单本身在工作区，这里只报数）
+    final nos = pending.map((s) {
+      final i = steps.indexOf(s);
+      final n = _stepNo(s, i);
+      return '${s['from'] == 'butler' ? 'S' : 'M'}$n';
+    }).join('、');
+    return '还有 ${pending.length} 条未处理消息（$nos）。\n'
         '· 回复时标注你回的是哪条（end_MN），可一次回多条（end_M1、end_M2）；\n'
-        '· 全部处理完 → 固定结束流程：最后一条 sys 写 end_TN + 调 save_summary'
-        '（save_summary）。';
+        '· 处理完 → 最后一条 sys 写 end_TN + 调 save_summary'
+        '（save_summary），管家归档（不用每条都标完，写了摘要=你检查过了）。';
   }
 
   // ---- 工具 ----

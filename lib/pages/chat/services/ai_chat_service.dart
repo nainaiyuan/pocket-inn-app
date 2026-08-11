@@ -1260,9 +1260,10 @@ class AiChatService {
     final showFlowAsLast =
         !isLight && chatFlowText != null && chatFlowText.isNotEmpty;
     final flowBlock = showFlowAsLast
-        ? '【当前工作区】（你当前要处理的工作——▶=正在处理的这条，'
-            '☐=待办（一条条看过去，每条都要处理判断）；标完 end_MN，'
-            '全部标完 → 最后一条 sys 写 end_flow + 调 save_summary）'
+        ? '【当前工作区】（你当前要处理的工作——☐=待办清单'
+            '（一条条看过去，每条都要处理判断，工具链挂在对应消息下面）；'
+            '标完 end_MN；结束：最后一条 sys 写 end_TN + 调 save_summary，'
+            '管家归档不再唤醒你——不用每条都标完，写了摘要=你检查过了）'
             '\n$chatFlowText'
         : null;
     lastPromptText = isLight
@@ -1320,9 +1321,10 @@ class AiChatService {
       if (toolRound && chatFlowText != null && chatFlowText.isNotEmpty)
         AIChatMessage(
           role: 'system',
-          content: '【当前工作区】（你现在要处理的工作——'
-              '▶=正在处理的这条；☐=待办（一条条看过去，每条都要处理判断）；'
-              '标完 end_MN；全部标完 → 最后一条 sys 写 end_TN + 调 save_summary）'
+          content: '【当前工作区】（你现在要处理的工作——☐=待办清单'
+              '（一条条看过去，每条都要处理判断，工具链挂在对应消息下面）；'
+              '标完 end_MN；结束：最后一条 sys 写 end_TN + 调 save_summary，'
+              '管家归档不再唤醒你——不用每条都标完，写了摘要=你检查过了）'
               '\n$chatFlowText',
         ),
       // 8-11 05:0x（用户 8-10 拍板"长任务的都不要了"）：
@@ -1353,7 +1355,7 @@ class AiChatService {
           content: '【上下文参考】（已处理过的历史：摘要/工具/系统/聊天分区）'
               '——只作参考保持人设和记忆连贯，**不用回复、不用处理、'
               '不要重复做**。布局：上面是已处理的（这里参考），'
-              '中间【当前工作区】=正在处理的（▶）+ 待办（☐，一条条看过去）。'
+              '中间【当前工作区】=待办清单（☐，一条条看过去）。'
               '历史里的事如果已经做过，就不要再做一遍。',
         ),
         ...historyMsgs,
@@ -1380,8 +1382,8 @@ class AiChatService {
       if (userMsg != null && userMsg.isNotEmpty) {
         messages.add(AIChatMessage(
           role: 'user',
-          content: '【当前输入】（本轮触发：她刚说的话——'
-              '你刚调用的工具结果在上面，基于结果处理当前步（▶））\n$userMsg',
+          content: '【当前输入】（本轮触发：她刚说的话；'
+              '你刚调用的工具结果在上面，基于结果回复她或继续）\n$userMsg',
         ));
       }
     } else {
@@ -1400,9 +1402,10 @@ class AiChatService {
           chatFlowText.isNotEmpty) {
         messages.add(AIChatMessage(
             role: 'user',
-            content: '【当前工作区】（你当前要处理的工作——'
-                '▶=正在处理的这条；☐=待办（一条条看过去，每条都要处理判断）；'
-                '标完 end_MN；全部标完 → 最后一条 sys 写 end_TN + 调 save_summary）'
+            content: '【当前工作区】（你当前要处理的工作——☐=待办清单'
+                '（一条条看过去，每条都要处理判断，工具链挂在对应消息下面）；'
+                '标完 end_MN；结束：最后一条 sys 写 end_TN + 调 save_summary，'
+                '管家归档不再唤醒你——不用每条都标完，写了摘要=你检查过了）'
                 '\n$chatFlowText'));
       } else {
         messages.add(AIChatMessage(role: 'user', content: message));
