@@ -1260,7 +1260,7 @@ class AiChatService {
     final flowBlock = showFlowAsLast
         ? '【当前工作区】（你当前要处理的工作——▶=正在处理的这条，'
             '☐=待办（一条条看过去，每条都要处理判断）；标完回MN，'
-            '全部标完 → 说"大流程也结束了"+ 写摘要 save_summary）'
+            '全部标完 → 说「消大流程」+ 写摘要 save_summary）'
             '\n$chatFlowText'
         : null;
     lastPromptText = isLight
@@ -1331,7 +1331,7 @@ class AiChatService {
           role: 'system',
           content: '【当前工作区】（你现在要处理的工作——'
               '▶=正在处理的这条；☐=待办（一条条看过去，每条都要处理判断）；'
-              '标完回MN；全部标完 → 说"大流程也结束了"+ 写摘要 save_summary）'
+              '标完回MN；全部标完 → 说「消大流程」+ 写摘要 save_summary）'
               '\n$chatFlowText',
         ),
       if (inFlow && pendingUser != null)
@@ -1453,7 +1453,7 @@ class AiChatService {
             role: 'user',
             content: '【当前工作区】（你当前要处理的工作——'
                 '▶=正在处理的这条；☐=待办（一条条看过去，每条都要处理判断）；'
-                '标完回MN；全部标完 → 说"大流程也结束了"+ 写摘要 save_summary）'
+                '标完回MN；全部标完 → 说「消大流程」+ 写摘要 save_summary）'
                 '\n$chatFlowText'));
       } else {
         messages.add(AIChatMessage(role: 'user', content: message));

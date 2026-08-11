@@ -735,7 +735,7 @@ class ChatFlowStore {
     final allReplied = steps.every((s) => s['status'] == 'done');
     if (allReplied) {
       sb.writeln('✅ 所有消息都处理完了。');
-      sb.writeln('· 做完了 → 在这条回复上带"大流程也结束了"（结束标记）'
+      sb.writeln('· 做完了 → 在这条回复上带固定结束指令「消大流程」（结束标记）'
           '+ 写摘要（save_summary），管家归档合并历史，之后不再唤醒你；');
       sb.writeln('· 还有事 → 继续处理。');
       return sb.toString();
@@ -812,7 +812,7 @@ class ChatFlowStore {
         '就一起做（回MN 标你处理的是哪条，可一次回多条 回M1、回M2）。'
         '每条都要处理，判断：补充/修改/插入（先做插话，做完回原任务）'
         '/不做了（她叫停）——不能跳过任何一条');
-    sb.writeln('—— 结束：全部标完 → 说"大流程也结束了" + 写摘要'
+    sb.writeln('—— 结束：全部标完 → 说「消大流程」 + 写摘要'
         '（save_summary）→ 管家归档，不再唤醒你（你没标完=没做完，'
         '管家不替标）。');
     return sb.toString();
@@ -909,7 +909,7 @@ class ChatFlowStore {
     }
     if (pending.isEmpty) {
       // 全部处理完 → 固定结束流程（8-11 19:0x 用户 19:04/19:07）
-      return '全部消息都处理完了：在这条回复上带"大流程也结束了"'
+      return '全部消息都处理完了：在这条回复上带「消大流程」'
           '（结束标记）+ 写摘要（save_summary），管家归档合并历史，'
           '之后不再唤醒你。';
     }
@@ -934,7 +934,7 @@ class ChatFlowStore {
     return '还有 $pendingCount 条未处理消息。当前第 $curNo 条「'
         '${_short(curStep['userText'].toString(), 20)}」还没处理。\n'
         '· 回复时标注你回的是哪条（回MN），可一次回多条（回M1、回M2）；\n'
-        '· 全部处理完 → 固定结束流程：说"大流程做完了" + 写摘要'
+        '· 全部处理完 → 固定结束流程：说「消大流程」 + 写摘要'
         '（save_summary）。';
   }
 
