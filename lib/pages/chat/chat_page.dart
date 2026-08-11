@@ -871,13 +871,29 @@ class _ChatPageState extends State<ChatPage>
     // 工具链（❌）/摘要里，不再因工具失败二次唤醒（那正是反复唤醒的
     // 另一个来源）。有排队新流程 → finish() 已提升为 running（statusOf
     // = 'running'），走下方检查轮唤醒处理下一个（T2）；没有 → 安静等用户。
+    // 8-12 05:4x（用户：男主都做完了、工作区没有待办了，怎么还唤醒）：
+    // "没有待办工作"就不唤醒，不只认 done——running 但全部步骤 ✅ 处理完
+    // （只差 end_TN + 摘要归档）也一样不唤醒：唤醒他去补结束标记 = 男主
+    // 看不懂、反复被叫（无限唤醒撞三次锁）。归档提醒本来就在工作区
+    // （buildText"所有消息都处理完了"），下次她说话时男主自然看到补
+    // end_TN + 摘要；有排队 T2 → finish() 已提升为 running 且带待办步骤
+    // → hasPendingStep=true，走下方检查轮唤醒处理下一个。
     final toolFailed = _lastRoundToolFailed;
     _lastRoundToolFailed = false;
-    if (chatFlowStatus == 'done' && !maleChoseContinue) {
+    final chatFlowNow = ChatFlowStore.get(pid);
+    final hasPendingStep = chatFlowNow != null &&
+        ((chatFlowNow['steps'] as List?) ?? const [])
+            .any((s) => s['status']?.toString() != 'done');
+    if ((chatFlowStatus == 'done' ||
+            (chatFlowStatus == 'running' && !hasPendingStep)) &&
+        !maleChoseContinue) {
       DebugLogger.log(
         '管家流程',
-        '🔕 对话流程已结束（done），不唤醒（用户 8-12：标了 end_TN+摘要=结束；'
-        '有排队 T2 会由 finish 提升为 running 自动轮到）',
+        chatFlowStatus == 'done'
+            ? '🔕 对话流程已结束（done），不唤醒（用户 8-12：标了 end_TN+摘要=结束；'
+                '有排队 T2 会由 finish 提升为 running 自动轮到）'
+            : '🔕 对话流程全部处理完（无待办步骤，只差 end_TN+摘要归档），'
+                '不唤醒（用户 8-12 05:4x：做完就不叫，下次她说话时工作区提醒补归档）',
       );
       return;
     }
