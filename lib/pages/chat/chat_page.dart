@@ -2473,7 +2473,7 @@ class _ChatPageState extends State<ChatPage>
             _pendingInterruptEvent =
                 '你说大流程结束了，但还有 ${pendingNos.join('、')} '
                 '没标处理完。你没标 = 没做完：都处理完了就回MN 标掉，'
-                '（最后一条标完时带上 end_flow +写摘要 save_summary），'
+                '（最后一条标完时 JSON 的 sys 写 end_flow +调 save_summary），'
                 '我再归档。';
             DebugLogger.log('管家流程',
                 '🔚 男主带结束标记但还有 ${pendingNos.length} 条没标完'
