@@ -91,6 +91,23 @@ bool? parseExitSignal(String raw) {
   return null;
 }
 
+/// 大流程结束信号（8-12 05:1x 用户：只有 end_TN 才算"男主说结束"）。
+/// 与 parseExitSignal 的区别：need_continue:false / next_action:null 只表示
+/// "本轮无需继续"（冻结自动续话），**不结束对话流程**——男主没写 end_TN
+/// = 没说结束，流程保持 running（✅ 全部处理完），等他说 end_TN + 摘要
+/// 才归档。避免 need_continue:false 把流程偷偷结束（摘要都没写）。
+bool? parseFlowEndSignal(String raw) {
+  if (raw.isEmpty) return null;
+  final t = raw.toLowerCase();
+  if (RegExp(r'end_T\d+', caseSensitive: false).hasMatch(t) ||
+      RegExp(r'end_?f(?:lo)?w', caseSensitive: false).hasMatch(t) ||
+      t.contains('消大流程') ||
+      t.contains('大流程也结束了')) {
+    return true;
+  }
+  return null;
+}
+
 /// 结尾命令的 next_action 值解析（8-10 00:5x 用户：男主消掉大流程
 /// 自带结尾命令——merge = 与后续大流程合二为一）。
 /// 返回 action 值（小写，如 'merge'），没输出则 null。

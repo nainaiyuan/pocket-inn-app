@@ -1418,10 +1418,16 @@ class AiChatService {
     final fixedBlock = systemPrompt.trim().isEmpty
         ? null
         : systemPrompt;
+    // 8-12 05:1x（用户：日志"她："只显示本轮触发，应该写上 T0 里面
+    // 所有话，比如 M1 和 M2，而不是单单 M2）→ 有流程时附加全部消息
+    final t0Brief = ChatFlowStore.allUserTextsBrief(ctxPid);
+    final logUserInput = t0Brief.isEmpty
+        ? message
+        : '${message.trim().isEmpty ? '（本轮无用户输入）' : message}\n$t0Brief';
     unawaited(PromptLog.appendInput(
       personaName: personaName,
       isToolRound: toolRound,
-      userInput: message,
+      userInput: logUserInput,
       fixedBlock: fixedBlock,
       dynamicBlocks: messages
           .where((m) => !_isFixedPromptBlock(m, systemPrompt))

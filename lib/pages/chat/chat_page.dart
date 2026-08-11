@@ -1037,6 +1037,10 @@ class _ChatPageState extends State<ChatPage>
           '没有 → 说一句自然的结束语，并在这条回复的末尾加上退出标记：'
           '{"need_continue": false}（管家识别这个标记，不会显示给她；'
           '加了这个标记，系统就不会再自动唤醒你）。\n'
+          '（8-12 05:1x 补充：工作区有【当前工作区】流程时，结束 = '
+          '最后一条 JSON 的 sys 写 end_TN（N=流程编号）+ 调 save_summary '
+          '归档——只写 need_continue:false 不会归档，流程会保持"全部处理完"'
+          '等你写结束标记。）\n'
           '注意：刚做完的事不用再调工具确认（流程已结束就别重复 finish），'
           '没有新事做就直接说结束语。'
           '（8-09 17:5x 补充）如果你刚回复她时漏记了新信息（她说过的'
@@ -2473,35 +2477,48 @@ class _ChatPageState extends State<ChatPage>
       }
       if (exitSignal == true) {
         _continueFrozen = true;
+        // 8-12 05:1x（用户：工具轮男主没说结束也没唤醒男主——根因是
+        // need_continue:false 把流程偷偷结束了）：结束流程**只认 end_TN**
+        //（parseFlowEndSignal）；need_continue:false / next_action:null
+        // 只冻结续话（不再自动唤醒），流程保持 running（✅ 全部处理完），
+        // 等男主下次被唤醒时工作区提醒他写 end_TN + 摘要。没写 end_TN
+        // = 没说结束 = 不归档（摘要都没写就归档 = 上下文丢失）。
+        final flowEnd = parseFlowEndSignal(replyTexts.join('\n'));
         DebugLogger.log(
           '管家流程',
-          '🔚 男主明确判定无需继续（need_continue:false/next_action:null），冻结自动唤醒',
+          flowEnd == true
+              ? '🔚 男主写了结束标记（end_TN），结束对话流程'
+              : '🔚 男主只说本轮无需继续（need_continue:false），'
+                  '没写 end_TN → 流程不结束（保持 ✅ 全部处理完，'
+                  '下次唤醒时提醒他写 end_TN + 摘要归档）',
         );
-        // 8-09 18:4x（用户设计定稿）：退出标记 = 男主声明"回完了+干完了"
-        // → 对话流程结束（回复只消条目，退出标记才结束流程）
-        // 8-09 21:0x（用户：一个大流程结束男主至少要跟她说一句）：
-        // 结束前校验——男主从没回过话（只调工具）→ 拒绝结束，
-        // 引导先说话；说过话 → 正常 finish。
-        final finishBlock = ChatFlowStore.finishCheck(personaId);
-        if (finishBlock != null) {
-          _pendingInterruptEvent = finishBlock;
-          DebugLogger.log('管家流程', '🔚 男主想结束但没说过话 → 打回引导先说话');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('男主还没跟用户说话，已提醒他先回复再结束'),
-                duration: const Duration(seconds: 2),
-              ),
-            );
+        if (flowEnd == true) {
+          // 8-09 18:4x（用户设计定稿）：退出标记 = 男主声明"回完了+干完了"
+          // → 对话流程结束（回复只消条目，退出标记才结束流程）
+          // 8-09 21:0x（用户：一个大流程结束男主至少要跟她说一句）：
+          // 结束前校验——男主从没回过话（只调工具）→ 拒绝结束，
+          // 引导先说话；说过话 → 正常 finish。
+          final finishBlock = ChatFlowStore.finishCheck(personaId);
+          if (finishBlock != null) {
+            _pendingInterruptEvent = finishBlock;
+            DebugLogger.log('管家流程', '🔚 男主想结束但没说过话 → 打回引导先说话');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('男主还没跟用户说话，已提醒他先回复再结束'),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
+          } else {
+            // 8-12 04:1x（用户拍板）：只要男主标了 end_TN + save_summary
+            // 就结束——不管中间有没有标完 end_MN（他写了摘要 = 他检查过了，
+            // 只是忘记打结束标签）。不再打回补标（那正是反复唤醒死循环的
+            // 根因：打回 → 男主补标 → 又打回）。有排队新流程（她插话）→
+            // finish() 自动提升为当前，检查点⑤唤醒处理下一个（T2）；
+            // 没有 → 安静等用户。
+            await ChatFlowStore.finish(personaId);
           }
-        } else {
-          // 8-12 04:1x（用户拍板）：只要男主标了 end_TN + save_summary
-          // 就结束——不管中间有没有标完 end_MN（他写了摘要 = 他检查过了，
-          // 只是忘记打结束标签）。不再打回补标（那正是反复唤醒死循环的
-          // 根因：打回 → 男主补标 → 又打回）。有排队新流程（她插话）→
-          // finish() 自动提升为当前，检查点⑤唤醒处理下一个（T2）；
-          // 没有 → 安静等用户。
-          await ChatFlowStore.finish(personaId);
         }
       } else if (exitSignal == false) {
         _continueFrozen = false;
