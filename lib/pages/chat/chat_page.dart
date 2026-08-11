@@ -2407,7 +2407,12 @@ class _ChatPageState extends State<ChatPage>
       //  全部消完 → 流程 done）。与 PendingQueue 并存（队列为空时
       //  对话流程是唯一消条目通道）。
       if (allRoundText.isNotEmpty) {
-        unawaited(ChatFlowStore.feedReply(personaId, allRoundText));
+        // 8-12 01:2x（用户历史：男主带 end_T0 + end_M1、end_M2 + save_summary
+        // 成功，仍被反复唤醒补标）——根因：unawaited 竞态！feedReply 第一行
+        // await warm 必然挂起，男主没输出 #指令时 commands 循环无 await，
+        // 结束检查的 pendingNos 读到的是 feedReply 跑完前的旧状态（消息未标完）
+        // → 打回补标 → 男主补标 → 又打回 → 死循环。必须等 feedReply 完成。
+        await ChatFlowStore.feedReply(personaId, allRoundText);
       }
       // 指令模块：解析男主输出（#记录/#查记忆/#定时/#帮助/#model）→ 审批弹窗
       final commands = ButlerCommandParser.instance.parse(result.text.trim());
