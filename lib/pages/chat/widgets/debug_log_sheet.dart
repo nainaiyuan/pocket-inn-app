@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -16,16 +18,23 @@ import '../../debug/debug_toolbox_page.dart';
 /// 8-08 13:0x 用户反馈：日志太长找不到关键行 → 加「只看关键日志」开关
 /// +「复制关键日志」按钮：只提取锚点行（🔧📦📋▶⏰🔔⏸❌⚠️）一键复制，
 /// 直接粘贴发给龙虾定位断点（A/B/C/D 判定）。
-void showDebugLogSheet(BuildContext context) {
+/// [initialView] 8-11 22:2x：聊天页📋按钮直达「每轮」视图
+void showDebugLogSheet(BuildContext context,
+    {DbgView initialView = DbgView.logs}) {
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
-    builder: (_) => const _DebugLogSheet(),
+    builder: (_) => _DebugLogSheet(initialView: initialView),
   );
 }
 
+/// 8-11 22:2x：调试弹层三视图（互斥枚举，避免多 bool 状态打架）
+enum DbgView { logs, flows, rounds }
+
 class _DebugLogSheet extends StatefulWidget {
-  const _DebugLogSheet();
+  final DbgView initialView;
+
+  const _DebugLogSheet({this.initialView = DbgView.logs});
 
   @override
   State<_DebugLogSheet> createState() => _DebugLogSheetState();
@@ -34,7 +43,7 @@ class _DebugLogSheet extends StatefulWidget {
 class _DebugLogSheetState extends State<_DebugLogSheet> {
   String _filter = '全部';
   // 8-11 22:2x（用户：开关切换不方便）：三视图互斥枚举，不再多 bool 打架
-  _DbgView _view = _DbgView.logs;
+  late DbgView _view = widget.initialView;
   bool _anchorsOnly = false; // true = 只看关键锚点行（🔧📦📋▶⏰🔔⏸❌⚠️）
 
   /// 关键锚点标记（断点定位用，对应 A/B/C/D 判定卡）
@@ -79,47 +88,47 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
                 // 视图切换：日志 / 流程
                 ChoiceChip(
                   label: const Text('日志', style: TextStyle(fontSize: 11)),
-                  selected: _view == _DbgView.logs,
+                  selected: _view == DbgView.logs,
                   selectedColor: const Color(0xFFC896B4),
                   labelStyle: TextStyle(
-                    color: _view == _DbgView.logs ? Colors.white : Colors.white70,
+                    color: _view == DbgView.logs ? Colors.white : Colors.white70,
                   ),
                   side: BorderSide(
-                    color: _view == _DbgView.logs
+                    color: _view == DbgView.logs
                         ? const Color(0xFFC896B4)
                         : Colors.white24,
                   ),
-                  onSelected: (_) => setState(() => _view = _DbgView.logs),
+                  onSelected: (_) => setState(() => _view = DbgView.logs),
                 ),
                 const SizedBox(width: 6),
                 ChoiceChip(
                   label: const Text('流程', style: TextStyle(fontSize: 11)),
-                  selected: _view == _DbgView.flows,
+                  selected: _view == DbgView.flows,
                   selectedColor: const Color(0xFFC896B4),
                   labelStyle: TextStyle(
-                    color: _view == _DbgView.flows ? Colors.white : Colors.white70,
+                    color: _view == DbgView.flows ? Colors.white : Colors.white70,
                   ),
                   side: BorderSide(
-                    color: _view == _DbgView.flows
+                    color: _view == DbgView.flows
                         ? const Color(0xFFC896B4)
                         : Colors.white24,
                   ),
-                  onSelected: (_) => setState(() => _view = _DbgView.flows),
+                  onSelected: (_) => setState(() => _view = DbgView.flows),
                 ),
                 const SizedBox(width: 6),
                 ChoiceChip(
                   label: const Text('每轮', style: TextStyle(fontSize: 11)),
-                  selected: _view == _DbgView.rounds,
+                  selected: _view == DbgView.rounds,
                   selectedColor: const Color(0xFF7FB5B5),
                   labelStyle: TextStyle(
-                    color: _view == _DbgView.rounds ? Colors.white : Colors.white70,
+                    color: _view == DbgView.rounds ? Colors.white : Colors.white70,
                   ),
                   side: BorderSide(
-                    color: _view == _DbgView.rounds
+                    color: _view == DbgView.rounds
                         ? const Color(0xFF7FB5B5)
                         : Colors.white24,
                   ),
-                  onSelected: (_) => setState(() => _view = _DbgView.rounds),
+                  onSelected: (_) => setState(() => _view = DbgView.rounds),
                 ),
                 const SizedBox(width: 6),
                 TextButton(
@@ -180,11 +189,11 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
               ],
             ),
             const Divider(color: Colors.white24),
-            if (_view == _DbgView.rounds) ...[
+            if (_view == DbgView.rounds) ...[
               // 8-11 21:5x（用户：看不见男主每轮 prompt 发生了什么）：
               // 每轮输入（动态块，固定设定已过滤）+ 男主回复命令 + 变化标记
               _RoundsView(scrollController: scrollCtrl),
-            ] else if (_view == _DbgView.flows) ...[
+            ] else if (_view == DbgView.flows) ...[
               _FlowTreeView(scrollController: scrollCtrl),
             ] else ...[
               // 只看关键锚点 + 一键复制（08-08 新增：日志太长找不到关键行）
@@ -259,7 +268,7 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
               const SizedBox(height: 6),
             ],
             Expanded(
-              child: _view == _DbgView.flows
+              child: _view == DbgView.flows
                   ? _FlowTreeView(scrollController: scrollCtrl)
                   : SingleChildScrollView(
                       controller: scrollCtrl,
@@ -586,11 +595,26 @@ class _RoundsView extends StatefulWidget {
 
 class _RoundsViewState extends State<_RoundsView> {
   late Future<List<AgentRunTrace>> _future;
+  StreamSubscription<String>? _sub;
 
   @override
   void initState() {
     super.initState();
     _future = TraceStore.instance.all(limit: 30);
+    // 8-11 22:2x（用户：还要我自己刷新？）：新轨迹落盘自动重读，
+    // 面板开着时每轮结束自动冒出来，零手动操作
+    _sub = TraceStore.revisionStream.listen((_) {
+      if (!mounted) return;
+      setState(() {
+        _future = TraceStore.instance.all(limit: 30);
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
   }
 
   void _refresh() {
@@ -849,5 +873,3 @@ String _argsBrief(Map<String, dynamic> args) {
   return parts.join('，');
 }
 
-/// 8-11 22:2x：调试弹层三视图（互斥枚举，避免多 bool 状态打架）
-enum _DbgView { logs, flows, rounds }

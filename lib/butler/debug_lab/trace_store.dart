@@ -7,6 +7,7 @@
 /// 纯 Dart，不依赖 Flutter。
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -97,7 +98,14 @@ class TraceStore {
       jsonEncode(trace.toJson()),
     );
     await _trim(trace.personaId);
+    _revisionController.add(trace.runId); // 通知 UI 自动刷新（8-11 22:2x）
   }
+
+  /// 8-11 22:2x（用户：还要我自己刷新？直接一轮一轮记录自动更新）：
+  /// 新轨迹落盘信号——UI 监听它自动重读，不需要手动刷新。
+  static final StreamController<String> _revisionController =
+      StreamController<String>.broadcast();
+  static Stream<String> get revisionStream => _revisionController.stream;
 
   /// 读取单条
   Future<AgentRunTrace?> load(String personaId, String runId) async {

@@ -3458,10 +3458,33 @@ class _ChatPageState extends State<ChatPage>
             ),
           ),
 
-        // ===== 调试日志按钮（右上角） =====
+        // ===== 📋 每轮记录按钮（8-11 22:2x 用户：聊天页直接看，
+        // 不要藏在管家/测试模式里；点开默认就是每轮视图，自动刷新）=====
+        Positioned(
+          right: 4,
+          top: MediaQuery.of(context).padding.top + 4,
+          child: GestureDetector(
+            onTap: () => showDebugLogSheet(context, initialView: DbgView.rounds),
+            child: Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: Colors.black26,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.assignment_outlined,
+                size: 15,
+                color: Colors.white70,
+              ),
+            ),
+          ),
+        ),
+
+        // ===== 调试日志按钮（右上角，testMode 时挪到最左）=====
         if (AIProviderManager.testModeEnabled)
           Positioned(
-            right: 4,
+            right: 140,
             top: MediaQuery.of(context).padding.top + 4,
             child: GestureDetector(
               onTap: _showDebugLog,
