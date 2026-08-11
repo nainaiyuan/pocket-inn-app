@@ -403,7 +403,7 @@ class ChatFlowStore {
         f['steps'] = steps;
         await _write(personaId, f);
         _log('对话流程',
-            '⚠️ 回MN 编号无效（${marked.join('、')}，未处理区 ${steps.length} 条）'
+            '⚠️ end_MN 编号无效（${marked.join('、')}，未处理区 ${steps.length} 条）'
             '→ 不自动消，回复挂当前步');
       }
       return;
@@ -742,7 +742,7 @@ class ChatFlowStore {
     final allReplied = steps.every((s) => s['status'] == 'done');
     if (allReplied) {
       sb.writeln('✅ 所有消息都处理完了。');
-      sb.writeln('· 做完了 → 最后一条 JSON 的 sys 写 end_flow（结束标记）'
+      sb.writeln('· 做完了 → 最后一条 JSON 的 sys 写 end_TN（N=大流程编号）'
           '+ 写摘要（save_summary），管家归档合并历史，之后不再唤醒你；');
       sb.writeln('· 还有事 → 继续处理。');
       return sb.toString();
@@ -790,7 +790,7 @@ class ChatFlowStore {
         if (v is! Map) continue;
         final ok = v['ok'] == true;
         final brief = (v['brief'] ?? '').toString();
-        sb.writeln('  - 你：调 ${entry.key} ${ok ? '✅' : '❌'}'
+        sb.writeln('  - 你：调 ${entry.key}（处理 $noMark$no）${ok ? '✅' : '❌'}'
             '${brief.isEmpty ? '' : '：$brief'}');
       }
       if (reply.isNotEmpty) {
@@ -818,11 +818,11 @@ class ChatFlowStore {
     // 引导：平行 + 插话判断 + 结束流程（8-11 19:4x 精简，对齐 GPT：
     // 固定层只放规则，流程细节这里一句话讲完，不叠话术）
     sb.writeln('—— 上面都是待办事项（参考）：一条条看过去，能一起做的'
-        '就一起做（回MN 标你处理的是哪条，可一次回多条 回M1、回M2；'
-        '管家消息用 回SN，如 回S1）。'
+        '就一起做（end_MN 标你处理的是哪条，可一次回多条 end_M1、end_M2；'
+        '管家消息用 end_SN，如 end_S1）。'
         '每条都要处理，判断：补充/修改/插入（先做插话，做完回原任务）'
         '/不做了（她叫停）——不能跳过任何一条');
-    sb.writeln('—— 结束：全部标完 → 最后一条 sys 写 end_flow + 调 save_summary'
+    sb.writeln('—— 结束：全部标完 → 最后一条 sys 写 end_TN + 调 save_summary'
         '（save_summary）→ 管家归档，不再唤醒你（你没标完=没做完，'
         '管家不替标）。');
     return sb.toString();
@@ -920,7 +920,7 @@ class ChatFlowStore {
     }
     if (pending.isEmpty) {
       // 全部处理完 → 固定结束流程（8-11 19:0x 用户 19:04/19:07）
-      return '全部消息都处理完了：最后一条 JSON 的 sys 写 end_flow'
+      return '全部消息都处理完了：最后一条 JSON 的 sys 写 end_TN'
           '（结束标记）+ 写摘要（save_summary），管家归档合并历史，'
           '之后不再唤醒你。';
     }
@@ -944,8 +944,8 @@ class ChatFlowStore {
     final pendingCount = pending.length;
     return '还有 $pendingCount 条未处理消息。当前第 $curNo 条「'
         '${_short(curStep['userText'].toString(), 20)}」还没处理。\n'
-        '· 回复时标注你回的是哪条（回MN），可一次回多条（回M1、回M2）；\n'
-        '· 全部处理完 → 固定结束流程：最后一条 sys 写 end_flow + 调 save_summary'
+        '· 回复时标注你回的是哪条（end_MN），可一次回多条（end_M1、end_M2）；\n'
+        '· 全部处理完 → 固定结束流程：最后一条 sys 写 end_TN + 调 save_summary'
         '（save_summary）。';
   }
 

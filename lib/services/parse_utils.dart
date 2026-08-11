@@ -79,11 +79,11 @@ bool? parseExitSignal(String raw) {
   if (RegExp(r'"?next_action"?\s*[:：]\s*("?null"?|none|无|空)').hasMatch(t)) {
     return true;
   }
-  // ③ 固定结束指令（8-11 21:58 用户：英文指令，一个就够——
-  // end_flow，避免中文和内容冲突；兼容旧引导的「消大流程」/旧中文）
-  // 8-11 23:5x（用户：男主把 end_flow 拼成 end_fow → 没结束被反复唤醒）：
-  // 常见拼写变体容错（end_fow / endflow 都认，避免男主手滑白忙一轮）
-  if (RegExp(r'end_?f(?:lo)?w', caseSensitive: false).hasMatch(t) ||
+  // ③ 固定结束指令（8-12 00:4x 用户：end_flow 看不懂，直接改用大流程
+  // 编号 end_TN（end_T + N=大流程编号），如 end_T1；保留旧 end_flow/
+  // end_fow 变体兼容旧包引导）
+  if (RegExp(r'end_T\d+', caseSensitive: false).hasMatch(t) ||
+      RegExp(r'end_?f(?:lo)?w', caseSensitive: false).hasMatch(t) ||
       t.contains('消大流程') ||
       t.contains('大流程也结束了')) {
     return true;
@@ -128,6 +128,8 @@ String stripExitSignal(String text) {
     '',
   );
   t = t.replaceAll(RegExp(r'end_flow', caseSensitive: false), '');
+  // 8-12 00:4x：结束指令改 end_TN（大流程编号）——同样剥离
+  t = t.replaceAll(RegExp(r'end_T\d+', caseSensitive: false), '');
   // 裸标记（前面不是 { 、 或 " → 不在 JSON 对象里）
   t = t
       .replaceAll(

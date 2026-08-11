@@ -1310,7 +1310,7 @@ class _ChatPageState extends State<ChatPage>
           } else {
             final rewriteEvent = '你的回复没有按格式输出（缺少 JSON 块），'
                 '已被打回，用户没看到。请按格式重写（JSON 对象，每个占一行）：'
-                '{"reply":"回MN"}（标注回哪条，可省）'
+                '{"reply":"end_MN"}（标注回哪条，可省）'
                 '+ {"act":"动作/神态"}（可选）+ {"msg":"你说的话"}。'
                 '除 JSON 对象外不要输出任何其他文字；一次说多句 = 多个 {"msg":..} 对象。';
             DebugLogger.log('AI路由', '⛔ 男主无标签回复，打回重写（第 $_formatFailCount 次）');
@@ -2472,8 +2472,8 @@ class _ChatPageState extends State<ChatPage>
           if (pendingNos.isNotEmpty) {
             _pendingInterruptEvent =
                 '你说大流程结束了，但还有 ${pendingNos.join('、')} '
-                '没标处理完。你没标 = 没做完：都处理完了就回MN 标掉，'
-                '（最后一条标完时 JSON 的 sys 写 end_flow +调 save_summary），'
+                '没标处理完。你没标 = 没做完：都处理完了就 end_MN 标掉，'
+                '（最后一条标完时 JSON 的 sys 写 end_TN +调 save_summary），'
                 '我再归档。';
             DebugLogger.log('管家流程',
                 '🔚 男主带结束标记但还有 ${pendingNos.length} 条没标完'
