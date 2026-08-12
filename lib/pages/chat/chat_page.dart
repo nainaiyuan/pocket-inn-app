@@ -8403,8 +8403,10 @@ class _ChatPageState extends State<ChatPage>
   String _currentPersonaPrompt() {
     try {
       var prompt = _state.persona?.prompt ?? '';
-      // 8-06 18:24 用户：设定版本管理 —— prompt 附加男主设定/用户设定/变更摘要
-      // （男主知道自己的演变史，不会"性情大变"却不知所以然）
+      // 8-06 18:24 用户：设定版本管理 —— prompt 附加男主设定（分段，改哪段用 tag 定位）
+      // 8-12 18:4x（用户：演变史不做成额外功能——版本记录本身就有：
+      // 每版全文/变更用 query_setting_history、指定版本段落用
+      // query_setting_version 查，男主定位修改直接查，不注入摘要块）
       final pid = _state.personaId;
       if (pid != null && pid.isNotEmpty) {
         final book = SettingVersionStore.cached(_settingPid());
@@ -8418,24 +8420,12 @@ class _ChatPageState extends State<ChatPage>
           // 8-08 22:5x（用户：用户设定不该拼进男主设定段）：用户设定拆走——
           // 独立走 userProfile 参数 → SystemTemplate【用户状态】段（见
           // _currentUserSetting），不再混在【男主设定】里
-          final summary = SettingVersionStore.summaryTextSync(_settingPid());
-          if (summary.isNotEmpty) {
-            prompt +=
-                '\n\n【设定变更摘要·你的演变史】\n$summary'
-                '（这些都是你经历过/主动做出的设定调整，顺着时间线你就能明白'
-                '自己为什么是现在这个样子。需要细节可以调 query_setting_history。）';
-          }
-          // 8-06 20:53 用户报 bug：男主反复 list_tools → 工具概览注入（男主天生知道）
-          // 8-06 21:54 用户：不写全量清单——分类概览 + 常用表，细节自查
-          // 8-12 18:0x（用户缓存命中重构）：便签/流程/工具缓存/定时任务/
-          // 记录职责/现有分类全部挪到工作区（ai_chat_service._buildWorkspaceText，
-          // 最后动态区）——之前塞在人设区（第一条 system），任一变化整个
-          // 前缀全不命中；且"人设"里塞工作数据也不该。这里只留固定部分：
-          // 人设 + 男主设定 + 演变史 + 工具概览。
+          // 8-12 18:4x（用户：工具概览不要了——GPT 模板【系统】节已写
+          // "你可以：调用工具，能力范围…"；男主想不起来时 list_tools 查）
+          // 人设区只留固定部分：人设 + 男主设定。
           prompt +=
-              '\n\n${_toolListText()}'
-              '\n（连续测试/做事时：先把步骤立到便签（1. 2. 3.），'
-              '再一条条执行过去；查到的结果自己决定留不留，重要的存便签，'
+              '\n（连续测试/做事时：先把步骤立到临时记忆（1. 2. 3.），'
+              '再一条条执行过去；查到的结果自己决定留不留，重要的存临时记忆，'
               '别重复查同一件事。）';
         }
       }
