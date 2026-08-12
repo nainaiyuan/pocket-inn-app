@@ -115,11 +115,8 @@ class _ChatTopBarState extends State<ChatTopBar> {
                             ),
                           ),
                           const SizedBox(width: 5),
-                          // 在线状态灯（绿=AI 可用 / 黄=未填 Key / 红=未配置）
-                          _AiStatusDot(
-                            personaId: _personaId,
-                            onTap: widget.onAiTap,
-                          ),
+                          // 在线状态灯（绿=主 AI 可用 / 黄=备胎顶着 / 红=无可用 AI）
+                          _AiStatusDot(personaId: _personaId),
                         ],
                       ),
                     ],
@@ -191,13 +188,12 @@ class _ChatTopBarState extends State<ChatTopBar> {
 }
 
 /// 「当前 AI」小徽章：显示这个男主现在用的是哪家，点击进 AI 设置。
-/// 男主名字旁的在线状态灯（绿=AI 可用 / 黄=未填 Key / 红=未配置 / 紫=测试中）。
-/// 点击可进 AI 配置。
+/// 男主名字旁的在线状态灯（绿=主 AI 可用 / 黄=主 AI 不可用但有备胎 /
+/// 红=没有可用 AI / 紫=测试中）。纯状态展示，配置入口在右页 AI 区。
 class _AiStatusDot extends StatelessWidget {
-  const _AiStatusDot({required this.personaId, required this.onTap});
+  const _AiStatusDot({required this.personaId});
 
   final String? personaId;
-  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -213,43 +209,54 @@ class _AiStatusDot extends StatelessWidget {
             break;
           }
         }
-        final anyUsable = manager.hasUsable(personaId);
         // 当前这个 AI 是否真能用（本地 Provider 不需要 Key）
         final currentReady =
             current != null &&
             (current.type == ProviderType.local ||
                 current.apiKey.trim().isNotEmpty);
+        final autoSwitch = manager.autoSwitchFor(personaId);
+        // 备胎：除当前 AI 外，绑定列表里还有可用的（自动切换开着才有意义）
+        final bound = manager.bindingFor(personaId ?? '') ?? const [];
+        var hasBackup = false;
+        if (autoSwitch && bound.isNotEmpty) {
+          for (final bid in bound) {
+            if (bid == id) continue;
+            for (final config in manager.providers) {
+              if (config.id == bid &&
+                  config.enabled &&
+                  (config.type == ProviderType.local ||
+                      config.apiKey.trim().isNotEmpty)) {
+                hasBackup = true;
+                break;
+              }
+            }
+            if (hasBackup) break;
+          }
+        }
         final Color color;
         if (AIProviderManager.testModeEnabled) {
           color = const Color(0xFF7B6A8F);
-        } else if (current == null || !anyUsable) {
-          color = const Color(0xFFE07A7A);
-        } else if (!currentReady) {
-          color = const Color(0xFFE0A050);
+        } else if (currentReady) {
+          color = const Color(0xFF7AA87A); // 绿：主 AI 在线
+        } else if (hasBackup) {
+          color = const Color(0xFFE0A050); // 黄：主 AI 掉了，备胎顶着
         } else {
-          color = const Color(0xFF7AA87A);
+          color = const Color(0xFFE07A7A); // 红：没有可用 AI
         }
-        return GestureDetector(
-          onTap: onTap,
-          behavior: HitTestBehavior.opaque,
-          child: Padding(
-            padding: const EdgeInsets.all(4),
-            child: Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: color,
-                border: Border.all(color: Colors.white, width: 1.5),
-                boxShadow: [
-                  BoxShadow(
-                    color: color.withValues(alpha: 0.45),
-                    blurRadius: 4,
-                    spreadRadius: 0.5,
-                  ),
-                ],
+        return Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color,
+            border: Border.all(color: Colors.white, width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: 0.45),
+                blurRadius: 4,
+                spreadRadius: 0.5,
               ),
-            ),
+            ],
           ),
         );
       },
