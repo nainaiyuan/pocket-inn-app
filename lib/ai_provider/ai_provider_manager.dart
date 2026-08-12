@@ -741,6 +741,7 @@ class AIProviderManager {
     }
     _syncRouter();
     await _persist();
+    changeNotifier.value++; // 8-13 02:0x 用户反馈：右页 AI 区不随管家页面更新（漏触发）
     AiModuleLog.log('AI管理', '已保存 AI: ${config.name}');
   }
 
@@ -758,6 +759,7 @@ class AIProviderManager {
     capabilityNotifier.value++;
     _syncRouter();
     await _persist();
+    changeNotifier.value++; // 8-13 02:0x 同上
     AiModuleLog.log('AI管理', '已删除 AI: $id');
   }
 
@@ -769,6 +771,7 @@ class AIProviderManager {
     capabilityNotifier.value++;
     _syncRouter();
     await _persist();
+    changeNotifier.value++; // 8-13 02:0x 同上
   }
 
   Future<void> _update(

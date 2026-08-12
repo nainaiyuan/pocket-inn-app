@@ -297,10 +297,11 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
           children: [
             const SizedBox(height: 56),
 
-            // ─── 顶部功能区（设备 / 管家暗号 / API 切换）───
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Column(
+            // ─── 顶部功能区（设备 / AI 工具 / AI 切换）───
+            // 8-13 02:0x 用户反馈：不跟随滑动 → 移进下方 ListView 一起滚
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 children: [
                   _DeviceZone(),
                   const SizedBox(height: 4),
@@ -313,15 +314,8 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                     personaId: widget.currentPersona?.id ?? '',
                     personaName: widget.currentPersona?.name ?? '默认',
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
+                  const SizedBox(height: 8),
 
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                children: [
                   // ─── 角色设定（5个结构化字段） ───
                   _SectionCard(
                     title: isLead ? '角色设定（所有形象的经历同步到本体）' : '角色设定',
