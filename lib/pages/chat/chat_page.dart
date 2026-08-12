@@ -1444,12 +1444,18 @@ class _ChatPageState extends State<ChatPage>
       // ① 本轮查询类工具累计 ≥3 强制停（不管交错）
       // ② 工具轮总轮数上限 6（防 query_logs→list_tools→query_logs 死循环）
       var queryToolCount = 0;
+      // 8-12 20:3x（用户：不同工具翻找累计失败 8 次就提醒明确需求）
+      var totalFailCount = 0;
       // 8-08 02:1x 用户：干太快被卡 → 总轮数 6 → 10（防死循环仍保留）
       // 8-12 20:2x（用户：兜底放宽，正常干活别卡）→ 10 → 12
       const maxToolRounds = 12;
       while (result.toolCalls != null && result.toolCalls!.isNotEmpty) {
         toolLoop++;
         toolExecuted = true;
+        // 8-12 20:3x：stop 事件在 for 循环外生成，失败原因状态提到这里
+        var lastFailName = '';
+        var lastFailN = 0;
+        var lastQueryStop = false;
         if (toolLoop > maxToolRounds) {
           // 防御兜底（正常路径由下方 stop 事件先拦，这里保证不无限循环）
           DebugLogger.log(
@@ -2281,9 +2287,10 @@ class _ChatPageState extends State<ChatPage>
           // 不算——那是正常交互）→ 标记本轮有失败 → done 也唤醒男主处理
           if (!toolResult.ok && !toolResult.text.startsWith('用户拒绝')) {
             _lastRoundToolFailed = true;
+            totalFailCount++;
           }
-          // 8-12 20:2x（用户：连续错 8 次总兜底了吧）——防死循环从
-          // "同一工具连续调用 ≥3"放宽为"同一工具连续失败 ≥8"（成功清零）
+          // 8-12 20:3x（用户：同一工具连续失败 5 次防死循环，成功清零；
+          // 不同工具累计失败 8 次由下方 loopExceeded 条件拦——防到处翻找）
           if (!toolResult.ok && !toolResult.text.startsWith('用户拒绝')) {
             consecutiveToolCounts[name] =
                 (consecutiveToolCounts[name] ?? 0) + 1;
@@ -2314,14 +2321,18 @@ class _ChatPageState extends State<ChatPage>
               );
             }
           }
-          if (n >= 8 ||
+          if (n >= 5 ||
+              totalFailCount >= 8 ||
               (name == 'continue_speaking' && continueCount >= 3) ||
               queryStop) {
             loopExceeded = true;
+            lastFailName = name;
+            lastFailN = n;
+            lastQueryStop = queryStop;
             DebugLogger.log(
               'AI路由',
-              '⚠️ 工具 $name 调用 $n 次（continue 累计 $continueCount，'
-              '查询类累计 $queryToolCount），强制停止（防死循环）',
+              '⚠️ 工具 $name 连续失败 $n 次 / 本轮累计失败 $totalFailCount 次'
+              '（continue $continueCount，查询类 $queryToolCount），强制停止',
             );
           }
         }
@@ -2373,16 +2384,24 @@ class _ChatPageState extends State<ChatPage>
               '别一直反复查；查到就继续干活，不用停下来说话。');
         }
         // 8-07 22:5x 用户：男主反复查工具卡死——触发防循环后必须明确告知
-        // 男主"别再调了直接回复"，否则他不知道为什么停、下轮又调
+        // 男主为什么停，否则他不知道为什么停、下轮又调
+        // 8-12 20:3x（用户：提示语要像系统提示，简短命令式；不矛盾——
+        // 流程保留、检查点⑤会自动唤醒继续，不是"等她下一句"）
         if (loopExceeded || toolLoop >= maxToolRounds) {
+          final failReason = (lastFailN >= 5)
+              ? '工具「$lastFailName」连续失败 $lastFailN 次'
+              : (totalFailCount >= 8)
+                  ? '本轮工具失败累计 $totalFailCount 次'
+                  : (lastQueryStop)
+                      ? '本轮查询类工具累计 $queryToolCount 次'
+                      : '工具轮数已达上限';
           toolMessages.add(
             AIChatMessage(
               role: 'user',
               content:
-                  '【系统事件】你本轮调用工具过快/错误过多（同工具连续失败/'
-                  '查询类累计/总轮数触发防护），本轮暂停工具调用。'
-                  '不要基于没查到的内容硬编答案；需要继续就等她下一句后'
-                  '重试，或先明确需求再调用。',
+                  '【系统】$failReason，本轮暂停工具调用。'
+                  '先明确需求再查（查参数用 list_tools {name:工具名}），'
+                  '别到处翻找；不要硬编答案。流程保留，继续或结束由你判断。',
             ),
           );
           // 注入后这轮生成完就停（不继续 while）
