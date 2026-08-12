@@ -5486,7 +5486,10 @@ class _ChatPageState extends State<ChatPage>
       line += '：$text';
     }
     if (!r.ok && !text.startsWith('用户拒绝')) {
-      line += '。→ 看失败原因换参数/换方式重试，或回复她结束这步';
+      // 8-12 19:2x（用户：失败要告诉怎么办——查参数就是解决办法）：
+      // 具体指引男主用 list_tools {name} 查这个工具的参数/必填，改好重试
+      line += '。→ 查「$name」的参数/必填：调 list_tools {name:$name}；'
+          '改好重试，或回复她结束这步';
     }
     return line;
   }
@@ -5537,11 +5540,52 @@ class _ChatPageState extends State<ChatPage>
     }
     if (name.isNotEmpty) {
       final detail = ToolCatalog.toolDetail(name);
-      return detail == null
-          ? _ToolResult(false, '没有「$name」这个工具')
-          : _ToolResult(true, detail);
+      if (detail == null) {
+        return _ToolResult(
+          false,
+          '没有「$name」这个工具（想不起来有哪些：list_tools 不带参数查概览）',
+        );
+      }
+      // 8-12 19:2x（用户：男主调用失败要知道怎么办——查参数就是解决办法）：
+      // list_tools {name} 除一句话说明外，再带完整参数详情（必填/类型/说明）
+      final params = _toolParamsText(name);
+      return _ToolResult(true, '$detail\n\n【参数】$params');
     }
     return _ToolResult(true, _toolListText());
+  }
+
+  /// 从工具定义（butlerTools）提取某工具的参数详情：必填 + 每个参数
+  /// 名/类型/说明/可选值。找不到定义返回提示。
+  String _toolParamsText(String name) {
+    for (final t in AiChatService.butlerTools) {
+      final fn = t['function'] as Map<String, dynamic>?;
+      if (fn == null || fn['name'] != name) continue;
+      final params = fn['parameters'] as Map<String, dynamic>?;
+      if (params == null) return '（无参数说明）';
+      final props = params['properties'] as Map<String, dynamic>?;
+      if (props == null || props.isEmpty) return '（无参数）';
+      final required =
+          (params['required'] as List?)?.cast<String>() ?? const <String>[];
+      final lines = <String>[];
+      props.forEach((k, v) {
+        final m = v as Map<String, dynamic>?;
+        if (m == null) return;
+        final type = m['type']?.toString() ?? '';
+        final desc = m['description']?.toString() ?? '';
+        final isReq = required.contains(k);
+        final enumVals = m['enum'];
+        var s = '· $k${isReq ? '（必填）' : ''}：$type $desc'.trim();
+        if (enumVals is List && enumVals.isNotEmpty) {
+          s += '（可选值：${enumVals.join(' / ')}）';
+        }
+        lines.add(s);
+      });
+      if (lines.isEmpty) return '（无参数）';
+      final reqText =
+          required.isEmpty ? '无必填参数' : '必填：${required.join('、')}';
+      return '$reqText\n${lines.join('\n')}';
+    }
+    return '（工具定义里找不到「$name」）';
   }
 
   /// 工具执行：write_diary（男主写日记 → 存档，无需用户审批）
