@@ -36,67 +36,16 @@ class ChatSidebarRight extends StatefulWidget {
   State<ChatSidebarRight> createState() => _ChatSidebarRightState();
 }
 
-/// 角色设定结构化字段
-class _RoleFields {
-  String world; // 世界观·背景
-  String relation; // 与用户的关系
-  String traits; // 喜好·性格·习惯
-  String connections; // 亲朋好友
-  String history; // 经历
-
-  _RoleFields({
-    this.world = '',
-    this.relation = '',
-    this.traits = '',
-    this.connections = '',
-    this.history = '',
-  });
-
-  static _RoleFields fromPrompt(String prompt) {
-    if (prompt.isEmpty) return _RoleFields();
-    try {
-      final m = jsonDecode(prompt) as Map<String, dynamic>;
-      return _RoleFields(
-        world: m['world'] as String? ?? '',
-        relation: m['relation'] as String? ?? '',
-        traits: m['traits'] as String? ?? '',
-        connections: m['connections'] as String? ?? '',
-        history: m['history'] as String? ?? '',
-      );
-    } catch (_) {
-      return _RoleFields(world: prompt);
-    }
-  }
-
-  String toPrompt() {
-    final m = <String, String>{
-      'world': world,
-      'relation': relation,
-      'traits': traits,
-      'connections': connections,
-      'history': history,
-    };
-    return jsonEncode(m);
-  }
-}
-
 class _ChatSidebarRightState extends State<ChatSidebarRight> {
-  final _greetingCtrl = TextEditingController();
   final _service = CharacterService();
 
-  // 5个设定控制器
-  late List<TextEditingController> _fieldCtrls;
-  _RoleFields _fields = _RoleFields();
-
   // 开关
-  bool _butlerIntervention = true;
   bool _shareMemory = true;
   bool _showingPrompt = true;
 
   @override
   void initState() {
     super.initState();
-    _fieldCtrls = List.generate(5, (_) => TextEditingController());
     _syncControllers();
   }
 
@@ -111,42 +60,11 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
   void _syncControllers() {
     final p = widget.currentPersona;
     if (p == null) return;
-    _greetingCtrl.text = p.greeting;
-
-    _fields = _RoleFields.fromPrompt(p.prompt);
-    _fieldCtrls[0].text = _fields.world;
-    _fieldCtrls[1].text = _fields.relation;
-    _fieldCtrls[2].text = _fields.traits;
-    _fieldCtrls[3].text = _fields.connections;
-    _fieldCtrls[4].text = _fields.history;
-  }
-
-  void _saveAll() {
-    final p = widget.currentPersona;
-    final l = widget.currentLead;
-    if (p == null || l == null) return;
-
-    _fields = _RoleFields(
-      world: _fieldCtrls[0].text,
-      relation: _fieldCtrls[1].text,
-      traits: _fieldCtrls[2].text,
-      connections: _fieldCtrls[3].text,
-      history: _fieldCtrls[4].text,
-    );
-
-    final updated = p.copyWith(
-      prompt: _fields.toPrompt(),
-      greeting: _greetingCtrl.text,
-    );
-    _service.updatePersona(l.id, updated);
+    // 8-13 02:0x 结构化字段/首次问候已删，无控制器需要同步
   }
 
   @override
   void dispose() {
-    for (final c in _fieldCtrls) {
-      c.dispose();
-    }
-    _greetingCtrl.dispose();
     super.dispose();
   }
 
@@ -321,14 +239,7 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                     title: isLead ? '角色设定（所有形象的经历同步到本体）' : '角色设定',
                     child: Column(
                       children: [
-                        _FieldBox(
-                          label: '首次问候',
-                          ctrl: _greetingCtrl,
-                          onChanged: _saveAll,
-                          maxLines: 2,
-                        ),
-                        const SizedBox(height: 8),
-
+                        // 8-13 02:0x 用户：删首次问候框（greeting 字段保留存档不再可编辑）
                         // 8-06 18:04 用户：合并分类 → 男主框/用户框 + 版本堆叠管理
                         // （男主自己分类；历史版本可修改/删除/一键选用；按键切换不占手势）
                         _SettingVersionPanel(
@@ -440,17 +351,12 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                     title: '全局设置',
                     child: Column(
                       children: [
-                        _SwitchTile(
-                          label: '管家不干预自然语言',
-                          subtitle: '开启后用户输入不经过管家处理',
-                          value: !_butlerIntervention,
-                          onChanged: (v) =>
-                              setState(() => _butlerIntervention = !v),
-                        ),
-                        const SizedBox(height: 4),
+                        // 8-13 02:0x 用户：删"管家不干预自然语言"；
+                        // "本体记忆共享"文案动态显示左页立绘名（Lead）
                         _SwitchTile(
                           label: '本体记忆共享',
-                          subtitle: '所有形象共用本体记忆',
+                          subtitle: '此角色可查看「${widget.currentLead?.name ?? '本体'}」'
+                              '下所有角色的记忆、设定等全部内容',
                           value: _shareMemory,
                           onChanged: (v) => setState(() => _shareMemory = v),
                         ),
@@ -2116,56 +2022,6 @@ class _SectionCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           child,
-        ],
-      ),
-    );
-  }
-}
-
-class _FieldBox extends StatelessWidget {
-  final String label;
-  final TextEditingController ctrl;
-  final VoidCallback onChanged;
-  final int maxLines;
-
-  const _FieldBox({
-    required this.label,
-    required this.ctrl,
-    required this.onChanged,
-    this.maxLines = 3,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              color: Color(0xFF5A4A52),
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 6),
-          TextField(
-            controller: ctrl,
-            maxLines: maxLines,
-            decoration: const InputDecoration(
-              border: InputBorder.none,
-              isDense: true,
-              contentPadding: EdgeInsets.zero,
-            ),
-            style: const TextStyle(fontSize: 13, color: Color(0xFF3D2C33)),
-            onChanged: (_) => onChanged(),
-          ),
         ],
       ),
     );
