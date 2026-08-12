@@ -102,17 +102,26 @@ class _ChatTopBarState extends State<ChatTopBar> {
                   return Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        _displayName,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                          color: Color(0xFF6A4A5A),
-                          letterSpacing: 1,
-                        ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _displayName,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                              color: Color(0xFF6A4A5A),
+                              letterSpacing: 1,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          // 在线状态灯（绿=AI 可用 / 黄=未填 Key / 红=未配置）
+                          _AiStatusDot(
+                            personaId: _personaId,
+                            onTap: widget.onAiTap,
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 2),
-                      _AiBadge(personaId: _personaId, onTap: widget.onAiTap),
                     ],
                   );
                 },
@@ -182,9 +191,10 @@ class _ChatTopBarState extends State<ChatTopBar> {
 }
 
 /// 「当前 AI」小徽章：显示这个男主现在用的是哪家，点击进 AI 设置。
-/// 没配置时显示醒目的"AI 未配置"。
-class _AiBadge extends StatelessWidget {
-  const _AiBadge({required this.personaId, required this.onTap});
+/// 男主名字旁的在线状态灯（绿=AI 可用 / 黄=未填 Key / 红=未配置 / 紫=测试中）。
+/// 点击可进 AI 配置。
+class _AiStatusDot extends StatelessWidget {
+  const _AiStatusDot({required this.personaId, required this.onTap});
 
   final String? personaId;
   final VoidCallback onTap;
@@ -194,7 +204,7 @@ class _AiBadge extends StatelessWidget {
     final manager = AIProviderManager.instance;
     return ValueListenableBuilder<int>(
       valueListenable: manager.changeNotifier,
-      builder: (context, _, __) {
+      builder: (context, _, _) {
         final id = manager.lastProviderFor(personaId);
         AIProviderConfig? current;
         for (final config in manager.providers) {
@@ -210,44 +220,35 @@ class _AiBadge extends StatelessWidget {
             (current.type == ProviderType.local ||
                 current.apiKey.trim().isNotEmpty);
         final Color color;
-        final String label;
-        // 8-05 16:36 用户：测试模式开着时，顶栏一眼看出在测试
         if (AIProviderManager.testModeEnabled) {
           color = const Color(0xFF7B6A8F);
-          label = '🧪 测试中';
         } else if (current == null || !anyUsable) {
           color = const Color(0xFFE07A7A);
-          label = '未配置';
         } else if (!currentReady) {
           color = const Color(0xFFE0A050);
-          label = '${current.name}（未填 Key）';
         } else {
           color = const Color(0xFF7AA87A);
-          label = current.name;
         }
         return GestureDetector(
           onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: color.withValues(alpha: 0.35)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.auto_awesome, size: 10, color: color),
-                const SizedBox(width: 4),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: color,
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.all(4),
+            child: Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: color,
+                border: Border.all(color: Colors.white, width: 1.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.45),
+                    blurRadius: 4,
+                    spreadRadius: 0.5,
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
