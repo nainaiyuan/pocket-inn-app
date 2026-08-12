@@ -188,8 +188,8 @@ class _ChatTopBarState extends State<ChatTopBar> {
 }
 
 /// 「当前 AI」小徽章：显示这个男主现在用的是哪家，点击进 AI 设置。
-/// 男主名字旁的在线状态灯（绿=主 AI 可用 / 黄=主 AI 不可用但有备胎 /
-/// 红=没有可用 AI / 紫=测试中）。纯状态展示，配置入口在右页 AI 区。
+/// 男主名字旁的在线状态灯（灰=没配置 AI / 绿=能用 / 红=出故障 / 紫=测试中）。
+/// 纯状态展示，配置入口在右页 AI 区。
 class _AiStatusDot extends StatelessWidget {
   const _AiStatusDot({required this.personaId});
 
@@ -209,39 +209,39 @@ class _AiStatusDot extends StatelessWidget {
             break;
           }
         }
-        // 当前这个 AI 是否真能用（本地 Provider 不需要 Key）
+        final bound = manager.bindingFor(personaId ?? '') ?? const [];
+        // 没勾选任何 AI = 没配置
+        final configured = bound.isNotEmpty;
+        // 当前 AI 是否就绪（本地 Provider 不需要 Key）
         final currentReady =
             current != null &&
             (current.type == ProviderType.local ||
                 current.apiKey.trim().isNotEmpty);
-        final autoSwitch = manager.autoSwitchFor(personaId);
-        // 备胎：除当前 AI 外，绑定列表里还有可用的（自动切换开着才有意义）
-        final bound = manager.bindingFor(personaId ?? '') ?? const [];
-        var hasBackup = false;
-        if (autoSwitch && bound.isNotEmpty) {
+        // 有没有任何一个绑定的 AI 可用
+        var anyReady = currentReady;
+        if (!anyReady) {
           for (final bid in bound) {
-            if (bid == id) continue;
             for (final config in manager.providers) {
               if (config.id == bid &&
                   config.enabled &&
                   (config.type == ProviderType.local ||
                       config.apiKey.trim().isNotEmpty)) {
-                hasBackup = true;
+                anyReady = true;
                 break;
               }
             }
-            if (hasBackup) break;
+            if (anyReady) break;
           }
         }
         final Color color;
         if (AIProviderManager.testModeEnabled) {
-          color = const Color(0xFF7B6A8F);
-        } else if (currentReady) {
-          color = const Color(0xFF7AA87A); // 绿：主 AI 在线
-        } else if (hasBackup) {
-          color = const Color(0xFFE0A050); // 黄：主 AI 掉了，备胎顶着
+          color = const Color(0xFF7B6A8F); // 紫：测试中
+        } else if (!configured) {
+          color = const Color(0xFFB8ACB2); // 灰：没配置 AI
+        } else if (anyReady) {
+          color = const Color(0xFF7AA87A); // 绿：能用
         } else {
-          color = const Color(0xFFE07A7A); // 红：没有可用 AI
+          color = const Color(0xFFE07A7A); // 红：配了但出故障
         }
         return Container(
           width: 8,
