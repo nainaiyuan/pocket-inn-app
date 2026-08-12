@@ -54,3 +54,4 @@ flutter:
     - assets/PInn.png
     - assets/models/model_int8.onnx
     - assets/models/tokenizer.json
+    - assets/models/labels.json

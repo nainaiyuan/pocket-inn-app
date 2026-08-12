@@ -1,0 +1,11 @@
+{
+  "emotion_labels": [
+    "anger", "annoyance", "disapproval", "confusion", "embarrassment",
+    "fear", "sadness", "disappointment", "shame", "disgust",
+    "amusement", "excitement", "optimism", "pride", "relief",
+    "joy", "love", "admiration", "gratitude", "contentment",
+    "caring", "approval", "curiosity", "realization", "surprise",
+    "nervousness", "neutral", "remorse"
+  ],
+  "polarity_labels": ["positive", "negative", "neutral"]
+}
