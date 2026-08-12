@@ -18,6 +18,7 @@ import '../../services/record_tree_store.dart';
 import '../../services/working_pad_store.dart';
 import '../../services/flow_store.dart';
 import '../../services/tool_cache_store.dart';
+import '../../services/memory_block_store.dart';
 import '../../services/tool_manual_store.dart';
 import '../../services/tool_test_store.dart';
 import 'services/chat_flow_store.dart';
@@ -1154,6 +1155,8 @@ class _ChatPageState extends State<ChatPage>
     ToolCacheStore.warm(personaId);
     // 8-08 15:2x：工具手册 + 测试任务预热
     ToolManualStore.warm(personaId);
+    // 8-12 18:0x：长期/短期记忆块预热（固定区记忆注入）
+    MemoryBlockStore.warm(personaId);
     ToolTestStore.warm(personaId);
     // 8-06 21:26：定时任务计划预热
     TimerPlanStore.warm(personaId);
@@ -1820,6 +1823,10 @@ class _ChatPageState extends State<ChatPage>
             // 8-08 02:1x 用户：工具工作缓存——男主干活中间数据（自管免审批）
             _appendToolBubble('🗃️ 男主在整理工具缓存…');
             toolResult = await _executeManageToolCache(args);
+          } else if (name == 'manage_memory_block') {
+            // 8-12 18:0x 用户：长期/短期记忆块（固定区记忆，压缩节点才更新）
+            _appendToolBubble('🧠 男主在整理长期/短期记忆…');
+            toolResult = await _executeManageMemoryBlock(args);
           } else if (name == 'save_summary') {
             // 8-11 20:2x（用户：男主说没有 save_summary）：正常轮执行分支——
             // 固定结束流程写摘要（大流程讲了什么）；range 可选
@@ -5138,6 +5145,10 @@ class _ChatPageState extends State<ChatPage>
         '动作': 'action', '操作': 'action',
         '工具': 'tool', '结果': 'result',
       },
+      'manage_memory_block': {
+        '动作': 'action', '操作': 'action',
+        '内容': 'content', '记忆': 'content',
+      },
       'save_summary': {
         '内容': 'content', '摘要': 'content', '总结': 'content',
         '范围': 'range', '区间': 'range',
@@ -7412,12 +7423,15 @@ class _ChatPageState extends State<ChatPage>
             ? '（空）'
             : book.currentUser,
       );
-      final system = SystemTemplate.build(
+      // 8-12 18:0x（缓存命中重构）：build 不再拼 taskState——弹窗会话
+      // 每轮重建本来就不命中缓存，动态上下文手动追加回 system 保持行为
+      final _baseSystem = SystemTemplate.build(
         personaName: personaName,
         personaPrompt: personaPrompt,
         needsWindow: false,
-        taskState:
-            '【主对话情况】（弹窗外她在主对话说的、还没回的——弹窗讨论完记得接上）：\n'
+      );
+      final system = '$_baseSystem\n\n【当前任务】'
+          '【主对话情况】（弹窗外她在主对话说的、还没回的——弹窗讨论完记得接上）：\n'
             '${_pdUser ?? '（主对话暂无待回复）'}\n'
             '${_pdButler != null ? _pdButler + '\n' : ''}'
             '【设定修改会话】你在和她讨论「$typeName」的修改，还没定案。\n'
@@ -7449,8 +7463,7 @@ class _ChatPageState extends State<ChatPage>
             '最后按上面规则写【新方案】或【最终方案】。'
             '【别中途断流程】她没点「就用这版」之前，讨论都没结束——'
             '她还在提需求/答问题，你就继续问或改，别急着定案收尾；'
-            '你只有在需求全部了解清楚、方案完整时才写【最终方案】。',
-      );
+            '你只有在需求全部了解清楚、方案完整时才写【最终方案】。';
       final msgs = <AIChatMessage>[
         AIChatMessage(role: 'system', content: system),
         for (final h in history) AIChatMessage(role: 'user', content: h),
@@ -8080,6 +8093,48 @@ class _ChatPageState extends State<ChatPage>
     }
   }
 
+  /// 工具执行：manage_memory_block（长期/短期记忆块，男主自管免审批）
+  /// 8-12 18:0x 用户（缓存命中重构）：固定区记忆——平时冻结，
+  /// 只在上下文压缩/整理节点更新；平时想记东西写临时记忆（tool_cache）。
+  Future<_ToolResult> _executeManageMemoryBlock(Map<String, dynamic> args) async {
+    final personaId = _state.personaId ?? '';
+    final action = args['action']?.toString() ?? '';
+    final content = args['content']?.toString() ?? '';
+    switch (action) {
+      case 'set_long':
+        return _ToolResult(
+            true, await MemoryBlockStore.save(personaId, 'long', content));
+      case 'set_short':
+        return _ToolResult(
+            true, await MemoryBlockStore.save(personaId, 'short', content));
+      case 'get_long':
+        return _ToolResult(true, await MemoryBlockStore.get(personaId, 'long'));
+      case 'get_short':
+        return _ToolResult(
+            true, await MemoryBlockStore.get(personaId, 'short'));
+      case 'clear_long':
+        await MemoryBlockStore.save(personaId, 'long', '');
+        return const _ToolResult(true, '长期记忆已清空');
+      case 'clear_short':
+        await MemoryBlockStore.save(personaId, 'short', '');
+        return const _ToolResult(true, '短期记忆已清空');
+      case 'status': {
+        final c = await MemoryBlockStore.count(personaId);
+        return _ToolResult(
+          true,
+          '长期记忆 ${c['long']} 字 / 短期记忆 ${c['short']} 字'
+          '（预算 500 字）',
+        );
+      }
+      default:
+        return _ToolResult(
+          false,
+          'manage_memory_block 参数：action=set_long（要 content）/set_short'
+          '（要 content）/get_long/get_short/clear_long/clear_short/status',
+        );
+    }
+  }
+
   /// 工具执行：manage_tool_cache（工具工作缓存，男主自管免审批）
   /// 8-08 02:1x 用户："留个位置给他工具使用的缓存，太多了就让他写进
   /// 他的管记忆的地方让他整理"——干活中间数据放这，干完整理进记忆后 clear。
@@ -8371,88 +8426,16 @@ class _ChatPageState extends State<ChatPage>
           }
           // 8-06 20:53 用户报 bug：男主反复 list_tools → 工具概览注入（男主天生知道）
           // 8-06 21:54 用户：不写全量清单——分类概览 + 常用表，细节自查
+          // 8-12 18:0x（用户缓存命中重构）：便签/流程/工具缓存/定时任务/
+          // 记录职责/现有分类全部挪到工作区（ai_chat_service._buildWorkspaceText，
+          // 最后动态区）——之前塞在人设区（第一条 system），任一变化整个
+          // 前缀全不命中；且"人设"里塞工作数据也不该。这里只留固定部分：
+          // 人设 + 男主设定 + 演变史 + 工具概览。
           prompt +=
               '\n\n${_toolListText()}'
               '\n（连续测试/做事时：先把步骤立到便签（1. 2. 3.），'
               '再一条条执行过去；查到的结果自己决定留不留，重要的存便签，'
               '别重复查同一件事。）';
-          // 8-06 21:12 用户：男主便签/当前任务模块——他自己维护，每轮注入
-          final padText = WorkingPadStore.text(pid);
-          if (padText != null) {
-            prompt +=
-                '\n\n【当前任务模块·你的便签】\n$padText'
-                '\n（这是你自己维护的：查到的、干到一半的、还要用的都写在这。'
-                '自己判断留删——干完活的删、正文里已经有的删（上下文已有的优先），'
-                '不设限额，删的时候自己说行号范围。'
-                '写摘要时自己清理。下一句对话你还知道有什么没干。）';
-          }
-          // 8-08 02:2x 用户：管家没同步流程进度 → 男主永远从第一步开始。
-          // 注入【流程】块（FlowStore.text：目标/状态/每步 ✅▶☐）
-          final flowText = FlowStore.text(pid);
-          if (flowText != null) {
-            prompt +=
-                '\n\n【流程】（旧长任务卡片，已停用——长任务直接做不用立流程；'
-                '有遗留卡片就按它收尾，做完直接回复她）\n$flowText';
-          }
-          // 8-08 02:1x 用户：工具工作缓存（干活中间数据，短命；
-          // 干完把要长期用的整理进记录/便签后 clear——"别查完就丢"）
-          final cacheText = ToolCacheStore.text(pid);
-          if (cacheText.isNotEmpty) {
-            prompt += '\n\n【工具缓存】（你干活时的临时数据，查到的先放这；'
-                '干完活把要长期用的整理进记录/便签，然后 manage_tool_cache '
-                '动作=clear 清空——别每次醒来重新查）\n$cacheText';
-          }
-          // 8-06 21:26 用户：定时任务独立区（跟便签分开——计划等触发，便签是正在干的活）
-          final timerText = TimerPlanStore.waitingText(pid);
-          if (timerText != null) {
-            prompt +=
-                '\n\n【定时任务】（你设的计划，到点会触发；'
-                '触发完/她明确不要了就从这里移除）\n$timerText';
-          }
-          // 8-06 18:41-19:21 用户：分类记录体系 —— 记录职责 + 现有分类概览
-          // 8-08 00:4x：措辞压缩（12 行 → 7 行核心，男主"醒来"负担更小）
-          final recordDuty =
-              '\n\n【你的记录职责】'
-              '发现值得记的（喜好/习惯/家人/说过的话）：先 query_record 查，'
-              '没有就 add_record 按「归属→关系→对象→类别」选路径'
-              '（归属=用户/男主/其他；如她妈妈的事=["用户","家人","妈妈","喜好"]）。'
-              '记录多挂几组关键词，任意一组命中都能翻出原话和时间。'
-              '改分类（改名/挪动/删除）→ manage_record_tree 弹窗她确认，'
-              '拒绝就给反馈改完再提交。';
-          prompt += recordDuty;
-          // 现有分类概览（男主知道有什么，避免重复建；同步缓存读）
-          // 8-08 00:4x：50 → 30 条 + 顶部归属概览一行（每轮省几百字）
-          try {
-            final tree = RecordTreeStore.cached();
-            if (tree != null) {
-              final paths = <String>[];
-              for (final n in tree.nodes) {
-                if (n.parentId != null) {
-                  paths.add(RecordTreeStore.pathText(tree, n.id));
-                }
-              }
-              if (paths.isNotEmpty) {
-                prompt += '\n\n【现有分类】（记东西优先挂进这些；都不合适再新建）\n';
-                // 归属概览：顶层 → 直接子类计数（一行，男主先看结构）
-                final rootCounts = <String, int>{};
-                for (final n in tree.nodes) {
-                  if (n.parentId == null) continue;
-                  final parent = tree.nodeById(n.parentId ?? '');
-                  if (parent == null || parent.parentId != null) continue;
-                  rootCounts[parent.name] = (rootCounts[parent.name] ?? 0) + 1;
-                }
-                if (rootCounts.isNotEmpty) {
-                  prompt += '归属概览：' +
-                      rootCounts.entries
-                          .map((e) => '${e.key} ${e.value}类')
-                          .join('、') +
-                      '\n';
-                }
-                prompt += paths.take(30).join('\n');
-                if (paths.length > 30) prompt += '\n…共 ${paths.length} 个分类';
-              }
-            }
-          } catch (_) {}
         }
       }
       return prompt;

@@ -865,7 +865,7 @@ class ChatFlowStore {
       pendingMs.add(s);
       final no = _stepNo(s, i);
       final noMark = s['from'] == 'butler' ? 'S' : 'M'; // 8-11 23:5x：管家消息 S 前缀（System 系统消息，用户：管家=系统）
-      final fromMark = s['from'] == 'butler' ? '【管家】' : '';
+      final fromMark = s['from'] == 'butler' ? '【SYSTEM】' : ''; // 8-12 18:0x（用户拍板）：英文标签区分底层平台，防用户人设叫'管家/穿越系统'时误导
       final ts = (s['ts'] ?? '').toString();
       final spk = s['from'] == 'butler' ? '管家' : '她';
       final tools = _asMap(s['tools']);
@@ -975,7 +975,7 @@ class ChatFlowStore {
       if (i == cur) continue;
       final no = _stepNo(s, i);
       final noMark = s['from'] == 'butler' ? 'S' : 'M'; // 8-11 23:5x
-      final fromMark = s['from'] == 'butler' ? '【管家】' : '';
+      final fromMark = s['from'] == 'butler' ? '【SYSTEM】' : ''; // 8-12 18:0x（用户拍板）：英文标签区分底层平台，防用户人设叫'管家/穿越系统'时误导
       final spk = s['from'] == 'butler' ? '管家' : '她';
       pending.add(
           '☐ $noMark$no $fromMark $spk：${_short(s['userText'].toString(), 24)}');

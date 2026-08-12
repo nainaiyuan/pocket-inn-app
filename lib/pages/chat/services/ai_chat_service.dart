@@ -18,10 +18,13 @@ import '../../../butler/system_template.dart' show SystemTemplate;
 import '../../../services/chat_database_service.dart';
 import '../../../services/chat_service.dart';
 import '../../../utils/debug_logger.dart';
-import '../../../services/pending_queue_store.dart';
 import '../../../services/flow_store.dart';
-import '../../../services/tool_manual_store.dart';
 import '../../../services/tool_test_store.dart';
+import '../../../services/tool_cache_store.dart';
+import '../../../services/memory_block_store.dart';
+import '../../../services/working_pad_store.dart';
+import '../../../services/timer_plan_store.dart';
+import '../../../services/record_tree_store.dart';
 
 /// 聊天页的 AI 门面 —— 走 AIProviderManager（男主级路由 + 故障切换）。
 ///
@@ -86,6 +89,9 @@ class AiChatService {
 
   /// 已做过上下文恢复的 persona（防重复恢复）
   final Set<String> _contextRestored = {};
+  // 8-12 18:0x（用户：思考过程放工作区最后面）：最近一轮工具轮的
+  // reasoning_content（DeepSeek 思考），注入下一轮工作区，男主看得见
+  String? _lastToolReasoning;
 
   /// 真实 AI 回复。
   ///
@@ -761,6 +767,49 @@ class AiChatService {
     {
       'type': 'function',
       'function': {
+        'name': 'manage_memory_block',
+        'description':
+            '管理长期记忆块/短期记忆块（8-12 18:0x 你设计：缓存命中重构的'
+            '固定区记忆）。'
+            '【长期记忆】=她不用查你就该知道的事：喜好/对待方式/工作习惯/'
+            '话题导航（聊到某话题→去哪查用什么命令查）——≤500字，超了会被'
+            '截断提示精简。'
+            '【短期记忆】=你临时观察到的、还不确定的事；上下文压缩节点把'
+            '临时记忆浓缩进来；观察一直稳定就升级进长期记忆。'
+            '⚠️ 这两块平时冻结（每轮注入固定区，改一次会破坏缓存命中）——'
+            '只在上下文压缩/整理节点更新，平时想记东西写临时记忆'
+            '（manage_tool_cache 动作=add）。不需要她审批。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'action': {
+              'type': 'string',
+              'enum': [
+                'set_long',
+                'set_short',
+                'get_long',
+                'get_short',
+                'clear_long',
+                'clear_short',
+                'status'
+              ],
+              'description':
+                  'set_long=覆盖长期记忆（要 content） set_short=覆盖短期记忆'
+                  '（要 content） get_long/get_short=读当前内容 '
+                  'clear_long/clear_short=清空 status=看两块字数',
+            },
+            'content': {
+              'type': 'string',
+              'description': 'set 时=要写入的内容（长期≤500字）',
+            },
+          },
+          'required': ['action'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
         'name': 'manage_frequent_tools',
         'description':
             '维护你的常用工具表（8-06 21:54 你设计：常用工具放概览里'
@@ -1162,7 +1211,8 @@ class AiChatService {
             // 用户 8-03 02:41 模块化重构：skillContext 拆成 userProfile
             // （用户状态）和 taskState（任务状态），各归各位
             userProfile: userProfile,
-            taskState: taskState,
+            // 8-12 18:0x（缓存命中重构）：taskState 不再拼固定区，
+            // 由下方组装拼进工作区（最后动态区）
             // 8-05 17:41 用户：固定部分（系统规则+人设）每轮必带；
             // stateless：前缀稳定 → 缓存命中 → 每次带全量反而便宜。
           );
@@ -1298,52 +1348,29 @@ class AiChatService {
       '📋 状态=${inFlow ? (flowGoal != null ? '走流程「$flowGoal」' : '设定弹窗中') : '正常对话'}'
       ' 待回复=无（主对话全走工作区）',
     );
-    // 8-08 15:2x（设计文档四，GPT 10 问 2）：工具手册注入（上下文预算，精简）
-    // 男主查一次格式就记住，不用反复试
-    final manualText = ToolManualStore.text(ctxPid);
     // 8-08 15:2x（设计文档八）：工具测试任务块（进度/当前测什么）
     final testBlock = ToolTestStore.block(ctxPid);
-    // 本轮软提示（查询类≥3/连续拒绝≥2，chat_page 累积传入）
-    final extraHints = (stateHints ?? const <String>[]).join('\n');
-    // 8-09 18:1x（用户设计定稿：每次对话=一个流程）：对话流程清单——
-    // 用户每条消息=一个条目，✅已回/☐没回 + 工具链 + 回复；每次唤醒注入，
-    // 男主看到就不会弄混、不漏、不重复回。流程中不注入（走【当前流程】）。
-    // （chatFlowText 已在上方 userText 前声明，8-11 04:4x——移作
-    // 最后一条 user【当前流程】，不再放状态块；flowHint 已删 8-11 05:0x）
-    final statusBlocks = <AIChatMessage>[
-      // 8-10 v3：不再有【当前情况】状态感知独立块——男主看下面的
-      // 【当前流程】清单就知道自己在哪、该做什么。
-      // 8-11 04:5x（用户：后续待处理放【当前流程】【后面/下面】——
-      // "当前工作完了，自动把下面的移上来一个"；处理完的移上去当参考。
-      // 顺序 = 上【上下文参考】→ 中【当前流程】→ 下【后续待处理】。
-      // 8-11 07:0x（用户：没有"后续步"——【后续待处理】区删除；
-      // 工具轮：最后一条是工具结果）
-      if (toolRound && chatFlowText != null && chatFlowText.isNotEmpty)
-        AIChatMessage(
-          role: 'system',
-          content: '【当前工作区】（你现在要处理的工作——☐=待办清单'
-              '（一条条看过去，每条都要处理判断，工具链挂在对应消息下面）；'
-              '标完 end_MN；结束：最后一条 sys 写 end_TN + 调 save_summary，'
-              '管家归档不再唤醒你——不用每条都标完，写了摘要=你检查过了）'
-              '\n$chatFlowText',
-        ),
-      // 8-11 05:0x（用户 8-10 拍板"长任务的都不要了"）：
-      // 旧长任务注入全删——旧【当前流程】卡片、【任务清单】、
-      // FlowStore 状态提示都不再注入（任务都插流程里，见对话流程清单）
-      if (testBlock.isNotEmpty)
-        AIChatMessage(
-          role: 'system',
-          content: '$testBlock',
-        ),
-      if (manualText.isNotEmpty)
-        AIChatMessage(
-          role: 'system',
-          content: '【工具笔记】（你自己维护的——用过的工具/格式/坑，'
-              '查这个别再反复试；用完把心得写进来）\n$manualText',
-        ),
-    ];
+    // 8-12 18:0x（用户缓存命中重构）：工具笔记不再注入——SYSTEM_CORE 已写
+    // "翻【工具笔记】"，男主需要时自己 manage_tool_manual 查；每轮注入手册
+    // 摘要块是多余开销（内容男主维护、会变 → 放哪都破坏缓存，干脆不注入）。
+    // 8-12 18:0x：工作区（动态区）统一组装放最后——固定区只留
+    // SYSTEM_CORE+人设+用户设定+长期/短期记忆块+历史。
+    final workspaceText = _buildWorkspaceText(
+      chatFlowText: chatFlowText,
+      taskState: taskState,
+      testBlock: testBlock,
+      personaId: ctxPid,
+      lastReasoning: toolRound ? _lastToolReasoning : null,
+    );
+    // ③长期记忆 + ④短期记忆块（固定区，历史前；内容低频变——
+    // 平时冻结，压缩节点由男主 manage_memory_block 更新）
+    final memoryBlockText = MemoryBlockStore.text(ctxPid);
     final messages = <AIChatMessage>[
       if (!isLight) AIChatMessage(role: 'system', content: systemPrompt),
+      // 8-12 18:0x（用户缓存命中重构）：记忆块插历史前——固定区最末，
+      // 平时冻结不影响命中；内容变只牺牲历史+工作区（低频，可接受）
+      if (!isLight && memoryBlockText.isNotEmpty)
+        AIChatMessage(role: 'system', content: memoryBlockText),
       // 8-11 04:4x（用户：历史放当前处理位置的上面作上下文参考）：
       // 顺序 = 人设 → 历史参考（已聊过的，不用回复不用做）→
       // 状态块（【当前流程】= 当前正在处理的工作 + 后续待处理）→ 本轮输入。
@@ -1360,7 +1387,6 @@ class AiChatService {
         ),
         ...historyMsgs,
       ],
-      if (!isLight) ...statusBlocks,
     ];
     // 工具轮消息顺序（8-05 18:56 用户定稿）：工具相关在前，用户消息最后——
     // AI 按数组顺序读，最后一条 user 才是"要回复的"。
@@ -1377,6 +1403,10 @@ class AiChatService {
           content: '【当前系统】（系统刚查到的参考/指令，'
               '针对它回应或调用工具处理）\n$butlerInstruction',
         ));
+      }
+      // 工作区（工具轮参考：流程清单+临时记忆等，放工具结果后、当前输入前）
+      if (!isLight && workspaceText.isNotEmpty) {
+        messages.add(AIChatMessage(role: 'system', content: workspaceText));
       }
       final userMsg = ContextManager.instance.lastUserMessageFor(ctxPid);
       if (userMsg != null && userMsg.isNotEmpty) {
@@ -1397,16 +1427,15 @@ class AiChatService {
       // 8-11 04:5x（用户：最后一条 = 工作区【当前流程】（她的话在▶
       // 当前步里，不重复放"她的话"）。无流程（纯闲聊）时回退到她的话
       // 8-11 07:0x（用户：没有"后续步"——【后续待处理】不再注入）
-      if (!isLight &&
-          chatFlowText != null &&
-          chatFlowText.isNotEmpty) {
+      // 8-12 18:0x（用户缓存命中重构）：工作区永远在最后（动态区），
+      // 她的话有流程时在清单 ▶ 里（不重复），纯闲聊时追加在末尾
+      if (!isLight && workspaceText.isNotEmpty) {
+        final hasFlow = chatFlowText != null && chatFlowText.isNotEmpty;
         messages.add(AIChatMessage(
             role: 'user',
-            content: '【当前工作区】（你当前要处理的工作——☐=待办清单'
-                '（一条条看过去，每条都要处理判断，工具链挂在对应消息下面）；'
-                '标完 end_MN；结束：最后一条 sys 写 end_TN + 调 save_summary，'
-                '管家归档不再唤醒你——不用每条都标完，写了摘要=你检查过了）'
-                '\n$chatFlowText'));
+            content: hasFlow
+                ? workspaceText
+                : '$workspaceText\n\n【当前输入】$message'));
       } else {
         messages.add(AIChatMessage(role: 'user', content: message));
       }
@@ -1545,6 +1574,13 @@ class AiChatService {
         }
         rethrow;
       }
+    }
+    // 8-12 18:0x（用户：男主调工具的思考过程放工作区最后面）：
+    // DeepSeek reasoning_content 不进对话历史，工具轮下一轮就忘了
+    // 自己刚才为什么这么调——存起来注入工作区（动态区，不影响缓存）
+    if (toolRound) {
+      final rc = (result.reasoningContent ?? '').trim();
+      if (rc.isNotEmpty) _lastToolReasoning = rc;
     }
     // ── Agent Debug Lab 埋点：模型输出（文本/思考链/工具调用）──
     TraceSession.instance.recordModelOutput(
@@ -1926,9 +1962,7 @@ class AiChatService {
         // 用户 8-03 03:20：男主已知管家=系统本身（SYSTEM_CORE 已说明），
         // 指令统一带【管家指令】标记即可，不用再解释"这是管家唤醒"
         userProfile: null,
-        taskState: '【系统指令】用户当前不在场。你主动说一句话或做一件事，'
-            '像平时一样自然、简短（30 字以内），参考你的设定；'
-            '不需要等她回复，说完就好。',
+        // 8-12 18:0x：taskState 不再拼固定区；唤醒指令已在下方 user 消息
       );
       final historyMsgs = ContextManager.instance.buildHistoryMessages(personaId, modelHint: _modelHintFor(personaId));
       final res = await _chat(
@@ -2241,7 +2275,7 @@ class AiChatService {
       personaPrompt: personaPrompt,
       needsWindow: needsWindow,
       userProfile: userProfile,
-      taskState: taskState,
+      // 8-12 18:0x：taskState 不再拼固定区（压缩节点不需要单轮提示）
     );
     // 【当前管家】唤醒指令（19:16 用户：当前管家段 = 管家唤醒 AI 的通道）
     final instruction = '【当前系统】窗口快满了，把刚给你的对话总结成摘要。'
@@ -2374,6 +2408,105 @@ class AiChatService {
     } catch (_) {
       return '';
     }
+  }
+
+  /// 8-12 18:0x（用户缓存命中重构）：动态区（工作区）统一组装——
+  /// 所有每轮会变的内容收敛到这里，放 messages 最后（固定区全稳定 →
+  /// DeepSeek 前缀缓存最大化命中）。之前便签/缓存/定时/记录职责全塞在
+  /// 人设（第一条 system）里，任一变化整个前缀全 miss。
+  /// [lastReasoning] = 上轮工具思考过程（8-12 18:0x 用户：放工作区最下面）
+  String _buildWorkspaceText({
+    required String? chatFlowText,
+    required String? taskState,
+    required String testBlock,
+    required String personaId,
+    String? lastReasoning,
+  }) {
+    final sb = StringBuffer();
+    sb.writeln('【当前工作区】（你现在要处理的工作——☐=待办清单'
+        '（一条条看过去，每条都要处理判断，工具链挂在对应消息下面）；'
+        '标完 end_MN；结束：最后一条 sys 写 end_TN + 调 save_summary，'
+        '管家归档不再唤醒你——不用每条都标完，写了摘要=你检查过了）');
+    if (chatFlowText != null && chatFlowText.isNotEmpty) {
+      sb.writeln(chatFlowText);
+    } else {
+      sb.writeln('（当前没有待办流程）');
+    }
+    // 单轮动态提示（审批反馈/格式提示）——之前拼固定区（taskState），
+    // 每轮一变全不命中；挪工作区后只牺牲最后一段
+    if (taskState != null && taskState.trim().isNotEmpty) {
+      sb.writeln('\n【当前提示】${taskState.trim()}');
+    }
+    // 工具测试块（测试中才有，动态）
+    if (testBlock.isNotEmpty) {
+      sb.writeln('\n$testBlock');
+    }
+    // 8-06 21:12 用户：男主便签/当前任务模块——他自己维护（从人设区挪来）
+    final padText = WorkingPadStore.text(personaId);
+    if (padText != null && padText.isNotEmpty) {
+      sb.writeln('\n【你的便签】（你自己维护：查到的、干到一半的、还要用的'
+          '都写在这；干完活的删、正文里已经有的删；写摘要时自己清理）\n$padText');
+    }
+    // 8-06 21:26 用户：定时任务独立区（跟便签分开——计划等触发，便签是正在干的活）
+    final timerText = TimerPlanStore.waitingText(personaId);
+    if (timerText != null && timerText.isNotEmpty) {
+      sb.writeln(
+          '\n【定时任务】（你设的计划，到点会触发；触发完/她明确不要了就从这里移除）\n$timerText');
+    }
+    // 8-06 18:41-19:21 用户：分类记录体系 —— 记录职责 + 现有分类概览
+    // 8-08 00:4x：措辞压缩（12 行 → 7 行核心，男主"醒来"负担更小）
+    sb.writeln('\n【你的记录职责】'
+        '发现值得记的（喜好/习惯/家人/说过的话）：先 query_record 查，'
+        '没有就 add_record 按「归属→关系→对象→类别」选路径'
+        '（归属=用户/男主/其他；如她妈妈的事=["用户","家人","妈妈","喜好"]）。'
+        '记录多挂几组关键词，任意一组命中都能翻出原话和时间。'
+        '改分类（改名/挪动/删除）→ manage_record_tree 弹窗她确认，'
+        '拒绝就给反馈改完再提交。');
+    // 现有分类概览（男主知道有什么，避免重复建；同步缓存读）
+    // 8-08 00:4x：50 → 30 条 + 顶部归属概览一行（每轮省几百字）
+    try {
+      final tree = RecordTreeStore.cached();
+      if (tree != null) {
+        final paths = <String>[];
+        for (final n in tree.nodes) {
+          if (n.parentId != null) {
+            paths.add(RecordTreeStore.pathText(tree, n.id));
+          }
+        }
+        if (paths.isNotEmpty) {
+          sb.writeln('\n【现有分类】（记东西优先挂进这些；都不合适再新建）');
+          final rootCounts = <String, int>{};
+          for (final n in tree.nodes) {
+            if (n.parentId == null) continue;
+            final parent = tree.nodeById(n.parentId ?? '');
+            if (parent == null || parent.parentId != null) continue;
+            rootCounts[parent.name] = (rootCounts[parent.name] ?? 0) + 1;
+          }
+          if (rootCounts.isNotEmpty) {
+            sb.writeln('归属概览：' +
+                rootCounts.entries
+                    .map((e) => '${e.key} ${e.value}类')
+                    .join('、'));
+          }
+          sb.writeln(paths.take(30).join('\n'));
+          if (paths.length > 30) sb.writeln('…共 ${paths.length} 个分类');
+        }
+      }
+    } catch (_) {}
+    // 8-12 18:0x（用户：临时记忆区=工作区固定子块，标签永远在，
+    // 没东西就注入"无"；男主调工具想写就写）——现有 C1/C2 工具缓存
+    // （ToolCacheStore）就是写入通道（manage_tool_cache add/clear）
+    final tempText = ToolCacheStore.text(personaId);
+    sb.writeln('\n【临时记忆】（你自己维护：干活查到/写到一半/还要用的放这；'
+        '用 manage_tool_cache 动作=add 写、clear 清空；干完活把要长期用的'
+        '整理进 record_memory 或便签）');
+    sb.writeln(tempText.isEmpty ? '（无）' : tempText);
+    // 8-12 18:0x（用户：思考过程放工作区最后面）——上轮调工具前的思考
+    // （DeepSeek reasoning），参考用不用回复；只保留最近一轮
+    if (lastReasoning != null && lastReasoning.isNotEmpty) {
+      sb.writeln('\n【思考过程】（你上轮调工具前的思考，参考用，不用回复）\n$lastReasoning');
+    }
+    return sb.toString().trim();
   }
 
   /// 工具轮【当前互动】展示：用户刚发的消息（带时间戳）+ 男主执行的工具结果。
