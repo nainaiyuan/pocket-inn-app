@@ -188,8 +188,8 @@ class _ChatTopBarState extends State<ChatTopBar> {
 }
 
 /// 「当前 AI」小徽章：显示这个男主现在用的是哪家，点击进 AI 设置。
-/// 男主名字旁的在线状态灯（灰=没配置 AI / 绿=能用 / 红=出故障 / 紫=测试中）。
-/// 纯状态展示，配置入口在右页 AI 区。
+/// 男主名字旁的在线状态灯（灰=没配置 / 绿=主 AI 能用 / 黄=主 AI 出问题、
+/// 备胎顶着 / 红=全部出故障 / 紫=测试中）。纯状态展示，配置入口在右页 AI 区。
 class _AiStatusDot extends StatelessWidget {
   const _AiStatusDot({required this.personaId});
 
@@ -217,20 +217,21 @@ class _AiStatusDot extends StatelessWidget {
             current != null &&
             (current.type == ProviderType.local ||
                 current.apiKey.trim().isNotEmpty);
-        // 有没有任何一个绑定的 AI 可用
-        var anyReady = currentReady;
-        if (!anyReady) {
+        // 除当前 AI 外，绑定列表里有没有可用的（备胎）
+        var hasBackup = false;
+        if (!currentReady) {
           for (final bid in bound) {
+            if (bid == id) continue;
             for (final config in manager.providers) {
               if (config.id == bid &&
                   config.enabled &&
                   (config.type == ProviderType.local ||
                       config.apiKey.trim().isNotEmpty)) {
-                anyReady = true;
+                hasBackup = true;
                 break;
               }
             }
-            if (anyReady) break;
+            if (hasBackup) break;
           }
         }
         final Color color;
@@ -238,10 +239,12 @@ class _AiStatusDot extends StatelessWidget {
           color = const Color(0xFF7B6A8F); // 紫：测试中
         } else if (!configured) {
           color = const Color(0xFFB8ACB2); // 灰：没配置 AI
-        } else if (anyReady) {
-          color = const Color(0xFF7AA87A); // 绿：能用
+        } else if (currentReady) {
+          color = const Color(0xFF7AA87A); // 绿：主 AI 能用
+        } else if (hasBackup) {
+          color = const Color(0xFFE0A050); // 黄：主 AI 有问题，备胎顶着
         } else {
-          color = const Color(0xFFE07A7A); // 红：配了但出故障
+          color = const Color(0xFFE07A7A); // 红：全部出故障
         }
         return Container(
           width: 8,
