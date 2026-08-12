@@ -1,12 +1,16 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../../ai_provider/ai_provider_manager.dart';
 import '../../../butler/system_template.dart';
 import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
 import '../../../services/setting_version_store.dart';
+import '../../../services/tool_approval_store.dart';
 import '../../system_view_page.dart';
 import '../services/chat_storage_service.dart';
 import '../state/current_character_state.dart';
+import 'ai_provider_sheet.dart';
 import 'task_list_page.dart';
 
 /// 角色设置侧栏（右页）
@@ -300,11 +304,15 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                 children: [
                   _DeviceZone(),
                   const SizedBox(height: 4),
-                  _ButlerCodeZone(),
+                  _ToolZone(
+                    personaId: widget.currentPersona?.id ?? '',
+                    personaName: widget.currentPersona?.name ?? '默认',
+                  ),
                   const SizedBox(height: 4),
-                  _ApiZone(),
-                  const SizedBox(height: 4),
-                  _QuoteZone(),
+                  _ApiZone(
+                    personaId: widget.currentPersona?.id ?? '',
+                    personaName: widget.currentPersona?.name ?? '默认',
+                  ),
                 ],
               ),
             ),
@@ -656,7 +664,7 @@ class _DeviceZoneState extends State<_DeviceZone> {
                   const SizedBox(width: 4),
                   Text(
                     _connected.isEmpty
-                        ? '未连接任何设备'
+                        ? '连接设备（开发中）'
                         : '已连接 ${_connected.length} 个设备',
                     style: TextStyle(
                       fontSize: 11,
@@ -762,227 +770,186 @@ class _DeviceItem {
   const _DeviceItem(this.name, this.icon);
 }
 
-// ─── 管家暗号区（可扩展列表） ───
-class _ButlerCodeZone extends StatefulWidget {
+// ─── AI 工具区（免审批开关，per persona） ───
+class _ToolZone extends StatefulWidget {
+  final String personaId;
+  final String personaName;
+  const _ToolZone({required this.personaId, required this.personaName});
+
   @override
-  State<_ButlerCodeZone> createState() => _ButlerCodeZoneState();
+  State<_ToolZone> createState() => _ToolZoneState();
 }
 
-class _ButlerCodeZoneState extends State<_ButlerCodeZone> {
+class _ToolZoneState extends State<_ToolZone> {
   bool _expanded = false;
+  final _searchCtrl = TextEditingController();
+  final Map<String, bool> _exempt = {}; // 工具名 → 是否免审批
 
-  static const _presetCodes = [
-    _ButlerCode('#A#', '多轮唤醒', '男主发送后，管家再次唤醒一次，可继续对话'),
-    _ButlerCode('#B#', '定时唤醒', '管家在指定时间唤醒男主，推送设备数据'),
-    _ButlerCode('#C#', '状态报告', '管家定时推送用户手机使用情况'),
-    _ButlerCode('#D#', '情感快照', '管家记录当前用户情绪并推送给男主'),
-  ];
+  static const _toolGroups = <String, List<String>>{
+    '📝 记忆': [
+      'record_memory', 'record_relation', 'recall_memory',
+      'save_identity_memory', 'save_summary',
+    ],
+    '📔 日记与记录': [
+      'write_diary', 'query_diary', 'add_record', 'query_record',
+      'manage_record_tree',
+    ],
+    '🧠 临时与记忆块': [
+      'manage_pad', 'manage_memory_block', 'manage_tool_cache',
+    ],
+    '🔍 查询与手册': [
+      'list_tools', 'query_tool_formats', 'query_logs',
+      'query_setting_history', 'manage_tool_manual',
+    ],
+    '📋 任务与计划': [
+      'manage_task', 'manage_schedule', 'manage_chat_flow',
+      'manage_flow', 'resolve_pending',
+    ],
+    '💬 对话与通知': [
+      'notify_user', 'request_permission', 'continue_speaking',
+      'request_text_block', 'countdown_card',
+    ],
+    '⚙️ 工具管理': [
+      'manage_frequent_tools', 'manage_tool_test', 'report_bug',
+      'update_setting',
+    ],
+  };
 
-  final Set<String> _enabledCodes = {};
+  /// 默认免审批的必要工具（低风险：查询/内部管理/男主自管类）。
+  /// 用户可手动关掉任意一个。
+  static const _defaultExempt = <String>{
+    'list_tools', 'query_tool_formats', 'query_logs', 'query_record',
+    'query_setting_history', 'manage_tool_cache', 'manage_pad',
+    'manage_memory_block', 'manage_record_tree', 'manage_frequent_tools',
+    'resolve_pending', 'save_summary',
+  };
+
+  /// 工具中文名（UI 展示用）
+  static const _toolNames = <String, String>{
+    'record_memory': '记录记忆',
+    'record_relation': '记录关系',
+    'recall_memory': '回忆记忆',
+    'save_identity_memory': '保存身份记忆',
+    'save_summary': '保存摘要',
+    'write_diary': '写日记',
+    'query_diary': '查日记',
+    'add_record': '添加记录',
+    'query_record': '查记录',
+    'manage_record_tree': '管理记录分类',
+    'manage_pad': '临时记忆',
+    'manage_memory_block': '管理记忆块',
+    'manage_tool_cache': '工具缓存',
+    'list_tools': '查看工具',
+    'query_tool_formats': '查工具格式',
+    'query_logs': '查日志',
+    'query_setting_history': '查设定历史',
+    'manage_tool_manual': '工具手册',
+    'manage_task': '任务管理',
+    'manage_schedule': '日程管理',
+    'manage_chat_flow': '对话流程',
+    'manage_flow': '长任务流程',
+    'resolve_pending': '处理待办',
+    'notify_user': '弹消息提醒',
+    'request_permission': '申请免审批',
+    'continue_speaking': '继续说话',
+    'request_text_block': '文本块输出',
+    'countdown_card': '倒计时卡片',
+    'manage_frequent_tools': '常用工具',
+    'manage_tool_test': '工具测试',
+    'report_bug': '报告问题',
+    'update_setting': '更新设定',
+  };
+
+  /// 工具一句话说明（UI 展示用）
+  static const _toolDescs = <String, String>{
+    'record_memory': '永久记住她的事（默认要审批）',
+    'record_relation': '记录她与别人的关系',
+    'recall_memory': '回忆之前记过的事',
+    'save_identity_memory': '保存自己的身份记忆',
+    'save_summary': '流程结束存摘要',
+    'write_diary': '写日记',
+    'query_diary': '翻日记',
+    'add_record': '往记录里加条目',
+    'query_record': '查记录',
+    'manage_record_tree': '整理记录分类',
+    'manage_pad': '干活中间数据，写完就删',
+    'manage_memory_block': '长期/短期记忆块浓缩',
+    'manage_tool_cache': '查工具结果缓存',
+    'list_tools': '查看有哪些工具/参数',
+    'query_tool_formats': '查平台调用格式',
+    'query_logs': '看运行日志',
+    'query_setting_history': '查设定各版本变更',
+    'manage_tool_manual': '记工具用法笔记',
+    'manage_task': '待办任务',
+    'manage_schedule': '定时日程',
+    'manage_chat_flow': '对话流程管理',
+    'manage_flow': '旧长任务（已停用）',
+    'resolve_pending': '处理遗留待办',
+    'notify_user': '弹窗提醒她（默认要审批）',
+    'request_permission': '申请某工具免审批',
+    'continue_speaking': '主动继续把话说完',
+    'request_text_block': '长文本块输出',
+    'countdown_card': '倒计时卡片',
+    'manage_frequent_tools': '常用工具排序',
+    'manage_tool_test': '工具自测',
+    'report_bug': '提交问题报告',
+    'update_setting': '更新男主设定（默认要审批）',
+  };
+
+  List<String> get _allTools => [
+        for (final tools in _toolGroups.values) ...tools,
+      ];
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.25),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: () => setState(() => _expanded = !_expanded),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.code_outlined,
-                    size: 13,
-                    color: _enabledCodes.isEmpty
-                        ? const Color(0xFF8A7A80).withValues(alpha: 0.5)
-                        : const Color(0xFFE8A0B8),
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _enabledCodes.isEmpty
-                        ? '管家暗号（未启用）'
-                        : '已启用 ${_enabledCodes.length} 个暗号',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: _enabledCodes.isEmpty
-                          ? const Color(0xFF8A7A80).withValues(alpha: 0.5)
-                          : const Color(0xFF6A4A5A),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const Spacer(),
-                  AnimatedRotation(
-                    turns: _expanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      size: 14,
-                      color: const Color(0xFF8A7A80).withValues(alpha: 0.5),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          AnimatedCrossFade(
-            firstChild: const SizedBox.shrink(),
-            secondChild: Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Column(
-                children: _presetCodes.map((c) => _buildCodeRow(c)).toList(),
-              ),
-            ),
-            crossFadeState: _expanded
-                ? CrossFadeState.showSecond
-                : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 200),
-          ),
-        ],
-      ),
-    );
+  void initState() {
+    super.initState();
+    _searchCtrl.addListener(() => setState(() {}));
+    _load();
   }
-
-  Widget _buildCodeRow(_ButlerCode c) {
-    final enabled = _enabledCodes.contains(c.code);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: () {
-          setState(() {
-            if (enabled) {
-              _enabledCodes.remove(c.code);
-            } else {
-              _enabledCodes.add(c.code);
-            }
-          });
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          decoration: BoxDecoration(
-            color: enabled
-                ? const Color(0xFFE8A0B8).withValues(alpha: 0.08)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: enabled
-                      ? const Color(0xFFE8A0B8).withValues(alpha: 0.15)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(
-                    color: enabled
-                        ? const Color(0xFFE8A0B8).withValues(alpha: 0.3)
-                        : const Color(0xFF8A7A80).withValues(alpha: 0.1),
-                  ),
-                ),
-                child: Text(
-                  c.code,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: enabled
-                        ? const Color(0xFFC87090)
-                        : const Color(0xFF8A7A80).withValues(alpha: 0.4),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      c.label,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        color: enabled
-                            ? const Color(0xFF6A4A5A)
-                            : const Color(0xFF8A7A80).withValues(alpha: 0.5),
-                      ),
-                    ),
-                    Text(
-                      c.desc,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 9,
-                        color: const Color(0xFF8A7A80).withValues(alpha: 0.4),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                width: 16,
-                height: 16,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: enabled
-                      ? const Color(0xFFE8A0B8)
-                      : Colors.white.withValues(alpha: 0.5),
-                  border: Border.all(
-                    color: enabled
-                        ? const Color(0xFFE8A0B8)
-                        : const Color(0xFF8A7A80).withValues(alpha: 0.2),
-                  ),
-                ),
-                child: enabled
-                    ? Icon(Icons.check_rounded, size: 10, color: Colors.white)
-                    : null,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ButlerCode {
-  final String code;
-  final String label;
-  final String desc;
-  const _ButlerCode(this.code, this.label, this.desc);
-}
-
-// ─── API / AI 切换区 ───
-class _ApiZone extends StatefulWidget {
-  @override
-  State<_ApiZone> createState() => _ApiZoneState();
-}
-
-class _ApiZoneState extends State<_ApiZone> {
-  bool _expanded = false;
-  final _apiKeyCtrl = TextEditingController();
-  final _endpointCtrl = TextEditingController();
-
-  // 预设 AI
-  static const _presetAIs = ['默认', 'DeepSeek', '本地模型', 'Claude', '自定义'];
-  String _selected = '默认';
 
   @override
   void dispose() {
-    _apiKeyCtrl.dispose();
-    _endpointCtrl.dispose();
+    _searchCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _load() async {
+    final pid = widget.personaId;
+    if (pid.isEmpty) return;
+    // 首次使用：默认必要工具自动免审批（用户可关）
+    final prefs = await SharedPreferences.getInstance();
+    final initedKey = 'tool_exempt_inited_$pid';
+    final inited = prefs.getBool(initedKey) ?? false;
+    if (!inited) {
+      for (final t in _defaultExempt) {
+        await ToolApprovalStore.setExempt(pid, t, true);
+      }
+      await prefs.setBool(initedKey, true);
+    }
+    final map = <String, bool>{};
+    for (final t in _allTools) {
+      map[t] = await ToolApprovalStore.isExempt(pid, t);
+    }
+    if (mounted) {
+      setState(() {
+        _exempt
+          ..clear()
+          ..addAll(map);
+      });
+    }
+  }
+
+  int get _exemptCount =>
+      _exempt.values.where((v) => v).length;
+
+  Future<void> _toggle(String tool, bool value) async {
+    setState(() => _exempt[tool] = value);
+    await ToolApprovalStore.setExempt(widget.personaId, tool, value);
   }
 
   @override
   Widget build(BuildContext context) {
+    final count = _exemptCount;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -991,7 +958,6 @@ class _ApiZoneState extends State<_ApiZone> {
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
             borderRadius: BorderRadius.circular(8),
@@ -1001,17 +967,27 @@ class _ApiZoneState extends State<_ApiZone> {
               child: Row(
                 children: [
                   Icon(
-                    Icons.api_outlined,
+                    Icons.handyman_outlined,
                     size: 13,
-                    color: const Color(0xFF8A7A80).withValues(alpha: 0.5),
+                    color: count > 0
+                        ? const Color(0xFFE8A0B8)
+                        : const Color(0xFF8A7A80).withValues(alpha: 0.5),
                   ),
                   const SizedBox(width: 4),
-                  Text(
-                    'AI 模型：$_selected',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFF6A4A5A),
-                      fontWeight: FontWeight.w500,
+                  Flexible(
+                    child: Text(
+                      widget.personaId.isEmpty
+                          ? 'AI 工具'
+                          : 'AI 工具（$count 个免审批）',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: count > 0
+                            ? const Color(0xFF6A4A5A)
+                            : const Color(0xFF8A7A80).withValues(alpha: 0.5),
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                   const Spacer(),
@@ -1035,87 +1011,40 @@ class _ApiZoneState extends State<_ApiZone> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // AI 选择行
-                  SizedBox(
-                    height: 32,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _presetAIs.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 6),
-                      itemBuilder: (_, i) {
-                        final ai = _presetAIs[i];
-                        final sel = _selected == ai;
-                        return GestureDetector(
-                          onTap: () => setState(() => _selected = ai),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            decoration: BoxDecoration(
-                              color: sel
-                                  ? const Color(
-                                      0xFFE8A0B8,
-                                    ).withValues(alpha: 0.12)
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: sel
-                                    ? const Color(
-                                        0xFFE8A0B8,
-                                      ).withValues(alpha: 0.25)
-                                    : const Color(
-                                        0xFF8A7A80,
-                                      ).withValues(alpha: 0.08),
-                              ),
-                            ),
-                            child: Center(
-                              child: Text(
-                                ai,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: sel
-                                      ? FontWeight.w600
-                                      : FontWeight.normal,
-                                  color: sel
-                                      ? const Color(0xFFC87090)
-                                      : const Color(
-                                          0xFF8A7A80,
-                                        ).withValues(alpha: 0.5),
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      },
+                  Text(
+                    '开 = 免审批（男主直接调用）；关 = 每次弹窗要你确认。'
+                    '默认已给必要工具开了免审批，可手动关。',
+                    style: TextStyle(
+                      fontSize: 9,
+                      height: 1.4,
+                      color: const Color(0xFF8A7A80).withValues(alpha: 0.6),
                     ),
                   ),
                   const SizedBox(height: 6),
-                  // API Key
+                  // 搜索框
                   SizedBox(
-                    height: 30,
+                    height: 28,
                     child: TextField(
-                      controller: _apiKeyCtrl,
-                      maxLines: 1,
-                      obscureText: true,
+                      controller: _searchCtrl,
                       style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF6A4A5A),
-                      ),
+                          fontSize: 11, color: Color(0xFF6A4A5A)),
                       decoration: InputDecoration(
-                        hintText: 'API Key（可选）',
+                        hintText: '搜索工具…',
                         hintStyle: TextStyle(
                           fontSize: 10,
-                          color: const Color(0xFF8A7A80).withValues(alpha: 0.3),
+                          color: const Color(0xFF8A7A80)
+                              .withValues(alpha: 0.3),
                         ),
+                        prefixIcon: const Icon(Icons.search_rounded,
+                            size: 14, color: Color(0xFF8A7A80)),
                         isDense: true,
                         contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 6,
-                        ),
+                            horizontal: 8, vertical: 4),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide(
-                            color: const Color(
-                              0xFF8A7A80,
-                            ).withValues(alpha: 0.1),
+                            color: const Color(0xFF8A7A80)
+                                .withValues(alpha: 0.1),
                           ),
                         ),
                         filled: true,
@@ -1124,37 +1053,16 @@ class _ApiZoneState extends State<_ApiZone> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  // Endpoint
-                  SizedBox(
-                    height: 30,
-                    child: TextField(
-                      controller: _endpointCtrl,
-                      maxLines: 1,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF6A4A5A),
-                      ),
-                      decoration: InputDecoration(
-                        hintText: '自定义 Endpoint（可选）',
-                        hintStyle: TextStyle(
-                          fontSize: 10,
-                          color: const Color(0xFF8A7A80).withValues(alpha: 0.3),
-                        ),
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 6,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(
-                            color: const Color(
-                              0xFF8A7A80,
-                            ).withValues(alpha: 0.1),
-                          ),
-                        ),
-                        filled: true,
-                        fillColor: Colors.white.withValues(alpha: 0.2),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 260),
+                    child: Scrollbar(
+                      child: ListView(
+                        shrinkWrap: true,
+                        padding: EdgeInsets.zero,
+                        children: [
+                          for (final entry in _toolGroups.entries)
+                            ..._buildGroup(entry.key, entry.value),
+                        ],
                       ),
                     ),
                   ),
@@ -1170,70 +1078,343 @@ class _ApiZoneState extends State<_ApiZone> {
       ),
     );
   }
+
+  List<Widget> _buildGroup(String title, List<String> tools) {
+    final q = _searchCtrl.text.trim().toLowerCase();
+    final filtered = q.isEmpty
+        ? tools
+        : tools
+            .where((t) =>
+                t.contains(q) ||
+                (_toolNames[t] ?? '').contains(q))
+            .toList();
+    if (filtered.isEmpty) return const [];
+    return [
+      Padding(
+        padding: const EdgeInsets.only(top: 6, bottom: 2),
+        child: Text(
+          title,
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w600,
+            color: const Color(0xFFB48296),
+            letterSpacing: 0.5,
+          ),
+        ),
+      ),
+      for (final t in filtered) _buildToolRow(t),
+    ];
+  }
+
+  Widget _buildToolRow(String tool) {
+    final on = _exempt[tool] ?? false;
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => _toggle(tool, !on),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: on
+              ? const Color(0xFFE8A0B8).withValues(alpha: 0.06)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 5,
+              height: 5,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: on
+                    ? const Color(0xFFE8A0B8)
+                    : const Color(0xFF8A7A80).withValues(alpha: 0.2),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _toolNames[tool] ?? tool,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: on
+                          ? const Color(0xFF6A4A5A)
+                          : const Color(0xFF8A7A80).withValues(alpha: 0.7),
+                    ),
+                  ),
+                  Text(
+                    _toolDescs[tool] ?? '',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: const Color(0xFF8A7A80)
+                          .withValues(alpha: 0.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 4),
+            // 小号开关
+            Transform.scale(
+              scale: 0.72,
+              child: Switch(
+                value: on,
+                activeTrackColor: const Color(0xFFE8A0B8),
+                activeThumbColor: Colors.white,
+                inactiveTrackColor: const Color(0xFF8A7A80)
+                    .withValues(alpha: 0.15),
+                onChanged: (v) => _toggle(tool, v),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-// ─── 角色语录区 ───
-class _QuoteZone extends StatefulWidget {
+// ─── AI 模型区（per persona 绑定，真实配置） ───
+class _ApiZone extends StatefulWidget {
+  final String personaId;
+  final String personaName;
+  const _ApiZone({required this.personaId, required this.personaName});
+
   @override
-  State<_QuoteZone> createState() => _QuoteZoneState();
+  State<_ApiZone> createState() => _ApiZoneState();
 }
 
-class _QuoteZoneState extends State<_QuoteZone> {
-  final _ctrl = TextEditingController();
+class _ApiZoneState extends State<_ApiZone> {
+  bool _expanded = false;
+  final _manager = AIProviderManager.instance;
 
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
+  String? get _currentId => widget.personaId.isEmpty
+      ? null
+      : _manager.lastProviderFor(widget.personaId);
+
+  String _providerName(String? id) {
+    if (id == null || id.isEmpty) return '未设置';
+    for (final p in _manager.providers) {
+      if (p.id == id) return p.name;
+    }
+    return id;
+  }
+
+  List<String> get _bound => widget.personaId.isEmpty
+      ? const []
+      : (_manager.bindingFor(widget.personaId) ?? const []);
+
+  Future<void> _openConfig() async {
+    await showAiProviderSheet(
+      context: context,
+      personaId: widget.personaId,
+      personaName: widget.personaName,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final hasText = _ctrl.text.trim().isNotEmpty;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.25),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.format_quote_outlined,
-            size: 13,
-            color: hasText
-                ? const Color(0xFFE8A0B8)
-                : const Color(0xFF8A7A80).withValues(alpha: 0.3),
+    return ValueListenableBuilder<int>(
+      valueListenable: _manager.changeNotifier,
+      builder: (context, _, _) {
+        final curId = _currentId;
+        final auto = _manager.autoSwitchFor(widget.personaId);
+        final bound = _bound;
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.25),
+            borderRadius: BorderRadius.circular(12),
           ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: SizedBox(
-              height: 32,
-              child: TextField(
-                controller: _ctrl,
-                maxLines: 1,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF6A4A5A),
-                  fontStyle: FontStyle.italic,
-                ),
-                decoration: InputDecoration(
-                  hintText: '角色语录（不写不显示）',
-                  hintStyle: TextStyle(
-                    fontSize: 11,
-                    color: const Color(0xFF8A7A80).withValues(alpha: 0.3),
-                    fontStyle: FontStyle.italic,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => setState(() => _expanded = !_expanded),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.auto_awesome_outlined,
+                        size: 13,
+                        color: curId != null
+                            ? const Color(0xFFE8A0B8)
+                            : const Color(0xFF8A7A80).withValues(alpha: 0.5),
+                      ),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          'AI：${_providerName(curId)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: curId != null
+                                ? const Color(0xFF6A4A5A)
+                                : const Color(0xFF8A7A80)
+                                    .withValues(alpha: 0.5),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: auto
+                              ? const Color(0xFFE8A0B8).withValues(alpha: 0.12)
+                              : const Color(0xFF8A7A80)
+                                  .withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          auto ? '自动切换' : '不自动切换',
+                          style: TextStyle(
+                            fontSize: 9,
+                            color: auto
+                                ? const Color(0xFFC87090)
+                                : const Color(0xFF8A7A80)
+                                    .withValues(alpha: 0.5),
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      AnimatedRotation(
+                        turns: _expanded ? 0.5 : 0,
+                        duration: const Duration(milliseconds: 200),
+                        child: Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          size: 14,
+                          color: const Color(0xFF8A7A80)
+                              .withValues(alpha: 0.5),
+                        ),
+                      ),
+                    ],
                   ),
-                  border: InputBorder.none,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 6),
                 ),
-                onChanged: (_) => setState(() {}),
               ),
-            ),
+              AnimatedCrossFade(
+                firstChild: const SizedBox.shrink(),
+                secondChild: Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 当前 AI 说明
+                      Text(
+                        widget.personaId.isEmpty
+                            ? '还没有选角色，先从左页选一个角色再配置'
+                            : '这个角色（${widget.personaName}）优先用「${_providerName(curId)}」，'
+                                '${auto ? "它不可用时自动切换其他 AI" : "不可用时直接报错，不偷偷换"}。',
+                        style: TextStyle(
+                          fontSize: 9,
+                          height: 1.4,
+                          color: const Color(0xFF8A7A80).withValues(alpha: 0.6),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      // 已绑定列表
+                      if (bound.isNotEmpty) ...[
+                        Text(
+                          '已绑定：${bound.map(_providerName).join(' → ')}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 9,
+                            height: 1.4,
+                            color: const Color(0xFFB48296),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                      ],
+                      // 自动切换开关
+                      InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => _manager.setAutoSwitch(
+                            widget.personaId, !auto),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 2),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.swap_horiz_rounded,
+                                size: 12,
+                                color: auto
+                                    ? const Color(0xFFE8A0B8)
+                                    : const Color(0xFF8A7A80)
+                                        .withValues(alpha: 0.4),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'AI 不可用时自动切换',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: const Color(0xFF6A4A5A),
+                                  ),
+                                ),
+                              ),
+                              Transform.scale(
+                                scale: 0.72,
+                                child: Switch(
+                                  value: auto,
+                                  activeTrackColor: const Color(0xFFE8A0B8),
+                                  activeThumbColor: Colors.white,
+                                  inactiveTrackColor: const Color(0xFF8A7A80)
+                                      .withValues(alpha: 0.15),
+                                  onChanged: (v) => _manager.setAutoSwitch(
+                                      widget.personaId, v),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      // 打开完整配置
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFC87090),
+                            side: const BorderSide(
+                                color: Color(0xFFE8A0B8), width: 0.8),
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            minimumSize: const Size(0, 28),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          icon: const Icon(Icons.tune_rounded, size: 12),
+                          label: const Text(
+                            '打开完整 AI 配置（API Key / 模型 / 顺序）',
+                            style: TextStyle(fontSize: 10),
+                          ),
+                          onPressed: _openConfig,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                crossFadeState: _expanded
+                    ? CrossFadeState.showSecond
+                    : CrossFadeState.showFirst,
+                duration: const Duration(milliseconds: 200),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
