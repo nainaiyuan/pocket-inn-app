@@ -60,7 +60,15 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
   void _syncControllers() {
     final p = widget.currentPersona;
     if (p == null) return;
-    // 8-13 02:0x 结构化字段/首次问候已删，无控制器需要同步
+    // 8-13 02:2x 本体记忆共享开关：从 SharedPreferences 读真实值（默认开）
+    final pid = p.id;
+    if (pid.isEmpty) return;
+    SharedPreferences.getInstance().then((prefs) {
+      final v = prefs.getBool('memory_share_$pid') ?? true;
+      if (mounted && v != _shareMemory) {
+        setState(() => _shareMemory = v);
+      }
+    });
   }
 
   @override
@@ -356,9 +364,17 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                         _SwitchTile(
                           label: '本体记忆共享',
                           subtitle: '此角色可查看「${widget.currentLead?.name ?? '本体'}」'
-                              '下所有角色的记忆、设定等全部内容',
+                              '下所有角色的记忆、设定等全部内容（男主读记忆/查设定历史时聚合）',
                           value: _shareMemory,
-                          onChanged: (v) => setState(() => _shareMemory = v),
+                          onChanged: (v) {
+                            setState(() => _shareMemory = v);
+                            final pid = widget.currentPersona?.id ?? '';
+                            if (pid.isNotEmpty) {
+                              SharedPreferences.getInstance().then((prefs) {
+                                prefs.setBool('memory_share_$pid', v);
+                              });
+                            }
+                          },
                         ),
                       ],
                     ),

@@ -33,6 +33,51 @@ class MemoryBlockStore {
     _load(personaId);
   }
 
+  /// 8-13 02:2x 本体记忆共享：聚合 Lead 下所有角色的记忆块。
+  /// [members] = Lead 下所有 (id, name)；合并各角色 long/short 成一份，
+  /// 当前角色的块放最前，其他角色的块带「角色名」前缀标注来源。
+  /// 开启后 _sharedIds 非空 → 后续 get/save 都走聚合（写仍写当前角色自己的 key）。
+  static void warmShared(List<({String id, String name})> members) {
+    _sharedIds = [for (final m in members) m.id];
+    _members = members;
+    if (members.isEmpty) return;
+    _loadAll(members);
+  }
+
+  static List<({String id, String name})> _members = const [];
+
+  static List<String> _sharedIds = const [];
+
+  static bool get _isShared => _sharedIds.isNotEmpty;
+
+  static Future<void> _loadAll(List<({String id, String name})> members) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final longParts = <String>[];
+      final shortParts = <String>[];
+      var first = true;
+      for (final m in members) {
+        final long = p.getString(_key(m.id, 'long')) ?? '';
+        final short = p.getString(_key(m.id, 'short')) ?? '';
+        if (long.trim().isEmpty && short.trim().isEmpty) continue;
+        final tag = first ? '' : '【${m.name}】';
+        if (long.trim().isNotEmpty) {
+          longParts.add(first ? long : '$tag $long');
+        }
+        if (short.trim().isNotEmpty) {
+          shortParts.add(first ? short : '$tag $short');
+        }
+        first = false;
+      }
+      _memCache = {
+        'long': longParts.join('\n\n'),
+        'short': shortParts.join('\n\n'),
+      };
+    } catch (e) {
+      _memCache = {'long': '', 'short': ''};
+    }
+  }
+
   static Future<void> _load(String personaId) async {
     if (personaId.isEmpty) return;
     try {
@@ -47,6 +92,10 @@ class MemoryBlockStore {
 
   static Future<Map<String, dynamic>> _read(String personaId) async {
     if (personaId.isEmpty) return {'long': '', 'short': ''};
+    if (_isShared) {
+      // 聚合模式：缓存已含全部角色，直接返回（不覆盖成单角色）
+      return _memCache ?? {'long': '', 'short': ''};
+    }
     await _load(personaId);
     return _memCache ?? {'long': '', 'short': ''};
   }
@@ -63,6 +112,10 @@ class MemoryBlockStore {
     }
     if (_memCache == null) _memCache = {'long': '', 'short': ''};
     _memCache![kind] = trimmed;
+    if (_isShared) {
+      // 聚合模式：写完重聚合，保持缓存含全部角色
+      _loadAll(_members);
+    }
   }
 
   /// 覆盖写入（男主 manage_memory_block 用）

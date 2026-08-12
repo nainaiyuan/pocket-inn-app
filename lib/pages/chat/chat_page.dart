@@ -61,6 +61,7 @@ import 'widgets/chat_message_area.dart';
 import 'services/chat_storage_service.dart';
 import 'services/multi_bubble_parser.dart';
 import 'widgets/character_world_page.dart';
+import '../../services/character_service.dart';
 import 'widgets/chat_input_bar.dart';
 import 'widgets/debug_log_sheet.dart';
 import 'widgets/plus_menu.dart';
@@ -422,6 +423,21 @@ class _ChatPageState extends State<ChatPage>
   String _settingPid() {
     final pid = _state.personaId ?? '';
     return _useTestSpace(pid) ? '$pid${AIProviderManager.mockTestSuffix}' : pid;
+  }
+
+  /// 8-13 02:2x 任意 persona 的测试空间映射（聚合设定历史用）
+  String _settingPidFor(String pid) =>
+      _useTestSpace(pid) ? '$pid${AIProviderManager.mockTestSuffix}' : pid;
+
+  /// 8-13 02:2x 本体记忆共享开关（per persona，默认开）
+  Future<bool> _memoryShareEnabled(String personaId) async {
+    if (personaId.isEmpty) return false;
+    try {
+      final p = await SharedPreferences.getInstance();
+      return p.getBool('memory_share_$personaId') ?? true;
+    } catch (_) {
+      return true;
+    }
   }
 
   /// 8-06 23:55 用户：流程停止条——长任务时强行让男主停止
@@ -1157,7 +1173,8 @@ class _ChatPageState extends State<ChatPage>
     // 8-08 15:2x：工具手册 + 测试任务预热
     ToolManualStore.warm(personaId);
     // 8-12 18:0x：长期/短期记忆块预热（固定区记忆注入）
-    MemoryBlockStore.warm(personaId);
+    // 8-13 02:2x 本体记忆共享：开关开 → 聚合 Lead 下所有角色的记忆块
+    await _warmMemoryBlocks(personaId, lid);
     ToolTestStore.warm(personaId);
     // 8-06 21:26：定时任务计划预热
     TimerPlanStore.warm(personaId);
@@ -7778,36 +7795,77 @@ class _ChatPageState extends State<ChatPage>
   }
 
   /// 工具执行：query_setting_history（男主查设定变更历史）
+  /// 8-13 02:2x 本体记忆共享：预热记忆块（共享开 → 聚合 Lead 下所有角色）
+  Future<void> _warmMemoryBlocks(String personaId, String? lid) async {
+    if (personaId.isEmpty) return;
+    try {
+      final p = await SharedPreferences.getInstance();
+      final share = p.getBool('memory_share_$personaId') ?? true;
+      if (!share || lid == null || lid.isEmpty) {
+        MemoryBlockStore.warm(personaId);
+        return;
+      }
+      final lead = await CharacterService().loadById(lid);
+      final members = <({String id, String name})>[
+        for (final ps in lead?.personas ?? <Persona>[])
+          if (ps.id.isNotEmpty) (id: ps.id, name: ps.name),
+      ];
+      if (members.isEmpty) {
+        MemoryBlockStore.warm(personaId);
+      } else {
+        MemoryBlockStore.warmShared(members);
+      }
+    } catch (_) {
+      MemoryBlockStore.warm(personaId);
+    }
+  }
+
   Future<_ToolResult> _executeQuerySettingHistory(
     Map<String, dynamic> args,
   ) async {
     final pid = _state.personaId ?? '';
     if (pid.isEmpty) return const _ToolResult(false, '查历史失败（缺少角色）');
     final limit = (args['limit'] as num?)?.toInt() ?? 10;
-    // 8-07：测试模式下查测试空间的设定历史
-    final book = await SettingVersionStore.load(_settingPid());
-    final log = book.changelog.take(limit).toList();
-    if (log.isEmpty) {
+    // 8-13 02:2x 本体记忆共享：共享开 → 聚合 Lead 下所有角色的设定历史
+    final share = await _memoryShareEnabled(pid);
+    final books = <(String, SettingBook)>[];
+    if (share && _state.leadId != null) {
+      final lead = await CharacterService().loadById(_state.leadId!);
+      for (final ps in lead?.personas ?? <Persona>[]) {
+        if (ps.id.isEmpty) continue;
+        books.add((ps.name, await SettingVersionStore.load(_settingPidFor(ps.id))));
+      }
+    }
+    if (books.isEmpty) {
+      books.add(('', await SettingVersionStore.load(_settingPid())));
+    }
+    final buf = StringBuffer();
+    var anyLog = false;
+    for (final (name, book) in books) {
+      final log = book.changelog.take(limit).toList();
+      if (log.isEmpty) continue;
+      anyLog = true;
+      buf.writeln(name.isEmpty ? '设定变更历史：' : '【${name}】设定变更历史：');
+      for (final e in log) {
+        final t = e.time;
+        final ts =
+            '${t.month.toString().padLeft(2, '0')}-'
+            '${t.day.toString().padLeft(2, '0')} '
+            '${t.hour.toString().padLeft(2, '0')}:'
+            '${t.minute.toString().padLeft(2, '0')}';
+        buf.writeln('- [$ts] ${e.type == 'user' ? '用户设定' : '男主设定'}：${e.summary}');
+      }
+      buf.writeln(
+        '  当前男主设定：${book.currentMale.isEmpty ? '（空）' : book.currentMale}',
+      );
+      buf.writeln(
+        '  当前用户设定：${book.currentUser.isEmpty ? '（空）' : book.currentUser}',
+      );
+      buf.writeln();
+    }
+    if (!anyLog) {
       return const _ToolResult(true, '还没有设定变更记录——你还没主动优化过设定。');
     }
-    final buf = StringBuffer('设定变更历史（共 ${book.changelog.length} 条）：\n');
-    for (final e in log) {
-      final t = e.time;
-      final ts =
-          '${t.month.toString().padLeft(2, '0')}-'
-          '${t.day.toString().padLeft(2, '0')} '
-          '${t.hour.toString().padLeft(2, '0')}:'
-          '${t.minute.toString().padLeft(2, '0')}';
-      buf.writeln('- [$ts] ${e.type == 'user' ? '用户设定' : '男主设定'}：${e.summary}');
-    }
-    // 附带当前版本信息
-    buf.writeln();
-    buf.writeln(
-      '当前男主设定：${book.currentMale.isEmpty ? '（空）' : book.currentMale}',
-    );
-    buf.writeln(
-      '当前用户设定：${book.currentUser.isEmpty ? '（空）' : book.currentUser}',
-    );
     return _ToolResult(true, buf.toString());
   }
 
