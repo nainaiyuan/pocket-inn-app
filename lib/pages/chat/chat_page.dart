@@ -1072,8 +1072,9 @@ class _ChatPageState extends State<ChatPage>
           '{"need_continue": false}（管家识别这个标记，不会显示给她；'
           '加了这个标记，系统就不会再自动唤醒你）。\n'
           '（8-12 05:2x 用户拍板：两种"不再唤醒"——① 工作区有【当前工作区】'
-          '流程 → 最后一条 JSON 的 sys 写 end_TN（N=流程编号）+ 调 '
-          'save_summary 归档；② 直接写 {"need_continue": false} = 静默结束'
+          '流程 → 最后一条 JSON 的 sys 写 end_TN（N=流程编号），信封里带 '
+          'summary（这个大流程的简短摘要）归档；② 直接写 '
+          '{"need_continue": false} = 静默结束'
           '（不再唤醒，流程保持不归档；下次她说话时工作区会提醒你补 '
           'end_TN + 摘要归档）。）\n'
           '注意：刚做完的事不用再调工具确认（流程已结束就别重复 finish），'
@@ -1444,7 +1445,8 @@ class _ChatPageState extends State<ChatPage>
       // ② 工具轮总轮数上限 6（防 query_logs→list_tools→query_logs 死循环）
       var queryToolCount = 0;
       // 8-08 02:1x 用户：干太快被卡 → 总轮数 6 → 10（防死循环仍保留）
-      const maxToolRounds = 10;
+      // 8-12 20:2x（用户：兜底放宽，正常干活别卡）→ 10 → 12
+      const maxToolRounds = 12;
       while (result.toolCalls != null && result.toolCalls!.isNotEmpty) {
         toolLoop++;
         toolExecuted = true;
@@ -2280,9 +2282,15 @@ class _ChatPageState extends State<ChatPage>
           if (!toolResult.ok && !toolResult.text.startsWith('用户拒绝')) {
             _lastRoundToolFailed = true;
           }
-          // 防死循环：同一工具连续调用 ≥3 次 → 停止本轮
-          final n = (consecutiveToolCounts[name] ?? 0) + 1;
-          consecutiveToolCounts[name] = n;
+          // 8-12 20:2x（用户：连续错 8 次总兜底了吧）——防死循环从
+          // "同一工具连续调用 ≥3"放宽为"同一工具连续失败 ≥8"（成功清零）
+          if (!toolResult.ok && !toolResult.text.startsWith('用户拒绝')) {
+            consecutiveToolCounts[name] =
+                (consecutiveToolCounts[name] ?? 0) + 1;
+          } else {
+            consecutiveToolCounts[name] = 0;
+          }
+          final n = consecutiveToolCounts[name] ?? 0;
           // 8-06 21:36：continue 本轮累计 ≥3 次也停（交错调用防不住"连续"计数）
           if (name == 'continue_speaking') continueCount++;
           // 8-07 22:5x 用户：男主反复查工具卡死——只读查询类工具
@@ -2291,21 +2299,22 @@ class _ChatPageState extends State<ChatPage>
           var queryStop = false;
           if (queryTools.contains(name)) {
             queryToolCount++;
-            if (queryToolCount >= 6) {
+            if (queryToolCount >= 10) {
               queryStop = true;
               DebugLogger.log(
                 'AI路由',
                 '⚠️ 本轮查询类工具累计 $queryToolCount 次（$name），强制停止（防反复查）',
               );
-            } else if (queryToolCount >= 3) {
-              // 8-08 02:1x 用户：干太快被卡 → 3 次只软提示不强制停
+            } else if (queryToolCount >= 6) {
+              // 8-08 02:1x 用户：干太快被卡 → 只软提示不强制停
+              // 8-12 20:2x（用户：正常干活别卡）→ 软提示 3→6，强制 6→10
               DebugLogger.log(
                 'AI路由',
                 '💡 查询类工具已 $queryToolCount 次（$name），软提示（不强制停）',
               );
             }
           }
-          if (n >= 3 ||
+          if (n >= 8 ||
               (name == 'continue_speaking' && continueCount >= 3) ||
               queryStop) {
             loopExceeded = true;
@@ -2358,7 +2367,7 @@ class _ChatPageState extends State<ChatPage>
         // 提醒他直接说缺什么（≥6 才走 loopExceeded 强制停）
         // 8-08 21:5x（GPT10问第7条）：软提示走 state_hint 专区（状态块
         // 【状态提示】），不再混 role:'user' 事件消息
-        if (!loopExceeded && queryToolCount >= 3 && queryToolCount < 6) {
+        if (!loopExceeded && queryToolCount >= 6 && queryToolCount < 10) {
           toolRoundHints.add('本轮已查了 $queryToolCount 次资料。'
               '如果还在找什么，直接告诉她你需要什么（她可以补），'
               '别一直反复查；查到就继续干活，不用停下来说话。');
@@ -2370,10 +2379,10 @@ class _ChatPageState extends State<ChatPage>
             AIChatMessage(
               role: 'user',
               content:
-                  '【系统事件】你本轮调用工具过多（同工具连续/查询类累计/'
-                  '总轮数触发防护），系统已停止你的工具调用。'
-                  '现在就基于已有结果直接回复她，别再申请任何工具；'
-                  '真做不到就老实说"这个我现在做不到"。',
+                  '【系统事件】你本轮调用工具过快/错误过多（同工具连续失败/'
+                  '查询类累计/总轮数触发防护），本轮暂停工具调用。'
+                  '不要基于没查到的内容硬编答案；需要继续就等她下一句后'
+                  '重试，或先明确需求再调用。',
             ),
           );
           // 注入后这轮生成完就停（不继续 while）
@@ -2557,6 +2566,15 @@ class _ChatPageState extends State<ChatPage>
                   '下次唤醒时提醒他写 end_TN + 摘要归档）',
         );
         if (flowEnd == true) {
+          // 8-12 20:2x（用户：结束不用调 save_summary 工具——JSON 信封带
+          // summary 字段即可，管家识别存档；适配不同 AI 的纯文本 JSON 输出）
+          final summaryText = parsedForDb.summaryText.trim();
+          if (summaryText.isNotEmpty) {
+            await ContextManager.instance
+                .appendSummary(personaId, '（大流程摘要）$summaryText');
+            DebugLogger.log('上下文管理',
+                '✅ 信封 summary 已存档（${summaryText.length} 字）');
+          }
           // 8-09 18:4x（用户设计定稿）：退出标记 = 男主声明"回完了+干完了"
           // → 对话流程结束（回复只消条目，退出标记才结束流程）
           // 8-09 21:0x（用户：一个大流程结束男主至少要跟她说一句）：

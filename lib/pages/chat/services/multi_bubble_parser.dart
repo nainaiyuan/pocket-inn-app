@@ -194,6 +194,10 @@ class StructuredOutput {
   /// 静默内容（JSON "sys" 字段值；旧 <sys> 标签同收）——不显示不落库
   final String sysText;
 
+  /// 大流程摘要（JSON "summary" 字段值；8-12 20:2x 用户：结束不用调
+  /// save_summary 工具，JSON 信封带 summary 字段即可，管家识别存档）
+  final String summaryText;
+
   /// 是否带结构化格式（JSON 块或标签块）——打回判断用
   final bool hasFormat;
 
@@ -201,6 +205,7 @@ class StructuredOutput {
     required this.bubbles,
     required this.replyText,
     required this.sysText,
+    required this.summaryText,
     required this.hasFormat,
   });
 }
@@ -215,11 +220,16 @@ final RegExp _sysTagRe = RegExp(r'<sys>([\s\S]*?)</sys>', caseSensitive: false);
 StructuredOutput parseStructuredOutput(String raw) {
   if (raw.trim().isEmpty) {
     return const StructuredOutput(
-        bubbles: [], replyText: '', sysText: '', hasFormat: false);
+        bubbles: [],
+        replyText: '',
+        sysText: '',
+        summaryText: '',
+        hasFormat: false);
   }
 
   final replyParts = <String>[];
   final sysParts = <String>[];
+  final summaryParts = <String>[];
   final blocks = <_Block>[]; // 复用旧 _Block（kind: msg/act/bare + 新增 json）
 
   // ① JSON 数组块（整体解析，内部对象不再单独匹配）
@@ -289,7 +299,7 @@ StructuredOutput parseStructuredOutput(String raw) {
         if (decoded is List) {
           for (final item in decoded) {
             if (item is Map<String, dynamic>) {
-              _jsonMapToBubbles(item, bubbles, replyParts, sysParts);
+              _jsonMapToBubbles(item, bubbles, replyParts, sysParts, summaryParts);
             }
           }
         }
@@ -297,7 +307,7 @@ StructuredOutput parseStructuredOutput(String raw) {
         hasFormat = true;
         final decoded = _tryDecode(b.content);
         if (decoded is Map<String, dynamic>) {
-          _jsonMapToBubbles(decoded, bubbles, replyParts, sysParts);
+          _jsonMapToBubbles(decoded, bubbles, replyParts, sysParts, summaryParts);
         }
       case _BlockKind.msg:
         hasFormat = true;
@@ -366,6 +376,7 @@ StructuredOutput parseStructuredOutput(String raw) {
     bubbles: bubbles,
     replyText: replyParts.join('、'),
     sysText: sysParts.join('\n'),
+    summaryText: summaryParts.join('\n'),
     hasFormat: hasFormat,
   );
 }
@@ -376,6 +387,7 @@ void _jsonMapToBubbles(
   List<BubblePart> bubbles,
   List<String> replyParts,
   List<String> sysParts,
+  List<String> summaryParts,
 ) {
   for (final entry in map.entries) {
     final key = entry.key.toLowerCase();
@@ -411,6 +423,15 @@ void _jsonMapToBubbles(
       case 'sys':
         final v = value?.toString() ?? '';
         if (v.trim().isNotEmpty) sysParts.add(v.trim());
+      case 'summary':
+        final v = value?.toString() ?? '';
+        if (v.trim().isNotEmpty) summaryParts.add(v.trim());
+      case '摘要':
+        final v = value?.toString() ?? '';
+        if (v.trim().isNotEmpty) summaryParts.add(v.trim());
+      case '总结':
+        final v = value?.toString() ?? '';
+        if (v.trim().isNotEmpty) summaryParts.add(v.trim());
     }
   }
 }
