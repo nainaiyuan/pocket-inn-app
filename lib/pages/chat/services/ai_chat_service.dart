@@ -20,11 +20,8 @@ import '../../../services/chat_service.dart';
 import '../../../utils/debug_logger.dart';
 import '../../../services/flow_store.dart';
 import '../../../services/tool_test_store.dart';
-import '../../../services/tool_cache_store.dart';
 import '../../../services/memory_block_store.dart';
 import '../../../services/working_pad_store.dart';
-import '../../../services/timer_plan_store.dart';
-import '../../../services/record_tree_store.dart';
 
 /// 聊天页的 AI 门面 —— 走 AIProviderManager（男主级路由 + 故障切换）。
 ///
@@ -732,13 +729,13 @@ class AiChatService {
       'function': {
         'name': 'manage_pad',
         'description':
-            '管理你自己的"当前任务模块"（便签，8-06 21:12 你设计）。'
+            '管理你的临时记忆（便签，你自己维护，不用她审批）。'
             '干活时把要用到的都写进去：工具查到的结果、查到的东西、干到一半的事、'
             '还要用的记录——这样下一句对话你还知道有什么没干。'
             '你自己判断留什么删什么：干完活的删、正文（对话上下文）里已经有的删'
             '（上下文已有的优先，不重复记）、下次还要用的留着。不设限额，'
             '删的时候自己说行号范围（如"删 3 到 5"）。写摘要时自己清理。'
-            '⚠️ 这是你自己的便签，不需要她审批。',
+            '⚠️ 这是你自己的临时记忆，不需要她审批。',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -2441,66 +2438,16 @@ class AiChatService {
     if (testBlock.isNotEmpty) {
       sb.writeln('\n$testBlock');
     }
-    // 8-06 21:12 用户：男主便签/当前任务模块——他自己维护（从人设区挪来）
+    // 8-12 18:3x（用户：便签=临时记忆，合并成一个概念写清楚；标签永远在，
+    // 空→"无"）——8-06 21:12 用户：男主便签（当前任务模块）自己维护
     final padText = WorkingPadStore.text(personaId);
-    if (padText != null && padText.isNotEmpty) {
-      sb.writeln('\n【你的便签】（你自己维护：查到的、干到一半的、还要用的'
-          '都写在这；干完活的删、正文里已经有的删；写摘要时自己清理）\n$padText');
-    }
-    // 8-06 21:26 用户：定时任务独立区（跟便签分开——计划等触发，便签是正在干的活）
-    final timerText = TimerPlanStore.waitingText(personaId);
-    if (timerText != null && timerText.isNotEmpty) {
-      sb.writeln(
-          '\n【定时任务】（你设的计划，到点会触发；触发完/她明确不要了就从这里移除）\n$timerText');
-    }
-    // 8-06 18:41-19:21 用户：分类记录体系 —— 记录职责 + 现有分类概览
-    // 8-08 00:4x：措辞压缩（12 行 → 7 行核心，男主"醒来"负担更小）
-    sb.writeln('\n【你的记录职责】'
-        '发现值得记的（喜好/习惯/家人/说过的话）：先 query_record 查，'
-        '没有就 add_record 按「归属→关系→对象→类别」选路径'
-        '（归属=用户/男主/其他；如她妈妈的事=["用户","家人","妈妈","喜好"]）。'
-        '记录多挂几组关键词，任意一组命中都能翻出原话和时间。'
-        '改分类（改名/挪动/删除）→ manage_record_tree 弹窗她确认，'
-        '拒绝就给反馈改完再提交。');
-    // 现有分类概览（男主知道有什么，避免重复建；同步缓存读）
-    // 8-08 00:4x：50 → 30 条 + 顶部归属概览一行（每轮省几百字）
-    try {
-      final tree = RecordTreeStore.cached();
-      if (tree != null) {
-        final paths = <String>[];
-        for (final n in tree.nodes) {
-          if (n.parentId != null) {
-            paths.add(RecordTreeStore.pathText(tree, n.id));
-          }
-        }
-        if (paths.isNotEmpty) {
-          sb.writeln('\n【现有分类】（记东西优先挂进这些；都不合适再新建）');
-          final rootCounts = <String, int>{};
-          for (final n in tree.nodes) {
-            if (n.parentId == null) continue;
-            final parent = tree.nodeById(n.parentId ?? '');
-            if (parent == null || parent.parentId != null) continue;
-            rootCounts[parent.name] = (rootCounts[parent.name] ?? 0) + 1;
-          }
-          if (rootCounts.isNotEmpty) {
-            sb.writeln('归属概览：' +
-                rootCounts.entries
-                    .map((e) => '${e.key} ${e.value}类')
-                    .join('、'));
-          }
-          sb.writeln(paths.take(30).join('\n'));
-          if (paths.length > 30) sb.writeln('…共 ${paths.length} 个分类');
-        }
-      }
-    } catch (_) {}
-    // 8-12 18:0x（用户：临时记忆区=工作区固定子块，标签永远在，
-    // 没东西就注入"无"；男主调工具想写就写）——现有 C1/C2 工具缓存
-    // （ToolCacheStore）就是写入通道（manage_tool_cache add/clear）
-    final tempText = ToolCacheStore.text(personaId);
-    sb.writeln('\n【临时记忆】（你自己维护：干活查到/写到一半/还要用的放这；'
-        '用 manage_tool_cache 动作=add 写、clear 清空；干完活把要长期用的'
-        '整理进 record_memory 或便签）');
-    sb.writeln(tempText.isEmpty ? '（无）' : tempText);
+    sb.writeln('\n【临时记忆】（你的便签，自己维护：查到的、干到一半的、'
+        '还要用的随手写这，manage_pad 写；干完删；要长期用的整理进记录）');
+    sb.writeln((padText == null || padText.isEmpty) ? '（无）' : padText);
+    // 8-12 18:3x（用户：定时任务不单独标签——到点触发时直接当大流程步骤，
+    // 工作区不显示清单；想查用 manage_timer_plan 工具）
+    // 8-12 18:3x（用户：记录职责/现有分类是说明+数据，工作区不重复注入——
+    // 说明已挪 SYSTEM_CORE【记忆维护】；记东西时工具返回会带现有分类）
     // 8-12 18:0x（用户：思考过程放工作区最后面）——上轮调工具前的思考
     // （DeepSeek reasoning），参考用不用回复；只保留最近一轮
     if (lastReasoning != null && lastReasoning.isNotEmpty) {

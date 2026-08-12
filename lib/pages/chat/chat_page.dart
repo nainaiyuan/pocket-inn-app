@@ -1817,7 +1817,7 @@ class _ChatPageState extends State<ChatPage>
             toolResult = await _executeManageRecordTree(args);
           } else if (name == 'manage_pad') {
             // 8-06 21:12 用户：男主自己的便签（当前任务模块），自己维护，免审批
-            _appendToolBubble('📋 男主在整理自己的便签…');
+            _appendToolBubble('📋 男主在整理临时记忆…');
             toolResult = await _executeManagePad(args);
           } else if (name == 'manage_tool_cache') {
             // 8-08 02:1x 用户：工具工作缓存——男主干活中间数据（自管免审批）
@@ -5126,7 +5126,7 @@ class _ChatPageState extends State<ChatPage>
       },
       'manage_pad': {
         '动作': 'action', '操作': 'action',
-        '内容': 'content', '便签': 'content',
+        '内容': 'content', '便签': 'content', '临时记忆': 'content',
       },
       'notify_user': {
         '内容': 'messages', '消息': 'messages', '文本': 'messages',
@@ -8059,15 +8059,15 @@ class _ChatPageState extends State<ChatPage>
         DebugLogger.log('指令模块', '📋 便签整体更新（${lines.length} 行）');
         return _ToolResult(
           true,
-          '便签已更新（${lines.length} 行）。'
+          '临时记忆已更新（${lines.length} 行）。'
           '${lines.isEmpty ? '已清空。' : '下一句对话你会带着它。'}',
         );
       case 'append':
         final content = args['content']?.toString().trim() ?? '';
-        if (content.isEmpty) return const _ToolResult(false, '便签没写内容');
+        if (content.isEmpty) return const _ToolResult(false, '临时记忆没写内容');
         await WorkingPadStore.append(personaId, content);
         DebugLogger.log('指令模块', '📋 便签追加一行');
-        return _ToolResult(true, '已记到便签：$content');
+        return _ToolResult(true, '已记到临时记忆：$content');
       case 'remove':
         final from = (args['from'] as num?)?.toInt() ?? 0;
         final to = (args['to'] as num?)?.toInt();
@@ -8075,16 +8075,16 @@ class _ChatPageState extends State<ChatPage>
         if (n == 0) {
           return _ToolResult(
             false,
-            '删除失败：便签没有第 $from 行'
+            '删除失败：临时记忆没有第 $from 行'
             '（先查一下现在有哪几行）',
           );
         }
         DebugLogger.log('指令模块', '📋 便签删了 $n 行');
-        return _ToolResult(true, '便签删了 $n 行（第 $from 行起）。');
+        return _ToolResult(true, '临时记忆删了 $n 行（第 $from 行起）。');
       default:
         return _ToolResult(
           false,
-          '便签操作失败：未知动作「$action」。'
+          '临时记忆操作失败：未知动作「$action」。'
           '可用动作：set（整体更新，要 content）/append（追加，要 content）'
           '/remove（删行，要 from，可选 to）。'
           '示例：{"action":"set","content":"第一行\\n第二行"}；'
@@ -8230,6 +8230,7 @@ class _ChatPageState extends State<ChatPage>
       'add_record': '记记录',
       'manage_record_tree': '调分类',
       'manage_pad': '整理便签',
+      '临时记忆': 'manage_pad',
       'manage_tool_cache': '整理工具缓存',
       'manage_flow': '流程',
       'continue_speaking': '继续说',
