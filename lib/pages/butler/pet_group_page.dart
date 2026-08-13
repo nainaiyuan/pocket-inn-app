@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -66,6 +67,18 @@ class _PetGroupPageState extends State<PetGroupPage> {
   List<_StepEdit> _steps = [];
   List<PetProfile> _profiles = [];
   bool _saving = false;
+  // ---- 预览框状态（圆圈=小人，同框看互动）----
+  final Map<String, PetPoint> _previewPos = {};
+  int _previewStepIdx = -1; // -1 = 初始摆位
+  bool _playing = false;
+  static const _slotColors = [
+    Color(0xFFB0789A),
+    Color(0xFF7A9AB0),
+    Color(0xFFA0B078),
+    Color(0xFFD0A070),
+    Color(0xFF9078B0),
+    Color(0xFF70A8A0),
+  ];
 
   @override
   void initState() {
@@ -132,6 +145,141 @@ class _PetGroupPageState extends State<PetGroupPage> {
       ));
   }
 
+  // ---------------- 预览框（同框看互动） ----------------
+
+  void _ensurePreview() {
+    if (_previewPos.isNotEmpty) return;
+    _resetPreview();
+  }
+
+  void _resetPreview() {
+    final n = _slots.length;
+    _previewPos.clear();
+    for (var i = 0; i < n; i++) {
+      _previewPos[_slots[i].slotId] = PetPoint((i + 1) / (n + 1), 0.6);
+    }
+    _previewStepIdx = -1;
+  }
+
+  /// 某步结束后每个坑的位置（基于传入的当前位置）
+  Map<String, PetPoint> _stepEnd(Map<String, PetPoint> base, _StepEdit step) {
+    final out = Map<String, PetPoint>.from(base);
+    for (final ss in step.slotSteps) {
+      final cur = out[ss.slotId];
+      if (cur == null) continue;
+      out[ss.slotId] = _applyMove(ss, cur, out);
+    }
+    return out;
+  }
+
+  PetPoint _applyMove(
+      _SlotStepEdit ss, PetPoint cur, Map<String, PetPoint> all) {
+    PetPoint target = cur;
+    switch (ss.moveType) {
+      case PetGroupMoveType.stay:
+        return cur;
+      case PetGroupMoveType.dir:
+        final d = _dirVec(ss.moveDir);
+        target = PetPoint(cur.x + d.x * ss.moveDist, cur.y + d.y * ss.moveDist);
+      case PetGroupMoveType.spot:
+        target = ss.spot;
+      case PetGroupMoveType.approach:
+        final partner = _partnerPos(ss.slotId, all);
+        if (partner != null) {
+          final dx = cur.x - partner.x;
+          final dy = cur.y - partner.y;
+          final len = math.sqrt(dx * dx + dy * dy);
+          if (len > 1e-6) {
+            target = PetPoint(partner.x + dx / len * ss.approachDist,
+                partner.y + dy / len * ss.approachDist);
+          }
+        }
+      case PetGroupMoveType.leave:
+        final partner = _partnerPos(ss.slotId, all);
+        if (partner != null) {
+          final dx = cur.x - partner.x;
+          final dy = cur.y - partner.y;
+          final len = math.sqrt(dx * dx + dy * dy);
+          if (len > 1e-6) {
+            target = PetPoint(cur.x + dx / len * ss.leaveDist,
+                cur.y + dy / len * ss.leaveDist);
+          } else {
+            target = PetPoint(cur.x + ss.leaveDist, cur.y);
+          }
+        }
+      case PetGroupMoveType.wall:
+        final d = _dirVec(ss.moveDir);
+        target = PetPoint(cur.x + d.x * 10, cur.y + d.y * 10);
+    }
+    return PetPoint(target.x.clamp(0.05, 0.95), target.y.clamp(0.05, 0.95));
+  }
+
+  PetPoint? _partnerPos(String slotId, Map<String, PetPoint> all) {
+    for (final entry in all.entries) {
+      if (entry.key != slotId) return entry.value;
+    }
+    return null;
+  }
+
+  PetPoint _dirVec(PetMoveDir d) => switch (d) {
+        PetMoveDir.left => const PetPoint(-1, 0),
+        PetMoveDir.right => const PetPoint(1, 0),
+        PetMoveDir.up => const PetPoint(0, -1),
+        PetMoveDir.down => const PetPoint(0, 1),
+        PetMoveDir.upLeft => const PetPoint(-0.707, -0.707),
+        PetMoveDir.upRight => const PetPoint(0.707, -0.707),
+        PetMoveDir.downLeft => const PetPoint(-0.707, 0.707),
+        PetMoveDir.downRight => const PetPoint(0.707, 0.707),
+      };
+
+  /// 点步骤 chip：从初始摆位演到第 idx 步结束后的位置
+  void _previewStep(int idx) {
+    if (_playing) return;
+    _ensurePreview();
+    final n = _slots.length;
+    final pos = <String, PetPoint>{};
+    for (var i = 0; i < n; i++) {
+      pos[_slots[i].slotId] = PetPoint((i + 1) / (n + 1), 0.6);
+    }
+    for (var i = 0; i <= idx && i < _steps.length; i++) {
+      pos
+        ..clear()
+        ..addAll(_stepEnd(pos, _steps[i]));
+    }
+    setState(() {
+      _previewPos
+        ..clear()
+        ..addAll(pos);
+      _previewStepIdx = idx;
+    });
+  }
+
+  /// 从头自动播放整个剧本
+  Future<void> _playPreview() async {
+    if (_playing || _steps.isEmpty) return;
+    _ensurePreview();
+    setState(() {
+      _playing = true;
+      _previewStepIdx = -1;
+      _resetPreview();
+    });
+    for (var i = 0; i < _steps.length; i++) {
+      if (!mounted) return;
+      final end = _stepEnd(_previewPos, _steps[i]);
+      setState(() {
+        _previewPos
+          ..clear()
+          ..addAll(end);
+        _previewStepIdx = i;
+      });
+      final secs = double.tryParse(_steps[i].durCtrl.text.trim()) ?? 1.0;
+      await Future.delayed(Duration(
+          milliseconds: (secs * 1000).clamp(400, 5000).round()));
+      if (!mounted) return;
+    }
+    if (mounted) setState(() => _playing = false);
+  }
+
   // ---------------- 坑 ----------------
 
   void _addSlot() {
@@ -149,6 +297,7 @@ class _PetGroupPageState extends State<PetGroupPage> {
       for (final step in _steps) {
         step.slotSteps.add(_SlotStepEdit(slot.slotId));
       }
+      _resetPreview();
     });
   }
 
@@ -158,6 +307,7 @@ class _PetGroupPageState extends State<PetGroupPage> {
       for (final step in _steps) {
         step.slotSteps.removeWhere((s) => s.slotId == slot.slotId);
       }
+      _resetPreview();
     });
   }
 
@@ -169,11 +319,15 @@ class _PetGroupPageState extends State<PetGroupPage> {
       step.slotSteps =
           _slots.map((s) => _SlotStepEdit(s.slotId)).toList();
       _steps.add(step);
+      _resetPreview();
     });
   }
 
   void _removeStep(_StepEdit step) {
-    setState(() => _steps.remove(step));
+    setState(() {
+      _steps.remove(step);
+      _resetPreview();
+    });
   }
 
   // ---------------- 保存 ----------------
@@ -383,6 +537,9 @@ class _PetGroupPageState extends State<PetGroupPage> {
             ],
           ),
           const SizedBox(height: 14),
+          // ---------- 预览框：同框看小人怎么互动 ----------
+          _buildPreviewCard(),
+          const SizedBox(height: 14),
           // ---------- 角色坑 ----------
           Row(children: [
             const Text('角色坑（想几个人就几个）',
@@ -438,6 +595,153 @@ class _PetGroupPageState extends State<PetGroupPage> {
               ),
             ),
           ]),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPreviewCard() {
+    _ensurePreview();
+    final ratio = (MediaQuery.of(context).size.width /
+            MediaQuery.of(context).size.height)
+        .clamp(0.45, 1.5);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0x22D8C8CE)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Text('预览框（圆圈 = 小人，跟着剧本动）',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            IconButton(
+              onPressed: _playing ? null : _resetPreview,
+              icon: const Icon(Icons.refresh, size: 16),
+              color: const Color(0xFFB0A0A6),
+              visualDensity: VisualDensity.compact,
+              tooltip: '回到初始摆位',
+            ),
+            FilledButton.icon(
+              onPressed: _playing ? null : _playPreview,
+              icon: Icon(
+                  _playing ? Icons.hourglass_top : Icons.play_arrow,
+                  size: 15),
+              label: Text(_playing ? '播放中' : '▶ 播放全部',
+                  style: const TextStyle(fontSize: 11.5)),
+              style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFB0789A),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6)),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          AspectRatio(
+            aspectRatio: ratio,
+            child: LayoutBuilder(
+              builder: (ctx, cons) {
+                final w = cons.maxWidth;
+                final h = cons.maxHeight;
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Stack(
+                    children: [
+                      // 聊天框区域
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        top: h * 0.78,
+                        bottom: 0,
+                        child: Container(
+                          color: const Color(0x22E8D8E2),
+                          alignment: Alignment.topCenter,
+                          padding: const EdgeInsets.only(top: 2),
+                          child: const Text('聊天框',
+                              style: TextStyle(
+                                  fontSize: 9, color: Color(0xFFB0A0A6))),
+                        ),
+                      ),
+                      // 各坑小人
+                      for (var i = 0; i < _slots.length; i++)
+                        if (_previewPos[_slots[i].slotId] != null)
+                          AnimatedPositioned(
+                            duration:
+                                const Duration(milliseconds: 600),
+                            curve: Curves.easeInOut,
+                            left: _previewPos[_slots[i].slotId]!.x * w - 20,
+                            top: _previewPos[_slots[i].slotId]!.y * h - 20,
+                            width: 40,
+                            height: 40,
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: 26,
+                                  height: 26,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: _slotColors[
+                                        i % _slotColors.length],
+                                    border: Border.all(
+                                        color: Colors.white, width: 2),
+                                    boxShadow: const [
+                                      BoxShadow(
+                                          color: Color(0x22000000),
+                                          blurRadius: 3)
+                                    ],
+                                  ),
+                                  child: const Icon(Icons.pets,
+                                      size: 14, color: Colors.white),
+                                ),
+                                const SizedBox(height: 1),
+                                Text(
+                                  _slots[i].label,
+                                  style: const TextStyle(
+                                      fontSize: 8.5,
+                                      color: Color(0xFF6A4A5A)),
+                                ),
+                              ],
+                            ),
+                          ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 6),
+          // 步骤条：点哪步看哪步（从初始摆位演到那步）
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              ChoiceChip(
+                label: const Text('初始摆位',
+                    style: TextStyle(fontSize: 10.5)),
+                selected: _previewStepIdx == -1,
+                showCheckmark: false,
+                visualDensity: VisualDensity.compact,
+                selectedColor: const Color(0xFFE8D8E2),
+                onSelected: (_) {
+                  if (_playing) return;
+                  setState(() => _resetPreview());
+                },
+              ),
+              for (var i = 0; i < _steps.length; i++)
+                ChoiceChip(
+                  label: Text('步骤${i + 1}',
+                      style: const TextStyle(fontSize: 10.5)),
+                  selected: _previewStepIdx == i,
+                  showCheckmark: false,
+                  visualDensity: VisualDensity.compact,
+                  selectedColor: const Color(0xFFE8D8E2),
+                  onSelected: (_) => _previewStep(i),
+                ),
+            ],
+          ),
         ],
       ),
     );
@@ -723,15 +1027,20 @@ class _PetGroupPageState extends State<PetGroupPage> {
             ),
           ]),
           const SizedBox(height: 4),
-          for (final ss in step.slotSteps) _buildSlotStepEditor(ss),
+          for (final ss in step.slotSteps)
+            _buildSlotStepEditor(ss, stepIndex: i),
         ],
       ),
     );
   }
 
-  Widget _buildSlotStepEditor(_SlotStepEdit ss) {
+  Widget _buildSlotStepEditor(_SlotStepEdit ss, {required int stepIndex}) {
     final slot = _slots.where((s) => s.slotId == ss.slotId).firstOrNull;
     if (slot == null) return const SizedBox.shrink();
+    // 改参数后，如果预览正停在这步，就用最新参数重演这步
+    void refresh() {
+      if (_previewStepIdx == stepIndex) _previewStep(stepIndex);
+    }
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(10),
@@ -758,7 +1067,10 @@ class _PetGroupPageState extends State<PetGroupPage> {
                   DropdownMenuItem<String?>(
                       value: a.id, child: Text(a.name)),
               ],
-              onChanged: (v) => setState(() => ss.actionId = v),
+              onChanged: (v) {
+                setState(() => ss.actionId = v);
+                refresh();
+              },
             ),
             const SizedBox(width: 8),
             // 怎么动
@@ -780,6 +1092,7 @@ class _PetGroupPageState extends State<PetGroupPage> {
                   if (v == PetGroupMoveType.approach) ss.approachDist = 0.05;
                   if (v == PetGroupMoveType.leave) ss.leaveDist = 0.3;
                 });
+                refresh();
               },
             ),
           ]),
@@ -788,7 +1101,7 @@ class _PetGroupPageState extends State<PetGroupPage> {
               style: const TextStyle(
                   fontSize: 10, color: Color(0xFFB0A0A6))),
           const SizedBox(height: 6),
-          ..._moveParams(ss),
+          ..._moveParams(ss, stepIndex: stepIndex, refresh: refresh),
         ],
       ),
     );
@@ -803,7 +1116,8 @@ class _PetGroupPageState extends State<PetGroupPage> {
         PetGroupMoveType.wall => '沿方向一直走到屏幕边',
       };
 
-  List<Widget> _moveParams(_SlotStepEdit ss) {
+  List<Widget> _moveParams(_SlotStepEdit ss,
+      {required int stepIndex, required VoidCallback refresh}) {
     switch (ss.moveType) {
       case PetGroupMoveType.stay:
         return const [];
@@ -815,7 +1129,10 @@ class _PetGroupPageState extends State<PetGroupPage> {
             value: ss.moveDist,
             min: 0.1,
             max: 0.9,
-            onChanged: (v) => setState(() => ss.moveDist = v),
+            onChanged: (v) {
+              setState(() => ss.moveDist = v);
+              refresh();
+            },
           ),
         ];
       case PetGroupMoveType.spot:
@@ -824,7 +1141,10 @@ class _PetGroupPageState extends State<PetGroupPage> {
             anchor: const PetPoint(0.5, 0.5),
             anchorVisible: false,
             initialTarget: ss.spot,
-            onChanged: (r) => ss.spot = r.target,
+            onChanged: (r) {
+              ss.spot = r.target;
+              refresh();
+            },
           ),
         ];
       case PetGroupMoveType.approach:
@@ -834,7 +1154,10 @@ class _PetGroupPageState extends State<PetGroupPage> {
             value: ss.approachDist,
             min: 0.0,
             max: 0.2,
-            onChanged: (v) => setState(() => ss.approachDist = v),
+            onChanged: (v) {
+              setState(() => ss.approachDist = v);
+              refresh();
+            },
           ),
         ];
       case PetGroupMoveType.leave:
@@ -844,7 +1167,10 @@ class _PetGroupPageState extends State<PetGroupPage> {
             value: ss.leaveDist,
             min: 0.1,
             max: 0.8,
-            onChanged: (v) => setState(() => ss.leaveDist = v),
+            onChanged: (v) {
+              setState(() => ss.leaveDist = v);
+              refresh();
+            },
           ),
         ];
       case PetGroupMoveType.wall:
@@ -864,7 +1190,10 @@ class _PetGroupPageState extends State<PetGroupPage> {
             showCheckmark: false,
             visualDensity: VisualDensity.compact,
             selectedColor: const Color(0xFFE8D8E2),
-            onSelected: (_) => setState(() => ss.moveDir = d),
+            onSelected: (_) {
+              setState(() => ss.moveDir = d);
+              refresh();
+            },
           ),
       ],
     );
