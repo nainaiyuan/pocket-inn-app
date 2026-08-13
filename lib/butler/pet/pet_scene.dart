@@ -672,6 +672,18 @@ class PetScene {
   /// 互动组结束回调（UI 监听，比如散场后做点什么）
   void Function(PetGroupRun run)? onGroupFinished;
 
+  /// 可自动触发的互动组（UI 层从数据库加载后注入）
+  List<PetGroupRuntime> groupRuntimes = const [];
+
+  /// 距离检测计时器
+  double _groupCheckAcc = 0;
+
+  /// 互动组散场后的冷却（防止立刻重触发）
+  DateTime? _groupCooldownUntil;
+
+  /// 开演前各小人正在播的单人动作（散场 resume 用）
+  final Map<String, String?> _preRunActions = {};
+
   PetScene({required this.frames}) {
     // 加载内置动作模板
     for (final a in PetBuiltinActions.all) {
@@ -779,9 +791,83 @@ class PetScene {
       run.update(dt);
       if (run.finished) {
         _groupRun = null;
+        _groupCooldownUntil =
+            DateTime.now().add(const Duration(seconds: 3));
+        _applyExitMode(run);
         onGroupFinished?.call(run);
       }
+    } else {
+      // 没有在演 → 周期检查距离触发
+      _groupCheckAcc += dt;
+      if (_groupCheckAcc >= 0.8) {
+        _groupCheckAcc = 0;
+        _maybeAutoStartGroup();
+      }
     }
+  }
+
+  /// 距离自动触发：互动组里所有绑定的小人都在场，且两两距离都 ≤ 触发距离 → 开演
+  void _maybeAutoStartGroup() {
+    if (_groupRun != null) return;
+    final cd = _groupCooldownUntil;
+    if (cd != null && DateTime.now().isBefore(cd)) return;
+    for (final rt in groupRuntimes) {
+      final def = rt.def;
+      final trigger = def.triggerDist;
+      if (trigger == null || def.slots.length < 2) continue;
+      final cast = <Pet>[];
+      var ok = true;
+      for (final slot in def.slots) {
+        final pid = slot.bindPetId;
+        if (pid == null) {
+          ok = false;
+          break;
+        }
+        final pet = petById(pid);
+        if (pet == null) {
+          ok = false;
+          break;
+        }
+        cast.add(pet);
+      }
+      if (!ok) continue;
+      var maxDist = 0.0;
+      for (var i = 0; i < cast.length; i++) {
+        for (var j = i + 1; j < cast.length; j++) {
+          final d = cast[i].position.distanceTo(cast[j].position);
+          if (d > maxDist) maxDist = d;
+        }
+      }
+      if (maxDist <= trigger) {
+        startGroup(def, cast, def.slots,
+            slotActions: rt.slotActions, slotFrames: rt.slotFrames);
+        return;
+      }
+    }
+  }
+
+  /// 散场：idle = 回待机；resume = 接着开演前各自的单人动作
+  void _applyExitMode(PetGroupRun run) {
+    final resume = run.def.exitMode == 'resume';
+    for (final pet in run.cast) {
+      if (!resume) {
+        pet.stop();
+        continue;
+      }
+      final aid = _preRunActions[pet.id];
+      final def = aid != null ? _actionDefs[aid] : null;
+      if (def != null) {
+        // 帧是异步加载的：先回待机，帧到了再接着播
+        pet.stop();
+        unawaited(frames.framesFor(def.id).then((f) {
+          if (f.isEmpty) return;
+          pet.playAction(def, f);
+        }));
+      } else {
+        pet.stop();
+      }
+    }
+    _preRunActions.clear();
   }
 
   /// 给指定小人播放组合动作
@@ -1029,6 +1115,19 @@ class PetScene {
 // - 每步开始：给每个坑播它动作库里的动作 + 按移动类型算目标点并 moveTo
 // - 每步时长：自动取各坑动作时长最大值（最少 2.5s），或用手动时长
 // - 帧/移动的逐帧推进仍由各 Pet 自己的 update() 完成，这里只管编排和计时
+/// 互动组运行时数据（def + 各坑动作库 + 帧），由 UI 层从数据库加载后注入场景
+class PetGroupRuntime {
+  final PetGroupDef def;
+  final Map<String, PetActionDef> slotActions;
+  final Map<String, List<String>> slotFrames;
+
+  PetGroupRuntime({
+    required this.def,
+    required this.slotActions,
+    required this.slotFrames,
+  });
+}
+
 class PetGroupRun {
   final PetGroupDef def;
   final List<Pet> cast;
@@ -1044,6 +1143,7 @@ class PetGroupRun {
   double _stepDuration = 2.5;
   bool _stepStarted = false;
   bool _finished = false;
+  bool _paused = false;
 
   PetGroupRun({
     required this.def,
@@ -1063,9 +1163,23 @@ class PetGroupRun {
   PetGroupStep? get currentStep =>
       _stepIndex < def.steps.length ? def.steps[_stepIndex] : null;
 
+  /// 暂停（提起来）：停掉各小人的移动，步骤计时冻结；放下后 resume 续播
+  void pause() {
+    if (_paused || _finished) return;
+    _paused = true;
+    for (final pet in cast) {
+      pet.stopMoving();
+    }
+  }
+
+  void resume() {
+    if (!_paused) return;
+    _paused = false;
+  }
+
   /// 场景每帧调用（先让各 Pet 自己 update，再推进编排计时）
   void update(double dt) {
-    if (_finished) return;
+    if (_finished || _paused) return;
     if (_stepIndex >= def.steps.length) {
       _finished = true;
       return;
@@ -1239,8 +1353,11 @@ extension PetSceneGroup on PetScene {
     required Map<String, List<String>> slotFrames,
   }) {
     if (cast.isEmpty || cast.length != slots.length) return null;
-    // 结束各自现有活动/互动，纳入组编排
+    // 记下开演前各自在播的单人动作（散场 resume 用），再纳入组编排
     for (final pet in cast) {
+      final aid = pet.currentActionId;
+      _preRunActions[pet.id] =
+          (aid == null || aid == 'idle') ? null : aid;
       pet.stop();
       pet._activity = null;
     }
@@ -1263,5 +1380,14 @@ extension PetSceneGroup on PetScene {
     for (final pet in run.cast) {
       pet.stop();
     }
+    for (final pet in run.cast) {
+      _preRunActions.remove(pet.id);
+    }
   }
+
+  /// 暂停（提起来）：冻结剧本计时 + 停移动
+  void pauseGroup() => _groupRun?.pause();
+
+  /// 续播（放下）
+  void resumeGroup() => _groupRun?.resume();
 }

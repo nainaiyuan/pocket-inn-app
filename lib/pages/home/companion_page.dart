@@ -62,6 +62,8 @@ class _CompanionPageState extends State<CompanionPage>
     // 按右页设置同步小人（首次自动创建男主小人）
     await world.syncVisible();
     _syncSpeakCallbacks(world);
+    // 加载互动组运行时（距离自动触发用）
+    await _loadGroupRuntimes(world);
 
     // 右页改设置 → 同步场景
     PetSettingsNotifier.instance.addListener(_onPetSettingsChanged);
@@ -77,6 +79,32 @@ class _CompanionPageState extends State<CompanionPage>
     PetBridge.instance.attach(world);
   }
 
+  /// 从数据库加载所有互动组（def + 各坑动作库 + 帧）注入场景，供距离自动触发
+  Future<void> _loadGroupRuntimes(PetWorld world) async {
+    try {
+      final store = PetStore();
+      final groups = await store.allGroups();
+      final runtimes = <PetGroupRuntime>[];
+      for (final g in groups) {
+        final slotActions = <String, PetActionDef>{};
+        final slotFrames = <String, List<String>>{};
+        for (final slot in g.slots) {
+          final acts = await store.slotActions(slot.slotId);
+          for (final a in acts) {
+            slotActions[a.id] = a;
+            slotFrames[a.id] = await FilePetFrameSource().framesFor(a.id);
+          }
+        }
+        runtimes.add(PetGroupRuntime(
+            def: g, slotActions: slotActions, slotFrames: slotFrames));
+      }
+      world.scene.groupRuntimes = runtimes;
+      DebugLogger.log('桌宠', '互动组运行时加载完成：${runtimes.length} 组');
+    } catch (e) {
+      DebugLogger.log('桌宠', '加载互动组运行时失败: $e');
+    }
+  }
+
   void _syncSpeakCallbacks(PetWorld world) {
     for (final pet in world.scene.pets) {
       pet.onSpeak = (petId, text) => _showSpeech(petId, text);
@@ -89,6 +117,8 @@ class _CompanionPageState extends State<CompanionPage>
     world.syncVisible().then((_) {
       if (!mounted) return;
       _syncSpeakCallbacks(world);
+      // 互动组增删改后同步运行时
+      _loadGroupRuntimes(world);
       setState(() {});
     });
   }
@@ -288,6 +318,11 @@ class _CompanionPageState extends State<CompanionPage>
 
   void _onPetDrag(PetWorld world, Pet pet, DragUpdateDetails d, double w, double h) {
     if (w <= 0 || h <= 0) return;
+    // 互动组在演 → 提起来暂停（放下续播）
+    final groupRun = world.scene.groupRun;
+    if (groupRun != null && groupRun.cast.contains(pet)) {
+      world.scene.pauseGroup();
+    }
     // 双人互动中拖走 = 打断（留下的一方播配置的"被打断后动作"）
     if (pet.inDuo) {
       world.breakDuo(pet.id);
@@ -323,6 +358,7 @@ class _CompanionPageState extends State<CompanionPage>
         _showToast('已解除控制');
       }
     }
+    world.scene.resumeGroup();
     _maybeStartDuo(world, pet);
   }
 
@@ -335,6 +371,8 @@ class _CompanionPageState extends State<CompanionPage>
   }
 
   void _maybeStartDuo(PetWorld world, Pet pet) {
+    // 互动组在演时，旧的"松手贴贴"不触发，避免两套系统打架
+    if (world.scene.groupRun != null) return;
     final duoActions = world.scene.actionDefs.values
         .where((d) => d.kind == PetActionKind.duo)
         .toList();
