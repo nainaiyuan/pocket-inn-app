@@ -238,6 +238,52 @@ class _PetSetupPageState extends State<PetSetupPage> {
                 ),
                 const SizedBox(height: 18),
 
+                // ═══ 单角色 ═══
+                Row(
+                  children: [
+                    const Text('单角色',
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF6A4A5A))),
+                    const Spacer(),
+                    Text('${_profiles.length} 个',
+                        style: const TextStyle(
+                            fontSize: 12, color: Color(0xFFB0A0A6))),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                const Text('点小框进去：基础动作 + 组合动作',
+                    style: TextStyle(fontSize: 11, color: Color(0xFFB0A0A6))),
+                const SizedBox(height: 10),
+                if (_profiles.isEmpty)
+                  const _EmptyHint(text: '还没有小人，点下面「＋」新建第一个'),
+                const SizedBox(height: 10),
+                GridView.count(
+                  crossAxisCount: 2,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 0.82,
+                  children: [
+                    for (final pet in _profiles)
+                      _PetCard(
+                        pet: pet,
+                        onTap: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                    PetProfilePage(petId: pet.petId)),
+                          );
+                          _load();
+                        },
+                        onToggle: (v) => _toggle(pet, v),
+                      ),
+                    _NewBox(label: '新建小人', onTap: _createPet),
+                  ],
+                ),
                 // ═══ 多角色互动 ═══
                 Row(
                   children: [
@@ -260,76 +306,31 @@ class _PetSetupPageState extends State<PetSetupPage> {
                     style: TextStyle(fontSize: 11, color: Color(0xFFB0A0A6))),
                 const SizedBox(height: 10),
                 if (_duoConfigs.isEmpty)
-                  _EmptyHint(
-                      text: '还没有互动\n点下面「＋」配第一对（如 A+B 贴贴）')
-                else
-                  GridView.count(
-                    crossAxisCount: 2,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    childAspectRatio: 0.95,
-                    children: [
-                      for (final c in _duoConfigs)
-                        _DuoCard(
-                          config: c,
-                          petA: _petById(c.petA),
-                          petB: _petById(c.petB),
-                          actionName: _actionName(c.actionId),
-                          onTap: () => _editDuo(c),
-                          onDelete: () => _deleteDuo(c),
-                        ),
-                      _NewBox(label: '新建互动', onTap: () => _editDuo(null)),
-                    ],
-                  ),
-                const SizedBox(height: 20),
-
-                // ═══ 单角色 ═══
-                Row(
+                  const _EmptyHint(
+                      text: '还没有互动，点下面「＋」配第一对（如 A+B 贴贴）'),
+                const SizedBox(height: 10),
+                GridView.count(
+                  crossAxisCount: 2,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 0.95,
                   children: [
-                    const Text('单角色',
-                        style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF6A4A5A))),
-                    const Spacer(),
-                    Text('${_profiles.length} 个',
-                        style: const TextStyle(
-                            fontSize: 12, color: Color(0xFFB0A0A6))),
+                    for (final c in _duoConfigs)
+                      _DuoCard(
+                        config: c,
+                        petA: _petById(c.petA),
+                        petB: _petById(c.petB),
+                        actionName: _actionName(c.actionId),
+                        onTap: () => _editDuo(c),
+                        onDelete: () => _deleteDuo(c),
+                      ),
+                    _NewBox(label: '新建互动', onTap: () => _editDuo(null)),
                   ],
                 ),
-                const SizedBox(height: 4),
-                const Text('点小框进去：基础动作 + 组合动作',
-                    style: TextStyle(fontSize: 11, color: Color(0xFFB0A0A6))),
-                const SizedBox(height: 10),
-                if (_profiles.isEmpty)
-                  _EmptyHint(text: '还没有小人\n点下面「＋」新建第一个')
-                else
-                  GridView.count(
-                    crossAxisCount: 2,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    childAspectRatio: 0.82,
-                    children: [
-                      for (final pet in _profiles) _PetCard(
-                        pet: pet,
-                        onTap: () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) =>
-                                    PetProfilePage(petId: pet.petId)),
-                          );
-                          _load();
-                        },
-                        onToggle: (v) => _toggle(pet, v),
-                      ),
-                      _NewBox(label: '新建小人', onTap: _createPet),
-                    ],
-                  ),
+                const SizedBox(height: 20),
+
                 const SizedBox(height: 12),
                 const Text('聊天页右页会显示每个小人的缩略图和名字，勾选 = 出现在陪伴页',
                     style:

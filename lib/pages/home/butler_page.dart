@@ -14,6 +14,7 @@ import '../../butler/task/butler_task.dart';
 import '../../butler/task/task_manager.dart';
 import '../ai_config_page.dart';
 import '../butler_modules_page.dart';
+import '../butler/pet_setup_page.dart';
 import '../butler_task_page.dart';
 import '../debug/debug_toolbox_page.dart';
 import '../mood_analysis_page.dart';
@@ -1102,6 +1103,29 @@ class _TasksTabState extends State<_TasksTab> {
                 label: const Text('全部任务'),
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const ButlerTaskPage()),
+                ),
+              ),
+              const SizedBox(width: 10),
+              OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFB0789A),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
+                  side: BorderSide(
+                    color: const Color(0xFFB0789A).withValues(alpha: 0.4),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const PetSetupPage()),
+                ),
+                child: const Tooltip(
+                  message: '桌宠设置',
+                  child: Icon(Icons.pets, size: 20),
                 ),
               ),
             ],
