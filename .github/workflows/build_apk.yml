@@ -33,6 +33,14 @@ jobs:
       - name: pub get
         run: flutter pub get
 
+      # 语义情绪模型缓存：154MB 每次重下很慢，缓存后第二次起秒过
+      # 模型更新时把 key 的 v1 改成 v2 即可强制刷新
+      - name: Cache emotion model
+        uses: actions/cache@v4
+        with:
+          path: assets/models
+          key: emotion-model-v1
+
       # 下载语义情绪模型（154MB int8 量化，托管在 model-assets Release；
       # 超过 GitHub 单文件 100MB 限制，不能进 git 仓库）
       - name: Download emotion model assets
@@ -40,6 +48,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p assets/models
+          if [ -f assets/models/model_int8.onnx ] && [ -f assets/models/tokenizer.json ]; then
+            echo "模型已缓存，跳过下载"
+            ls -la assets/models/
+            exit 0
+          fi
           REPO="${{ github.repository }}"
           gh release download model-assets --repo "$REPO" \
             --pattern "model_int8.onnx" --dir assets/models --clobber

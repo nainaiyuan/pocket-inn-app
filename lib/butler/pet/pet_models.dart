@@ -47,18 +47,23 @@ enum PetMoveTrajectory {
 
 /// 移动方向（组合动作里的方向移动步骤用，8 方向含斜角）
 /// 移动起点：动作从哪个基准位置开始动（上下左右是最大移动距离）
+/// dock/center 只是预设快捷项，用户可自己定起点（custom + startX/startY）
 enum PetMoveRef {
-  /// 从聊天框（手机底部）位置出发，聊天框弹起就当底部基准
-  dock('从聊天框位置'),
+  /// 预设1：从聊天框（手机底部）位置出发，聊天框弹起就当底部基准
+  dock('聊天框'),
 
-  /// 从屏幕中间位置出发
-  center('从屏幕中间');
+  /// 预设2：从屏幕中间位置出发
+  center('屏幕中间'),
+
+  /// 用户自定义起点（startX/startY 屏幕相对坐标）
+  custom('自定义');
 
   final String label;
   const PetMoveRef(this.label);
 
   static PetMoveRef fromName(String? name) => switch (name) {
         'center' => PetMoveRef.center,
+        'custom' => PetMoveRef.custom,
         // 老数据 self/hero/未知 都回退聊天框基准
         _ => PetMoveRef.dock,
       };
@@ -339,8 +344,12 @@ class PetActionDef {
   final double? moveDist;
   final double? moveSec;
 
-  /// 移动方向参照系：self = 从自己位置，center = 从屏幕中间
+  /// 移动起点基准：dock/center 预设 / custom 自定义
   final PetMoveRef moveRef;
+
+  /// 自定义起点坐标（moveRef == custom 时生效，屏幕相对坐标 0~1）
+  final double? startX;
+  final double? startY;
 
   /// 位移轨迹（带 target 时怎么过去：走/跳/飞）
   final PetMoveTrajectory trajectory;
@@ -374,6 +383,8 @@ class PetActionDef {
     this.moveDist,
     this.moveSec,
     this.moveRef = PetMoveRef.dock,
+    this.startX,
+    this.startY,
     this.trajectory = PetMoveTrajectory.walk,
     this.moveDurationSec = 3,
     this.speedTier = PetSpeedTier.normal,
@@ -394,6 +405,9 @@ class PetActionDef {
         targetSpot: targetSpot,
         targetX: targetX,
         targetY: targetY,
+        moveRef: moveRef,
+        startX: startX,
+        startY: startY,
         moveDurationSec: moveDurationSec,
         speedTier: speedTier ?? this.speedTier,
         moveGroupId: moveGroupId,
@@ -621,17 +635,25 @@ class PetActivityDef {
   /// null = 从当前位置开始
   final PetMoveRef? startRef;
 
+  /// 自定义起点坐标（startRef == custom 时生效）
+  final double? startX;
+  final double? startY;
+
   const PetActivityDef({
     required this.id,
     required this.name,
     required this.steps,
     this.startRef,
+    this.startX,
+    this.startY,
   });
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
         if (startRef != null) 'startRef': startRef!.name,
+        if (startX != null) 'startX': startX,
+        if (startY != null) 'startY': startY,
         'steps': steps.map((s) => s.toJson()).toList(),
       };
 
@@ -642,6 +664,8 @@ class PetActivityDef {
         startRef: json['startRef'] != null
             ? PetMoveRef.fromName(json['startRef'] as String?)
             : null,
+        startX: (json['startX'] as num?)?.toDouble(),
+        startY: (json['startY'] as num?)?.toDouble(),
         steps: (json['steps'] as List<dynamic>? ?? [])
             .map((e) => PetActivityStep.fromJson(e as Map<String, dynamic>))
             .toList(),

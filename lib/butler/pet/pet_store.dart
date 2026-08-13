@@ -151,6 +151,26 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       await db.execute(
           'ALTER TABLE pet_profiles ADD COLUMN avatar_path TEXT');
     } catch (_) {}
+    try {
+      await db.execute(
+          'ALTER TABLE pet_activities ADD COLUMN start_ref TEXT');
+    } catch (_) {}
+    try {
+      await db.execute(
+          'ALTER TABLE pet_actions ADD COLUMN start_x REAL');
+    } catch (_) {}
+    try {
+      await db.execute(
+          'ALTER TABLE pet_actions ADD COLUMN start_y REAL');
+    } catch (_) {}
+    try {
+      await db.execute(
+          'ALTER TABLE pet_activities ADD COLUMN start_x REAL');
+    } catch (_) {}
+    try {
+      await db.execute(
+          'ALTER TABLE pet_activities ADD COLUMN start_y REAL');
+    } catch (_) {}
   }
 
   // ========== 宠物档案 ==========
@@ -278,6 +298,8 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       'move_dist': def.moveDist,
       'move_sec': def.moveSec,
       'move_ref': def.moveRef.name,
+      'start_x': def.startX,
+      'start_y': def.startY,
       'speed_tier': def.speedTier.name,
       'move_group_id': def.moveGroupId,
       'duration_seconds': def.durationSeconds,
@@ -314,6 +336,8 @@ class PetStore extends ButlerStore implements PetAffectionStore {
         moveDist: (r['move_dist'] as num?)?.toDouble(),
         moveSec: (r['move_sec'] as num?)?.toDouble(),
         moveRef: PetMoveRef.fromName(r['move_ref'] as String?),
+        startX: (r['start_x'] as num?)?.toDouble(),
+        startY: (r['start_y'] as num?)?.toDouble(),
         speedTier: PetSpeedTier.fromName(r['speed_tier'] as String?),
         moveGroupId: r['move_group_id'] as String?,
         durationSeconds: (r['duration_seconds'] as num?)?.toDouble() ?? 1,
@@ -354,6 +378,9 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       'activity_id': def.id,
       'name': def.name,
       'steps_json': jsonEncode(def.steps.map((s) => s.toJson()).toList()),
+      if (def.startRef != null) 'start_ref': def.startRef!.name,
+      if (def.startX != null) 'start_x': def.startX,
+      if (def.startY != null) 'start_y': def.startY,
     });
   }
 
@@ -364,6 +391,11 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       return PetActivityDef(
         id: r['activity_id'] as String,
         name: r['name'] as String? ?? '',
+        startRef: r['start_ref'] != null
+            ? PetMoveRef.fromName(r['start_ref'] as String?)
+            : null,
+        startX: (r['start_x'] as num?)?.toDouble(),
+        startY: (r['start_y'] as num?)?.toDouble(),
         steps: (steps as List<dynamic>)
             .map((e) => PetActivityStep.fromJson(e as Map<String, dynamic>))
             .toList(),

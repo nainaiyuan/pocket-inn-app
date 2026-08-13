@@ -397,10 +397,13 @@ class Pet {
 }
 
 /// 组合动作运行器（由 PetActivityRunner 创建，Pet 持有）
-/// 移动起点计算：dock=聊天框（底部上方）/ center=屏幕中间
-PetPoint _moveBasePoint(Pet pet, PetMoveRef ref) => switch (ref) {
+/// 移动起点计算：dock=聊天框（底部上方）/ center=屏幕中间 /
+/// custom=用户自定义坐标（startX/startY，缺省 0.5,0.5）
+PetPoint _moveBasePoint(PetMoveRef ref, {double? x, double? y}) =>
+    switch (ref) {
       PetMoveRef.dock => const PetPoint(0.5, 0.85),
       PetMoveRef.center => const PetPoint(0.5, 0.5),
+      PetMoveRef.custom => PetPoint(x ?? 0.5, y ?? 0.5),
     };
 
 class PetActivityRun {
@@ -460,7 +463,8 @@ class PetActivityRun {
 
     final def = actionResolver(step.actionId);
 
-    // 方向移动步骤：朝 8 方向之一走（固定速度 0.3/s），
+    // 方向移动步骤：从当前位置朝 8 方向之一走（固定速度 0.3/s），
+    // 起点由组合动作的 startRef 决定（先瞬移过去再一步步走）
     // 可走固定秒数，也可"一直走到撞墙/屏幕边"才停下
     if (step.isMoveDir) {
       if (!_stepStarted) {
@@ -588,7 +592,8 @@ class PetActivityRun {
           target = def.target!;
         } else {
           final (vx, vy) = def.moveDir!.vector;
-          final base = _moveBasePoint(pet, def.moveRef);
+          final base = _moveBasePoint(def.moveRef,
+              x: def.startX, y: def.startY);
           target = PetPoint(
               base.x + vx * def.moveDist!, base.y + vy * def.moveDist!);
         }
@@ -775,7 +780,8 @@ class PetScene {
     if (pet == null || def == null) return null;
     // 初始位置：小人先瞬移到基准点，再从那里开始走路径
     if (def.startRef != null) {
-      pet.position = pet.clampToArea(_moveBasePoint(pet, def.startRef!));
+      pet.position = pet.clampToArea(_moveBasePoint(def.startRef!,
+          x: def.startX, y: def.startY));
       pet.stopMoving();
     }
 
@@ -880,7 +886,8 @@ class PetScene {
         def.moveDist != null) {
       final from = pet.position;
       final (vx, vy) = def.moveDir!.vector;
-      final base = _moveBasePoint(pet, def.moveRef);
+      final base = _moveBasePoint(def.moveRef,
+          x: def.startX, y: def.startY);
       final clamped = pet.clampToArea(
           PetPoint(base.x + vx * def.moveDist!, base.y + vy * def.moveDist!));
       final actualDist = from.distanceTo(clamped);

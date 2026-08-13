@@ -278,7 +278,7 @@ class _PetSetupPageState extends State<PetSetupPage> {
                     physics: const NeverScrollableScrollPhysics(),
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
-                    childAspectRatio: 0.82,
+                    mainAxisExtent: 140,
                     children: [
                       for (final pet in _profiles)
                         _PetCard(
@@ -344,7 +344,7 @@ class _PetSetupPageState extends State<PetSetupPage> {
                     physics: const NeverScrollableScrollPhysics(),
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
-                    childAspectRatio: 0.95,
+                    mainAxisExtent: 125,
                     children: [
                       for (final c in _duoConfigs)
                         _DuoCard(
