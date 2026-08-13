@@ -287,7 +287,7 @@ class _CompanionPageState extends State<CompanionPage>
       if (!mounted) return;
       for (final c in configs) {
         if (c.matches(pet.id, partner!.id)) {
-          if (world.scene.actionDefs.containsKey(c.actionId) && partner != null) {
+          if (world.scene.actionDefs.containsKey(c.actionId)) {
             world.startDuo(pet.id, partner.id, c.actionId);
             return;
           }

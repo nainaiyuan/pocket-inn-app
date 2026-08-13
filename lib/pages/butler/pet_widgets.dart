@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../butler/pet/pet_models.dart';
+import '../../butler/pet/pet_store.dart';
+import '../../services/pet_settings_notifier.dart';
 
 /// 目标点选择器：模拟手机屏幕的小方块 + 横向/竖向双滑块 + 8 向快捷按钮
 ///
@@ -273,4 +275,163 @@ class _PathPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_PathPainter old) => old.from != from || old.to != to;
+}
+
+/// ─────────────────────────────────────────────
+/// 互动编辑对话框：勾选两个角色 + 选互动动作
+/// ─────────────────────────────────────────────
+class DuoEditDialog extends StatefulWidget {
+  final List<PetProfile> profiles;
+  final List<PetActionDef> duoActions;
+  final PetDuoConfig? existing;
+
+  const DuoEditDialog({
+    super.key,
+    required this.profiles,
+    required this.duoActions,
+    this.existing,
+  });
+
+  @override
+  State<DuoEditDialog> createState() => _DuoEditDialogState();
+}
+
+class _DuoEditDialogState extends State<DuoEditDialog> {
+  final List<String> _selected = [];
+  String? _actionId;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.existing;
+    if (e != null) {
+      _selected.addAll([e.petA, e.petB]);
+      _actionId = e.actionId;
+    }
+  }
+
+  Future<void> _save() async {
+    if (_selected.length != 2) {
+      _toast('勾选两个小人');
+      return;
+    }
+    if (_actionId == null) {
+      _toast('选一段互动动作');
+      return;
+    }
+    setState(() => _saving = true);
+    final store = PetStore();
+    await store.saveDuoConfig(PetDuoConfig(
+      pairId: '${_selected[0]}_${_selected[1]}',
+      petA: _selected[0],
+      petB: _selected[1],
+      actionId: _actionId!,
+    ));
+    PetSettingsNotifier.instance.notifyChanged();
+    if (!mounted) return;
+    Navigator.pop(context, true);
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.existing == null ? '新建互动' : '编辑互动'),
+      content: SizedBox(
+        width: 340,
+        height: 380,
+        child: Column(
+          children: [
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('选两个小人：',
+                  style: TextStyle(fontSize: 12, color: Color(0xFFB0A0A6))),
+            ),
+            const SizedBox(height: 4),
+            Expanded(
+              child: ListView.separated(
+                itemCount: widget.profiles.length,
+                separatorBuilder: (_, __) =>
+                    const Divider(height: 1, color: Color(0xFFF0E8EC)),
+                itemBuilder: (_, i) {
+                  final pet = widget.profiles[i];
+                  final checked = _selected.contains(pet.petId);
+                  return ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Checkbox(
+                      value: checked,
+                      activeColor: const Color(0xFFB0789A),
+                      onChanged: (v) {
+                        setState(() {
+                          if (v == true) {
+                            if (_selected.length >= 2) {
+                              _toast('最多选两个');
+                              return;
+                            }
+                            _selected.add(pet.petId);
+                          } else {
+                            _selected.remove(pet.petId);
+                          }
+                        });
+                      },
+                    ),
+                    title: Text(pet.name, style: const TextStyle(fontSize: 13)),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('互动动作：',
+                  style: TextStyle(fontSize: 12, color: Color(0xFFB0A0A6))),
+            ),
+            const SizedBox(height: 4),
+            if (widget.duoActions.isEmpty)
+              const Text('还没有双人互动动作，先去角色配置页添加',
+                  style: TextStyle(fontSize: 11, color: Color(0xFFC0A0B0)))
+            else
+              DropdownButtonFormField<String>(
+                initialValue: _actionId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+                hint: const Text('选一段互动', style: TextStyle(fontSize: 12)),
+                items: [
+                  for (final a in widget.duoActions)
+                    DropdownMenuItem(
+                        value: a.id,
+                        child: Text('${a.name}（${a.durationSeconds}秒）',
+                            style: const TextStyle(fontSize: 12.5))),
+                ],
+                onChanged: (v) => setState(() => _actionId = v),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context), child: const Text('取消')),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFB0789A)),
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : const Text('保存'),
+        ),
+      ],
+    );
+  }
 }

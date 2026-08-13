@@ -109,20 +109,20 @@ class _PetProfilePageState extends State<PetProfilePage> {
     }
   }
 
-  /// 添加动作：上传图片 → 配置 → 命名保存
-  Future<void> _addAction() async {
+  /// 添加/编辑动作：上传图片（或用预设）→ 配置 → 命名保存
+  Future<void> _editAction(PetActionDef? existing) async {
     final created = await showDialog<bool>(
       context: context,
-      builder: (_) => const _ActionEditDialog(),
+      builder: (_) => _ActionEditDialog(existing: existing),
     );
     if (created == true) _load();
   }
 
-  /// 新建组合：勾选已有动作 → 命名
-  Future<void> _addActivity() async {
+  /// 新建/编辑组合：勾选已有动作 → 命名
+  Future<void> _editActivity(PetActivityDef? existing) async {
     final created = await showDialog<bool>(
       context: context,
-      builder: (_) => _ComboEditDialog(actions: _actions),
+      builder: (_) => _ComboEditDialog(actions: _actions, existing: existing),
     );
     if (created == true) _load();
   }
@@ -249,7 +249,7 @@ class _PetProfilePageState extends State<PetProfilePage> {
               style: TextStyle(fontSize: 11, color: Color(0xFFB0A0A6))),
           const SizedBox(height: 10),
           if (_actions.isEmpty)
-            _EmptyBox(text: '还没有动作\n点下面「＋ 添加动作」上传图片开始')
+            _EmptyBox(text: '还没有动作\n点下面「＋ 添加动作」开始（可用预设，或上传图片）')
           else
             Wrap(
               spacing: 10,
@@ -257,12 +257,13 @@ class _PetProfilePageState extends State<PetProfilePage> {
               children: [
                 for (final a in _actions) _ActionCard(
                   action: a,
+                  onTap: () => _editAction(a),
                   onDelete: () => _deleteAction(a),
                 ),
               ],
             ),
           const SizedBox(height: 10),
-          _AddButton(label: '添加动作', onTap: _addAction),
+          _AddButton(label: '添加动作', onTap: () => _editAction(null)),
           const SizedBox(height: 24),
 
           // ═══ 动作组合 ═══
@@ -289,24 +290,11 @@ class _PetProfilePageState extends State<PetProfilePage> {
             for (final act in _activities) _ComboCard(
               activity: act,
               actions: _actions,
+              onTap: () => _editActivity(act),
               onDelete: () => _deleteActivity(act),
             ),
           const SizedBox(height: 10),
-          _AddButton(label: '新建组合', onTap: _addActivity),
-          const SizedBox(height: 24),
-
-          // ═══ 其他设置 ═══
-          const Text('其他设置',
-              style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF6A4A5A))),
-          const SizedBox(height: 10),
-          _SettingsCard(
-            pet: pet,
-            actions: _actions,
-            onSave: _savePet,
-          ),
+          _AddButton(label: '新建组合', onTap: () => _editActivity(null)),
           const SizedBox(height: 30),
         ],
       ),
@@ -367,12 +355,17 @@ class _AddButton extends StatelessWidget {
   }
 }
 
-/// 动作卡（收纳格）：名字 + 帧数/秒数 + 怎么动摘要
+/// 动作卡（收纳格）：名字 + 帧数/秒数 + 怎么动摘要；点卡片可编辑
 class _ActionCard extends StatelessWidget {
   final PetActionDef action;
+  final VoidCallback onTap;
   final VoidCallback onDelete;
 
-  const _ActionCard({required this.action, required this.onDelete});
+  const _ActionCard({
+    required this.action,
+    required this.onTap,
+    required this.onDelete,
+  });
 
   String get _moveHint {
     if (action.target != null) {
@@ -390,37 +383,42 @@ class _ActionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 150,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE8D8E0)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  action.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF6A4A5A)),
-                ),
-              ),
-              GestureDetector(
-                onTap: onDelete,
-                child: const Icon(Icons.delete_outline,
-                    size: 16, color: Color(0xFFD0A0B0)),
-              ),
-            ],
+        child: Container(
+          width: 150,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFE8D8E0)),
           ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      action.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF6A4A5A)),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: onDelete,
+                    child: const Icon(Icons.delete_outline,
+                        size: 16, color: Color(0xFFD0A0B0)),
+                  ),
+                ],
+              ),
           const SizedBox(height: 6),
           Text('${action.frameCount} 帧 · ${action.durationSeconds}秒',
               style:
@@ -432,25 +430,29 @@ class _ActionCard extends StatelessWidget {
               color: const Color(0x22F0E4EA),
               borderRadius: BorderRadius.circular(6),
             ),
-            child: Text(_moveHint,
-                style: const TextStyle(
-                    fontSize: 10, color: Color(0xFF8A5A72))),
+              child: Text(_moveHint,
+                  style: const TextStyle(
+                      fontSize: 10, color: Color(0xFF8A5A72))),
+            ),
+              ],
+            ),
           ),
-        ],
-      ),
-    );
+        ),
+      );
   }
 }
 
-/// 组合卡（收纳格）：名字 + 步骤预览 + 删除
+/// 组合卡（收纳格）：名字 + 步骤预览 + 删除；点卡片可编辑
 class _ComboCard extends StatelessWidget {
   final PetActivityDef activity;
   final List<PetActionDef> actions;
+  final VoidCallback onTap;
   final VoidCallback onDelete;
 
   const _ComboCard({
     required this.activity,
     required this.actions,
+    required this.onTap,
     required this.onDelete,
   });
 
@@ -463,38 +465,43 @@ class _ComboCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE8D8E0)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.play_circle_outline,
-                  size: 18, color: Color(0xFFB0789A)),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  activity.name,
-                  style: const TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF6A4A5A)),
-                ),
-              ),
-              GestureDetector(
-                onTap: onDelete,
-                child: const Icon(Icons.delete_outline,
-                    size: 16, color: Color(0xFFD0A0B0)),
-              ),
-            ],
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFE8D8E0)),
           ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.play_circle_outline,
+                      size: 18, color: Color(0xFFB0789A)),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      activity.name,
+                      style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF6A4A5A)),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: onDelete,
+                    child: const Icon(Icons.delete_outline,
+                        size: 16, color: Color(0xFFD0A0B0)),
+                  ),
+                ],
+              ),
           const SizedBox(height: 8),
           Wrap(
             spacing: 4,
@@ -518,150 +525,7 @@ class _ComboCard extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// 其他设置卡
-class _SettingsCard extends StatefulWidget {
-  final PetProfile pet;
-  final List<PetActionDef> actions;
-  final ValueChanged<PetProfile> onSave;
-
-  const _SettingsCard({
-    required this.pet,
-    required this.actions,
-    required this.onSave,
-  });
-
-  @override
-  State<_SettingsCard> createState() => _SettingsCardState();
-}
-
-class _SettingsCardState extends State<_SettingsCard> {
-  late bool _visible;
-  late PetArea _area;
-  late double _scale;
-  late String _breakActionId;
-
-  List<PetActionDef> get _breakCandidates => [
-        for (final a in PetBuiltinActions.all)
-          if (a.id == 'idle' ||
-              a.id == 'jump' ||
-              a.id == 'spin' ||
-              a.id == 'wave' ||
-              a.id == 'happy' ||
-              a.id == 'climb' ||
-              a.id == 'jumpOff')
-            a,
-        ...widget.actions,
-      ];
-
-  @override
-  void initState() {
-    super.initState();
-    _visible = widget.pet.visible;
-    _area = widget.pet.area;
-    _scale = widget.pet.scale;
-    _breakActionId = widget.pet.breakActionId;
-  }
-
-  void _persist() {
-    widget.onSave(widget.pet.copyWith(
-      visible: _visible,
-      area: _area,
-      scale: _scale,
-      breakActionId: _breakActionId,
-    ));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE8D8E0)),
       ),
-      child: Column(
-        children: [
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('在聊天页显示', style: TextStyle(fontSize: 13.5)),
-            subtitle: const Text('关掉后陪伴页不出现这个小人了',
-                style: TextStyle(fontSize: 11)),
-            value: _visible,
-            activeTrackColor: const Color(0xFFB0789A),
-            onChanged: (v) {
-              setState(() => _visible = v);
-              _persist();
-            },
-          ),
-          const Divider(height: 1, color: Color(0xFFF0E8EC)),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('活动区域', style: TextStyle(fontSize: 13.5)),
-            subtitle: Text(
-              switch (_area) {
-                PetArea.full => '满屏随便跑',
-                PetArea.bottom => '只在输入框上方活动',
-                PetArea.fixed => '固定在原地不动',
-              },
-              style: const TextStyle(fontSize: 11),
-            ),
-            trailing: DropdownButton<PetArea>(
-              value: _area,
-              underline: const SizedBox.shrink(),
-              items: const [
-                DropdownMenuItem(
-                    value: PetArea.full, child: Text('满屏')),
-                DropdownMenuItem(
-                    value: PetArea.bottom, child: Text('上方')),
-                DropdownMenuItem(
-                    value: PetArea.fixed, child: Text('固定')),
-              ],
-              onChanged: (v) {
-                if (v == null) return;
-                setState(() => _area = v);
-                _persist();
-              },
-            ),
-          ),
-          const Divider(height: 1, color: Color(0xFFF0E8EC)),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('大小', style: TextStyle(fontSize: 13.5)),
-            subtitle: Slider(
-              value: _scale,
-              min: 0.5,
-              max: 2.0,
-              activeColor: const Color(0xFFB0789A),
-              onChanged: (v) => setState(() => _scale = v),
-              onChangeEnd: (_) => _persist(),
-            ),
-          ),
-          const Divider(height: 1, color: Color(0xFFF0E8EC)),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('互动被打断后', style: TextStyle(fontSize: 13.5)),
-            subtitle: const Text('双人互动被拉开时，这个小人的反应',
-                style: TextStyle(fontSize: 11)),
-            trailing: DropdownButton<String>(
-              value: _breakActionId,
-              underline: const SizedBox.shrink(),
-              items: [
-                for (final a in _breakCandidates)
-                  DropdownMenuItem(value: a.id, child: Text(a.name)),
-              ],
-              onChanged: (v) {
-                if (v == null) return;
-                setState(() => _breakActionId = v);
-                _persist();
-              },
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -671,7 +535,9 @@ class _SettingsCardState extends State<_SettingsCard> {
 /// 单动作配置对话框：上传图片 → 怎么动 → 命名保存
 /// ─────────────────────────────────────────────
 class _ActionEditDialog extends StatefulWidget {
-  const _ActionEditDialog();
+  final PetActionDef? existing;
+
+  const _ActionEditDialog({this.existing});
 
   @override
   State<_ActionEditDialog> createState() => _ActionEditDialogState();
@@ -692,7 +558,62 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
   double _targetY = 0.5;
   PetMoveTrajectory _trajectory = PetMoveTrajectory.walk;
 
+  /// 选中的预设动作 id（null = 自己上传图）
+  String? _presetId;
+  bool _nameEdited = false;
+
   bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.existing;
+    if (e != null) {
+      _nameController.text = e.name;
+      _nameEdited = true;
+      _secondsController.text = e.durationSeconds.toString();
+      _kind = switch (e.kind) {
+        PetActionKind.inPlace => _ImportKind.inPlace,
+        PetActionKind.moveTo => _ImportKind.move,
+        PetActionKind.duo => _ImportKind.duo,
+        _ => _ImportKind.inPlace,
+      };
+      // 预设动作（引用内置帧、无用户图）
+      if (e.frameCount == 0 && e.frameDir != null && PetBuiltinActions.byId(e.frameDir!) != null) {
+        _presetId = e.frameDir;
+      }
+      final t = e.target;
+      if (t != null) {
+        _howMove = _HowMove.target;
+        _targetX = t.x;
+        _targetY = t.y;
+        _trajectory = e.trajectory;
+      } else if (e.moveDir != null) {
+        _howMove = _HowMove.dir;
+        _moveDir = e.moveDir!;
+        _moveDist = e.moveDist ?? 0.3;
+        if (e.moveSec != null) _moveSecController.text = e.moveSec.toString();
+      }
+    }
+  }
+
+  /// 可选用的预设动作（原地类 + 引擎行为）
+  List<PetActionDef> get _presets => [
+        for (final a in PetBuiltinActions.all)
+          if (a.kind == PetActionKind.inPlace ||
+              a.kind == PetActionKind.behavior)
+            a,
+      ];
+
+  void _pickPreset(PetActionDef a) {
+    setState(() {
+      _presetId = a.id;
+      if (!_nameEdited) {
+        _nameController.text = a.name;
+        _nameEdited = true;
+      }
+    });
+  }
 
   Future<void> _pick() async {
     final result = await FilePicker.platform.pickFiles(
@@ -700,7 +621,10 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
       allowMultiple: true,
     );
     if (result == null || result.files.isEmpty) return;
-    setState(() => _files = result.files.map((f) => f.path!).toList());
+    setState(() {
+      _files = result.files.map((f) => f.path!).toList();
+      _presetId = null;
+    });
   }
 
   String get _frameHint {
@@ -711,13 +635,8 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
 
   Future<void> _save() async {
     final name = _nameController.text.trim();
-    final files = _files;
     if (name.isEmpty) {
       _toast('先给动作起个名字');
-      return;
-    }
-    if (files == null || files.isEmpty) {
-      _toast('先选图片');
       return;
     }
     final seconds = double.tryParse(_secondsController.text.trim()) ?? 1;
@@ -725,34 +644,61 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
       _toast('秒数要大于 0');
       return;
     }
+    // 预设动作：不需要图；自己上传：必须有图
+    final usingPreset = _presetId != null;
+    final files = _files;
+    if (!usingPreset && (files == null || files.isEmpty)) {
+      _toast('先选图片（或用预设动作）');
+      return;
+    }
     setState(() => _saving = true);
 
-    final actionId = 'act_${DateTime.now().millisecondsSinceEpoch}';
-    // 1. 复制帧图 → pet/animations/<actionId>/
-    final dir = await FilePetFrameSource.actionDir(actionId);
-    final copied = <String>[];
-    for (final f in files) {
-      final target = p.join(dir, p.basename(f));
-      await File(f).copy(target);
-      copied.add(target);
-    }
-    // 2. 写动作记录
+    final existing = widget.existing;
+    final actionId = existing?.id ?? 'act_${DateTime.now().millisecondsSinceEpoch}';
     final store = PetStore();
+
+    // 帧图：预设 → 引用内置 frameDir；上传 → 复制到动作目录
+    String? frameDir;
+    int frameCount = 0;
+    double fps;
+    PetAnimLoop loop;
+    if (usingPreset) {
+      final preset = PetBuiltinActions.byId(_presetId!)!;
+      frameDir = preset.frameDir ?? preset.id;
+      fps = preset.fps;
+      loop = preset.loop;
+    } else {
+      frameDir = actionId;
+      final dir = await FilePetFrameSource.actionDir(actionId);
+      // 编辑时重选图：先清旧帧
+      if (await Directory(dir).exists()) {
+        await Directory(dir).delete(recursive: true);
+      }
+      final copied = <String>[];
+      for (final f in files!) {
+        final target = p.join(dir, p.basename(f));
+        await File(f).copy(target);
+        copied.add(target);
+      }
+      frameCount = copied.length;
+      fps = (copied.length / seconds).clamp(1.0, 60.0);
+      loop = PetAnimLoop.loop;
+    }
+
     final kind = switch (_kind) {
       _ImportKind.inPlace => PetActionKind.inPlace,
       _ImportKind.move => PetActionKind.moveTo,
       _ImportKind.duo => PetActionKind.duo,
     };
-    final fps = (copied.length / seconds).clamp(1.0, 60.0);
     final moveSec = double.tryParse(_moveSecController.text.trim());
     final def = PetActionDef(
       id: actionId,
       name: name,
       kind: kind,
       fps: fps,
-      loop: PetAnimLoop.loop,
-      frameDir: actionId,
-      frameCount: copied.length,
+      loop: loop,
+      frameDir: frameDir,
+      frameCount: frameCount,
       durationSeconds: seconds,
       moveDir: _howMove == _HowMove.dir ? _moveDir : null,
       moveDist: _howMove == _HowMove.dir ? _moveDist : null,
@@ -774,8 +720,9 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final usingPreset = _presetId != null;
     return AlertDialog(
-      title: const Text('添加动作'),
+      title: Text(widget.existing == null ? '添加动作' : '编辑动作'),
       content: SizedBox(
         width: 400,
         child: SingleChildScrollView(
@@ -803,48 +750,91 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
                     const TextStyle(fontSize: 10.5, color: Color(0xFFB0A0A6)),
               ),
               const SizedBox(height: 12),
-              // 上传图片
-              OutlinedButton.icon(
-                onPressed: _saving ? null : _pick,
-                icon: const Icon(Icons.upload_file,
-                    size: 18, color: Color(0xFFB0789A)),
-                label: Text(_files == null ? '上传图片（可多选，按顺序）' : '重新选图',
-                    style: const TextStyle(color: Color(0xFFB0789A))),
-              ),
-              const SizedBox(height: 6),
-              Text(_frameHint,
-                  style: const TextStyle(
-                      fontSize: 10.5, color: Color(0xFFB0A0A6))),
-              if (_files != null && _files!.isNotEmpty) ...[
+              // 预设动作（原地/行为类才有）
+              if (_kind == _ImportKind.inPlace) ...[
+                const Text('用预设动作（不用画图）：',
+                    style: TextStyle(fontSize: 12)),
                 const SizedBox(height: 6),
-                SizedBox(
-                  height: 52,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _files!.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 6),
-                    itemBuilder: (_, i) => ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: Image.file(
-                        File(_files![i]),
-                        width: 52,
-                        height: 52,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final a in _presets)
+                      FilterChip(
+                        label: Text(a.name,
+                            style: const TextStyle(fontSize: 11)),
+                        visualDensity: VisualDensity.compact,
+                        selected: _presetId == a.id,
+                        selectedColor: const Color(0x33B0789A),
+                        backgroundColor: const Color(0x11F0E4EA),
+                        checkmarkColor: const Color(0xFFB0789A),
+                        side: BorderSide(
+                          color: _presetId == a.id
+                              ? const Color(0xFFB0789A)
+                              : const Color(0xFFE0D0D8),
+                        ),
+                        onSelected: (_) => _pickPreset(a),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
+              // 上传图片（预设选中时不显示）
+              if (!usingPreset) ...[
+                OutlinedButton.icon(
+                  onPressed: _saving ? null : _pick,
+                  icon: const Icon(Icons.upload_file,
+                      size: 18, color: Color(0xFFB0789A)),
+                  label: Text(_files == null ? '上传图片（可多选，按顺序）' : '重新选图',
+                      style: const TextStyle(color: Color(0xFFB0789A))),
+                ),
+                const SizedBox(height: 6),
+                Text(_frameHint,
+                    style: const TextStyle(
+                        fontSize: 10.5, color: Color(0xFFB0A0A6))),
+                if (_files != null && _files!.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    height: 52,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _files!.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 6),
+                      itemBuilder: (_, i) => ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Image.file(
+                          File(_files![i]),
                           width: 52,
                           height: 52,
-                          color: const Color(0xFFF0E8EC),
-                          child: const Icon(Icons.broken_image,
-                              size: 18, color: Color(0xFFD0B8C4)),
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            width: 52,
+                            height: 52,
+                            color: const Color(0xFFF0E8EC),
+                            child: const Icon(Icons.broken_image,
+                                size: 18, color: Color(0xFFD0B8C4)),
+                          ),
                         ),
                       ),
                     ),
                   ),
+                ],
+                const SizedBox(height: 12),
+              ] else
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0x22F0E4EA),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Text('使用内置动画，无需上传图片',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 11, color: Color(0xFF8A5A72))),
                 ),
-              ],
-              const SizedBox(height: 12),
               TextField(
                 controller: _nameController,
+                onChanged: (_) => _nameEdited = true,
                 decoration: const InputDecoration(
                   labelText: '动作名字',
                   hintText: '如：跳一下 / 向左跑',
@@ -1023,17 +1013,28 @@ enum _HowMove {
 /// ─────────────────────────────────────────────
 class _ComboEditDialog extends StatefulWidget {
   final List<PetActionDef> actions;
+  final PetActivityDef? existing;
 
-  const _ComboEditDialog({required this.actions});
+  const _ComboEditDialog({required this.actions, this.existing});
 
   @override
   State<_ComboEditDialog> createState() => _ComboEditDialogState();
 }
 
 class _ComboEditDialogState extends State<_ComboEditDialog> {
-  final _nameController = TextEditingController();
+  late final TextEditingController _nameController;
   final List<String> _selected = []; // 按勾选顺序
   bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.existing;
+    _nameController = TextEditingController(text: e?.name ?? '');
+    if (e != null) {
+      _selected.addAll([for (final s in e.steps) s.actionId]);
+    }
+  }
 
   void _toggle(String id) {
     setState(() {
@@ -1070,7 +1071,7 @@ class _ComboEditDialogState extends State<_ComboEditDialog> {
     setState(() => _saving = true);
     final store = PetStore();
     await store.saveActivity(PetActivityDef(
-      id: 'grp_${DateTime.now().millisecondsSinceEpoch}',
+      id: widget.existing?.id ?? 'grp_${DateTime.now().millisecondsSinceEpoch}',
       name: name,
       steps: [for (final id in _selected) PetActivityStep(actionId: id)],
     ));
@@ -1082,7 +1083,7 @@ class _ComboEditDialogState extends State<_ComboEditDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('新建组合'),
+      title: Text(widget.existing == null ? '新建组合' : '编辑组合'),
       content: SizedBox(
         width: 380,
         height: 420,
