@@ -666,6 +666,12 @@ class PetScene {
   /// 移动动画组（走+跑绑定，id → 定义）
   final Map<String, PetMoveGroupDef> _moveGroups = {};
 
+  /// 正在跑的互动组（null = 没有）
+  PetGroupRun? _groupRun;
+
+  /// 互动组结束回调（UI 监听，比如散场后做点什么）
+  void Function(PetGroupRun run)? onGroupFinished;
+
   PetScene({required this.frames}) {
     // 加载内置动作模板
     for (final a in PetBuiltinActions.all) {
@@ -766,6 +772,15 @@ class PetScene {
   void update(double dt) {
     for (final pet in _pets) {
       pet.update(dt);
+    }
+    // 互动组编排推进（先让小人动，再算步骤计时）
+    final run = _groupRun;
+    if (run != null) {
+      run.update(dt);
+      if (run.finished) {
+        _groupRun = null;
+        onGroupFinished?.call(run);
+      }
     }
   }
 
@@ -1005,5 +1020,248 @@ class PetScene {
   /// 设置小人的"被打断后动作"
   void setBreakAction(String petId, String actionId) {
     petById(petId)?.breakActionId = actionId;
+  }
+}
+
+// ==================== 互动组运行器（多角色剧本） ====================
+//
+// 驱动一组 Pet 按剧本一步步演：
+// - 每步开始：给每个坑播它动作库里的动作 + 按移动类型算目标点并 moveTo
+// - 每步时长：自动取各坑动作时长最大值（最少 2.5s），或用手动时长
+// - 帧/移动的逐帧推进仍由各 Pet 自己的 update() 完成，这里只管编排和计时
+class PetGroupRun {
+  final PetGroupDef def;
+  final List<Pet> cast;
+
+  /// 与 cast 一一对应的坑
+  final List<PetGroupSlot> slots;
+
+  final PetActionDef? Function(String actionId) actionResolver;
+  final List<String> Function(String actionId) framesResolver;
+
+  int _stepIndex = 0;
+  double _stepElapsed = 0;
+  double _stepDuration = 2.5;
+  bool _stepStarted = false;
+  bool _finished = false;
+
+  PetGroupRun({
+    required this.def,
+    required this.cast,
+    required this.slots,
+    required this.actionResolver,
+    required this.framesResolver,
+  });
+
+  bool get finished => _finished;
+  int get stepIndex => _stepIndex;
+
+  /// 剧本进度 0~1
+  double get progress =>
+      def.steps.isEmpty ? 1 : _stepIndex / def.steps.length;
+
+  PetGroupStep? get currentStep =>
+      _stepIndex < def.steps.length ? def.steps[_stepIndex] : null;
+
+  /// 场景每帧调用（先让各 Pet 自己 update，再推进编排计时）
+  void update(double dt) {
+    if (_finished) return;
+    if (_stepIndex >= def.steps.length) {
+      _finished = true;
+      return;
+    }
+    final step = def.steps[_stepIndex];
+    if (!_stepStarted) {
+      _startStep(step);
+      _stepStarted = true;
+    }
+    _stepElapsed += dt;
+    if (_stepElapsed >= _stepDuration) {
+      _advanceStep();
+    }
+  }
+
+  void _startStep(PetGroupStep step) {
+    // 步时长：手动优先；否则取各坑动作时长最大值，最少 2.5s
+    _stepDuration = step.duration ?? 2.5;
+    for (final slotStep in step.slotSteps) {
+      final idx = _indexOfSlot(slotStep.slotId);
+      if (idx < 0 || idx >= cast.length) continue;
+      final def = slotStep.actionId != null
+          ? actionResolver(slotStep.actionId!)
+          : null;
+      if (def != null && slotStep.actionId != null) {
+        final d = def.durationSeconds > 0 ? def.durationSeconds : 2.5;
+        if (step.duration == null && d > _stepDuration) _stepDuration = d;
+      }
+    }
+    if (_stepDuration < 2.5) _stepDuration = 2.5;
+
+    // 各坑开演
+    for (final slotStep in step.slotSteps) {
+      final idx = _indexOfSlot(slotStep.slotId);
+      if (idx < 0 || idx >= cast.length) continue;
+      final pet = cast[idx];
+      final def = slotStep.actionId != null
+          ? actionResolver(slotStep.actionId!)
+          : null;
+      // 动作：有动作就播（循环帧播满整步）；没有就不动它现有的播放器
+      if (def != null && slotStep.actionId != null) {
+        pet.playAction(def, framesResolver(slotStep.actionId!));
+      }
+      // 移动
+      final duration = _stepDuration;
+      switch (slotStep.moveType) {
+        case PetGroupMoveType.stay:
+          break;
+        case PetGroupMoveType.dir:
+          final (vx, vy) =
+              (slotStep.moveDir ?? PetMoveDir.left).vector;
+          final dist = slotStep.moveDist ?? 0.3;
+          pet.moveTo(
+            pet.clampToArea(PetPoint(
+              pet.position.x + vx * dist,
+              pet.position.y + vy * dist,
+            )),
+            duration: duration,
+          );
+        case PetGroupMoveType.spot:
+          pet.moveTo(
+            pet.clampToArea(PetPoint(
+              slotStep.targetX ?? 0.5,
+              slotStep.targetY ?? 0.5,
+            )),
+            duration: duration,
+          );
+        case PetGroupMoveType.approach:
+          final partner = _partnerOf(idx);
+          if (partner != null) {
+            pet.moveTo(
+              _approachTarget(pet.position, partner.position,
+                  slotStep.moveDist ?? 0.05),
+              duration: duration,
+            );
+          }
+        case PetGroupMoveType.leave:
+          final partner = _partnerOf(idx);
+          if (partner != null) {
+            pet.moveTo(
+              _leaveTarget(pet.position, partner.position,
+                  slotStep.moveDist ?? 0.3),
+              duration: duration,
+            );
+          }
+        case PetGroupMoveType.wall:
+          final (vx, vy) =
+              (slotStep.moveDir ?? PetMoveDir.left).vector;
+          pet.moveTo(
+            pet.clampToArea(PetPoint(
+              pet.position.x + vx * 2,
+              pet.position.y + vy * 2,
+            )),
+            duration: duration,
+          );
+      }
+    }
+  }
+
+  int _indexOfSlot(String slotId) {
+    for (var i = 0; i < slots.length; i++) {
+      if (slots[i].slotId == slotId) return i;
+    }
+    return -1;
+  }
+
+  /// 搭档：两人组 = 对方；多人组 = 下一个坑（循环）
+  Pet? _partnerOf(int idx) {
+    if (cast.length < 2) return null;
+    return cast[(idx + 1) % cast.length];
+  }
+
+  /// 靠近：朝对方走到间隔 [gap]（默认 0.05 = 挨着）
+  PetPoint _approachTarget(PetPoint me, PetPoint other, double gap) {
+    final dx = other.x - me.x;
+    final dy = other.y - me.y;
+    final len = math.sqrt(dx * dx + dy * dy);
+    if (len < 1e-6) return other;
+    return PetPoint(
+      (other.x - dx / len * gap).clamp(0.02, 0.98),
+      (other.y - dy / len * gap).clamp(0.02, 0.98),
+    );
+  }
+
+  /// 离开：往反方向拉开 [dist]
+  PetPoint _leaveTarget(PetPoint me, PetPoint other, double dist) {
+    final dx = me.x - other.x;
+    final dy = me.y - other.y;
+    final len = math.sqrt(dx * dx + dy * dy);
+    if (len < 1e-6) {
+      return PetPoint(
+        (me.x + 0.2).clamp(0.02, 0.98),
+        (me.y + 0.2).clamp(0.02, 0.98),
+      );
+    }
+    return PetPoint(
+      (me.x + dx / len * dist).clamp(0.02, 0.98),
+      (me.y + dy / len * dist).clamp(0.02, 0.98),
+    );
+  }
+
+  void _advanceStep() {
+    _stepIndex++;
+    _stepElapsed = 0;
+    _stepStarted = false;
+    if (_stepIndex >= def.steps.length) {
+      _finished = true;
+      // 散场：各小人回待机（留在当前位置）
+      for (final pet in cast) {
+        pet.stopMoving();
+        pet.state = PetState.idle;
+        pet.currentActionId = 'idle';
+      }
+    }
+  }
+}
+
+extension PetSceneGroup on PetScene {
+  /// 正在跑的互动组（null = 没有）
+  PetGroupRun? get groupRun => _groupRun;
+
+  /// 开始互动组：cast 与 def.slots 一一对应
+  ///
+  /// [slotActions] 每个坑的动作库（action_id → 定义），
+  /// [slotFrames] 每个坑的动作帧（action_id → 帧列表）。
+  PetGroupRun? startGroup(
+    PetGroupDef def,
+    List<Pet> cast,
+    List<PetGroupSlot> slots, {
+    required Map<String, PetActionDef> slotActions,
+    required Map<String, List<String>> slotFrames,
+  }) {
+    if (cast.isEmpty || cast.length != slots.length) return null;
+    // 结束各自现有活动/互动，纳入组编排
+    for (final pet in cast) {
+      pet.stop();
+      pet._activity = null;
+    }
+    final run = PetGroupRun(
+      def: def,
+      cast: cast,
+      slots: slots,
+      actionResolver: (id) => slotActions[id],
+      framesResolver: (id) => slotFrames[id] ?? const [],
+    );
+    _groupRun = run;
+    return run;
+  }
+
+  /// 停止互动组（打断）：各小人回待机
+  void stopGroup() {
+    final run = _groupRun;
+    _groupRun = null;
+    if (run == null) return;
+    for (final pet in run.cast) {
+      pet.stop();
+    }
   }
 }

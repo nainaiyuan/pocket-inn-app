@@ -61,6 +61,9 @@ class MoveTargetEditor extends StatefulWidget {
   /// 是否显示"一直走到屏幕边"开关（组合移动步骤用）
   final bool showUntilWall;
 
+  /// 是否显示起点锚点（灰点 + 路径线）；剧本步骤里"到某位置"不需要
+  final bool anchorVisible;
+
   final ValueChanged<MoveTargetResult> onChanged;
 
   const MoveTargetEditor({
@@ -71,6 +74,7 @@ class MoveTargetEditor extends StatefulWidget {
     this.initialDist,
     this.initialUntilWall = false,
     this.showUntilWall = false,
+    this.anchorVisible = true,
     required this.onChanged,
   });
 
@@ -79,8 +83,17 @@ class MoveTargetEditor extends StatefulWidget {
 }
 
 class _MoveTargetEditorState extends State<MoveTargetEditor> {
-  static const double _mapW = 150;
-  static const double _mapH = 250;
+  /// 迷你屏尺寸：高度固定，宽度按设备屏幕比例算（平板宽、手机窄），
+  /// 记录的一直是 0~1 相对坐标，换设备照样用
+  Size _map = const Size(150, 250);
+
+  Size _mapSize() {
+    final screen = MediaQuery.of(context).size;
+    final ratio = (screen.width / screen.height).clamp(0.45, 1.5);
+    const h = 250.0;
+    final w = (h * ratio).clamp(120.0, 300.0);
+    return Size(w, h);
+  }
 
   late PetPoint _target;
   late PetMoveDir _dir;
@@ -150,8 +163,8 @@ class _MoveTargetEditorState extends State<MoveTargetEditor> {
     setState(() {
       _untilWall = false;
       _target = PetPoint(
-        (local.dx / _mapW).clamp(0.02, 0.98),
-        (local.dy / _mapH).clamp(0.02, 0.98),
+        (local.dx / _map.width).clamp(0.02, 0.98),
+        (local.dy / _map.height).clamp(0.02, 0.98),
       );
       _usedDir = false;
       _dir = _inferDir(_target);
@@ -188,6 +201,7 @@ class _MoveTargetEditorState extends State<MoveTargetEditor> {
 
   @override
   Widget build(BuildContext context) {
+    _map = _mapSize();
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -198,8 +212,8 @@ class _MoveTargetEditorState extends State<MoveTargetEditor> {
             behavior: HitTestBehavior.opaque,
             onTapDown: (d) => _tap(d.localPosition),
             child: Container(
-              width: _mapW,
-              height: _mapH,
+              width: _map.width,
+              height: _map.height,
               decoration: BoxDecoration(
                 color: const Color(0xFFF5F0F2),
                 borderRadius: BorderRadius.circular(12),
@@ -209,30 +223,54 @@ class _MoveTargetEditorState extends State<MoveTargetEditor> {
                 borderRadius: BorderRadius.circular(11),
                 child: Stack(
                   children: [
-                    // 起点锚点
+                    // 聊天框区域（屏幕底部输入框）：让用户直观看到聊天框在哪，
+                    // "从聊天框出发"的灰点正好落在它上沿中间
                     Positioned(
-                      left: widget.anchor.x * _mapW - 4,
-                      top: widget.anchor.y * _mapH - 4,
+                      left: 0,
+                      right: 0,
+                      top: _map.height * 0.78,
+                      height: _map.height * 0.22,
                       child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFC0B0B6),
-                          shape: BoxShape.circle,
+                        decoration: BoxDecoration(
+                          color: const Color(0x22D0B8C4),
+                          borderRadius: const BorderRadius.vertical(
+                              bottom: Radius.circular(11)),
+                          border: const Border(
+                              top: BorderSide(
+                                  color: Color(0x55B0A0A6), width: 1)),
+                        ),
+                        alignment: Alignment.topCenter,
+                        padding: const EdgeInsets.only(top: 2),
+                        child: const Text('聊天框',
+                            style: TextStyle(
+                                fontSize: 8, color: Color(0x99B0A0A6))),
+                      ),
+                    ),
+                    // 起点锚点 + 路径线（anchorVisible=false 时隐藏）
+                    if (widget.anchorVisible) ...[
+                      Positioned(
+                        left: widget.anchor.x * _map.width - 4,
+                        top: widget.anchor.y * _map.height - 4,
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFC0B0B6),
+                            shape: BoxShape.circle,
+                          ),
                         ),
                       ),
-                    ),
-                    // 路径线（起点 → 目标）
-                    Positioned.fill(
-                      child: CustomPaint(
-                        painter: _PathPainter(
-                            from: widget.anchor, to: _target),
+                      Positioned.fill(
+                        child: CustomPaint(
+                          painter: _PathPainter(
+                              from: widget.anchor, to: _target),
+                        ),
                       ),
-                    ),
+                    ],
                     // 目标亮点
                     Positioned(
-                      left: _target.x * _mapW - 7,
-                      top: _target.y * _mapH - 7,
+                      left: _target.x * _map.width - 7,
+                      top: _target.y * _map.height - 7,
                       child: Container(
                         width: 14,
                         height: 14,

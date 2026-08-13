@@ -8,6 +8,7 @@ import '../../butler/pet/pet_models.dart';
 import '../../butler/pet/pet_store.dart';
 import '../../services/pet_settings_notifier.dart';
 import '../../utils/debug_logger.dart';
+import 'pet_group_page.dart';
 import 'pet_profile_page.dart';
 import 'pet_widgets.dart';
 
@@ -26,7 +27,7 @@ class PetSetupPage extends StatefulWidget {
 class _PetSetupPageState extends State<PetSetupPage> {
   final _store = PetStore();
   List<PetProfile> _profiles = [];
-  List<PetDuoConfig> _duoConfigs = [];
+  List<PetGroupDef> _groups = [];
   List<PetActionDef> _actions = [];
   bool _loading = true;
 
@@ -38,12 +39,12 @@ class _PetSetupPageState extends State<PetSetupPage> {
 
   Future<void> _load() async {
     final profiles = await _store.allProfiles();
-    final configs = await _store.duoConfigs();
+    final groups = await _store.allGroups();
     final actions = await _store.allActions();
     if (!mounted) return;
     setState(() {
       _profiles = profiles;
-      _duoConfigs = configs;
+      _groups = groups;
       _actions = actions;
       _loading = false;
     });
@@ -143,23 +144,20 @@ class _PetSetupPageState extends State<PetSetupPage> {
   }
 
   /// 新建/编辑互动（对话框里勾选两角色 + 选/建互动动作）
-  Future<void> _editDuo(PetDuoConfig? existing) async {
-    final created = await showDialog<bool>(
-      context: context,
-      builder: (_) => DuoEditDialog(
-        profiles: _profiles,
-        existing: existing,
-      ),
+  Future<void> _editGroup(PetGroupDef? existing) async {
+    final created = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => PetGroupPage(existing: existing)),
     );
     if (created == true) _load();
   }
 
-  Future<void> _deleteDuo(PetDuoConfig c) async {
+  Future<void> _deleteGroup(PetGroupDef g) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('删除这组互动？'),
-        content: Text('「${_petName(c.petA)} 和 ${_petName(c.petB)}」的互动会被删掉'),
+        title: const Text('删除这个互动组？'),
+        content: Text('「${g.name}」会被删掉（包括所有坑的动作和帧图）'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -174,7 +172,7 @@ class _PetSetupPageState extends State<PetSetupPage> {
       ),
     );
     if (ok != true) return;
-    await _store.removeDuoConfig(c.pairId);
+    await _store.removeGroup(g.id);
     PetSettingsNotifier.instance.notifyChanged();
     _load();
   }
@@ -225,7 +223,7 @@ class _PetSetupPageState extends State<PetSetupPage> {
                       SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          '这里放你的小人：\n单角色 = 一个小人一个框：点进去配它的动作和组合表演\n双人互动 = 两个小人一组：点进去选人、绑一段互动',
+                          '这里放你的小人：\n单角色 = 一个小人一个框：点进去配它的动作和组合表演\n互动组 = 几个小人一起演：每坑一个角色（自己的帧图），一步步排剧本（A走、B跑、A去抱…）',
                           style: TextStyle(
                               fontSize: 12.5, color: Color(0xFF8A5A72)),
                         ),
@@ -303,10 +301,10 @@ class _PetSetupPageState extends State<PetSetupPage> {
                       );
                     },
                   ),
-                // ═══ 多角色互动 ═══
+                // ═══ 互动组（多角色剧本）═══
                 Row(
                   children: [
-                    const Text('双人互动',
+                    const Text('互动组',
                         style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
@@ -315,24 +313,24 @@ class _PetSetupPageState extends State<PetSetupPage> {
                     const Icon(Icons.favorite,
                         size: 14, color: Color(0xFFB0789A)),
                     const Spacer(),
-                    Text('${_duoConfigs.length} 组',
+                    Text('${_groups.length} 组',
                         style: const TextStyle(
                             fontSize: 12, color: Color(0xFFB0A0A6))),
                   ],
                 ),
                 const SizedBox(height: 4),
-                const Text('两个小人一组：点进去选人、绑互动（如 A+B 贴贴）',
+                const Text('几个小人一起演：每个小人一个坑（自己的帧图），一步步排剧本（A走、B跑、A去抱…）',
                     style: TextStyle(fontSize: 11, color: Color(0xFFB0A0A6))),
                 const SizedBox(height: 10),
-                if (_duoConfigs.isEmpty) ...[
+                if (_groups.isEmpty) ...[
                   const _EmptyHint(
-                      text: '还没有互动，点下面「＋」配第一对（如 A+B 贴贴）'),
+                      text: '还没有互动组，点下面「＋」排第一个（如 A 跑过去抱 B）'),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
-                    onPressed: () => _editDuo(null),
+                    onPressed: () => _editGroup(null),
                     icon: const Icon(Icons.add,
                         size: 18, color: Color(0xFFB0789A)),
-                    label: const Text('新建互动',
+                    label: const Text('新建互动组',
                         style: TextStyle(
                             color: Color(0xFFB0789A), fontSize: 13)),
                     style: OutlinedButton.styleFrom(
@@ -344,7 +342,7 @@ class _PetSetupPageState extends State<PetSetupPage> {
                     ),
                   ),
                 ] else
-                  // 双人互动框同样固定 3:4，和单角色框整齐
+                  // 互动组框同样固定 3:4，和单角色框整齐
                   LayoutBuilder(
                     builder: (ctx, cons) {
                       final cols = (cons.maxWidth / 200).floor().clamp(2, 6);
@@ -356,16 +354,17 @@ class _PetSetupPageState extends State<PetSetupPage> {
                         crossAxisSpacing: 12,
                         childAspectRatio: 3 / 4,
                         children: [
-                          for (final c in _duoConfigs)
-                            _DuoCard(
-                              config: c,
-                              petA: _petById(c.petA),
-                              petB: _petById(c.petB),
-                              actionName: _actionName(c.actionId),
-                              onTap: () => _editDuo(c),
-                              onDelete: () => _deleteDuo(c),
+                          for (final g in _groups)
+                            _GroupCard(
+                              group: g,
+                              bindNames: [
+                                for (final s in g.slots)
+                                  s.bindPetId != null ? _petName(s.bindPetId!) : s.label,
+                              ],
+                              onTap: () => _editGroup(g),
+                              onDelete: () => _deleteGroup(g),
                             ),
-                          _NewBox(label: '新建互动', onTap: () => _editDuo(null)),
+                          _NewBox(label: '新建互动组', onTap: () => _editGroup(null)),
                         ],
                       );
                     },
@@ -417,43 +416,22 @@ class _EmptyHint extends StatelessWidget {
 }
 
 /// 多角色互动小框：两个头像并排 + 名字
-class _DuoCard extends StatelessWidget {
-  final PetDuoConfig config;
-  final PetProfile? petA;
-  final PetProfile? petB;
-  final String actionName;
+class _GroupCard extends StatelessWidget {
+  final PetGroupDef group;
+  final List<String> bindNames;
   final VoidCallback onTap;
   final VoidCallback onDelete;
 
-  const _DuoCard({
-    required this.config,
-    required this.petA,
-    required this.petB,
-    required this.actionName,
+  const _GroupCard({
+    required this.group,
+    required this.bindNames,
     required this.onTap,
     required this.onDelete,
   });
 
-  Widget _avatar(PetProfile? pet, double radius) {
-    if (pet != null && pet.avatarPath != null) {
-      return CircleAvatar(
-        radius: radius,
-        backgroundColor: const Color(0xFFF0E4EA),
-        backgroundImage: FileImage(File(pet.avatarPath!)),
-        onBackgroundImageError: (_, __) {},
-      );
-    }
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: const Color(0xFFF0E4EA),
-      child: Icon(Icons.pets, size: radius, color: const Color(0xFFD0B8C4)),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final nameA = petA?.name ?? config.petA;
-    final nameB = petB?.name ?? config.petB;
+    final names = bindNames.join(' + ');
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(16),
@@ -478,14 +456,11 @@ class _DuoCard extends StatelessWidget {
                         color: const Color(0xFFF7F0F4),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _avatar(petA, 26),
-                          const SizedBox(width: 4),
-                          _avatar(petB, 26),
-                        ],
-                      ),
+                      child: Icon(Icons.favorite,
+                          size: 34,
+                          color: group.steps.isEmpty
+                              ? const Color(0xFFD8C8CE)
+                              : const Color(0xFFB0789A)),
                     ),
                     Positioned(
                       top: 4,
@@ -508,7 +483,7 @@ class _DuoCard extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                '$nameA × $nameB',
+                group.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
@@ -518,7 +493,14 @@ class _DuoCard extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                actionName,
+                '${group.slots.length} 个坑 · ${group.steps.length} 步',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 10, color: Color(0xFFB0A0A6)),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                names.isEmpty ? '未绑定小人' : names,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 10, color: Color(0xFFB0A0A6)),
@@ -531,7 +513,6 @@ class _DuoCard extends StatelessWidget {
   }
 }
 
-/// 单角色小框：头像 + 名字 + 显示开关
 class _PetCard extends StatelessWidget {
   final PetProfile pet;
   final VoidCallback onTap;

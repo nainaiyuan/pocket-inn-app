@@ -7,6 +7,7 @@
 /// - 组合动作 = 动作的有序序列，支持时长/重复/说话/移动/转头
 library;
 
+import 'dart:convert';
 import 'dart:math' as math;
 
 /// 动作种类
@@ -334,6 +335,9 @@ class PetActionDef {
   /// 帧图目录名（相对 pet/animations/），null = 无帧图（如 turn 可用内置翻转）
   final String? frameDir;
 
+  /// 所属互动组坑位 id（null = 单人自己的动作；非 null = 互动组里某个坑的动作库）
+  final String? slotId;
+
   /// 该动作当前实际帧数（由引擎扫描自动得到，0 = 用户还没放图）
   final int frameCount;
 
@@ -382,6 +386,7 @@ class PetActionDef {
     this.fps = 10,
     this.loop = PetAnimLoop.loop,
     this.frameDir,
+    this.slotId,
     this.frameCount = 0,
     this.moveAnimId = 'walk',
     this.targetSpot,
@@ -886,4 +891,194 @@ class PetDuoConfig {
 
   bool matches(String a, String b) =>
       (petA == a && petB == b) || (petA == b && petB == a);
+}
+
+// ==================== 互动组（多角色剧本） ====================
+//
+// 互动组 = 角色坑 × 剧本
+// - 坑：想几个人就几个坑，每个坑有自己的动作库（帧图），绑定单人仅用于显示名字
+// - 剧本：一步步排，每步给每个坑指派"播哪个动作 + 怎么动"
+// - 移动类型：stay 原地 / dir 上下左右 / spot 到某位置 / approach 靠近对方 /
+//   leave 离开对方 / wall 走到碰墙
+// - 所有坐标都是 0~1 相对值，换设备通用
+
+/// 互动组里一个坑（一个角色）
+class PetGroupSlot {
+  final String slotId;
+  final int index;
+
+  /// 绑定单人（仅区分显示用，不参与播放）
+  final String? bindPetId;
+
+  /// 坑的名字（默认"左半边"/"右半边"）
+  final String label;
+
+  /// 组内初始摆位（相对 0~1）
+  final double x;
+  final double y;
+
+  const PetGroupSlot({
+    required this.slotId,
+    required this.index,
+    this.bindPetId,
+    this.label = '',
+    this.x = 0.5,
+    this.y = 0.6,
+  });
+
+  Map<String, dynamic> toJson() => {
+        's': slotId,
+        'i': index,
+        'p': bindPetId,
+        'l': label,
+        'x': x,
+        'y': y,
+      };
+
+  static PetGroupSlot fromJson(Map<String, dynamic> j) => PetGroupSlot(
+        slotId: j['s'] as String,
+        index: (j['i'] as num?)?.toInt() ?? 0,
+        bindPetId: j['p'] as String?,
+        label: j['l'] as String? ?? '',
+        x: (j['x'] as num?)?.toDouble() ?? 0.5,
+        y: (j['y'] as num?)?.toDouble() ?? 0.6,
+      );
+}
+
+/// 剧本里某个坑的移动方式
+enum PetGroupMoveType {
+  stay('原地', '就在原地播'),
+  dir('方向+距离', '朝方向走一段'),
+  spot('到某个位置', '走到地图上某个点'),
+  approach('靠近对方', '走到挨着对方'),
+  leave('离开对方', '往反方向拉开'),
+  wall('走到碰墙', '一直走到屏幕边');
+
+  final String label;
+  final String hint;
+  const PetGroupMoveType(this.label, this.hint);
+
+  static PetGroupMoveType fromName(String? n) => values.firstWhere(
+      (v) => v.name == n,
+      orElse: () => PetGroupMoveType.stay);
+}
+
+/// 剧本一步里，一个坑的任务：播哪个动作 + 怎么动
+class PetSlotStep {
+  final String slotId;
+
+  /// 播这个坑动作库里的哪个动作 id
+  final String? actionId;
+
+  final PetGroupMoveType moveType;
+  final PetMoveDir? moveDir;
+  final double? moveDist;
+  final double? targetX;
+  final double? targetY;
+
+  const PetSlotStep({
+    required this.slotId,
+    this.actionId,
+    this.moveType = PetGroupMoveType.stay,
+    this.moveDir,
+    this.moveDist,
+    this.targetX,
+    this.targetY,
+  });
+
+  Map<String, dynamic> toJson() => {
+        's': slotId,
+        'a': actionId,
+        'm': moveType.name,
+        'd': moveDir?.name,
+        'dist': moveDist,
+        'x': targetX,
+        'y': targetY,
+      };
+
+  static PetSlotStep fromJson(Map<String, dynamic> j) => PetSlotStep(
+        slotId: j['s'] as String,
+        actionId: j['a'] as String?,
+        moveType: PetGroupMoveType.fromName(j['m'] as String?),
+        moveDir: PetMoveDir.fromName(j['d'] as String?),
+        moveDist: (j['dist'] as num?)?.toDouble(),
+        targetX: (j['x'] as num?)?.toDouble(),
+        targetY: (j['y'] as num?)?.toDouble(),
+      );
+}
+
+/// 剧本一步：所有坑同时执行各自的任务
+class PetGroupStep {
+  final List<PetSlotStep> slotSteps;
+
+  /// 手动时长（秒，null = 自动：取各坑动作时长最大值，最少 2.5s）
+  final double? duration;
+
+  const PetGroupStep(this.slotSteps, {this.duration});
+
+  Map<String, dynamic> toJson() => {
+        'slots': slotSteps.map((e) => e.toJson()).toList(),
+        if (duration != null) 'duration': duration,
+      };
+
+  static PetGroupStep fromJson(Map<String, dynamic> j) => PetGroupStep(
+        ((j['slots'] as List?) ?? const [])
+            .map((e) => PetSlotStep.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        duration: (j['duration'] as num?)?.toDouble(),
+      );
+}
+
+/// 互动组定义
+class PetGroupDef {
+  final String id;
+  final String name;
+
+  /// 距离触发阈值（0~1，null = 不用距离自动触发）
+  final double? triggerDist;
+
+  /// 散场方式：idle 回待机 / resume 接着刚才的单人动作
+  final String exitMode;
+
+  final List<PetGroupSlot> slots;
+  final List<PetGroupStep> steps;
+  final String updatedAt;
+
+  const PetGroupDef({
+    required this.id,
+    required this.name,
+    this.triggerDist,
+    this.exitMode = 'idle',
+    this.slots = const [],
+    this.steps = const [],
+    required this.updatedAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'group_id': id,
+        'name': name,
+        'trigger_dist': triggerDist,
+        'exit_mode': exitMode,
+        'slots_json': jsonEncode(slots.map((e) => e.toJson()).toList()),
+        'steps_json': jsonEncode(steps.map((e) => e.toJson()).toList()),
+        'updated_at': updatedAt,
+      };
+
+  static PetGroupDef fromJson(Map<String, dynamic> j) => PetGroupDef(
+        id: j['group_id'] as String,
+        name: j['name'] as String? ?? '',
+        triggerDist: (j['trigger_dist'] as num?)?.toDouble(),
+        exitMode: j['exit_mode'] as String? ?? 'idle',
+        slots: ((j['slots_json'] as String?) ?? '[]').isEmpty
+            ? const []
+            : (jsonDecode(j['slots_json'] as String) as List)
+                .map((e) => PetGroupSlot.fromJson(e as Map<String, dynamic>))
+                .toList(),
+        steps: ((j['steps_json'] as String?) ?? '[]').isEmpty
+            ? const []
+            : (jsonDecode(j['steps_json'] as String) as List)
+                .map((e) => PetGroupStep.fromJson(e as Map<String, dynamic>))
+                .toList(),
+        updatedAt: j['updated_at'] as String? ?? '',
+      );
 }

@@ -31,7 +31,7 @@ class ButlerDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 6,
+      version: 7,
       onCreate: (db, version) async {
         await _createTables(db);
         // 各 Store 的表（IF NOT EXISTS，幂等）

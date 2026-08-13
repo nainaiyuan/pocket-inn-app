@@ -21,6 +21,9 @@ import 'pet_scene.dart';
 import 'pet_store.dart';
 
 class PetWorld {
+  /// 当前桌宠页的实时世界（互动组配置页"试播"用；null = 桌宠页没开）
+  static PetWorld? live;
+
   late final PetScene scene;
   final PetEventBus events;
   late final PetFeedSystem feedSystem;
@@ -38,6 +41,7 @@ class PetWorld {
       events: this.events,
       store: this.store,
     );
+    PetWorld.live = this;
   }
 
   /// 从持久化恢复：组合动作、用户自建动作、移动组
@@ -206,6 +210,7 @@ class PetWorld {
       feedSystem.feed(petId, itemId);
 
   void dispose() {
+    if (PetWorld.live == this) PetWorld.live = null;
     events.dispose();
   }
 }

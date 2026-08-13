@@ -87,6 +87,17 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       )
     ''');
     await db.execute('''
+      CREATE TABLE IF NOT EXISTS pet_groups (
+        group_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        trigger_dist REAL,
+        exit_mode TEXT DEFAULT 'idle',
+        slots_json TEXT NOT NULL,
+        steps_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
       CREATE TABLE IF NOT EXISTS pet_move_groups (
         group_id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -170,6 +181,10 @@ class PetStore extends ButlerStore implements PetAffectionStore {
     try {
       await db.execute(
           'ALTER TABLE pet_activities ADD COLUMN start_y REAL');
+    } catch (_) {}
+    try {
+      await db.execute(
+          'ALTER TABLE pet_actions ADD COLUMN slot_id TEXT');
     } catch (_) {}
   }
 
@@ -445,5 +460,88 @@ class PetStore extends ButlerStore implements PetAffectionStore {
   Future<void> removeDuoConfig(String pairId) async {
     await db.delete('pet_duo_configs',
         where: 'pair_id = ?', whereArgs: [pairId]);
+  }
+
+  // ========== 互动组（多角色剧本） ==========
+
+  Future<void> saveGroup(PetGroupDef def) async {
+    await insert('pet_groups', def.toJson());
+  }
+
+  Future<List<PetGroupDef>> allGroups() async {
+    final rows = await query('pet_groups', orderBy: 'updated_at DESC');
+    return rows.map((r) => PetGroupDef.fromJson(r)).toList();
+  }
+
+  /// 删除互动组：组 + 所有坑的动作（含帧图目录）
+  Future<void> removeGroup(String groupId) async {
+    final groups = await allGroups();
+    final group = groups.where((g) => g.id == groupId).firstOrNull;
+    if (group != null) {
+      for (final slot in group.slots) {
+        final actions = await slotActions(slot.slotId);
+        for (final a in actions) {
+          await removeSlotAction(a.id);
+        }
+      }
+    }
+    await db.delete('pet_groups', where: 'group_id = ?', whereArgs: [groupId]);
+  }
+
+  // ---- 坑的动作库（存在 pet_actions 里，slot_id 标记归属） ----
+
+  Future<void> saveSlotAction(PetActionDef def) async {
+    final row = {
+      'action_id': def.id,
+      'name': def.name,
+      'kind': def.kind.name,
+      'fps': def.fps,
+      'loop': def.loop.name,
+      'frame_dir': def.frameDir,
+      'frame_count': def.frameCount,
+      'move_anim_id': def.moveAnimId,
+      'target_spot': def.targetSpot?.name,
+      'target_x': def.targetX,
+      'target_y': def.targetY,
+      'trajectory': def.trajectory.name,
+      'move_duration': def.moveDurationSec,
+      'move_dir': def.moveDir?.name,
+      'move_dist': def.moveDist,
+      'move_sec': def.moveSec,
+      'move_ref': def.moveRef.name,
+      'start_x': def.startX,
+      'start_y': def.startY,
+      'speed_tier': def.speedTier.name,
+      'move_group_id': def.moveGroupId,
+      'duration_seconds': def.durationSeconds,
+      'slot_id': def.slotId,
+    };
+    try {
+      await insert('pet_actions', row);
+    } on DatabaseException {
+      // 自愈兜底：老库缺列时先补表结构再重试
+      await createTables(db);
+      await insert('pet_actions', row);
+    }
+  }
+
+  /// 某个坑的动作库
+  Future<List<PetActionDef>> slotActions(String slotId) async {
+    final rows = await query('pet_actions',
+        where: 'slot_id = ?', whereArgs: [slotId]);
+    return rows.map((r) => _actionFromRow(r)).toList();
+  }
+
+  Future<void> removeSlotAction(String actionId) async {
+    await removeAction(actionId);
+    // 顺带清掉帧图目录，不留垃圾
+    try {
+      final support = await getApplicationSupportDirectory();
+      final dir =
+          Directory(p.join(support.path, 'pet', 'animations', actionId));
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
+    } catch (_) {}
   }
 }
