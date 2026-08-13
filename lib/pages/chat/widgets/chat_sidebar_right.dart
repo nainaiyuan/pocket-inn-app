@@ -2236,11 +2236,40 @@ class _PetSectionState extends State<_PetSection> {
             )
           : Column(
               children: [
+                // 一键去配置（显眼入口）
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0x22F0E4EA),
+                      foregroundColor: const Color(0xFF8A5A72),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        side: const BorderSide(color: Color(0xFFE0C8D4)),
+                      ),
+                    ),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const PetSetupPage()),
+                      ).then((_) => _load());
+                    },
+                    icon: const Icon(Icons.pets,
+                        size: 18, color: Color(0xFFB0789A)),
+                    label: const Text('一键去配置桌宠',
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                ),
+                const SizedBox(height: 10),
                 if (_profiles.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(8),
                     child: Text(
-                      '还没有小人，点下面「去配置」新建',
+                      '还没有小人，点上面「一键去配置桌宠」新建',
                       style: TextStyle(fontSize: 12, color: Color(0xFF9A8A90)),
                     ),
                   )
@@ -2285,20 +2314,6 @@ class _PetSectionState extends State<_PetSection> {
                       onChanged: (v) => _toggle(p, v ?? false),
                     ),
                 const SizedBox(height: 4),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const PetSetupPage()),
-                      ).then((_) => _load());
-                    },
-                    icon: const Icon(Icons.settings_outlined, size: 16),
-                    label: const Text('去配置', style: TextStyle(fontSize: 12)),
-                  ),
-                ),
                 const Text(
                   '勾选 = 出现在陪伴页；动作/组合/互动都在配置页里',
                   style: TextStyle(fontSize: 10.5, color: Color(0xFFB0A0A6)),
