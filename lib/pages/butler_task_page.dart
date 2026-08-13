@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../butler/task/butler_task.dart';
 import '../butler/task/task_manager.dart';
+import 'butler/pet_setup_page.dart';
 
 /// 管家任务页 — 待处理 / 进行中 / 已完成。
 ///
@@ -181,6 +182,18 @@ class _ButlerTaskPageState extends State<ButlerTaskPage> {
             onPressed: () => Navigator.of(context).pop(),
           ),
           actions: [
+            // 桌宠设置入口
+            IconButton(
+              icon: const Icon(Icons.pets, color: Color(0xFFC896B4)),
+              tooltip: '桌宠',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const PetSetupPage()),
+                );
+              },
+            ),
             // 8-07 00:49 用户：新建任务入口
             TextButton.icon(
               onPressed: _showCreateTaskSheet,

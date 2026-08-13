@@ -282,37 +282,49 @@ class _CompanionPageState extends State<CompanionPage>
       }
     }
     if (partner == null) return;
-    if (duoActions.length == 1) {
-      world.startDuo(pet.id, partner.id, duoActions.first.id);
-      return;
-    }
-    // 多个双人互动：让用户选一个
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(12),
-              child: Text('选一个互动吧',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-            for (final a in duoActions)
-              ListTile(
-                leading: const Icon(Icons.favorite_rounded,
-                    color: Color(0xFFB0789A)),
-                title: Text(a.name),
-                subtitle: Text('${a.frameCount} 帧 · ${a.durationSeconds}秒'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  world.startDuo(pet.id, partner!.id, a.id);
-                },
+    // 已配置的角色互动优先（配对 + 指定动作）
+    PetStore().duoConfigs().then((configs) {
+      if (!mounted) return;
+      for (final c in configs) {
+        if (c.matches(pet.id, partner!.id)) {
+          if (world.scene.actionDefs.containsKey(c.actionId) && partner != null) {
+            world.startDuo(pet.id, partner.id, c.actionId);
+            return;
+          }
+        }
+      }
+      // 没配置：单个互动动作直接用，多个让用户选
+      if (duoActions.length == 1) {
+        world.startDuo(pet.id, partner!.id, duoActions.first.id);
+        return;
+      }
+      showModalBottomSheet<void>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(12),
+                child: Text('选一个互动吧',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
               ),
-          ],
+              for (final a in duoActions)
+                ListTile(
+                  leading: const Icon(Icons.favorite_rounded,
+                      color: Color(0xFFB0789A)),
+                  title: Text(a.name),
+                  subtitle: Text('${a.frameCount} 帧 · ${a.durationSeconds}秒'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    world.startDuo(pet.id, partner!.id, a.id);
+                  },
+                ),
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    });
   }
 
   Future<void> _feedPet(PetWorld world, Pet pet, String itemId) async {

@@ -458,13 +458,14 @@ class PetActivityRun {
         const speed = 0.3;
         final from = pet.position;
         final (vx, vy) = step.moveDir!.vector;
-        // 撞墙模式：往方向走很远，目标被屏幕边夹住 = 撞墙自然停
-        final dist = step.moveUntilWall ? 10.0 : speed * step.moveSec;
+        // 距离优先：moveDist（屏幕百分比）> 撞墙 > 秒数×速度
+        final dist = step.moveDist ??
+            (step.moveUntilWall ? 10.0 : speed * (step.moveSec ?? 2));
         final target = pet.clampToArea(
             PetPoint(from.x + vx * dist, from.y + vy * dist));
         // 按实际可走距离算时长 → 速度恒定；撞墙时提前到点停
         final actualDist = from.distanceTo(target);
-        final duration = actualDist / speed;
+        final duration = step.moveSec ?? actualDist / speed;
         pet.moveTo(target,
             duration: duration, turnBack: step.turnBack);
         _stepStarted = true;
@@ -568,12 +569,20 @@ class PetActivityRun {
       return;
     }
 
-    // 原地动作步骤（动作自带位移目标时，边播帧边移动）
+    // 原地动作步骤（动作自带位移目标/相对位移时，边播帧边移动）
     if (!_stepStarted) {
       pet.playAction(def, framesResolver(step.actionId), repeat: step.repeat);
-      if (def.target != null) {
+      if (def.target != null || (def.moveDir != null && def.moveDist != null)) {
         final from = pet.position;
-        final clamped = pet.clampToArea(def.target!);
+        final PetPoint target;
+        if (def.target != null) {
+          target = def.target!;
+        } else {
+          final (vx, vy) = def.moveDir!.vector;
+          target = PetPoint(
+              from.x + vx * def.moveDist!, from.y + vy * def.moveDist!);
+        }
+        final clamped = pet.clampToArea(target);
         final actualDist = from.distanceTo(clamped);
         final speed = switch (def.trajectory) {
           PetMoveTrajectory.walk => 0.35,
@@ -582,7 +591,7 @@ class PetActivityRun {
         };
         pet.moveTo(
           clamped,
-          duration: actualDist / speed,
+          duration: def.moveSec ?? actualDist / speed,
           ease: switch (def.trajectory) {
             PetMoveTrajectory.walk => PetMoveEase.linear,
             PetMoveTrajectory.jump => PetMoveEase.jump,
@@ -604,7 +613,7 @@ class PetActivityRun {
     }
 
     // 带位移的动作：移动完才算这步结束（帧循环播着无所谓）
-    if (def.target != null) {
+    if (def.target != null || (def.moveDir != null && def.moveDist != null)) {
       if (!pet.moving && _stepElapsed > 0.05) {
         _advanceStep();
       }
@@ -835,6 +844,33 @@ class PetScene {
       pet.moveTo(
         clamped,
         duration: actualDist / speed,
+        ease: switch (def.trajectory) {
+          PetMoveTrajectory.walk => PetMoveEase.linear,
+          PetMoveTrajectory.jump => PetMoveEase.jump,
+          PetMoveTrajectory.fly => PetMoveEase.easeInOut,
+        },
+        jumpHeight: def.trajectory == PetMoveTrajectory.jump ? 0.25 : 0,
+      );
+      return;
+    }
+    // 原地动作带相对位移（方向+距离，从当前位置出发）
+    if (def.kind == PetActionKind.inPlace &&
+        def.moveDir != null &&
+        def.moveDist != null) {
+      final from = pet.position;
+      final (vx, vy) = def.moveDir!.vector;
+      final clamped = pet.clampToArea(
+          PetPoint(from.x + vx * def.moveDist!, from.y + vy * def.moveDist!));
+      final actualDist = from.distanceTo(clamped);
+      final speed = switch (def.trajectory) {
+        PetMoveTrajectory.walk => 0.35,
+        PetMoveTrajectory.jump => 0.55,
+        PetMoveTrajectory.fly => 0.45,
+      };
+      pet.playAction(def, _resolveFramesSync(actionId));
+      pet.moveTo(
+        clamped,
+        duration: def.moveSec ?? actualDist / speed,
         ease: switch (def.trajectory) {
           PetMoveTrajectory.walk => PetMoveEase.linear,
           PetMoveTrajectory.jump => PetMoveEase.jump,

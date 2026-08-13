@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,13 +10,13 @@ import '../../../models/male_lead.dart';
 import '../../../services/character_service.dart';
 import '../../../services/pet_settings_notifier.dart';
 import '../../../services/setting_version_store.dart';
-import 'pet_action_section.dart';
 import '../../../services/tool_approval_store.dart';
 import '../../system_view_page.dart';
 import '../services/chat_storage_service.dart';
 import '../state/current_character_state.dart';
 import 'ai_provider_sheet.dart';
 import 'task_list_page.dart';
+import '../../butler/pet_setup_page.dart';
 
 /// 角色设置侧栏（右页）
 class ChatSidebarRight extends StatefulWidget {
@@ -249,9 +250,6 @@ class _ChatSidebarRightState extends State<ChatSidebarRight> {
                   // ─── 桌宠设置（显示哪些小人） ───
                   const _PetSection(),
                   const SizedBox(height: 8),
-
-                  // ─── 桌宠动作（导入帧图/移动组） ───
-                  const PetActionSection(),
 
                   // ─── 角色设定（5个结构化字段） ───
                   _SectionCard(
@@ -2194,7 +2192,6 @@ class _PetSection extends StatefulWidget {
 class _PetSectionState extends State<_PetSection> {
   final _store = PetStore();
   List<PetProfile> _profiles = [];
-  List<PetActionDef> _breakCandidates = [];
   bool _loading = true;
 
   @override
@@ -2205,39 +2202,11 @@ class _PetSectionState extends State<_PetSection> {
 
   Future<void> _load() async {
     final profiles = await _store.allProfiles();
-    final actions = await _store.allActions();
     if (!mounted) return;
     setState(() {
       _profiles = profiles;
-      // 打断后可播的动作：内置（待机/跳/转圈/挥手/开心/爬/跳下来）+ 用户自建
-      _breakCandidates = [
-        for (final a in PetBuiltinActions.all)
-          if (a.id == 'idle' ||
-              a.id == 'jump' ||
-              a.id == 'spin' ||
-              a.id == 'wave' ||
-              a.id == 'happy' ||
-              a.id == 'climb' ||
-              a.id == 'jumpOff')
-            a,
-        ...actions,
-      ];
       _loading = false;
     });
-  }
-
-  /// 双人互动被打断后，这个小人的反应（默认待机，可换成"难过"等自建动作）
-  Future<void> _setBreakAction(PetProfile p, String actionId) async {
-    await _store.updateProfileBreakAction(p.petId, actionId);
-    PetSettingsNotifier.instance.notifyChanged();
-    setState(() => p.breakActionId = actionId);
-  }
-
-  String _breakName(String id) {
-    for (final a in _breakCandidates) {
-      if (a.id == id) return a.name;
-    }
-    return id;
   }
 
   Future<void> _toggle(PetProfile p, bool visible) async {
@@ -2248,80 +2217,12 @@ class _PetSectionState extends State<_PetSection> {
     });
   }
 
-  Future<void> _addPet() async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('新建小人'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: '小人的名字（如：我的小猫）'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('创建'),
-          ),
-        ],
-      ),
-    );
-    if (name == null || name.isEmpty || !mounted) return;
-    await _store.saveProfile(PetProfile(
-      petId: 'pet_${DateTime.now().millisecondsSinceEpoch}',
-      name: name,
-    ));
-    PetSettingsNotifier.instance.notifyChanged();
-    await _load();
-  }
 
-  Future<void> _setArea(PetProfile p, String value) async {
-    if (value == 'full' || value == 'bottom') {
-      await _store.updateProfileArea(p.petId, area: PetArea.fromName(value));
-    } else if (value.startsWith('fix:')) {
-      final parts = value.split(':');
-      final x = double.tryParse(parts[1]);
-      final y = double.tryParse(parts[2]);
-      if (x != null && y != null) {
-        await _store.updateProfileArea(p.petId,
-            area: PetArea.fixed, fixedX: x, fixedY: y);
-      }
-    } else {
-      return;
-    }
-    PetSettingsNotifier.instance.notifyChanged();
-    await _load();
-  }
-
-  static const List<(String, double, double)> _fixedSpots = [
-    ('底部中间', 0.5, 0.8),
-    ('左下角', 0.2, 0.8),
-    ('右下角', 0.8, 0.8),
-    ('左上角', 0.2, 0.2),
-    ('右上角', 0.8, 0.2),
-    ('屏幕中间', 0.5, 0.5),
-  ];
-
-  String _areaLabel(PetProfile p) {
-    switch (p.area) {
-      case PetArea.full:
-        return '满屏跑';
-      case PetArea.bottom:
-        return '输入框上方';
-      case PetArea.fixed:
-        return '固定在位置';
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
     return _SectionCard(
-      title: '桌宠设置',
+      title: '桌宠',
       child: _loading
           ? const Padding(
               padding: EdgeInsets.all(8),
@@ -2339,7 +2240,7 @@ class _PetSectionState extends State<_PetSection> {
                   const Padding(
                     padding: EdgeInsets.all(8),
                     child: Text(
-                      '还没有小人，先去陪伴页玩一下，或点下面新建',
+                      '还没有小人，点下面「去配置」新建',
                       style: TextStyle(fontSize: 12, color: Color(0xFF9A8A90)),
                     ),
                   )
@@ -2351,85 +2252,31 @@ class _PetSectionState extends State<_PetSection> {
                       controlAffinity: ListTileControlAffinity.leading,
                       title: Row(
                         children: [
+                          // 缩略图
+                          Container(
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF0E4EA),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: p.avatarPath != null
+                                ? Image.file(
+                                    File(p.avatarPath!),
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (_, __, ___) =>
+                                        const Icon(Icons.pets,
+                                            size: 16,
+                                            color: Color(0xFFD0B8C4)),
+                                  )
+                                : const Icon(Icons.pets,
+                                    size: 16, color: Color(0xFFD0B8C4)),
+                          ),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: Text(p.name,
                                 style: const TextStyle(fontSize: 13)),
-                          ),
-                          // 双人互动被打断后的反应
-                          PopupMenuButton<String>(
-                            tooltip: '互动被打断后',
-                            initialValue: p.breakActionId,
-                            onSelected: (v) => _setBreakAction(p, v),
-                            itemBuilder: (_) => [
-                              for (final a in _breakCandidates)
-                                PopupMenuItem(
-                                    value: a.id,
-                                    child: Text(a.kind == PetActionKind.duo
-                                        ? '${a.name}（双人）'
-                                        : a.name)),
-                            ],
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF7AA0B0)
-                                    .withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.heart_broken_rounded,
-                                      size: 12, color: Color(0xFF5A7A9A)),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    '打断后:${_breakName(p.breakActionId)}',
-                                    style: const TextStyle(
-                                        fontSize: 10.5,
-                                        color: Color(0xFF5A7A9A)),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          // 活动区域设置
-                          PopupMenuButton<String>(
-                            tooltip: '活动区域',
-                            initialValue: p.area.name,
-                            onSelected: (v) => _setArea(p, v),
-                            itemBuilder: (_) => [
-                              const PopupMenuItem(
-                                  value: 'full', child: Text('满屏跑')),
-                              const PopupMenuItem(
-                                  value: 'bottom', child: Text('只在输入框上方')),
-                              const PopupMenuDivider(),
-                              for (final (label, x, y) in _fixedSpots)
-                                PopupMenuItem(
-                                  value: 'fix:$x:$y',
-                                  child: Text('固定到：$label'),
-                                ),
-                            ],
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFB0789A)
-                                    .withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(_areaLabel(p),
-                                      style: const TextStyle(
-                                          fontSize: 10.5,
-                                          color: Color(0xFF9A5A7A))),
-                                  const Icon(Icons.arrow_drop_down,
-                                      size: 14, color: Color(0xFF9A5A7A)),
-                                ],
-                              ),
-                            ),
                           ),
                         ],
                       ),
@@ -2441,13 +2288,19 @@ class _PetSectionState extends State<_PetSection> {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
-                    onPressed: _addPet,
-                    icon: const Icon(Icons.add_rounded, size: 16),
-                    label: const Text('新建小人', style: TextStyle(fontSize: 12)),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const PetSetupPage()),
+                      ).then((_) => _load());
+                    },
+                    icon: const Icon(Icons.settings_outlined, size: 16),
+                    label: const Text('去配置', style: TextStyle(fontSize: 12)),
                   ),
                 ),
                 const Text(
-                  '勾选 = 出现在陪伴页；点右侧标签可设置小人活动区域',
+                  '勾选 = 出现在陪伴页；动作/组合/互动都在配置页里',
                   style: TextStyle(fontSize: 10.5, color: Color(0xFFB0A0A6)),
                 ),
               ],

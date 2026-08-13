@@ -316,6 +316,11 @@ class PetActionDef {
   final double? targetX;
   final double? targetY;
 
+  /// 相对位移：朝方向走 moveDist（屏幕百分比 0~1），从当前位置出发
+  final PetMoveDir? moveDir;
+  final double? moveDist;
+  final double? moveSec;
+
   /// 位移轨迹（带 target 时怎么过去：走/跳/飞）
   final PetMoveTrajectory trajectory;
 
@@ -344,6 +349,9 @@ class PetActionDef {
     this.targetSpot,
     this.targetX,
     this.targetY,
+    this.moveDir,
+    this.moveDist,
+    this.moveSec,
     this.trajectory = PetMoveTrajectory.walk,
     this.moveDurationSec = 3,
     this.speedTier = PetSpeedTier.normal,
@@ -502,8 +510,11 @@ class PetActivityStep {
   /// 方向移动：朝某方向走（8 方向），null = 非方向移动步骤
   final PetMoveDir? moveDir;
 
-  /// 方向移动持续秒数（moveDir 非空且非撞墙模式时生效）
-  final double moveSec;
+  /// 方向移动持续秒数（null = 按距离/速度自动算）
+  final double? moveSec;
+
+  /// 方向移动距离（屏幕百分比 0~1，相对当前位置；null = 按秒数走）
+  final double? moveDist;
 
   /// 方向移动：一直走到撞墙/屏幕边才停下（忽略 moveSec）
   final bool moveUntilWall;
@@ -521,7 +532,8 @@ class PetActivityStep {
     this.targetY,
     this.turnBack = false,
     this.moveDir,
-    this.moveSec = 2,
+    this.moveSec,
+    this.moveDist,
     this.moveUntilWall = false,
     this.trajectory = PetMoveTrajectory.walk,
   });
@@ -550,6 +562,7 @@ class PetActivityStep {
         'turnBack': turnBack,
         if (moveDir != null) 'moveDir': moveDir!.name,
         if (moveDir != null) 'moveSec': moveSec,
+        if (moveDir != null) 'moveDist': moveDist,
         if (moveDir != null) 'moveUntilWall': moveUntilWall,
         if (trajectory != PetMoveTrajectory.walk) 'trajectory': trajectory.name,
       };
@@ -568,6 +581,7 @@ class PetActivityStep {
         turnBack: json['turnBack'] as bool? ?? false,
         moveDir: PetMoveDir.fromName(json['moveDir'] as String?),
         moveSec: (json['moveSec'] as num?)?.toDouble() ?? 2,
+        moveDist: (json['moveDist'] as num?)?.toDouble(),
         moveUntilWall: json['moveUntilWall'] as bool? ?? false,
         trajectory:
             PetMoveTrajectory.fromName(json['trajectory'] as String?) ??
@@ -726,6 +740,9 @@ class PetProfile {
   /// 比如互动时被拉开，男主演"难过"（用户可换成自己画的帧组）
   String breakActionId;
 
+  /// 头像图路径（大类框/聊天页显示缩略图；null = 用第一个动作的第一帧）
+  String? avatarPath;
+
   PetProfile({
     required this.petId,
     required this.name,
@@ -736,6 +753,7 @@ class PetProfile {
     this.fixedX,
     this.fixedY,
     this.breakActionId = 'idle',
+    this.avatarPath,
   });
 
   Map<String, dynamic> toJson() => {
@@ -748,6 +766,7 @@ class PetProfile {
         'fixedX': fixedX,
         'fixedY': fixedY,
         'breakActionId': breakActionId,
+        'avatarPath': avatarPath,
       };
 
   factory PetProfile.fromJson(Map<String, dynamic> json) => PetProfile(
@@ -760,6 +779,7 @@ class PetProfile {
         fixedX: (json['fixedX'] as num?)?.toDouble(),
         fixedY: (json['fixedY'] as num?)?.toDouble(),
         breakActionId: json['breakActionId'] as String? ?? 'idle',
+        avatarPath: json['avatarPath'] as String?,
       );
 
   PetProfile copyWith({
@@ -771,6 +791,7 @@ class PetProfile {
     double? fixedX,
     double? fixedY,
     String? breakActionId,
+    String? avatarPath,
   }) =>
       PetProfile(
         petId: petId,
@@ -782,5 +803,24 @@ class PetProfile {
         fixedX: fixedX ?? this.fixedX,
         fixedY: fixedY ?? this.fixedY,
         breakActionId: breakActionId ?? this.breakActionId,
+        avatarPath: avatarPath ?? this.avatarPath,
       );
+}
+
+/// 双人互动配置：哪两个小人 + 用哪段互动动作
+class PetDuoConfig {
+  final String pairId;
+  final String petA;
+  final String petB;
+  final String actionId;
+
+  const PetDuoConfig({
+    required this.pairId,
+    required this.petA,
+    required this.petB,
+    required this.actionId,
+  });
+
+  bool matches(String a, String b) =>
+      (petA == a && petB == b) || (petA == b && petB == a);
 }

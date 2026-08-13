@@ -968,4 +968,49 @@ void main() {
       expect(pet.activity, isNull);
     });
   });
+  group('方向+距离相对位移（导入时配置）', () {
+    test('playAction 带 moveDir+moveDist：从当前位置朝方向走固定距离', () {
+      final scene = PetScene(frames: _MemoryFrameSource({}));
+      scene.registerAction(PetActionDef(
+        id: 'hop_left',
+        name: '向左跳',
+        fps: 8,
+        loop: PetAnimLoop.loop,
+        frameDir: 'hop_left',
+        moveDir: PetMoveDir.left,
+        moveDist: 0.3,
+        trajectory: PetMoveTrajectory.jump,
+      ));
+      final pet = scene.createPet(
+          id: 'p1', name: 'x', position: const PetPoint(0.5, 0.5));
+      scene.playAction('p1', 'hop_left');
+      for (var i = 0; i < 300; i++) {
+        scene.update(0.02);
+      }
+      expect((pet.position.x - 0.2).abs(), lessThan(0.05));
+      expect((pet.position.y - 0.5).abs(), lessThan(0.05));
+      expect(pet.moving, isFalse);
+    });
+
+    test('moveDist 超出屏幕自动截断（不会跑出去）', () {
+      final scene = PetScene(frames: _MemoryFrameSource({}));
+      scene.registerAction(PetActionDef(
+        id: 'run_right',
+        name: '向右跑',
+        fps: 8,
+        loop: PetAnimLoop.loop,
+        frameDir: 'run_right',
+        moveDir: PetMoveDir.right,
+        moveDist: 2.0, // 远超屏幕
+      ));
+      final pet = scene.createPet(
+          id: 'p1', name: 'x', position: const PetPoint(0.4, 0.5));
+      scene.playAction('p1', 'run_right');
+      for (var i = 0; i < 400; i++) {
+        scene.update(0.02);
+      }
+      expect(pet.position.x, lessThanOrEqualTo(0.98));
+      expect(pet.moving, isFalse);
+    });
+  });
 }

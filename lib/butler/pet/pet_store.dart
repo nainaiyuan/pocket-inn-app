@@ -7,7 +7,10 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../storage/butler_store.dart';
@@ -15,6 +18,16 @@ import 'pet_feed.dart';
 import 'pet_models.dart';
 
 class PetStore extends ButlerStore implements PetAffectionStore {
+  /// 头像目录（应用文档目录 pet/avatars/）
+  static Future<String> avatarsDir() async {
+    final support = await getApplicationSupportDirectory();
+    final dir = Directory(p.join(support.path, 'pet', 'avatars'));
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir.path;
+  }
+
   @override
   String get id => 'pet';
 
@@ -34,6 +47,7 @@ class PetStore extends ButlerStore implements PetAffectionStore {
         fixed_x REAL,
         fixed_y REAL,
         break_action_id TEXT DEFAULT 'idle',
+        avatar_path TEXT,
         updated_at TEXT NOT NULL
       )
     ''');
@@ -55,6 +69,14 @@ class PetStore extends ButlerStore implements PetAffectionStore {
         speed_tier TEXT DEFAULT 'normal',
         move_group_id TEXT,
         duration_seconds REAL DEFAULT 1
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pet_duo_configs (
+        pair_id TEXT PRIMARY KEY,
+        pet_a TEXT NOT NULL,
+        pet_b TEXT NOT NULL,
+        action_id TEXT NOT NULL
       )
     ''');
     await db.execute('''
@@ -109,6 +131,10 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       await db.execute(
           'ALTER TABLE pet_actions ADD COLUMN trajectory TEXT DEFAULT \'walk\'');
     } catch (_) {}
+    try {
+      await db.execute(
+          'ALTER TABLE pet_profiles ADD COLUMN avatar_path TEXT');
+    } catch (_) {}
   }
 
   // ========== 宠物档案 ==========
@@ -131,6 +157,7 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       fixedX: (rows.first['fixed_x'] as num?)?.toDouble(),
       fixedY: (rows.first['fixed_y'] as num?)?.toDouble(),
       breakActionId: rows.first['break_action_id'] as String? ?? 'idle',
+      avatarPath: rows.first['avatar_path'] as String?,
     );
   }
 
@@ -147,6 +174,7 @@ class PetStore extends ButlerStore implements PetAffectionStore {
               fixedX: (r['fixed_x'] as num?)?.toDouble(),
               fixedY: (r['fixed_y'] as num?)?.toDouble(),
               breakActionId: r['break_action_id'] as String? ?? 'idle',
+              avatarPath: r['avatar_path'] as String?,
             ))
         .toList();
   }
@@ -162,6 +190,7 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       'fixed_x': profile.fixedX,
       'fixed_y': profile.fixedY,
       'break_action_id': profile.breakActionId,
+      'avatar_path': profile.avatarPath,
       'updated_at': DateTime.now().toIso8601String(),
     });
   }
@@ -324,5 +353,33 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       where: 'activity_id = ?',
       whereArgs: [activityId],
     );
+  }
+
+  // ========== 双人互动配置 ==========
+
+  Future<void> saveDuoConfig(PetDuoConfig config) async {
+    await insert('pet_duo_configs', {
+      'pair_id': config.pairId,
+      'pet_a': config.petA,
+      'pet_b': config.petB,
+      'action_id': config.actionId,
+    });
+  }
+
+  Future<List<PetDuoConfig>> duoConfigs() async {
+    final rows = await query('pet_duo_configs');
+    return rows
+        .map((r) => PetDuoConfig(
+              pairId: r['pair_id'] as String,
+              petA: r['pet_a'] as String,
+              petB: r['pet_b'] as String,
+              actionId: r['action_id'] as String,
+            ))
+        .toList();
+  }
+
+  Future<void> removeDuoConfig(String pairId) async {
+    await db.delete('pet_duo_configs',
+        where: 'pair_id = ?', whereArgs: [pairId]);
   }
 }
