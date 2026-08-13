@@ -46,25 +46,21 @@ enum PetMoveTrajectory {
 }
 
 /// 移动方向（组合动作里的方向移动步骤用，8 方向含斜角）
-/// 移动起点：方向从哪算（默认位置 1/2/3，以后可继续加自定义位置，不写死）
+/// 移动起点：动作从哪个基准位置开始动（上下左右是最大移动距离）
 enum PetMoveRef {
-  /// 默认位置1：从自己当前站的位置出发
-  self('从自己位置'),
+  /// 从聊天框（手机底部）位置出发，聊天框弹起就当底部基准
+  dock('从聊天框位置'),
 
-  /// 默认位置2：从男主小人站的位置出发
-  hero('从男主位置'),
-
-  /// 默认位置3：从聊天框（手机底部）位置出发，聊天框弹起就当底部基准
-  dock('从聊天框位置');
+  /// 从屏幕中间位置出发
+  center('从屏幕中间');
 
   final String label;
   const PetMoveRef(this.label);
 
   static PetMoveRef fromName(String? name) => switch (name) {
-        'hero' => PetMoveRef.hero,
-        'dock' => PetMoveRef.dock,
-        'center' => PetMoveRef.dock, // 老数据兼容：center 并入 dock
-        _ => PetMoveRef.self,
+        'center' => PetMoveRef.center,
+        // 老数据 self/hero/未知 都回退聊天框基准
+        _ => PetMoveRef.dock,
       };
 }
 
@@ -377,7 +373,7 @@ class PetActionDef {
     this.moveDir,
     this.moveDist,
     this.moveSec,
-    this.moveRef = PetMoveRef.self,
+    this.moveRef = PetMoveRef.dock,
     this.trajectory = PetMoveTrajectory.walk,
     this.moveDurationSec = 3,
     this.speedTier = PetSpeedTier.normal,

@@ -394,13 +394,10 @@ class Pet {
 }
 
 /// 组合动作运行器（由 PetActivityRunner 创建，Pet 持有）
-/// 移动起点计算：self=自己当前位置 / hero=男主位置（无则回退自己）/ dock=聊天框（底部）
-/// 聊天框弹起时相当于手机底部，基准点取底部上方（0.5, 0.85）
-PetPoint _moveBasePoint(Pet pet, PetMoveRef ref, PetPoint? heroPos) =>
-    switch (ref) {
+/// 移动起点计算：dock=聊天框（底部上方）/ center=屏幕中间
+PetPoint _moveBasePoint(Pet pet, PetMoveRef ref) => switch (ref) {
       PetMoveRef.dock => const PetPoint(0.5, 0.85),
-      PetMoveRef.hero => heroPos ?? pet.position,
-      PetMoveRef.self => pet.position,
+      PetMoveRef.center => const PetPoint(0.5, 0.5),
     };
 
 class PetActivityRun {
@@ -588,7 +585,7 @@ class PetActivityRun {
           target = def.target!;
         } else {
           final (vx, vy) = def.moveDir!.vector;
-          final base = _moveBasePoint(pet, def.moveRef, null);
+          final base = _moveBasePoint(pet, def.moveRef);
           target = PetPoint(
               base.x + vx * def.moveDist!, base.y + vy * def.moveDist!);
         }
@@ -714,10 +711,6 @@ class PetScene {
     final hero = petById('male_lead');
     return hero?.position;
   }
-
-  /// 移动起点：self=自己当前位置 / hero=男主位置 / center=屏幕中间
-  PetPoint _moveBase(Pet pet, PetMoveRef ref) =>
-      _moveBasePoint(pet, ref, heroPosition());
 
   /// 创建一个小人
   Pet createPet({
@@ -879,7 +872,7 @@ class PetScene {
         def.moveDist != null) {
       final from = pet.position;
       final (vx, vy) = def.moveDir!.vector;
-      final base = _moveBase(pet, def.moveRef);
+      final base = _moveBasePoint(pet, def.moveRef);
       final clamped = pet.clampToArea(
           PetPoint(base.x + vx * def.moveDist!, base.y + vy * def.moveDist!));
       final actualDist = from.distanceTo(clamped);

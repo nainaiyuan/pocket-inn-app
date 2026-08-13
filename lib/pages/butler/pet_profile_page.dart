@@ -606,7 +606,7 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
   PetMoveTrajectory _trajectory = PetMoveTrajectory.walk;
 
   /// 移动方向参照系：从自己位置 / 从屏幕中间
-  PetMoveRef _moveRef = PetMoveRef.self;
+  PetMoveRef _moveRef = PetMoveRef.dock;
   bool _nameEdited = false;
 
   bool _saving = false;
@@ -720,7 +720,7 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
       moveDir: _howMove == _HowMove.dir ? _moveDir : null,
       moveDist: _howMove == _HowMove.dir ? _moveDist : null,
       moveSec: _howMove == _HowMove.dir ? moveSec : null,
-      moveRef: _howMove == _HowMove.dir ? _moveRef : PetMoveRef.self,
+      moveRef: _howMove == _HowMove.dir ? _moveRef : PetMoveRef.dock,
       targetX: _howMove == _HowMove.target ? _targetX : null,
       targetY: _howMove == _HowMove.target ? _targetY : null,
       trajectory: _trajectory,
@@ -904,9 +904,8 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
                   const SizedBox(height: 4),
                   Text(
                     switch (_moveRef) {
-                      PetMoveRef.self => '默认位置1：从小人自己站的位置出发',
-                      PetMoveRef.hero => '默认位置2：从男主小人站的位置出发',
-                      PetMoveRef.dock => '默认位置3：从聊天框（手机底部）出发',
+                      PetMoveRef.dock => '从聊天框（手机底部）出发，小人刷新在这，上下左右从这里动',
+                      PetMoveRef.center => '从屏幕中间出发，上下左右从这里动',
                     },
                     style: const TextStyle(
                         fontSize: 10.5, color: Color(0xFFB0A0A6)),

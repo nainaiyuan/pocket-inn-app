@@ -969,7 +969,7 @@ void main() {
     });
   });
   group('方向+距离相对位移（导入时配置）', () {
-    test('playAction 带 moveDir+moveDist：从当前位置朝方向走固定距离', () {
+    test('playAction 带 moveDir+moveDist：从聊天框基准朝方向走固定距离', () {
       final scene = PetScene(frames: _MemoryFrameSource({}));
       scene.registerAction(PetActionDef(
         id: 'hop_left',
@@ -980,6 +980,7 @@ void main() {
         moveDir: PetMoveDir.left,
         moveDist: 0.3,
         trajectory: PetMoveTrajectory.jump,
+        moveRef: PetMoveRef.dock,
       ));
       final pet = scene.createPet(
           id: 'p1', name: 'x', position: const PetPoint(0.5, 0.5));
@@ -987,8 +988,34 @@ void main() {
       for (var i = 0; i < 300; i++) {
         scene.update(0.02);
       }
+      // 聊天框基准 (0.5, 0.85) 往左 0.3 → (0.2, 0.85)
       expect((pet.position.x - 0.2).abs(), lessThan(0.05));
-      expect((pet.position.y - 0.5).abs(), lessThan(0.05));
+      expect((pet.position.y - 0.85).abs(), lessThan(0.05));
+      expect(pet.moving, isFalse);
+    });
+
+    test('playAction 带 moveDir+moveDist：从屏幕中间基准朝方向走固定距离', () {
+      final scene = PetScene(frames: _MemoryFrameSource({}));
+      scene.registerAction(PetActionDef(
+        id: 'hop_up',
+        name: '向上跳',
+        fps: 8,
+        loop: PetAnimLoop.loop,
+        frameDir: 'hop_up',
+        moveDir: PetMoveDir.up,
+        moveDist: 0.3,
+        trajectory: PetMoveTrajectory.jump,
+        moveRef: PetMoveRef.center,
+      ));
+      final pet = scene.createPet(
+          id: 'p1', name: 'x', position: const PetPoint(0.5, 0.8));
+      scene.playAction('p1', 'hop_up');
+      for (var i = 0; i < 300; i++) {
+        scene.update(0.02);
+      }
+      // 屏幕中间 (0.5, 0.5) 往上 0.3 → (0.5, 0.2)
+      expect((pet.position.x - 0.5).abs(), lessThan(0.05));
+      expect((pet.position.y - 0.2).abs(), lessThan(0.05));
       expect(pet.moving, isFalse);
     });
 
