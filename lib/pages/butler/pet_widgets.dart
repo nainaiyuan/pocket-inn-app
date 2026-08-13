@@ -1,9 +1,13 @@
+import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
 import '../../butler/pet/pet_models.dart';
 import '../../butler/pet/pet_store.dart';
+import '../../services/pet_frame_source_impl.dart';
 import '../../services/pet_settings_notifier.dart';
 
 /// 目标点选择器：模拟手机屏幕的小方块 + 横向/竖向双滑块 + 8 向快捷按钮
@@ -278,17 +282,15 @@ class _PathPainter extends CustomPainter {
 }
 
 /// ─────────────────────────────────────────────
-/// 互动编辑对话框：勾选两个角色 + 选互动动作
+/// 互动编辑对话框：勾选两个角色 + 选/建互动动作
 /// ─────────────────────────────────────────────
 class DuoEditDialog extends StatefulWidget {
   final List<PetProfile> profiles;
-  final List<PetActionDef> duoActions;
   final PetDuoConfig? existing;
 
   const DuoEditDialog({
     super.key,
     required this.profiles,
-    required this.duoActions,
     this.existing,
   });
 
@@ -301,6 +303,9 @@ class _DuoEditDialogState extends State<DuoEditDialog> {
   String? _actionId;
   bool _saving = false;
 
+  List<PetActionDef> _duoActions = [];
+  bool _loadingActions = true;
+
   @override
   void initState() {
     super.initState();
@@ -309,6 +314,20 @@ class _DuoEditDialogState extends State<DuoEditDialog> {
       _selected.addAll([e.petA, e.petB]);
       _actionId = e.actionId;
     }
+    _loadDuoActions();
+  }
+
+  Future<void> _loadDuoActions() async {
+    final store = PetStore();
+    final all = await store.allActions();
+    if (!mounted) return;
+    setState(() {
+      _duoActions = [
+        for (final a in all)
+          if (a.kind == PetActionKind.duo) a,
+      ];
+      _loadingActions = false;
+    });
   }
 
   Future<void> _save() async {
@@ -317,7 +336,7 @@ class _DuoEditDialogState extends State<DuoEditDialog> {
       return;
     }
     if (_actionId == null) {
-      _toast('选一段互动动作');
+      _toast('选一段互动动作（或点「＋上传图新建」）');
       return;
     }
     setState(() => _saving = true);
@@ -333,6 +352,20 @@ class _DuoEditDialogState extends State<DuoEditDialog> {
     Navigator.pop(context, true);
   }
 
+  /// 弹新建互动动作对话框：上传图 → 命名 → 保存为 duo 动作
+  Future<void> _createDuoAction() async {
+    final created = await showDialog<PetActionDef>(
+      context: context,
+      builder: (_) => const _NewDuoActionDialog(),
+    );
+    if (created == null || !mounted) return;
+    // 保存成功：刷新列表并自动选中
+    setState(() {
+      _duoActions = [..._duoActions, created];
+      _actionId = created.id;
+    });
+  }
+
   void _toast(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
@@ -340,10 +373,10 @@ class _DuoEditDialogState extends State<DuoEditDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.existing == null ? '新建互动' : '编辑互动'),
+      title: Text(widget.existing == null ? '添加互动' : '编辑互动'),
       content: SizedBox(
-        width: 340,
-        height: 380,
+        width: 360,
+        height: 420,
         child: Column(
           children: [
             const Align(
@@ -353,6 +386,7 @@ class _DuoEditDialogState extends State<DuoEditDialog> {
             ),
             const SizedBox(height: 4),
             Expanded(
+              flex: 5,
               child: ListView.separated(
                 itemCount: widget.profiles.length,
                 separatorBuilder: (_, __) =>
@@ -380,40 +414,252 @@ class _DuoEditDialogState extends State<DuoEditDialog> {
                         });
                       },
                     ),
-                    title: Text(pet.name, style: const TextStyle(fontSize: 13)),
+                    title:
+                        Text(pet.name, style: const TextStyle(fontSize: 13)),
                   );
                 },
               ),
             ),
             const SizedBox(height: 8),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text('互动动作：',
-                  style: TextStyle(fontSize: 12, color: Color(0xFFB0A0A6))),
+            Row(
+              children: [
+                const Text('互动动作：',
+                    style:
+                        TextStyle(fontSize: 12, color: Color(0xFFB0A0A6))),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: _createDuoAction,
+                  icon: const Icon(Icons.add,
+                      size: 15, color: Color(0xFFB0789A)),
+                  label: const Text('上传图新建',
+                      style: TextStyle(fontSize: 11.5, color: Color(0xFFB0789A))),
+                ),
+              ],
             ),
             const SizedBox(height: 4),
-            if (widget.duoActions.isEmpty)
-              const Text('还没有双人互动动作，先去角色配置页添加',
-                  style: TextStyle(fontSize: 11, color: Color(0xFFC0A0B0)))
-            else
-              DropdownButtonFormField<String>(
-                initialValue: _actionId,
-                isExpanded: true,
+            Expanded(
+              flex: 4,
+              child: _loadingActions
+                  ? const Center(
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : _duoActions.isEmpty
+                      ? Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: const Color(0x22F0E4EA),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Text(
+                            '还没有互动动作：点右上「上传图新建」，'
+                            '上传一组两个小人挨在一起的帧图',
+                            style: TextStyle(
+                                fontSize: 11.5,
+                                color: Color(0xFF9A8A90),
+                                height: 1.6),
+                          ),
+                        )
+                      : ListView(
+                          children: [
+                            for (final a in _duoActions)
+                              RadioListTile<String>(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                activeColor: const Color(0xFFB0789A),
+                                title: Text('${a.name}（${a.durationSeconds}秒）',
+                                    style: const TextStyle(fontSize: 13)),
+                                value: a.id,
+                                groupValue: _actionId,
+                                onChanged: (v) =>
+                                    setState(() => _actionId = v),
+                              ),
+                          ],
+                        ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context), child: const Text('取消')),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFB0789A)),
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : const Text('保存'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 新建互动动作小对话框：上传帧图 + 命名 + 秒数，保存后 pop 返回新动作
+class _NewDuoActionDialog extends StatefulWidget {
+  const _NewDuoActionDialog();
+
+  @override
+  State<_NewDuoActionDialog> createState() => _NewDuoActionDialogState();
+}
+
+class _NewDuoActionDialogState extends State<_NewDuoActionDialog> {
+  List<String>? _files;
+  final _nameController = TextEditingController();
+  final _secondsController = TextEditingController(text: '1');
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _secondsController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pick() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    if (!mounted) return;
+    setState(() {
+      _files = result.files.map((f) => f.path!).toList();
+    });
+  }
+
+  Future<void> _save() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      _toast('先给互动动作起个名字');
+      return;
+    }
+    final seconds = double.tryParse(_secondsController.text.trim()) ?? 1;
+    if (seconds <= 0) {
+      _toast('秒数要大于 0');
+      return;
+    }
+    final files = _files;
+    if (files == null || files.isEmpty) {
+      _toast('先上传互动帧图（两个小人挨在一起的一组图）');
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      final actionId = 'duo_${DateTime.now().millisecondsSinceEpoch}';
+      final dir = await FilePetFrameSource.actionDir(actionId);
+      final copied = <String>[];
+      for (final f in files) {
+        final target = p.join(dir, p.basename(f));
+        await File(f).copy(target);
+        copied.add(target);
+      }
+      final def = PetActionDef(
+        id: actionId,
+        name: name,
+        kind: PetActionKind.duo,
+        fps: (copied.length / seconds).clamp(1.0, 60.0),
+        loop: PetAnimLoop.loop,
+        frameDir: actionId,
+        frameCount: copied.length,
+        durationSeconds: seconds,
+      );
+      await PetStore().saveAction(def);
+      if (!mounted) return;
+      Navigator.pop(context, def);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _toast('保存失败，检查图片能否读取');
+    }
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final files = _files;
+    return AlertDialog(
+      title: const Text('新建互动动作'),
+      content: SizedBox(
+        width: 340,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _saving ? null : _pick,
+                icon: const Icon(Icons.upload_file,
+                    size: 18, color: Color(0xFFB0789A)),
+                label: Text(files == null ? '上传互动帧图（可多选）' : '重新选图',
+                    style: const TextStyle(color: Color(0xFFB0789A))),
+              ),
+              const SizedBox(height: 6),
+              const Text('一组图里两个小人挨在一起，按顺序播放',
+                  style: TextStyle(fontSize: 10.5, color: Color(0xFFB0A0A6))),
+              if (files != null && files.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                SizedBox(
+                  height: 52,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: files.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 6),
+                    itemBuilder: (_, i) => ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: Image.file(
+                        File(files[i]),
+                        width: 52,
+                        height: 52,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          width: 52,
+                          height: 52,
+                          color: const Color(0xFFF0E8EC),
+                          child: const Icon(Icons.broken_image,
+                              size: 18, color: Color(0xFFD0B8C4)),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: _nameController,
                 decoration: const InputDecoration(
+                  labelText: '互动动作名字',
+                  hintText: '如：贴贴 / 抱抱 / 转圈圈',
                   isDense: true,
                   border: OutlineInputBorder(),
                 ),
-                hint: const Text('选一段互动', style: TextStyle(fontSize: 12)),
-                items: [
-                  for (final a in widget.duoActions)
-                    DropdownMenuItem(
-                        value: a.id,
-                        child: Text('${a.name}（${a.durationSeconds}秒）',
-                            style: const TextStyle(fontSize: 12.5))),
-                ],
-                onChanged: (v) => setState(() => _actionId = v),
               ),
-          ],
+              const SizedBox(height: 10),
+              TextField(
+                controller: _secondsController,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: '播几秒',
+                  suffixText: '秒',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
       actions: [

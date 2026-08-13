@@ -46,6 +46,23 @@ enum PetMoveTrajectory {
 }
 
 /// 移动方向（组合动作里的方向移动步骤用，8 方向含斜角）
+/// 移动方向参照系：方向从哪算
+enum PetMoveRef {
+  /// 从自己当前位置出发（聊天框上方的小人所在位置）
+  self('从自己位置'),
+
+  /// 以屏幕中间为基准点
+  center('从屏幕中间');
+
+  final String label;
+  const PetMoveRef(this.label);
+
+  static PetMoveRef fromName(String? name) => switch (name) {
+        'center' => PetMoveRef.center,
+        _ => PetMoveRef.self,
+      };
+}
+
 enum PetMoveDir {
   up,
   down,
@@ -321,6 +338,9 @@ class PetActionDef {
   final double? moveDist;
   final double? moveSec;
 
+  /// 移动方向参照系：self = 从自己位置，center = 从屏幕中间
+  final PetMoveRef moveRef;
+
   /// 位移轨迹（带 target 时怎么过去：走/跳/飞）
   final PetMoveTrajectory trajectory;
 
@@ -352,6 +372,7 @@ class PetActionDef {
     this.moveDir,
     this.moveDist,
     this.moveSec,
+    this.moveRef = PetMoveRef.self,
     this.trajectory = PetMoveTrajectory.walk,
     this.moveDurationSec = 3,
     this.speedTier = PetSpeedTier.normal,

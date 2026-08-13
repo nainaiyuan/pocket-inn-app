@@ -133,6 +133,22 @@ class PetStore extends ButlerStore implements PetAffectionStore {
     } catch (_) {}
     try {
       await db.execute(
+          'ALTER TABLE pet_actions ADD COLUMN move_dir TEXT');
+    } catch (_) {}
+    try {
+      await db.execute(
+          'ALTER TABLE pet_actions ADD COLUMN move_dist REAL');
+    } catch (_) {}
+    try {
+      await db.execute(
+          'ALTER TABLE pet_actions ADD COLUMN move_sec REAL');
+    } catch (_) {}
+    try {
+      await db.execute(
+          'ALTER TABLE pet_actions ADD COLUMN move_ref TEXT DEFAULT \'self\'');
+    } catch (_) {}
+    try {
+      await db.execute(
           'ALTER TABLE pet_profiles ADD COLUMN avatar_path TEXT');
     } catch (_) {}
   }
@@ -258,6 +274,10 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       'target_y': def.targetY,
       'trajectory': def.trajectory.name,
       'move_duration': def.moveDurationSec,
+      'move_dir': def.moveDir?.name,
+      'move_dist': def.moveDist,
+      'move_sec': def.moveSec,
+      'move_ref': def.moveRef.name,
       'speed_tier': def.speedTier.name,
       'move_group_id': def.moveGroupId,
       'duration_seconds': def.durationSeconds,
@@ -290,6 +310,10 @@ class PetStore extends ButlerStore implements PetAffectionStore {
         trajectory: PetMoveTrajectory.fromName(r['trajectory'] as String?) ??
             PetMoveTrajectory.walk,
         moveDurationSec: (r['move_duration'] as num?)?.toDouble() ?? 3,
+        moveDir: PetMoveDir.fromName(r['move_dir'] as String?),
+        moveDist: (r['move_dist'] as num?)?.toDouble(),
+        moveSec: (r['move_sec'] as num?)?.toDouble(),
+        moveRef: PetMoveRef.fromName(r['move_ref'] as String?),
         speedTier: PetSpeedTier.fromName(r['speed_tier'] as String?),
         moveGroupId: r['move_group_id'] as String?,
         durationSeconds: (r['duration_seconds'] as num?)?.toDouble() ?? 1,

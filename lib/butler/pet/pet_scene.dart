@@ -579,8 +579,11 @@ class PetActivityRun {
           target = def.target!;
         } else {
           final (vx, vy) = def.moveDir!.vector;
+          final base = def.moveRef == PetMoveRef.center
+              ? const PetPoint(0.5, 0.5)
+              : from;
           target = PetPoint(
-              from.x + vx * def.moveDist!, from.y + vy * def.moveDist!);
+              base.x + vx * def.moveDist!, base.y + vy * def.moveDist!);
         }
         final clamped = pet.clampToArea(target);
         final actualDist = from.distanceTo(clamped);
@@ -859,8 +862,11 @@ class PetScene {
         def.moveDist != null) {
       final from = pet.position;
       final (vx, vy) = def.moveDir!.vector;
+      final base = def.moveRef == PetMoveRef.center
+          ? const PetPoint(0.5, 0.5)
+          : from;
       final clamped = pet.clampToArea(
-          PetPoint(from.x + vx * def.moveDist!, from.y + vy * def.moveDist!));
+          PetPoint(base.x + vx * def.moveDist!, base.y + vy * def.moveDist!));
       final actualDist = from.distanceTo(clamped);
       final speed = switch (def.trajectory) {
         PetMoveTrajectory.walk => 0.35,

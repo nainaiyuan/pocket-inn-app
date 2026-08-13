@@ -558,8 +558,8 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
   double _targetY = 0.5;
   PetMoveTrajectory _trajectory = PetMoveTrajectory.walk;
 
-  /// 选中的预设动作 id（null = 自己上传图）
-  String? _presetId;
+  /// 移动方向参照系：从自己位置 / 从屏幕中间
+  PetMoveRef _moveRef = PetMoveRef.self;
   bool _nameEdited = false;
 
   bool _saving = false;
@@ -575,13 +575,9 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
       _kind = switch (e.kind) {
         PetActionKind.inPlace => _ImportKind.inPlace,
         PetActionKind.moveTo => _ImportKind.move,
-        PetActionKind.duo => _ImportKind.duo,
         _ => _ImportKind.inPlace,
       };
-      // 预设动作（引用内置帧、无用户图）
-      if (e.frameCount == 0 && e.frameDir != null && PetBuiltinActions.byId(e.frameDir!) != null) {
-        _presetId = e.frameDir;
-      }
+      _moveRef = e.moveRef;
       final t = e.target;
       if (t != null) {
         _howMove = _HowMove.target;
@@ -594,25 +590,15 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
         _moveDist = e.moveDist ?? 0.3;
         if (e.moveSec != null) _moveSecController.text = e.moveSec.toString();
       }
+      // 编辑：把已有帧图回填，不重新选图也能保存（保留原帧）
+      _loadExistingFrames(e.id);
     }
   }
 
-  /// 可选用的预设动作（原地类 + 引擎行为）
-  List<PetActionDef> get _presets => [
-        for (final a in PetBuiltinActions.all)
-          if (a.kind == PetActionKind.inPlace ||
-              a.kind == PetActionKind.behavior)
-            a,
-      ];
-
-  void _pickPreset(PetActionDef a) {
-    setState(() {
-      _presetId = a.id;
-      if (!_nameEdited) {
-        _nameController.text = a.name;
-        _nameEdited = true;
-      }
-    });
+  Future<void> _loadExistingFrames(String actionId) async {
+    final frames = await FilePetFrameSource().framesFor(actionId);
+    if (!mounted || frames.isEmpty) return;
+    setState(() => _files = frames);
   }
 
   Future<void> _pick() async {
@@ -623,7 +609,6 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
     if (result == null || result.files.isEmpty) return;
     setState(() {
       _files = result.files.map((f) => f.path!).toList();
-      _presetId = null;
     });
   }
 
@@ -644,11 +629,9 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
       _toast('秒数要大于 0');
       return;
     }
-    // 预设动作：不需要图；自己上传：必须有图
-    final usingPreset = _presetId != null;
     final files = _files;
-    if (!usingPreset && (files == null || files.isEmpty)) {
-      _toast('先选图片（或用预设动作）');
+    if (files == null || files.isEmpty) {
+      _toast('先上传图片（帧图）');
       return;
     }
     setState(() => _saving = true);
@@ -657,38 +640,25 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
     final actionId = existing?.id ?? 'act_${DateTime.now().millisecondsSinceEpoch}';
     final store = PetStore();
 
-    // 帧图：预设 → 引用内置 frameDir；上传 → 复制到动作目录
-    String? frameDir;
-    int frameCount = 0;
-    double fps;
-    PetAnimLoop loop;
-    if (usingPreset) {
-      final preset = PetBuiltinActions.byId(_presetId!)!;
-      frameDir = preset.frameDir ?? preset.id;
-      fps = preset.fps;
-      loop = preset.loop;
-    } else {
-      frameDir = actionId;
-      final dir = await FilePetFrameSource.actionDir(actionId);
-      // 编辑时重选图：先清旧帧
-      if (await Directory(dir).exists()) {
-        await Directory(dir).delete(recursive: true);
-      }
-      final copied = <String>[];
-      for (final f in files!) {
-        final target = p.join(dir, p.basename(f));
-        await File(f).copy(target);
-        copied.add(target);
-      }
-      frameCount = copied.length;
-      fps = (copied.length / seconds).clamp(1.0, 60.0);
-      loop = PetAnimLoop.loop;
+    // 帧图：复制到动作目录（编辑时重选图先清旧帧）
+    final frameDir = actionId;
+    final dir = await FilePetFrameSource.actionDir(actionId);
+    if (await Directory(dir).exists()) {
+      await Directory(dir).delete(recursive: true);
     }
+    final copied = <String>[];
+    for (final f in files) {
+      final target = p.join(dir, p.basename(f));
+      await File(f).copy(target);
+      copied.add(target);
+    }
+    final frameCount = copied.length;
+    final fps = (frameCount / seconds).clamp(1.0, 60.0);
+    final loop = PetAnimLoop.loop;
 
     final kind = switch (_kind) {
       _ImportKind.inPlace => PetActionKind.inPlace,
       _ImportKind.move => PetActionKind.moveTo,
-      _ImportKind.duo => PetActionKind.duo,
     };
     final moveSec = double.tryParse(_moveSecController.text.trim());
     final def = PetActionDef(
@@ -703,6 +673,7 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
       moveDir: _howMove == _HowMove.dir ? _moveDir : null,
       moveDist: _howMove == _HowMove.dir ? _moveDist : null,
       moveSec: _howMove == _HowMove.dir ? moveSec : null,
+      moveRef: _howMove == _HowMove.dir ? _moveRef : PetMoveRef.self,
       targetX: _howMove == _HowMove.target ? _targetX : null,
       targetY: _howMove == _HowMove.target ? _targetY : null,
       trajectory: _trajectory,
@@ -720,7 +691,6 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final usingPreset = _presetId != null;
     return AlertDialog(
       title: Text(widget.existing == null ? '添加动作' : '编辑动作'),
       content: SizedBox(
@@ -750,88 +720,46 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
                     const TextStyle(fontSize: 10.5, color: Color(0xFFB0A0A6)),
               ),
               const SizedBox(height: 12),
-              // 预设动作（原地/行为类才有）
-              if (_kind == _ImportKind.inPlace) ...[
-                const Text('用预设动作（不用画图）：',
-                    style: TextStyle(fontSize: 12)),
+              // 上传帧图（必须）
+              OutlinedButton.icon(
+                onPressed: _saving ? null : _pick,
+                icon: const Icon(Icons.upload_file,
+                    size: 18, color: Color(0xFFB0789A)),
+                label: Text(_files == null ? '上传图片（可多选，按顺序）' : '重新选图',
+                    style: const TextStyle(color: Color(0xFFB0789A))),
+              ),
+              const SizedBox(height: 6),
+              Text(_frameHint,
+                  style:
+                      const TextStyle(fontSize: 10.5, color: Color(0xFFB0A0A6))),
+              if (_files != null && _files!.isNotEmpty) ...[
                 const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final a in _presets)
-                      FilterChip(
-                        label: Text(a.name,
-                            style: const TextStyle(fontSize: 11)),
-                        visualDensity: VisualDensity.compact,
-                        selected: _presetId == a.id,
-                        selectedColor: const Color(0x33B0789A),
-                        backgroundColor: const Color(0x11F0E4EA),
-                        checkmarkColor: const Color(0xFFB0789A),
-                        side: BorderSide(
-                          color: _presetId == a.id
-                              ? const Color(0xFFB0789A)
-                              : const Color(0xFFE0D0D8),
-                        ),
-                        onSelected: (_) => _pickPreset(a),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-              ],
-              // 上传图片（预设选中时不显示）
-              if (!usingPreset) ...[
-                OutlinedButton.icon(
-                  onPressed: _saving ? null : _pick,
-                  icon: const Icon(Icons.upload_file,
-                      size: 18, color: Color(0xFFB0789A)),
-                  label: Text(_files == null ? '上传图片（可多选，按顺序）' : '重新选图',
-                      style: const TextStyle(color: Color(0xFFB0789A))),
-                ),
-                const SizedBox(height: 6),
-                Text(_frameHint,
-                    style: const TextStyle(
-                        fontSize: 10.5, color: Color(0xFFB0A0A6))),
-                if (_files != null && _files!.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  SizedBox(
-                    height: 52,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _files!.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 6),
-                      itemBuilder: (_, i) => ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: Image.file(
-                          File(_files![i]),
+                SizedBox(
+                  height: 52,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _files!.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 6),
+                    itemBuilder: (_, i) => ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: Image.file(
+                        File(_files![i]),
+                        width: 52,
+                        height: 52,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
                           width: 52,
                           height: 52,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
-                            width: 52,
-                            height: 52,
-                            color: const Color(0xFFF0E8EC),
-                            child: const Icon(Icons.broken_image,
-                                size: 18, color: Color(0xFFD0B8C4)),
-                          ),
+                          color: const Color(0xFFF0E8EC),
+                          child: const Icon(Icons.broken_image,
+                              size: 18, color: Color(0xFFD0B8C4)),
                         ),
                       ),
                     ),
                   ),
-                ],
-                const SizedBox(height: 12),
-              ] else
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0x22F0E4EA),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Text('使用内置动画，无需上传图片',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 11, color: Color(0xFF8A5A72))),
                 ),
+              ],
+              const SizedBox(height: 12),
               TextField(
                 controller: _nameController,
                 onChanged: (_) => _nameEdited = true,
@@ -907,6 +835,32 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
                           ),
                         ),
                     ],
+                  ),
+                  const SizedBox(height: 8),
+                  // 方向从哪算：从自己位置 / 从屏幕中间
+                  const Text('上下左右从哪算：',
+                      style: TextStyle(fontSize: 12)),
+                  const SizedBox(height: 4),
+                  SegmentedButton<PetMoveRef>(
+                    segments: [
+                      for (final r in PetMoveRef.values)
+                        ButtonSegment(
+                            value: r,
+                            label: Text(r.label,
+                                style: const TextStyle(fontSize: 10.5))),
+                    ],
+                    selected: {_moveRef},
+                    showSelectedIcon: false,
+                    onSelectionChanged: (s) =>
+                        setState(() => _moveRef = s.first),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _moveRef == PetMoveRef.self
+                        ? '从小人自己站的位置出发（聊天框上方）'
+                        : '以屏幕中间为基准点',
+                    style: const TextStyle(
+                        fontSize: 10.5, color: Color(0xFFB0A0A6)),
                   ),
                   const SizedBox(height: 6),
                   // 距离滑块
@@ -989,8 +943,7 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
 /// 动作类型（导入时选择）
 enum _ImportKind {
   inPlace('原地动作', '站在原地播（可带移动：跳/走/飞）'),
-  move('移动动作', '走/跑，用于移动组绑定'),
-  duo('双人互动', '每张图里画两个小人挨在一起（一半是你，一半是男主）');
+  move('移动动作', '走/跑，用于移动组绑定');
 
   final String label;
   final String hint;
