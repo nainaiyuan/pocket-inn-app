@@ -21,6 +21,7 @@ import 'trigger_store.dart';
 import 'relation_store.dart';
 import 'user_memory_store.dart';
 import 'vault_store.dart';
+import '../pet/pet_store.dart';
 
 /// 存储注册中心（单例）
 class StorageRegistry {
@@ -39,6 +40,7 @@ class StorageRegistry {
       EmotionArcStore(),
       ScheduleStore(),
       RelationStore(),
+      PetStore(),
     ];
   }
 
@@ -78,6 +80,8 @@ class StorageRegistry {
 
   RelationStore get relations =>
       _store<RelationStore>('relation');
+
+  PetStore get pet => _store<PetStore>('pet');
 
   // ========== 通用 ==========
 

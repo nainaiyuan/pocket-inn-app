@@ -1,0 +1,948 @@
+/// 桌宠模块 — 场景层（Pet 单实例 + PetScene 多小人世界）
+///
+/// - [Pet]：一个小人实例。位置、朝向、当前动作、移动、说话，独立状态机
+/// - [PetScene]：一个屏幕空间，多个小人共存，共享帧图来源和事件总线
+///
+/// 从第一天就是多实例设计：男主小人、用户小人同屏互动，各自独立又互相可见。
+library;
+
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'pet_engine.dart';
+import 'pet_models.dart';
+
+/// 小人状态
+enum PetState {
+  /// 待机（无动作，播放待机动画）
+  idle,
+
+  /// 正在播放原地动作
+  acting,
+
+  /// 正在移动
+  moving,
+
+  /// 正在执行组合动作
+  activity,
+
+  /// 正在说话（气泡显示中，动作可继续）
+  speaking,
+}
+
+/// 单个小人实例
+class Pet {
+  final String id;
+  String name;
+
+  /// 相对坐标（0~1）
+  PetPoint position;
+
+  /// 朝向（影响镜像）
+  PetFacing facing;
+
+  /// 显示大小
+  double scale;
+
+  /// 当前状态
+  PetState state = PetState.idle;
+
+  /// 当前帧动画播放器
+  PetAnimPlayer? _player;
+
+  /// 当前移动状态
+  PetMoveState? _move;
+
+  /// 当前组合动作运行器（由场景注入逻辑）
+  PetActivityRun? _activity;
+
+  /// 当前动作 id（null = 待机）
+  String? currentActionId;
+
+  /// 说话回调（UI 层设置：显示气泡）
+  void Function(String petId, String text)? onSpeak;
+
+  /// 动作完成回调（活动执行器/UI 监听）
+  void Function(String petId, String actionId)? onActionDone;
+
+  /// 活动区域（满屏 / 输入框上方 / 固定位置）
+  PetArea area = PetArea.full;
+
+  /// area == fixed 时的固定坐标（相对 0~1）
+  PetPoint? fixedPosition;
+
+  /// 双人互动被打断后播放的动作 id（默认待机，UI 可配置为"难过"等）
+  String breakActionId = 'idle';
+
+  /// 双人互动：互动对象
+  Pet? _pair;
+
+  double _pairElapsed = 0;
+  double _pairDuration = 0;
+
+  /// 自动过渡透明度 0~1：动作切换时 0.15s 内从 0 淡入，衔接不突兀
+  double _transition = 1.0;
+
+  /// 渲染透明度系数（UI 层乘到 opacity 上）
+  double get transitionOpacity => _transition;
+
+  /// 是否正在双人互动
+  bool get inDuo => _pair != null;
+
+  /// 互动对象
+  Pet? get pair => _pair;
+
+  Pet({
+    required this.id,
+    required this.name,
+    PetPoint? position,
+    this.facing = PetFacing.right,
+    this.scale = 1.0,
+  }) : position = position ?? const PetPoint(0.5, 0.5);
+
+  /// 按活动区域约束坐标
+  PetPoint clampToArea(PetPoint p) {
+    switch (area) {
+      case PetArea.fixed:
+        return fixedPosition ?? p;
+      case PetArea.bottom:
+        // 只在输入框上方区域（屏幕下半部）
+        return PetPoint(
+          p.x.clamp(0.02, 0.98),
+          p.y.clamp(0.55, 0.95),
+        );
+      case PetArea.full:
+        return PetPoint(
+          p.x.clamp(0.02, 0.98),
+          p.y.clamp(0.05, 0.95),
+        );
+    }
+  }
+
+  /// 当前要渲染的帧（null = 无帧可显示）
+  String? get currentFrame {
+    if (_player != null) return _player!.currentFrame;
+    // 双人互动：共享主导者的帧（图里画了两个小人，两边显示同一帧）
+    if (_pair != null && _pair!._player != null) {
+      return _pair!._player!.currentFrame;
+    }
+    return null;
+  }
+
+  /// 是否正在移动
+  bool get moving => _move != null && !_move!.finished;
+
+  /// 是否忙（有动作/移动/组合动作/双人互动在跑）
+  bool get busy =>
+      _pair != null ||
+      _activity != null ||
+      moving ||
+      (_player != null && !_player!.finished);
+
+  /// 帧动画播放器（只读）
+  PetAnimPlayer? get player => _player;
+
+  /// 移动状态（只读）
+  PetMoveState? get move => _move;
+
+  /// 组合动作运行器（只读）
+  PetActivityRun? get activity => _activity;
+
+  /// 帧推进
+  void update(double dt) {
+    // 双人互动优先：共享帧推进 + 计时
+    if (_pair != null) {
+      _updatePair(dt);
+      return;
+    }
+
+    // 组合动作优先驱动（活动执行器内部会调用 tickMove/tickAnim）
+    if (_activity != null) {
+      _activity!.update(dt, this);
+      if (_activity!.finished) {
+        _activity = null;
+        _enterIdle();
+      }
+      _tickTransition(dt);
+      return;
+    }
+
+    tickMove(dt);
+    tickAnim(dt);
+    _tickTransition(dt);
+  }
+
+  /// 双人互动推进（主导者驱动共享帧，双方各自计时）
+  void _updatePair(double dt) {
+    _pairElapsed += dt;
+    if (_player != null) {
+      _player!.update(dt);
+    }
+    _tickTransition(dt);
+    // 用户设置的互动时长到点即分开（帧循环只影响画面循环，不影响时长）
+    if (_pairDuration > 0 && _pairElapsed >= _pairDuration) {
+      _endPair();
+    }
+  }
+
+  /// 结束双人互动（双方解除，回待机）
+  void _endPair() {
+    if (_pair == null) return;
+    final partner = _pair;
+    _pair = null;
+    if (partner != null && partner._pair == this) {
+      partner._pair = null;
+      partner._enterIdle();
+    }
+    _enterIdle();
+  }
+
+  /// 自动过渡：透明度 0.15s 淡入
+  void _tickTransition(double dt) {
+    if (_transition < 1) {
+      _transition = math.min(1, _transition + dt / 0.15);
+    }
+  }
+
+  void _startTransition() {
+    _transition = 0;
+  }
+
+  /// 推进移动（正常 update 与活动执行器共用）
+  void tickMove(double dt) {
+    if (_move == null || _move!.finished) return;
+    _move!.update(dt);
+    position = clampToArea(_move!.position);
+    // 根据移动方向自动翻转朝向
+    final dir = _move!.directionX;
+    if (dir.abs() > 0.001) {
+      facing = dir > 0 ? PetFacing.right : PetFacing.left;
+    }
+    if (_move!.finished) {
+      final done = _move!;
+      _move = null;
+      // 转头往回走支持
+      if (_turnBackPending) {
+        _turnBackPending = false;
+        _startMove(
+            from: position,
+            to: _turnBackOrigin,
+            duration: done.duration,
+            ease: done.ease);
+        return;
+      }
+      state = PetState.idle;
+      _onActionDone('move');
+    }
+  }
+
+  /// 推进帧动画（正常 update 与活动执行器共用）
+  void tickAnim(double dt) {
+    _player?.update(dt);
+    if (_player != null && _player!.finished && state == PetState.acting) {
+      final doneId = _lastPlayedActionId ?? 'action';
+      _player = null;
+      _enterIdle();
+      _onActionDone(doneId);
+    }
+  }
+
+  bool _turnBackPending = false;
+  PetPoint _turnBackOrigin = PetPoint.origin;
+
+  /// 播放一个原地动作（帧动画）
+  ///
+  /// 注意：不清理 _activity —— 组合动作执行器在活动期间调用本方法，
+  /// 活动需要保持存活来驱动后续步骤。
+  void playAction(PetActionDef def, List<String> frames, {int? repeat}) {
+    _move = null;
+    _lastPlayedActionId = def.id;
+    _player = PetAnimPlayer(
+      frames: frames,
+      fps: def.fps * def.speedTier.factor,
+      loop: def.loop,
+      maxLoops: repeat != null && repeat > 1 ? repeat : 0,
+    );
+    currentActionId = def.id;
+    state = PetState.acting;
+    _startTransition();
+  }
+
+  String? _lastPlayedActionId;
+
+  /// 播放待机（回落到待机帧）
+  void playIdle(List<String> idleFrames, {double fps = 8}) {
+    _player = PetAnimPlayer(frames: idleFrames, fps: fps, loop: PetAnimLoop.loop);
+    currentActionId = 'idle';
+    state = PetState.idle;
+    _startTransition();
+  }
+
+  /// 移动到目标位置（播放移动帧 + 插值）
+  void moveTo(
+    PetPoint target, {
+    double duration = 3,
+    PetAnimPlayer? movePlayer,
+    bool turnBack = false,
+    PetMoveEase ease = PetMoveEase.easeInOut,
+    double jumpHeight = 0,
+  }) {
+    if (area == PetArea.fixed) {
+      // 固定位置的小人不移动，原地待着
+      return;
+    }
+    final clamped = clampToArea(target);
+    if (turnBack) {
+      _turnBackPending = true;
+      _turnBackOrigin = position;
+    } else {
+      _turnBackPending = false;
+    }
+    _startMove(
+        from: position,
+        to: clamped,
+        duration: duration,
+        movePlayer: movePlayer,
+        ease: ease,
+        jumpHeight: jumpHeight);
+  }
+
+  void _startMove({
+    required PetPoint from,
+    required PetPoint to,
+    required double duration,
+    PetAnimPlayer? movePlayer,
+    PetMoveEase ease = PetMoveEase.easeInOut,
+    double jumpHeight = 0.3,
+  }) {
+    _move = PetMoveState(
+      from: from,
+      to: to,
+      duration: duration,
+      ease: ease,
+      jumpHeight: jumpHeight,
+    );
+    if (movePlayer != null) {
+      _player = movePlayer;
+    }
+    currentActionId = 'move';
+    state = PetState.moving;
+    _startTransition();
+  }
+
+  /// 预设行为（爬屏幕 / 跳下来）
+  void runBehavior(PetBehavior behavior) {
+    switch (behavior) {
+      case PetBehavior.climb:
+        // 沿屏幕边缘爬到顶部：速度固定 0.35/s，从哪爬都刚好到顶
+        // （爬的动画帧是循环的，爬多久都行——动画循环播，位置持续动）
+        final target = PetPoint(position.x, 0.06);
+        final dist = position.distanceTo(target);
+        final duration = dist / 0.35;
+        _startMove(
+          from: position,
+          to: target,
+          duration: duration,
+          ease: PetMoveEase.easeInOut,
+        );
+      case PetBehavior.jumpOff:
+        // 抛物线跳出屏幕底部，然后自动回到原位
+        _turnBackPending = true;
+        _turnBackOrigin = PetPoint(position.x, 0.8);
+        _startMove(
+          from: position,
+          to: PetPoint(position.x, 1.15),
+          duration: 1.1,
+          ease: PetMoveEase.jump,
+          jumpHeight: 0.35,
+        );
+    }
+    _onActionDone('behavior:${behavior.name}');
+  }
+
+  /// 转头（翻转朝向）
+  void turnAround() {
+    facing = facing == PetFacing.left ? PetFacing.right : PetFacing.left;
+    _onActionDone('turn');
+  }
+
+  /// 说话（触发气泡，不打断动作）
+  void speak(String text) {
+    state = PetState.speaking;
+    onSpeak?.call(id, text);
+  }
+
+  /// 停止当前一切，回待机
+  void stop() {
+    _endPair();
+    _activity = null;
+    _move = null;
+    _turnBackPending = false;
+    _player = null;
+    currentActionId = null;
+    _enterIdle();
+  }
+
+  void _enterIdle() {
+    state = PetState.idle;
+    currentActionId = 'idle';
+  }
+
+  void _onActionDone(String actionId) {
+    onActionDone?.call(id, actionId);
+  }
+}
+
+/// 组合动作运行器（由 PetActivityRunner 创建，Pet 持有）
+class PetActivityRun {
+  final PetActivityDef def;
+  int _stepIndex = 0;
+  double _stepElapsed = 0;
+  bool _finished = false;
+  bool _stepStarted = false;
+
+  /// 每步的动作定义查找（由场景注入）
+  final PetActionDef Function(String actionId) actionResolver;
+
+  /// 每步的帧图查找（由场景注入）
+  final List<String> Function(String actionId) framesResolver;
+
+  /// 移动动画解析（走/跑切换，由场景注入；可空 = 不播移动帧）
+  final PetActionDef? Function(String? moveGroupId, double speed)
+      moveAnimResolver;
+
+  PetActivityRun({
+    required this.def,
+    required this.actionResolver,
+    required this.framesResolver,
+    PetActionDef? Function(String? moveGroupId, double speed)?
+        moveAnimResolver,
+  }) : moveAnimResolver = moveAnimResolver ?? _noMoveAnim;
+
+  static PetActionDef? _noMoveAnim(String? moveGroupId, double speed) => null;
+
+  bool get finished => _finished;
+  int get stepIndex => _stepIndex;
+  PetActivityStep? get currentStep =>
+      _stepIndex < def.steps.length ? def.steps[_stepIndex] : null;
+
+  /// 步骤进度 0~1
+  double get progress =>
+      def.steps.isEmpty ? 1 : _stepIndex / def.steps.length;
+
+  /// 推进（dt 秒），驱动 Pet 执行当前步骤
+  void update(double dt, Pet pet) {
+    if (_finished) return;
+
+    final step = currentStep;
+    if (step == null) {
+      _finished = true;
+      return;
+    }
+
+    // 说话步骤：触发气泡，立即进入下一步
+    if (step.isSpeak) {
+      pet.speak(step.text ?? '');
+      // 活动仍在驱动，状态归活动（speak 只负责触发气泡）
+      pet.state = PetState.activity;
+      _advanceStep();
+      return;
+    }
+
+    final def = actionResolver(step.actionId);
+
+    // 方向移动步骤：朝 8 方向之一走（固定速度 0.3/s），
+    // 可走固定秒数，也可"一直走到撞墙/屏幕边"才停下
+    if (step.isMoveDir) {
+      if (!_stepStarted) {
+        const speed = 0.3;
+        final from = pet.position;
+        final (vx, vy) = step.moveDir!.vector;
+        // 撞墙模式：往方向走很远，目标被屏幕边夹住 = 撞墙自然停
+        final dist = step.moveUntilWall ? 10.0 : speed * step.moveSec;
+        final target = pet.clampToArea(
+            PetPoint(from.x + vx * dist, from.y + vy * dist));
+        // 按实际可走距离算时长 → 速度恒定；撞墙时提前到点停
+        final actualDist = from.distanceTo(target);
+        final duration = actualDist / speed;
+        pet.moveTo(target,
+            duration: duration, turnBack: step.turnBack);
+        _stepStarted = true;
+      }
+      _stepElapsed += dt;
+      pet.tickMove(dt);
+      if (!pet.moving && _stepElapsed > 0.05) {
+        _advanceStep();
+      }
+      return;
+    }
+
+    // 目标点步骤（任何动作 + target）：
+    // 速度固定 → 时长按距离自动换算；越界被夹到屏幕边（撞墙截断）
+    // 移动动作播走/跑帧；原地动作（跳/飞等）边播帧边移动
+    if (step.target != null) {
+      if (!_stepStarted) {
+        final from = pet.position;
+        final clamped = pet.clampToArea(step.target!);
+        final actualDist = from.distanceTo(clamped);
+        final speed = switch (step.trajectory) {
+          PetMoveTrajectory.walk => 0.35,
+          PetMoveTrajectory.jump => 0.55,
+          PetMoveTrajectory.fly => 0.45,
+        };
+        final duration = actualDist / speed;
+        if (def.kind == PetActionKind.moveTo) {
+          // 移动动作：按速度选走/跑帧
+          final moveDef =
+              moveAnimResolver(def.moveGroupId, actualDist / duration);
+          if (moveDef != null) {
+            final movePlayer = PetAnimPlayer(
+              frames: framesResolver(moveDef.id),
+              fps: moveDef.fps * moveDef.speedTier.factor,
+              loop: PetAnimLoop.loop,
+            );
+            pet.moveTo(
+              clamped,
+              duration: duration,
+              movePlayer: movePlayer,
+              turnBack: step.turnBack,
+              ease: switch (step.trajectory) {
+                PetMoveTrajectory.walk => PetMoveEase.linear,
+                PetMoveTrajectory.jump => PetMoveEase.jump,
+                PetMoveTrajectory.fly => PetMoveEase.easeInOut,
+              },
+              jumpHeight:
+                  step.trajectory == PetMoveTrajectory.jump ? 0.25 : 0,
+            );
+          } else {
+            pet.moveTo(
+              clamped,
+              duration: duration,
+              turnBack: step.turnBack,
+              ease: switch (step.trajectory) {
+                PetMoveTrajectory.walk => PetMoveEase.linear,
+                PetMoveTrajectory.jump => PetMoveEase.jump,
+                PetMoveTrajectory.fly => PetMoveEase.easeInOut,
+              },
+              jumpHeight:
+                  step.trajectory == PetMoveTrajectory.jump ? 0.25 : 0,
+            );
+          }
+        } else {
+          // 原地动作带位移：先播帧（循环），位置同时动
+          pet.playAction(def, framesResolver(step.actionId));
+          pet.moveTo(
+            clamped,
+            duration: duration,
+            turnBack: step.turnBack,
+            ease: switch (step.trajectory) {
+              PetMoveTrajectory.walk => PetMoveEase.linear,
+              PetMoveTrajectory.jump => PetMoveEase.jump,
+              PetMoveTrajectory.fly => PetMoveEase.easeInOut,
+            },
+            jumpHeight: step.trajectory == PetMoveTrajectory.jump ? 0.25 : 0,
+          );
+        }
+        _stepStarted = true;
+      }
+      _stepElapsed += dt;
+      pet.tickAnim(dt);
+      pet.tickMove(dt);
+      if (!pet.moving && _stepElapsed > 0.05) {
+        // 移动结束（含转头往回走整体结束）
+        _advanceStep();
+      }
+      return;
+    }
+
+    // 转头步骤
+    if (def.kind == PetActionKind.turn) {
+      if (!_stepStarted) {
+        pet.turnAround();
+        _stepStarted = true;
+      }
+      _stepElapsed += dt;
+      if (_stepElapsed >= 0.5) {
+        _advanceStep();
+      }
+      return;
+    }
+
+    // 原地动作步骤（动作自带位移目标时，边播帧边移动）
+    if (!_stepStarted) {
+      pet.playAction(def, framesResolver(step.actionId), repeat: step.repeat);
+      if (def.target != null) {
+        final from = pet.position;
+        final clamped = pet.clampToArea(def.target!);
+        final actualDist = from.distanceTo(clamped);
+        final speed = switch (def.trajectory) {
+          PetMoveTrajectory.walk => 0.35,
+          PetMoveTrajectory.jump => 0.55,
+          PetMoveTrajectory.fly => 0.45,
+        };
+        pet.moveTo(
+          clamped,
+          duration: actualDist / speed,
+          ease: switch (def.trajectory) {
+            PetMoveTrajectory.walk => PetMoveEase.linear,
+            PetMoveTrajectory.jump => PetMoveEase.jump,
+            PetMoveTrajectory.fly => PetMoveEase.easeInOut,
+          },
+          jumpHeight: def.trajectory == PetMoveTrajectory.jump ? 0.25 : 0,
+        );
+      }
+      _stepStarted = true;
+    }
+    _stepElapsed += dt;
+    pet.tickAnim(dt);
+    if (pet.moving) pet.tickMove(dt);
+
+    // 指定了时长：到时即进下一步
+    if (step.durationSec != null && _stepElapsed >= step.durationSec!) {
+      _advanceStep();
+      return;
+    }
+
+    // 带位移的动作：移动完才算这步结束（帧循环播着无所谓）
+    if (def.target != null) {
+      if (!pet.moving && _stepElapsed > 0.05) {
+        _advanceStep();
+      }
+      return;
+    }
+
+    // 动作播完（含 repeat 循环次数播完）即进下一步
+    // 注意：tickAnim 播完后会把 player 置空，所以 player == null 也视为播完
+    final player = pet.player;
+    if (player == null || player.finished) {
+      _advanceStep();
+    }
+  }
+
+  void _advanceStep() {
+    _stepElapsed = 0;
+    _stepStarted = false;
+    _stepIndex++;
+    if (_stepIndex >= def.steps.length) {
+      _finished = true;
+    }
+  }
+
+  /// 跳过当前步骤（活动编辑预览用）
+  void skipStep() => _advanceStep();
+}
+
+/// 桌宠世界 — 多个小人共享一个屏幕空间
+class PetScene {
+  final PetFrameSource frames;
+  final List<Pet> _pets = [];
+
+  /// 组合动作库（id → 定义）
+  final Map<String, PetActivityDef> _activities = {};
+
+  /// 动作定义库（内置 + 用户自建，id → 定义）
+  final Map<String, PetActionDef> _actionDefs = {};
+
+  /// 移动动画组（走+跑绑定，id → 定义）
+  final Map<String, PetMoveGroupDef> _moveGroups = {};
+
+  PetScene({required this.frames}) {
+    // 加载内置动作模板
+    for (final a in PetBuiltinActions.all) {
+      _actionDefs[a.id] = a;
+    }
+    // 默认移动组：走 + 跑
+    _moveGroups['default'] = const PetMoveGroupDef(
+      id: 'default',
+      name: '默认',
+      walkActionId: 'walk',
+      runActionId: 'run',
+    );
+  }
+
+  List<Pet> get pets => List.unmodifiable(_pets);
+
+  Map<String, PetActionDef> get actionDefs => Map.unmodifiable(_actionDefs);
+
+  Map<String, PetActivityDef> get activities => Map.unmodifiable(_activities);
+
+  Map<String, PetMoveGroupDef> get moveGroups => Map.unmodifiable(_moveGroups);
+
+  /// 注册/覆盖移动组
+  void registerMoveGroup(PetMoveGroupDef def) => _moveGroups[def.id] = def;
+
+  /// 按移动速度解析移动动画（走/跑切换）
+  ///
+  /// [moveGroupId] 指定组；null 用默认组。
+  /// 速度 = 距离/时长（屏幕比例每秒），超过阈值用跑。
+  PetActionDef resolveMoveAnim(String? moveGroupId, double speed) {
+    final group = _moveGroups[moveGroupId ?? 'default'] ?? _moveGroups['default']!;
+    const runThreshold = 0.45;
+    final useRun = group.runActionId != null && speed > runThreshold;
+    final actionId = useRun ? group.runActionId! : group.walkActionId;
+    return _actionDefs[actionId] ?? _actionDefs['walk']!;
+  }
+
+  Pet? petById(String id) {
+    for (final p in _pets) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  /// 创建一个小人
+  Pet createPet({
+    required String id,
+    String? name,
+    PetPoint? position,
+    double scale = 1.0,
+    PetArea area = PetArea.full,
+    PetPoint? fixedPosition,
+  }) {
+    final pet = Pet(
+      id: id,
+      name: name ?? id,
+      position: position,
+      scale: scale,
+    );
+    pet.area = area;
+    pet.fixedPosition = fixedPosition;
+    if (area == PetArea.fixed) {
+      pet.position = fixedPosition ?? pet.position;
+    }
+    _pets.add(pet);
+    return pet;
+  }
+
+  void removePet(String id) {
+    _pets.removeWhere((p) => p.id == id);
+  }
+
+  /// 注册/更新动作定义
+  void registerAction(PetActionDef def) {
+    _actionDefs[def.id] = def;
+  }
+
+  /// 删除动作定义（内置动作不可删）
+  bool removeAction(String id) {
+    if (PetBuiltinActions.byId(id) != null) return false;
+    return _actionDefs.remove(id) != null;
+  }
+
+  /// 保存组合动作
+  void saveActivity(PetActivityDef def) {
+    _activities[def.id] = def;
+  }
+
+  bool removeActivity(String id) => _activities.remove(id) != null;
+
+  /// 场景总推进：所有小人各自更新
+  void update(double dt) {
+    for (final pet in _pets) {
+      pet.update(dt);
+    }
+  }
+
+  /// 给指定小人播放组合动作
+  PetActivityRun? runActivity(String petId, String activityId) {
+    final pet = petById(petId);
+    final def = _activities[activityId];
+    if (pet == null || def == null) return null;
+
+    final run = PetActivityRun(
+      def: def,
+      actionResolver: (id) => _actionDefs[id] ?? PetBuiltinActions.byId(id) ?? PetBuiltinActions.all.first,
+      framesResolver: (id) => _resolveFramesSync(id),
+      moveAnimResolver: (groupId, speed) {
+        if (groupId == null) return null;
+        final group = _moveGroups[groupId] ?? _moveGroups['default'];
+        if (group == null) return null;
+        const runThreshold = 0.45;
+        final useRun = group.runActionId != null && speed > runThreshold;
+        final aid = useRun ? group.runActionId! : group.walkActionId;
+        return _actionDefs[aid] ?? _actionDefs['walk'];
+      },
+    );
+    pet._activity = run;
+    pet.state = PetState.activity;
+    // 立即执行第一步（说话/动作即时响应，不等下一帧）
+    run.update(0, pet);
+    return run;
+  }
+
+  /// 给指定小人播放单个动作
+  void playAction(String petId, String actionId) {
+    final pet = petById(petId);
+    final def = _actionDefs[actionId];
+    if (pet == null || def == null) return;
+    if (def.kind == PetActionKind.duo) {
+      // 双人互动：找另一个小人一起
+      Pet? partner;
+      for (final p in _pets) {
+        if (p.id != petId) {
+          partner = p;
+          break;
+        }
+      }
+      if (partner != null) {
+        startDuo(petId, partner.id, def.id);
+      }
+      return;
+    }
+    if (def.kind == PetActionKind.moveTo) {
+      final target = def.target ?? const PetPoint(0.5, 0.5);
+      // 按速度选走/跑动画（移动组）
+      final dist = pet.position.distanceTo(target);
+      final speed = def.moveDurationSec > 0 ? dist / def.moveDurationSec : 0.0;
+      final moveDef = resolveMoveAnim(def.moveGroupId, speed);
+      final movePlayer = PetAnimPlayer(
+        frames: _resolveFramesSync(moveDef.id),
+        fps: moveDef.fps * moveDef.speedTier.factor,
+        loop: PetAnimLoop.loop,
+      );      pet.moveTo(
+        target,
+        duration: def.moveDurationSec,
+        movePlayer: movePlayer,
+      );
+      return;
+    }
+    if (def.kind == PetActionKind.turn) {
+      pet.turnAround();
+      return;
+    }
+    if (def.kind == PetActionKind.behavior) {
+      final behavior = PetBehavior.fromName(actionId);
+      if (behavior != null) {
+        // 先播行为帧（爬/跳的动画循环播），再开始行为移动——
+        // 动画 1 秒循环，位置持续动，直到爬完/跳完
+        pet.playAction(def, _resolveFramesSync(actionId));
+        pet.runBehavior(behavior);
+        return;
+      }
+    }
+    // 原地动作带位移目标（导入时配的"播的时候怎么动"）：
+    // 边播帧边移动到目标点，速度固定，时长按距离自动换算
+    if (def.kind == PetActionKind.inPlace && def.target != null) {
+      final from = pet.position;
+      final clamped = pet.clampToArea(def.target!);
+      final actualDist = from.distanceTo(clamped);
+      final speed = switch (def.trajectory) {
+        PetMoveTrajectory.walk => 0.35,
+        PetMoveTrajectory.jump => 0.55,
+        PetMoveTrajectory.fly => 0.45,
+      };
+      pet.playAction(def, _resolveFramesSync(actionId));
+      pet.moveTo(
+        clamped,
+        duration: actualDist / speed,
+        ease: switch (def.trajectory) {
+          PetMoveTrajectory.walk => PetMoveEase.linear,
+          PetMoveTrajectory.jump => PetMoveEase.jump,
+          PetMoveTrajectory.fly => PetMoveEase.easeInOut,
+        },
+        jumpHeight: def.trajectory == PetMoveTrajectory.jump ? 0.25 : 0,
+      );
+      return;
+    }
+    pet.playAction(def, _resolveFramesSync(actionId));
+  }
+
+  /// 同步取帧（无图时用占位帧兜底）
+  List<String> _resolveFramesSync(String actionId) {
+    final def = _actionDefs[actionId];
+    if (def == null) return [];
+    if (def.hasFrames) {
+      // 有帧图：异步扫描的结果缓存在这里（由 UI 层预载入）
+      final cached = _frameCache[actionId];
+      if (cached != null && cached.isNotEmpty) return cached;
+    }
+    return PetPlaceholderFrames.forAction(def);
+  }
+
+  /// 帧图缓存（UI 层预载入：扫描目录 → 存入）
+  final Map<String, List<String>> _frameCache = {};
+
+  /// 预载入动作帧图（UI 层调用）
+  Future<void> preloadFrames(String actionId) async {
+    final list = await frames.framesFor(actionId);
+    _frameCache[actionId] = list;
+    final def = _actionDefs[actionId];
+    if (def != null && list.isNotEmpty) {
+      registerAction(def.copyWith(frameCount: list.length));
+    }
+  }
+
+  /// 预载入所有已注册动作的帧图
+  Future<void> preloadAllFrames() async {
+    for (final id in _actionDefs.keys) {
+      await preloadFrames(id);
+    }
+  }
+
+  /// 说话（指定小人）
+  void speak(String petId, String text) {
+    petById(petId)?.speak(text);
+  }
+
+  /// 开始双人互动：两个小人贴在一起，同步播放双人帧组
+  ///
+  /// [duoActionId] 必须是 duo 类型动作（帧图里画了两个小人挨在一起）。
+  /// 播完（非循环）自动分开；也可被 breakDuo 打断。
+  bool startDuo(String petAId, String petBId, String duoActionId) {
+    final a = petById(petAId);
+    final b = petById(petBId);
+    final def = _actionDefs[duoActionId];
+    if (a == null || b == null || def == null || def.kind != PetActionKind.duo) {
+      return false;
+    }
+    // 结束各自现有活动/互动
+    a.stop();
+    b.stop();
+    // b 贴到 a 旁边（按 a 朝向左右贴）
+    final dir = a.facing == PetFacing.right ? 1.0 : -1.0;
+    b.position = b.clampToArea(
+        PetPoint(a.position.x + dir * 0.13, a.position.y));
+    // a 驱动共享帧（b 渲染时从 a 取帧）
+    final frames = _resolveFramesSync(def.id);
+    final player = PetAnimPlayer(
+      frames: frames,
+      fps: def.fps * def.speedTier.factor,
+      loop: def.loop,
+    );
+    a._pair = b;
+    b._pair = a;
+    a._pairElapsed = 0;
+    b._pairElapsed = 0;
+    a._pairDuration = def.durationSeconds;
+    b._pairDuration = def.durationSeconds;
+    a._player = player;
+    a.currentActionId = def.id;
+    b.currentActionId = def.id;
+    a.state = PetState.acting;
+    b.state = PetState.acting;
+    a._startTransition();
+    // ignore: avoid_print
+    print('桌宠: 双人互动开始 ${a.name} × ${b.name} = ${def.name}');
+    return true;
+  }
+
+  /// 打断双人互动（用户拖走其中一个小人时调用）
+  ///
+  /// 被留下的那个小人播放自己配置的"被打断后动作"（breakActionId，
+  /// 默认待机；用户可设为"难过"等）。
+  void breakDuo(String petId) {
+    final pet = petById(petId);
+    if (pet == null || pet._pair == null) return;
+    final partner = pet._pair!;
+    pet._endPair();
+    final bdef = _actionDefs[partner.breakActionId] ?? _actionDefs['idle']!;
+    partner.playAction(bdef, _resolveFramesSync(bdef.id));
+    // ignore: avoid_print
+    print('桌宠: 双人互动被打断 ${partner.name} 播放 ${bdef.name}');
+  }
+
+  /// 设置小人的"被打断后动作"
+  void setBreakAction(String petId, String actionId) {
+    petById(petId)?.breakActionId = actionId;
+  }
+}

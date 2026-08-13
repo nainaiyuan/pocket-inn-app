@@ -4,6 +4,7 @@ import '../ai_provider/ai_provider_manager.dart';
 import '../ai_provider/models.dart';
 import '../butler/butler.dart';
 import '../butler/mask_engine.dart' show MaskEngine;
+import '../butler/pet/pet_bridge.dart' show registerPetBridge;
 import '../butler/risk_word_store.dart' show RiskWordStore;
 import '../butler/sensitive_info/sensitive_info_store.dart'
     show SensitiveInfoStore;
@@ -95,6 +96,8 @@ class ChatService {
       SemanticMoodTool(),
       MemoryRecallTool(),
     ]);
+    // 桌宠 AI 桥（男主控制小人 + 感知互动）
+    registerPetBridge();
   }
 
   // ========== 频率限制 ==========
