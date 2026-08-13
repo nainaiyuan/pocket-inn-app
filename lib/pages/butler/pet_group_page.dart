@@ -1123,7 +1123,7 @@ class _PetGroupPageState extends State<PetGroupPage> {
         return const [];
       case PetGroupMoveType.dir:
         return [
-          _dirSelector(ss),
+          _dirSelector(ss, refresh: refresh),
           _distSlider(
             label: '走多远',
             value: ss.moveDist,
@@ -1174,11 +1174,11 @@ class _PetGroupPageState extends State<PetGroupPage> {
           ),
         ];
       case PetGroupMoveType.wall:
-        return [_dirSelector(ss)];
+        return [_dirSelector(ss, refresh: refresh)];
     }
   }
 
-  Widget _dirSelector(_SlotStepEdit ss) {
+  Widget _dirSelector(_SlotStepEdit ss, {required VoidCallback refresh}) {
     return Wrap(
       spacing: 6,
       runSpacing: 6,
