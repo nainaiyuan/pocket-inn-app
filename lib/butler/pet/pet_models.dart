@@ -617,15 +617,21 @@ class PetActivityDef {
   final String name;
   final List<PetActivityStep> steps;
 
+  /// 初始位置：动作开始时小人先瞬移到这个基准点再走路径
+  /// null = 从当前位置开始
+  final PetMoveRef? startRef;
+
   const PetActivityDef({
     required this.id,
     required this.name,
     required this.steps,
+    this.startRef,
   });
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
+        if (startRef != null) 'startRef': startRef!.name,
         'steps': steps.map((s) => s.toJson()).toList(),
       };
 
@@ -633,6 +639,9 @@ class PetActivityDef {
       PetActivityDef(
         id: json['id'] as String,
         name: json['name'] as String? ?? '',
+        startRef: json['startRef'] != null
+            ? PetMoveRef.fromName(json['startRef'] as String?)
+            : null,
         steps: (json['steps'] as List<dynamic>? ?? [])
             .map((e) => PetActivityStep.fromJson(e as Map<String, dynamic>))
             .toList(),

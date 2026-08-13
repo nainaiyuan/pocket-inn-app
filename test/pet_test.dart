@@ -686,6 +686,39 @@ void main() {
       expect(pet.position.y, greaterThan(0.3));
       expect(pet.position.y, lessThanOrEqualTo(1.0));
     });
+
+    test('组合动作 startRef：小人先瞬移到基准点，再从那里走路径', () {
+      final scene = PetScene(frames: _MemoryFrameSource({}));
+      final pet = scene.createPet(
+          id: 'p1', name: 'x', position: const PetPoint(0.3, 0.3));
+      scene.registerAction(PetActionDef(
+        id: 'idle',
+        name: '待机',
+        fps: 8,
+        loop: PetAnimLoop.loop,
+        frameDir: 'idle',
+      ));
+      scene.saveActivity(PetActivityDef(
+        id: 'path',
+        name: '从聊天框往左走',
+        startRef: PetMoveRef.dock,
+        steps: [
+          PetActivityStep(
+              actionId: 'idle', moveDir: PetMoveDir.left, moveDist: 0.2),
+        ],
+      ));
+      scene.runActivity('p1', 'path');
+      // 先瞬移到聊天框基准 (0.5, 0.85)
+      expect((pet.position.x - 0.5).abs(), lessThan(0.02));
+      expect((pet.position.y - 0.85).abs(), lessThan(0.02));
+      for (var i = 0; i < 300; i++) {
+        scene.update(0.02);
+      }
+      // 再从基准往左走 0.2 → (0.3, 0.85)
+      expect((pet.position.x - 0.3).abs(), lessThan(0.05));
+      expect((pet.position.y - 0.85).abs(), lessThan(0.05));
+      expect(pet.activity, isNull);
+    });
   });
 
   group('自动过渡', () {

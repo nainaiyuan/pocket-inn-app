@@ -132,6 +132,9 @@ class Pet {
   /// 是否正在移动
   bool get moving => _move != null && !_move!.finished;
 
+  /// 立即停下当前移动
+  void stopMoving() => _move = null;
+
   /// 是否忙（有动作/移动/组合动作/双人互动在跑）
   bool get busy =>
       _pair != null ||
@@ -770,6 +773,11 @@ class PetScene {
     final pet = petById(petId);
     final def = _activities[activityId];
     if (pet == null || def == null) return null;
+    // 初始位置：小人先瞬移到基准点，再从那里开始走路径
+    if (def.startRef != null) {
+      pet.position = pet.clampToArea(_moveBasePoint(pet, def.startRef!));
+      pet.stopMoving();
+    }
 
     final run = PetActivityRun(
       def: def,

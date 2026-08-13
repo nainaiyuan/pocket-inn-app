@@ -1010,7 +1010,8 @@ enum _HowMove {
 }
 
 /// ─────────────────────────────────────────────
-/// 组合动作对话框：勾选已有动作 → 排序 → 命名保存
+/// 组合动作对话框：初始位置 + 混合步骤（动作 / 方向移动）
+/// 小人从初始位置开始，一个步骤接一个步骤，走到碰墙自动停
 /// ─────────────────────────────────────────────
 class _ComboEditDialog extends StatefulWidget {
   final List<PetActionDef> actions;
@@ -1024,7 +1025,10 @@ class _ComboEditDialog extends StatefulWidget {
 
 class _ComboEditDialogState extends State<_ComboEditDialog> {
   late final TextEditingController _nameController;
-  final List<String> _selected = []; // 按勾选顺序
+  late final List<PetActivityStep> _steps;
+
+  /// 初始位置：null = 当前位置 / dock = 聊天框 / center = 屏幕中间
+  PetMoveRef? _startRef;
   bool _saving = false;
 
   @override
@@ -1032,29 +1036,69 @@ class _ComboEditDialogState extends State<_ComboEditDialog> {
     super.initState();
     final e = widget.existing;
     _nameController = TextEditingController(text: e?.name ?? '');
-    if (e != null) {
-      _selected.addAll([for (final s in e.steps) s.actionId]);
-    }
+    _steps = [...?e?.steps];
+    _startRef = e?.startRef;
   }
 
-  void _toggle(String id) {
-    setState(() {
-      if (_selected.contains(id)) {
-        _selected.remove(id);
-      } else {
-        _selected.add(id);
+  String _stepLabel(PetActivityStep step) {
+    if (step.isMoveDir) {
+      final dist = step.moveDist != null
+          ? '走${(step.moveDist! * 100).round()}%'
+          : (step.moveUntilWall ? '走到碰墙' : '走${step.moveSec ?? 2}秒');
+      return '${step.moveDir!.label}$dist';
+    }
+    for (final a in widget.actions) {
+      if (a.id == step.actionId) return a.name;
+    }
+    return step.actionId;
+  }
+
+  String _stepSub(PetActivityStep step) {
+    if (step.isMoveDir) {
+      return step.moveUntilWall ? '一直走，碰到屏幕边缘停下' : '方向移动步骤';
+    }
+    for (final a in widget.actions) {
+      if (a.id == step.actionId) {
+        return '${a.frameCount}帧 · ${a.durationSeconds}秒'
+            '${a.moveDir != null ? ' · ${a.moveDir!.label}走${(a.moveDist! * 100).round()}%' : ''}'
+            '${a.target != null ? ' · 到目标点' : ''}';
       }
-    });
+    }
+    return '';
   }
 
   void _move(int index, int delta) {
     setState(() {
       final target = index + delta;
-      if (target < 0 || target >= _selected.length) return;
-      final tmp = _selected[index];
-      _selected[index] = _selected[target];
-      _selected[target] = tmp;
+      if (target < 0 || target >= _steps.length) return;
+      final tmp = _steps[index];
+      _steps[index] = _steps[target];
+      _steps[target] = tmp;
     });
+  }
+
+  /// 添加已有动作（多选追加到末尾）
+  Future<void> _addActions() async {
+    final picked = await showDialog<List<String>>(
+      context: context,
+      builder: (ctx) => _PickActionsDialog(actions: widget.actions),
+    );
+    if (picked == null || picked.isEmpty) return;
+    setState(() {
+      _steps.addAll([
+        for (final id in picked) PetActivityStep(actionId: id),
+      ]);
+    });
+  }
+
+  /// 添加方向移动步骤：方向 + 距离/碰墙
+  Future<void> _addMoveStep() async {
+    final step = await showDialog<PetActivityStep>(
+      context: context,
+      builder: (_) => const _MoveStepDialog(),
+    );
+    if (step == null) return;
+    setState(() => _steps.add(step));
   }
 
   Future<void> _save() async {
@@ -1064,9 +1108,9 @@ class _ComboEditDialogState extends State<_ComboEditDialog> {
           .showSnackBar(const SnackBar(content: Text('给组合起个名字')));
       return;
     }
-    if (_selected.isEmpty) {
+    if (_steps.isEmpty) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('至少勾选一个动作')));
+          .showSnackBar(const SnackBar(content: Text('至少加一个步骤')));
       return;
     }
     setState(() => _saving = true);
@@ -1074,7 +1118,8 @@ class _ComboEditDialogState extends State<_ComboEditDialog> {
     await store.saveActivity(PetActivityDef(
       id: widget.existing?.id ?? 'grp_${DateTime.now().millisecondsSinceEpoch}',
       name: name,
-      steps: [for (final id in _selected) PetActivityStep(actionId: id)],
+      startRef: _startRef,
+      steps: _steps,
     ));
     PetSettingsNotifier.instance.notifyChanged();
     if (!mounted) return;
@@ -1087,7 +1132,7 @@ class _ComboEditDialogState extends State<_ComboEditDialog> {
       title: Text(widget.existing == null ? '新建组合' : '编辑组合'),
       content: SizedBox(
         width: 380,
-        height: 420,
+        height: 460,
         child: Column(
           children: [
             TextField(
@@ -1100,59 +1145,128 @@ class _ComboEditDialogState extends State<_ComboEditDialog> {
               ),
             ),
             const SizedBox(height: 10),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text('勾选动作（按勾选顺序播放，可上下调整）：',
-                  style: TextStyle(fontSize: 11, color: Color(0xFFB0A0A6))),
+            // 初始位置：小人从这里开始动
+            Row(
+              children: [
+                const Text('初始位置：',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF6A4A5A))),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: SegmentedButton<PetMoveRef?>(
+                    segments: const [
+                      ButtonSegment(
+                          value: null,
+                          label: Text('当前位置',
+                              style: TextStyle(fontSize: 10.5))),
+                      ButtonSegment(
+                          value: PetMoveRef.dock,
+                          label: Text('聊天框',
+                              style: TextStyle(fontSize: 10.5))),
+                      ButtonSegment(
+                          value: PetMoveRef.center,
+                          label: Text('屏幕中间',
+                              style: TextStyle(fontSize: 10.5))),
+                    ],
+                    selected: {_startRef},
+                    showSelectedIcon: false,
+                    onSelectionChanged: (s) =>
+                        setState(() => _startRef = s.first),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
+            const Text('小人先出现在这里，然后按下面步骤一个接一个走，碰到屏幕边缘自动停',
+                style: TextStyle(fontSize: 10.5, color: Color(0xFFB0A0A6))),
+            const SizedBox(height: 8),
+            // 步骤列表
+            Row(
+              children: [
+                const Text('步骤：',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF6A4A5A))),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: _addActions,
+                  icon: const Icon(Icons.add,
+                      size: 15, color: Color(0xFFB0789A)),
+                  label: const Text('加动作',
+                      style:
+                          TextStyle(fontSize: 11.5, color: Color(0xFFB0789A))),
+                ),
+                TextButton.icon(
+                  onPressed: _addMoveStep,
+                  icon: const Icon(Icons.directions_walk,
+                      size: 15, color: Color(0xFFB0789A)),
+                  label: const Text('加移动',
+                      style:
+                          TextStyle(fontSize: 11.5, color: Color(0xFFB0789A))),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
             Expanded(
-              child: ListView.separated(
-                itemCount: widget.actions.length,
-                separatorBuilder: (_, __) =>
-                    const Divider(height: 1, color: Color(0xFFF0E8EC)),
-                itemBuilder: (_, i) {
-                  final a = widget.actions[i];
-                  final idx = _selected.indexOf(a.id);
-                  return ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Checkbox(
-                      value: idx >= 0,
-                      activeColor: const Color(0xFFB0789A),
-                      onChanged: (_) => _toggle(a.id),
-                    ),
-                    title: Text(a.name,
-                        style: const TextStyle(fontSize: 13)),
-                    subtitle: Text(
-                      '${a.frameCount}帧 · ${a.durationSeconds}秒'
-                      '${a.moveDir != null ? ' · ${a.moveDir!.label}走${(a.moveDist! * 100).round()}%' : ''}'
-                      '${a.target != null ? ' · 到目标点' : ''}',
-                      style: const TextStyle(fontSize: 10),
-                    ),
-                    trailing: idx >= 0
-                        ? Row(
+              child: _steps.isEmpty
+                  ? Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0x22F0E4EA),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Text(
+                        '还没有步骤：'
+                        '「加动作」= 播一段动作；'
+                        '「加移动」= 朝一个方向走（可走到碰墙）',
+                        style: TextStyle(
+                            fontSize: 11.5,
+                            color: Color(0xFF9A8A90),
+                            height: 1.6),
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: _steps.length,
+                      separatorBuilder: (_, __) =>
+                          const Divider(height: 1, color: Color(0xFFF0E8EC)),
+                      itemBuilder: (_, i) {
+                        final step = _steps[i];
+                        return ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: step.isMoveDir
+                              ? const Icon(Icons.directions_walk,
+                                  size: 18, color: Color(0xFFB0789A))
+                              : const Icon(Icons.movie_outlined,
+                                  size: 18, color: Color(0xFFC896B4)),
+                          title: Text(_stepLabel(step),
+                              style: const TextStyle(fontSize: 13)),
+                          subtitle: Text(_stepSub(step),
+                              style: const TextStyle(fontSize: 10)),
+                          trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
                                 icon: const Icon(Icons.arrow_upward,
                                     size: 16, color: Color(0xFFB0789A)),
-                                onPressed:
-                                    idx == 0 ? null : () => _move(idx, -1),
+                                onPressed: i == 0 ? null : () => _move(i, -1),
                               ),
                               IconButton(
                                 icon: const Icon(Icons.arrow_downward,
                                     size: 16, color: Color(0xFFB0789A)),
-                                onPressed: idx == _selected.length - 1
+                                onPressed: i == _steps.length - 1
                                     ? null
-                                    : () => _move(idx, 1),
+                                    : () => _move(i, 1),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline,
+                                    size: 16, color: Color(0xFFD0A0B0)),
+                                onPressed: () =>
+                                    setState(() => _steps.removeAt(i)),
                               ),
                             ],
-                          )
-                        : null,
-                  );
-                },
-              ),
+                          ),
+                        );
+                      },
+                    ),
             ),
           ],
         ),
@@ -1171,6 +1285,182 @@ class _ComboEditDialogState extends State<_ComboEditDialog> {
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white))
               : const Text('保存'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 勾选已有动作（多选）
+class _PickActionsDialog extends StatefulWidget {
+  final List<PetActionDef> actions;
+
+  const _PickActionsDialog({required this.actions});
+
+  @override
+  State<_PickActionsDialog> createState() => _PickActionsDialogState();
+}
+
+class _PickActionsDialogState extends State<_PickActionsDialog> {
+  final List<String> _picked = [];
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('加动作'),
+      content: SizedBox(
+        width: 320,
+        height: 360,
+        child: ListView.separated(
+          itemCount: widget.actions.length,
+          separatorBuilder: (_, __) =>
+              const Divider(height: 1, color: Color(0xFFF0E8EC)),
+          itemBuilder: (_, i) {
+            final a = widget.actions[i];
+            final checked = _picked.contains(a.id);
+            return ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Checkbox(
+                value: checked,
+                activeColor: const Color(0xFFB0789A),
+                onChanged: (v) {
+                  setState(() {
+                    if (v == true) {
+                      _picked.add(a.id);
+                    } else {
+                      _picked.remove(a.id);
+                    }
+                  });
+                },
+              ),
+              title: Text(a.name, style: const TextStyle(fontSize: 13)),
+              subtitle: Text('${a.frameCount}帧 · ${a.durationSeconds}秒',
+                  style: const TextStyle(fontSize: 10)),
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context), child: const Text('取消')),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _picked),
+          style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFB0789A)),
+          child: const Text('加入'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 方向移动步骤：8 向 + 距离滑块 / 走到碰墙
+class _MoveStepDialog extends StatefulWidget {
+  const _MoveStepDialog();
+
+  @override
+  State<_MoveStepDialog> createState() => _MoveStepDialogState();
+}
+
+class _MoveStepDialogState extends State<_MoveStepDialog> {
+  PetMoveDir _dir = PetMoveDir.left;
+  double _dist = 0.3;
+  bool _untilWall = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('加移动步骤'),
+      content: SizedBox(
+        width: 320,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('方向：', style: TextStyle(fontSize: 12)),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                for (final d in PetMoveDir.values)
+                  SizedBox(
+                    width: 52,
+                    height: 32,
+                    child: OutlinedButton(
+                      onPressed: () => setState(() => _dir = d),
+                      style: OutlinedButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        backgroundColor: _dir == d
+                            ? const Color(0x22B0789A)
+                            : null,
+                        side: BorderSide(
+                          color: _dir == d
+                              ? const Color(0xFFB0789A)
+                              : const Color(0xFFD8C0CA),
+                        ),
+                      ),
+                      child: Text(d.label,
+                          style: const TextStyle(
+                              fontSize: 10, color: Color(0xFF8A5A72))),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Text('走到碰墙',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF6A4A5A))),
+                const Spacer(),
+                Switch(
+                  value: _untilWall,
+                  activeTrackColor: const Color(0xFFB0789A),
+                  onChanged: (v) => setState(() => _untilWall = v),
+                ),
+              ],
+            ),
+            if (!_untilWall) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Text('距离：', style: TextStyle(fontSize: 12)),
+                  const Spacer(),
+                  Text('${(_dist * 100).round()}%',
+                      style: const TextStyle(
+                          fontSize: 12, color: Color(0xFFB0789A))),
+                ],
+              ),
+              Slider(
+                value: _dist,
+                min: 0.1,
+                max: 1.0,
+                divisions: 18,
+                activeColor: const Color(0xFFB0789A),
+                inactiveColor: const Color(0xFFE8D8E0),
+                onChanged: (v) => setState(() => _dist = v),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context), child: const Text('取消')),
+        FilledButton(
+          onPressed: () => Navigator.pop(
+            context,
+            PetActivityStep(
+              actionId: 'idle',
+              moveDir: _dir,
+              moveDist: _untilWall ? null : _dist,
+              moveUntilWall: _untilWall,
+            ),
+          ),
+          style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFB0789A)),
+          child: const Text('加入'),
         ),
       ],
     );
