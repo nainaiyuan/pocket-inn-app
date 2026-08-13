@@ -42,6 +42,11 @@ class _CompanionPageState extends State<CompanionPage>
   String? _toast;
   Timer? _toastTimer;
 
+  /// 导航小圈：当前被控制的小人（一次一个）；拖小人到圈上绑定
+  String? _joystickPetId;
+  Offset _joystickVec = Offset.zero;
+  final GlobalKey _joystickKey = GlobalKey();
+
   int _speechSeq = 0;
 
   @override
@@ -96,6 +101,18 @@ class _CompanionPageState extends State<CompanionPage>
         : (elapsed - _lastTick).inMicroseconds / 1e6;
     _lastTick = elapsed;
     world.update(dt.clamp(0.0, 0.1));
+    // 导航小圈：控制绑定的那个小人跟着圈动
+    final jid = _joystickPetId;
+    if (jid != null && _joystickVec != Offset.zero) {
+      final jpet = world.scene.petById(jid);
+      if (jpet != null) {
+        const speed = 0.5;
+        jpet.position = jpet.clampToArea(PetPoint(
+          jpet.position.x + _joystickVec.dx * speed * dt,
+          jpet.position.y + _joystickVec.dy * speed * dt,
+        ));
+      }
+    }
     setState(() {}); // 每帧刷新帧动画/移动
   }
 
@@ -124,6 +141,12 @@ class _CompanionPageState extends State<CompanionPage>
     _toastTimer = Timer(const Duration(seconds: 2), () {
       if (mounted) setState(() => _toast = null);
     });
+  }
+
+  String _petName(String id) {
+    final world = _world;
+    if (world == null) return id;
+    return world.scene.petById(id)?.name ?? id;
   }
 
   @override
@@ -175,7 +198,8 @@ class _CompanionPageState extends State<CompanionPage>
         final w = constraints.maxWidth;
         final h = constraints.maxHeight;
         const baseSize = 120.0;
-        final size = baseSize * pet.scale;
+        // 聊天页限制最大尺寸（图太大不撑爆）；模拟立绘场景不受此限制
+        final size = (baseSize * pet.scale).clamp(0.0, 220.0);
         final left = pet.position.x * w - size / 2;
         final top = pet.position.y * h - size / 2;
 
@@ -192,10 +216,27 @@ class _CompanionPageState extends State<CompanionPage>
                 onTap: () => _onPetTap(world, pet),
                 onLongPress: () => _onPetLongPress(world, pet),
                 onPanUpdate: (d) => _onPetDrag(world, pet, d, w, h),
-                onPanEnd: (_) => _maybeStartDuo(world, pet),
+                onPanEnd: (_) => _onPetDragEnd(world, pet, w, h),
                 child: _PetFrameView(pet: pet, size: size),
               ),
             ),
+            // 导航小圈绑定中的小人：粉色高亮圈
+            if (_joystickPetId == pet.id)
+              Positioned(
+                left: left - 5,
+                top: top - 5,
+                width: size + 10,
+                height: size + 10,
+                child: IgnorePointer(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                          color: const Color(0xFFB0789A), width: 2.5),
+                    ),
+                  ),
+                ),
+              ),
             // 气泡
             if (_speeches[pet.id] != null)
               Positioned(
@@ -267,6 +308,32 @@ class _CompanionPageState extends State<CompanionPage>
   }
 
   /// 松手时检查：旁边有没有另一个小人 → 靠近就触发双人互动
+  /// 小人拖拽结束：落在导航小圈上 = 绑定控制；绑定的被拖走 = 解除
+  void _onPetDragEnd(PetWorld world, Pet pet, double w, double h) {
+    final rect = _joystickRect();
+    if (rect != null) {
+      final screenPos = Offset(pet.position.x * w, pet.position.y * h);
+      if (rect.inflate(14).contains(screenPos)) {
+        setState(() => _joystickPetId = pet.id);
+        _showToast('已绑定「${pet.name}」，动小圈控制它');
+        return;
+      }
+      if (_joystickPetId == pet.id) {
+        setState(() => _joystickPetId = null);
+        _showToast('已解除控制');
+      }
+    }
+    _maybeStartDuo(world, pet);
+  }
+
+  /// 导航小圈在屏幕上的位置（用于判断小人是否拖到圈上）
+  Rect? _joystickRect() {
+    final box = _joystickKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return null;
+    final origin = box.localToGlobal(Offset.zero);
+    return origin & box.size;
+  }
+
   void _maybeStartDuo(PetWorld world, Pet pet) {
     final duoActions = world.scene.actionDefs.values
         .where((d) => d.kind == PetActionKind.duo)
@@ -409,6 +476,27 @@ class _CompanionPageState extends State<CompanionPage>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 导航小圈：拖小人到圈上 = 控制它，动圈小人跟着动
+          Row(
+            children: [
+              _NavJoystick(
+                key: _joystickKey,
+                size: 68,
+                onVecChanged: (v) => setState(() => _joystickVec = v),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _joystickPetId == null
+                    ? const Text('把小人拖到小圈上 = 控制它，动圈它跟着动（一次一个）',
+                        style: TextStyle(
+                            fontSize: 11, color: Color(0xFFB0A0A6)))
+                    : Text('正在控制：${_petName(_joystickPetId!)}（把它拖走解除）',
+                        style: const TextStyle(
+                            fontSize: 11.5, color: Color(0xFF8A5A72))),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           // 输入框：打字 → 小人头上气泡
           Row(
             children: [
@@ -550,6 +638,104 @@ class _SpeechData {
 }
 
 /// 背景
+/// 导航小圈：拖动摇杆头 → 回调归一化方向向量（-1~1）；松手回中回调零向量
+class _NavJoystick extends StatefulWidget {
+  final double size;
+  final ValueChanged<Offset> onVecChanged;
+
+  const _NavJoystick({super.key, required this.size, required this.onVecChanged});
+
+  @override
+  State<_NavJoystick> createState() => _NavJoystickState();
+}
+
+class _NavJoystickState extends State<_NavJoystick> {
+  Offset _vec = Offset.zero;
+
+  void _update(Offset localPos) {
+    final radius = widget.size / 2;
+    final center = Offset(radius, radius);
+    var v = localPos - center;
+    final len = v.distance;
+    if (len > radius) v = v / len * radius; // 限制在圆内
+    final norm = len == 0 ? Offset.zero : v / radius; // 归一化 -1~1
+    setState(() => _vec = v);
+    widget.onVecChanged(norm);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = widget.size;
+    final radius = size / 2;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onPanDown: (d) => _update(d.localPosition),
+      onPanUpdate: (d) => _update(d.localPosition),
+      onPanEnd: (_) {
+        setState(() => _vec = Offset.zero);
+        widget.onVecChanged(Offset.zero);
+      },
+      onPanCancel: () {
+        setState(() => _vec = Offset.zero);
+        widget.onVecChanged(Offset.zero);
+      },
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: const Color(0x33F0E4EA),
+          border: Border.all(color: const Color(0xFFD8C0CA), width: 1.5),
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // 十字刻度
+            CustomPaint(
+                size: Size(size, size), painter: _JoystickGridPainter()),
+            // 摇杆头
+            Positioned(
+              left: radius - 16 + _vec.dx,
+              top: radius - 16 + _vec.dy,
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFFB0789A),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.15),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 小圈十字刻度
+class _JoystickGridPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0x44D8C0CA)
+      ..strokeWidth = 1;
+    final c = size.center(Offset.zero);
+    canvas.drawLine(Offset(c.dx, 0), Offset(c.dx, size.height), paint);
+    canvas.drawLine(Offset(0, c.dy), Offset(size.width, c.dy), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
 class _PetBackground extends StatelessWidget {
   const _PetBackground();
 

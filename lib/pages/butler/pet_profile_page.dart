@@ -230,6 +230,53 @@ class _PetProfilePageState extends State<PetProfilePage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // ═══ 显示大小 ═══
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE8D8E0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.pets,
+                        size: 15, color: Color(0xFFB0789A)),
+                    const SizedBox(width: 6),
+                    const Text('显示大小',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF6A4A5A))),
+                    const Spacer(),
+                    Text('${(pet.scale * 100).round()}%',
+                        style: const TextStyle(
+                            fontSize: 12, color: Color(0xFFB0789A))),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                const Text('图太大在聊天页会被限制，调小一点更合适',
+                    style: TextStyle(
+                        fontSize: 10.5, color: Color(0xFFB0A0A6))),
+                Slider(
+                  value: pet.scale.clamp(0.4, 2.0),
+                  min: 0.4,
+                  max: 2.0,
+                  divisions: 16,
+                  activeColor: const Color(0xFFB0789A),
+                  inactiveColor: const Color(0xFFE8D8E0),
+                  onChanged: (v) async {
+                    await _savePet(pet.copyWith(scale: v));
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+
           // ═══ 我的动作 ═══
           Row(
             children: [
@@ -837,8 +884,8 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  // 方向从哪算：从自己位置 / 从屏幕中间
-                  const Text('上下左右从哪算：',
+                  // 起点位置：默认位置1/2/3，以后可继续加自定义位置
+                  const Text('从哪开始移动：',
                       style: TextStyle(fontSize: 12)),
                   const SizedBox(height: 4),
                   SegmentedButton<PetMoveRef>(
@@ -856,9 +903,11 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _moveRef == PetMoveRef.self
-                        ? '从小人自己站的位置出发（聊天框上方）'
-                        : '以屏幕中间为基准点',
+                    switch (_moveRef) {
+                      PetMoveRef.self => '默认位置1：从小人自己站的位置出发',
+                      PetMoveRef.hero => '默认位置2：从男主小人站的位置出发',
+                      PetMoveRef.dock => '默认位置3：从聊天框（手机底部）出发',
+                    },
                     style: const TextStyle(
                         fontSize: 10.5, color: Color(0xFFB0A0A6)),
                   ),

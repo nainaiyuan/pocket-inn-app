@@ -127,9 +127,11 @@ class PetWorld {
         pet.breakActionId = p.breakActionId;
       }
     }
-    // 同步已有小人的打断动作配置
+    // 同步已有小人的打断动作配置 + 显示大小
     for (final p in wanted) {
-      scene.petById(p.petId)?.breakActionId = p.breakActionId;
+      final existing = scene.petById(p.petId);
+      existing?.breakActionId = p.breakActionId;
+      existing?.scale = p.scale;
     }
     // 挂上说话回调（页面气泡）
     for (final pet in scene.pets) {
