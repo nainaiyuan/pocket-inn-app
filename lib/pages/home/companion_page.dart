@@ -42,6 +42,7 @@ class _CompanionPageState extends State<CompanionPage>
   /// 全局提示（好感度变化等）
   String? _toast;
   Timer? _toastTimer;
+  Timer? _settingsDebounce;
 
   /// 导航小圈：当前被控制的小人（一次一个）；拖小人到圈上绑定
   String? _joystickPetId;
@@ -113,14 +114,18 @@ class _CompanionPageState extends State<CompanionPage>
   }
 
   void _onPetSettingsChanged() {
-    final world = _world;
-    if (world == null) return;
-    world.syncVisible().then((_) {
-      if (!mounted) return;
-      _syncSpeakCallbacks(world);
-      // 互动组增删改后同步运行时
-      _loadGroupRuntimes(world);
-      setState(() {});
+    // 防抖：调大小滑块拖动会高频 notifyChanged，合并成一次再加载
+    _settingsDebounce?.cancel();
+    _settingsDebounce = Timer(const Duration(milliseconds: 800), () {
+      final world = _world;
+      if (world == null) return;
+      world.syncVisible().then((_) {
+        if (!mounted) return;
+        _syncSpeakCallbacks(world);
+        // 互动组增删改后同步运行时
+        _loadGroupRuntimes(world);
+        setState(() {});
+      });
     });
   }
 

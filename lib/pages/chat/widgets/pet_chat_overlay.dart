@@ -33,6 +33,9 @@ class _PetChatOverlayState extends State<PetChatOverlay>
   Duration _lastTick = Duration.zero;
   final Map<String, SpeechData> _speeches = {};
   int _speechSeq = 0;
+  // 8-14 07:0x：设置通知防抖——调大小滑块拖动会高频 notifyChanged，
+  // 每次都全量重载互动组运行时（查库+读帧）→ 日志刷屏。
+  Timer? _settingsDebounce;
 
   @override
   void initState() {
@@ -84,12 +87,16 @@ class _PetChatOverlayState extends State<PetChatOverlay>
   }
 
   void _onSettingsChanged() {
-    final world = _world;
-    if (world == null) return;
-    world.syncVisible().then((_) {
-      if (!mounted) return;
-      _loadGroupRuntimes(world);
-      setState(() {});
+    // 防抖：高频通知合并成一次（滑块拖动期间不重复加载）
+    _settingsDebounce?.cancel();
+    _settingsDebounce = Timer(const Duration(milliseconds: 800), () {
+      final world = _world;
+      if (world == null) return;
+      world.syncVisible().then((_) {
+        if (!mounted) return;
+        _loadGroupRuntimes(world);
+        setState(() {});
+      });
     });
   }
 
@@ -107,6 +114,7 @@ class _PetChatOverlayState extends State<PetChatOverlay>
   @override
   void dispose() {
     _ticker?.dispose();
+    _settingsDebounce?.cancel();
     PetSettingsNotifier.instance.removeListener(_onSettingsChanged);
     super.dispose();
   }
