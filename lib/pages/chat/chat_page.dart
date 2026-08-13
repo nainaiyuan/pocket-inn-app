@@ -58,6 +58,7 @@ import 'widgets/chat_sidebar_left.dart';
 import 'widgets/chat_sidebar_right.dart';
 import 'widgets/chat_top_bar.dart';
 import 'widgets/chat_message_area.dart';
+import 'widgets/pet_chat_overlay.dart';
 import 'services/chat_storage_service.dart';
 import 'services/multi_bubble_parser.dart';
 import 'widgets/character_world_page.dart';
@@ -3480,6 +3481,12 @@ class _ChatPageState extends State<ChatPage>
                                 : '${_state.leadId}_default'),
                       ))
                     _buildFlowStopBar(),
+                  // 桌宠层：趴在聊天框上方，和男主聊天时小人就在旁边互动
+                  // 8-14 06:5x（用户：桌宠就是放聊天页的，不是单独页面）
+                  const SizedBox(
+                    height: 190,
+                    child: PetChatOverlay(),
+                  ),
                   ChatInputBar(
                     externalCtrl: _inputCtrl,
                     onCameraTap: () {},

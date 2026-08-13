@@ -34,7 +34,7 @@ class _CompanionPageState extends State<CompanionPage>
   Duration _lastTick = Duration.zero;
 
   /// 每个小人的气泡数据（petId → 数据）
-  final Map<String, _SpeechData> _speeches = {};
+  final Map<String, SpeechData> _speeches = {};
 
   /// 投喂模式：选中的食物 id（null = 未选择）
   String? _feedingItemId;
@@ -157,7 +157,7 @@ class _CompanionPageState extends State<CompanionPage>
   void _showSpeech(String petId, String text) {
     _speechSeq++;
     setState(() {
-      _speeches[petId] = _SpeechData(text: text, seq: _speechSeq);
+      _speeches[petId] = SpeechData(text: text, seq: _speechSeq);
     });
   }
 
@@ -248,7 +248,7 @@ class _CompanionPageState extends State<CompanionPage>
                 onLongPress: () => _onPetLongPress(world, pet),
                 onPanUpdate: (d) => _onPetDrag(world, pet, d, w, h),
                 onPanEnd: (_) => _onPetDragEnd(world, pet, w, h),
-                child: _PetFrameView(pet: pet, size: size),
+                child: PetFrameView(pet: pet, size: size),
               ),
             ),
             // 导航小圈绑定中的小人：粉色高亮圈
@@ -274,7 +274,7 @@ class _CompanionPageState extends State<CompanionPage>
                 left: left + size / 2 - 90,
                 top: top - 46,
                 width: 180,
-                child: _SpeechBubble(
+                child: SpeechBubble(
                   data: _speeches[pet.id]!,
                   onFinished: () => _dismissSpeech(pet.id),
                 ),
@@ -785,10 +785,10 @@ class _CompanionPageState extends State<CompanionPage>
 }
 
 /// 气泡数据
-class _SpeechData {
+class SpeechData {
   final String text;
   final int seq;
-  const _SpeechData({required this.text, required this.seq});
+  const SpeechData({required this.text, required this.seq});
 }
 
 /// 背景
@@ -914,11 +914,11 @@ class _PetBackground extends StatelessWidget {
 }
 
 /// 小人帧渲染：真实帧图 or 占位图形
-class _PetFrameView extends StatelessWidget {
+class PetFrameView extends StatelessWidget {
   final Pet pet;
   final double size;
 
-  const _PetFrameView({required this.pet, required this.size});
+  const PetFrameView({required this.pet, required this.size});
 
   @override
   Widget build(BuildContext context) {
@@ -929,7 +929,7 @@ class _PetFrameView extends StatelessWidget {
     } else if (frame.startsWith('placeholder:')) {
       final parsed = PetPlaceholderFrames.parse(frame);
       child = CustomPaint(
-        painter: _PlaceholderPainter(
+        painter: PlaceholderPainter(
           actionId: parsed?.$1 ?? 'idle',
           index: parsed?.$2 ?? 0,
           total: parsed?.$3 ?? 1,
@@ -957,13 +957,13 @@ class _PetFrameView extends StatelessWidget {
 }
 
 /// 占位图形绘制（用户没放图时的小人形）
-class _PlaceholderPainter extends CustomPainter {
+class PlaceholderPainter extends CustomPainter {
   final String actionId;
   final int index;
   final int total;
   final Color color;
 
-  _PlaceholderPainter({
+  PlaceholderPainter({
     required this.actionId,
     required this.index,
     required this.total,
@@ -1033,22 +1033,22 @@ class _PlaceholderPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _PlaceholderPainter old) =>
+  bool shouldRepaint(covariant PlaceholderPainter old) =>
       old.index != index || old.actionId != actionId;
 }
 
 /// 气泡（打字机效果）
-class _SpeechBubble extends StatefulWidget {
-  final _SpeechData data;
+class SpeechBubble extends StatefulWidget {
+  final SpeechData data;
   final VoidCallback onFinished;
 
-  const _SpeechBubble({required this.data, required this.onFinished});
+  const SpeechBubble({required this.data, required this.onFinished});
 
   @override
-  State<_SpeechBubble> createState() => _SpeechBubbleState();
+  State<SpeechBubble> createState() => _SpeechBubbleState();
 }
 
-class _SpeechBubbleState extends State<_SpeechBubble> {
+class _SpeechBubbleState extends State<SpeechBubble> {
   int _shown = 0;
   Timer? _typeTimer;
   Timer? _holdTimer;
