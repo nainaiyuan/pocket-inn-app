@@ -1270,14 +1270,26 @@ class _SlotActionDialogState extends State<_SlotActionDialog> {
         type: FileType.image,
       );
       if (result != null && result.files.isNotEmpty) {
-        setState(() {
-          _files = result.files.map((f) => f.path ?? '').where((e) => e.isNotEmpty).toList();
-          _repicked = true;
-          // 自动算秒数：帧数 / 10fps
-          if (_files.isNotEmpty) {
-            _secondsCtrl.text = (_files.length / 10).toStringAsFixed(1);
-          }
-        });
+        try {
+          // 立即复制到应用私有目录，防止 file_picker 临时文件被系统清理
+          final staged = await FilePetFrameSource.stagePickedFiles(
+              result.files.map((f) => f.path ?? '').where((e) => e.isNotEmpty).toList());
+          if (!mounted) return;
+          setState(() {
+            _files = staged;
+            _repicked = true;
+            // 自动算秒数：帧数 / 10fps
+            if (_files.isNotEmpty) {
+              _secondsCtrl.text = (_files.length / 10).toStringAsFixed(1);
+            }
+          });
+        } catch (e) {
+          if (!mounted) return;
+          setState(() => _files = []);
+          ScaffoldMessenger.of(context)
+            ..clearSnackBars()
+            ..showSnackBar(SnackBar(content: Text('图片暂存失败，请重选：$e')));
+        }
       }
     } finally {
       if (mounted) setState(() => _picking = false);

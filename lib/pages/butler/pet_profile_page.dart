@@ -660,10 +660,19 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
       allowMultiple: true,
     );
     if (result == null || result.files.isEmpty) return;
-    setState(() {
-      _files = result.files.map((f) => f.path!).toList();
-      _repicked = true;
-    });
+    try {
+      // 立即复制到应用私有目录，防止 file_picker 临时文件被系统清理
+      final staged = await FilePetFrameSource.stagePickedFiles(
+          result.files.map((f) => f.path ?? '').where((e) => e.isNotEmpty).toList());
+      if (!mounted) return;
+      setState(() {
+        _files = staged;
+        _repicked = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      _toast('图片暂存失败，请重选：$e');
+    }
   }
 
   String get _frameHint {

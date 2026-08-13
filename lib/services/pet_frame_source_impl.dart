@@ -38,6 +38,31 @@ class FilePetFrameSource implements PetFrameSource {
     return dir.path;
   }
 
+  /// 选图后立即把 FilePicker 临时文件复制进应用私有目录（`__pick_cache`）。
+  ///
+  /// 8-14 06:52 根因修复：FilePicker 的临时文件在系统 cache/ 下，
+  /// 选完图到点保存之间（几十秒）可能被系统清理 → 保存时源文件
+  /// PathNotFoundException。复制到应用 files/ 后源文件稳定，不再依赖
+  /// 系统临时目录。每次调用会清空上次的暂存。
+  static Future<List<String>> stagePickedFiles(List<String> srcPaths) async {
+    final root = await rootPath();
+    final cacheDir = Directory(p.join(root, '__pick_cache'));
+    if (await cacheDir.exists()) {
+      await cacheDir.delete(recursive: true);
+    }
+    await cacheDir.create(recursive: true);
+    final out = <String>[];
+    for (var i = 0; i < srcPaths.length; i++) {
+      final src = srcPaths[i];
+      if (src.isEmpty) continue;
+      final target =
+          p.join(cacheDir.path, '${i.toString().padLeft(3, '0')}_${p.basename(src)}');
+      await File(src).copy(target);
+      out.add(target);
+    }
+    return out;
+  }
+
   @override
   Future<List<String>> framesFor(String actionId) async {
     final root = await rootPath();
