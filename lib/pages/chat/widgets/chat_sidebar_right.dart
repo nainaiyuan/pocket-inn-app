@@ -2217,6 +2217,107 @@ class _PetSectionState extends State<_PetSection> {
     });
   }
 
+  /// 长按角色 → 选项菜单（调大小等）
+  void _showPetMenu(PetProfile p) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Text(
+              p.name,
+              style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF6A4A5A)),
+            ),
+            Text(
+              '当前大小 ${(p.scale * 100).round()}%',
+              style:
+                  const TextStyle(fontSize: 11, color: Color(0xFFB0A0A6)),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              leading:
+                  const Icon(Icons.straighten, color: Color(0xFFB0789A)),
+              title: const Text('调大小', style: TextStyle(fontSize: 13.5)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showScaleDialog(p);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.pets, color: Color(0xFFB0789A)),
+              title: const Text('去配置桌宠', style: TextStyle(fontSize: 13.5)),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const PetSetupPage()),
+                ).then((_) => _load());
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 调大小：滑块实时保存，每个角色分开
+  void _showScaleDialog(PetProfile p) {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) {
+          return AlertDialog(
+            title: Text('「${p.name}」的大小',
+                style: const TextStyle(fontSize: 15)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Slider(
+                  value: p.scale.clamp(0.4, 2.0),
+                  min: 0.4,
+                  max: 2.0,
+                  divisions: 32,
+                  activeColor: const Color(0xFFB0789A),
+                  label: '${(p.scale * 100).round()}%',
+                  onChanged: (v) {
+                    p.scale = v;
+                    setDlg(() {});
+                    _store.saveProfile(p);
+                    PetSettingsNotifier.instance.notifyChanged();
+                    setState(() {});
+                  },
+                ),
+                Text(
+                  '${(p.scale * 100).round()}%',
+                  style: const TextStyle(
+                      fontSize: 13, color: Color(0xFF6A4A5A)),
+                ),
+                const SizedBox(height: 4),
+                const Text('50% 变小 · 100% 原样 · 200% 变大（每个角色单独设置）',
+                    style: TextStyle(
+                        fontSize: 10.5, color: Color(0xFFB0A0A6))),
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('完成')),
+            ],
+          );
+        },
+      ),
+    );
+  }
 
 
   @override
@@ -2275,7 +2376,9 @@ class _PetSectionState extends State<_PetSection> {
                   )
                 else
                   for (final p in _profiles)
-                    CheckboxListTile(
+                    GestureDetector(
+                      onLongPress: () => _showPetMenu(p),
+                      child: CheckboxListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                       controlAffinity: ListTileControlAffinity.leading,
@@ -2312,6 +2415,7 @@ class _PetSectionState extends State<_PetSection> {
                       value: p.visible,
                       activeColor: const Color(0xFFB0789A),
                       onChanged: (v) => _toggle(p, v ?? false),
+                      ),
                     ),
                 const SizedBox(height: 4),
                 const Text(
