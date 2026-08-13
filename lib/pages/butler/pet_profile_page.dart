@@ -599,7 +599,6 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
   _HowMove _howMove = _HowMove.none;
   PetMoveDir _moveDir = PetMoveDir.left;
   double _moveDist = 0.3;
-  final _moveSecController = TextEditingController();
   double _targetX = 0.5;
   double _targetY = 0.5;
   double _startX = 0.5;
@@ -608,6 +607,9 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
 
   /// 移动起点：聊天框 / 屏幕中间（预设快捷）/ 自定义
   PetMoveRef _moveRef = PetMoveRef.dock;
+
+  /// 编辑时是否重选了图（没重选 = 保留原帧图，不重拷）
+  bool _repicked = false;
   bool _nameEdited = false;
 
   bool _saving = false;
@@ -625,15 +627,21 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
       _startY = e.startY ?? 0.5;
       final t = e.target;
       if (t != null) {
-        _howMove = _HowMove.target;
+        // 新格式：目标点（绝对位置）
+        _howMove = _HowMove.move;
         _targetX = t.x;
         _targetY = t.y;
         _trajectory = e.trajectory;
       } else if (e.moveDir != null) {
-        _howMove = _HowMove.dir;
+        // 老格式：方向+距离 → 换算成目标点（相对锚点），编辑后自动迁移
+        _howMove = _HowMove.move;
         _moveDir = e.moveDir!;
         _moveDist = e.moveDist ?? 0.3;
-        if (e.moveSec != null) _moveSecController.text = e.moveSec.toString();
+        _trajectory = e.trajectory;
+        final base = PetMoveRef.basePoint(_moveRef, x: _startX, y: _startY);
+        final (vx, vy) = e.moveDir!.vector;
+        _targetX = (base.x + vx * _moveDist).clamp(0.02, 0.98);
+        _targetY = (base.y + vy * _moveDist).clamp(0.02, 0.98);
       }
       // 编辑：把已有帧图回填，不重新选图也能保存（保留原帧）
       _loadExistingFrames(e.id);
@@ -654,6 +662,7 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
     if (result == null || result.files.isEmpty) return;
     setState(() {
       _files = result.files.map((f) => f.path!).toList();
+      _repicked = true;
     });
   }
 
@@ -685,50 +694,60 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
     final actionId = existing?.id ?? 'act_${DateTime.now().millisecondsSinceEpoch}';
     final store = PetStore();
 
-    // 帧图：复制到动作目录（编辑时重选图先清旧帧）
-    final frameDir = actionId;
+    // 帧图：复制到动作目录
+    // 重选了图（或新建）→ 清旧帧重拷；编辑但没重选 → 原帧图就在目录里，直接保留
+    // （旧代码：编辑时没重选图也先删目录再拷，源文件被删 → 保存直接崩）
     final dir = await FilePetFrameSource.actionDir(actionId);
-    if (await Directory(dir).exists()) {
-      await Directory(dir).delete(recursive: true);
+    final frameCount = files.length;
+    if (_repicked || existing == null) {
+      try {
+        if (await Directory(dir).exists()) {
+          await Directory(dir).delete(recursive: true);
+        }
+        for (var i = 0; i < files.length; i++) {
+          final f = files[i];
+          // 加序号前缀：多选同名文件不互相覆盖，且天然按选择顺序播放
+          final target = p.join(
+              dir, '${i.toString().padLeft(3, '0')}_${p.basename(f)}');
+          await File(f).copy(target);
+        }
+      } catch (e) {
+        DebugLogger.log('桌宠', '帧图复制失败: $e');
+        if (!mounted) return;
+        setState(() => _saving = false);
+        _toast('保存失败（帧图复制出错）：$e');
+        return;
+      }
     }
-    final copied = <String>[];
-    for (final f in files) {
-      final target = p.join(dir, p.basename(f));
-      await File(f).copy(target);
-      copied.add(target);
-    }
-    final frameCount = copied.length;
     final fps = (frameCount / seconds).clamp(1.0, 60.0);
     final loop = PetAnimLoop.loop;
 
     final kind = _howMove == _HowMove.none
         ? PetActionKind.inPlace
         : PetActionKind.moveTo;
-    final moveSec = double.tryParse(_moveSecController.text.trim());
     final def = PetActionDef(
       id: actionId,
       name: name,
       kind: kind,
       fps: fps,
       loop: loop,
-      frameDir: frameDir,
+      frameDir: actionId,
       frameCount: frameCount,
       durationSeconds: seconds,
-      moveDir: _howMove == _HowMove.dir ? _moveDir : null,
-      moveDist: _howMove == _HowMove.dir ? _moveDist : null,
-      moveSec: _howMove == _HowMove.dir ? moveSec : null,
-      moveRef: _howMove == _HowMove.dir ? _moveRef : PetMoveRef.dock,
-      startX: _howMove == _HowMove.dir && _moveRef == PetMoveRef.custom
-          ? _startX
-          : null,
-      startY: _howMove == _HowMove.dir && _moveRef == PetMoveRef.custom
-          ? _startY
-          : null,
-      targetX: _howMove == _HowMove.target ? _targetX : null,
-      targetY: _howMove == _HowMove.target ? _targetY : null,
+      // 移动统一存"目标点"（方向+距离 在编辑器里已换算成目标点）
+      targetX: _howMove == _HowMove.move ? _targetX : null,
+      targetY: _howMove == _HowMove.move ? _targetY : null,
       trajectory: _trajectory,
     );
-    await store.saveAction(def);
+    try {
+      await store.saveAction(def);
+    } catch (e) {
+      DebugLogger.log('桌宠', '保存动作失败: $e');
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _toast('保存失败：$e');
+      return;
+    }
     PetSettingsNotifier.instance.notifyChanged();
     if (!mounted) return;
     Navigator.pop(context, true);
@@ -815,151 +834,81 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
               const SizedBox(height: 12),
               // 播的时候怎么动
               const Text('播的时候怎么动：', style: TextStyle(fontSize: 12)),
+              const SizedBox(height: 4),
+              SegmentedButton<_HowMove>(
+                segments: [
+                  for (final h in _HowMove.values)
+                    ButtonSegment(
+                        value: h,
+                        label: Text(h.label,
+                            style: const TextStyle(fontSize: 10.5))),
+                ],
+                selected: {_howMove},
+                showSelectedIcon: false,
+                onSelectionChanged: (s) => setState(() => _howMove = s.first),
+              ),
+              const SizedBox(height: 4),
+              Text(_howMove.hint,
+                  style: const TextStyle(
+                      fontSize: 10.5, color: Color(0xFFB0A0A6))),
+              if (_howMove == _HowMove.move) ...[
+                const SizedBox(height: 8),
+                // 起点（方向+距离 的基准点）
+                const Text('从哪出发（起点）：', style: TextStyle(fontSize: 12)),
                 const SizedBox(height: 4),
-                SegmentedButton<_HowMove>(
+                SegmentedButton<PetMoveRef>(
                   segments: [
-                    for (final h in _HowMove.values)
+                    for (final r in PetMoveRef.values)
                       ButtonSegment(
-                          value: h,
-                          label: Text(h.label,
+                          value: r,
+                          label: Text(r.label,
                               style: const TextStyle(fontSize: 10.5))),
                   ],
-                  selected: {_howMove},
+                  selected: {_moveRef},
                   showSelectedIcon: false,
-                  onSelectionChanged: (s) =>
-                      setState(() => _howMove = s.first),
+                  onSelectionChanged: (s) => setState(() => _moveRef = s.first),
                 ),
                 const SizedBox(height: 4),
-                Text(_howMove.hint,
-                    style: const TextStyle(
-                        fontSize: 10.5, color: Color(0xFFB0A0A6))),
-                if (_howMove == _HowMove.dir) ...[
-                  const SizedBox(height: 8),
-                  // 8 向
-                  Wrap(
-                    spacing: 4,
-                    runSpacing: 4,
-                    children: [
-                      for (final d in PetMoveDir.values)
-                        SizedBox(
-                          width: 42,
-                          height: 30,
-                          child: OutlinedButton(
-                            onPressed: () =>
-                                setState(() => _moveDir = d),
-                            style: OutlinedButton.styleFrom(
-                              padding: EdgeInsets.zero,
-                              backgroundColor: _moveDir == d
-                                  ? const Color(0x22B0789A)
-                                  : null,
-                              side: BorderSide(
-                                color: _moveDir == d
-                                    ? const Color(0xFFB0789A)
-                                    : const Color(0xFFD8C0CA),
-                              ),
-                            ),
-                            child: Text(d.label,
-                                style: const TextStyle(
-                                    fontSize: 10, color: Color(0xFF8A5A72))),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  // 起点位置：默认位置1/2/3，以后可继续加自定义位置
-                  const Text('从哪开始移动：',
-                      style: TextStyle(fontSize: 12)),
+                Text(
+                  switch (_moveRef) {
+                    PetMoveRef.dock => '预设：起点 = 聊天框（手机底部）位置',
+                    PetMoveRef.center => '预设：起点 = 屏幕中间',
+                    PetMoveRef.custom => '自定义：自己定起点',
+                  },
+                  style: const TextStyle(
+                      fontSize: 10.5, color: Color(0xFFB0A0A6)),
+                ),
+                if (_moveRef == PetMoveRef.custom) ...[
                   const SizedBox(height: 4),
-                  SegmentedButton<PetMoveRef>(
-                    segments: [
-                      for (final r in PetMoveRef.values)
-                        ButtonSegment(
-                            value: r,
-                            label: Text(r.label,
-                                style: const TextStyle(fontSize: 10.5))),
-                    ],
-                    selected: {_moveRef},
-                    showSelectedIcon: false,
-                    onSelectionChanged: (s) =>
-                        setState(() => _moveRef = s.first),
+                  _AxisSlider(
+                    label: '起点 左右',
+                    value: _startX,
+                    onChanged: (v) => setState(() => _startX = v),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    switch (_moveRef) {
-                      PetMoveRef.dock => '预设：从聊天框（手机底部）出发，小人刷新在这，上下左右从这里动',
-                      PetMoveRef.center => '预设：从屏幕中间出发，上下左右从这里动',
-                      PetMoveRef.custom => '自定义：小人从你定的位置出发',
-                    },
-                    style: const TextStyle(
-                        fontSize: 10.5, color: Color(0xFFB0A0A6)),
-                  ),
-                  if (_moveRef == PetMoveRef.custom) ...[
-                    const SizedBox(height: 4),
-                    _AxisSlider(
-                      label: '起点 左右',
-                      value: _startX,
-                      onChanged: (v) => setState(() => _startX = v),
-                    ),
-                    _AxisSlider(
-                      label: '起点 上下',
-                      value: _startY,
-                      onChanged: (v) => setState(() => _startY = v),
-                    ),
-                  ],
-                  const SizedBox(height: 6),
-                  // 距离滑块
-                  Row(
-                    children: [
-                      const Text('距离',
-                          style: TextStyle(fontSize: 11)),
-                      Expanded(
-                        child: Slider(
-                          value: _moveDist,
-                          min: 0.1,
-                          max: 1.0,
-                          activeColor: const Color(0xFFB0789A),
-                          onChanged: (v) =>
-                              setState(() => _moveDist = v),
-                        ),
-                      ),
-                      Text('${(_moveDist * 100).round()}%',
-                          style: const TextStyle(
-                              fontSize: 11, color: Color(0xFF8A5A72))),
-                    ],
-                  ),
-                  // 时间（可留空自动）
-                  TextField(
-                    controller: _moveSecController,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
-                      labelText: '走多久（留空 = 自动按距离算）',
-                      suffixText: '秒',
-                      isDense: true,
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text('超出屏幕会自动截断，不会跑出去',
-                      style: TextStyle(
-                          fontSize: 10, color: Color(0xFFC0B0B6))),
-                ],
-                if (_howMove == _HowMove.target) ...[
-                  const SizedBox(height: 8),
-                  TrajectorySelector(
-                    value: _trajectory,
-                    onChanged: (t) => setState(() => _trajectory = t),
-                  ),
-                  const SizedBox(height: 8),
-                  TargetPicker(
-                    initial: PetPoint(_targetX, _targetY),
-                    onChanged: (pt) {
-                      _targetX = pt.x;
-                      _targetY = pt.y;
-                    },
+                  _AxisSlider(
+                    label: '起点 上下',
+                    value: _startY,
+                    onChanged: (v) => setState(() => _startY = v),
                   ),
                 ],
-
+                const SizedBox(height: 10),
+                // 移动目标：方向+距离 与 到某个位置 合并
+                MoveTargetEditor(
+                  anchor: PetMoveRef.basePoint(_moveRef, x: _startX, y: _startY),
+                  initialTarget: PetPoint(_targetX, _targetY),
+                  initialDir: _moveDir,
+                  initialDist: _moveDist,
+                  onChanged: (r) {
+                    _targetX = r.target.x;
+                    _targetY = r.target.y;
+                  },
+                ),
+                const SizedBox(height: 8),
+                TrajectorySelector(
+                  value: _trajectory,
+                  onChanged: (t) => setState(() => _trajectory = t),
+                ),
+              ],
             ],
           ),
         ),
@@ -987,8 +936,7 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
 /// 播的时候怎么动（导入时配置）
 enum _HowMove {
   none('原地不动', '就在原地播这组帧'),
-  dir('方向+距离', '选起点（预设/自定义）→ 8 向选方向 → 滑块选最大距离'),
-  target('到某个位置', '滑滑块选目标点，角度/时长自动算');
+  move('移动', '选起点 → 点地图指哪走哪，或点方向按钮 + 距离滑块从起点朝这个方向走');
 
   final String label;
   final String hint;
@@ -1085,11 +1033,15 @@ class _ComboEditDialogState extends State<_ComboEditDialog> {
     });
   }
 
-  /// 添加方向移动步骤：方向 + 距离/碰墙
+  /// 添加移动步骤：方向+距离 / 到某个位置 / 走到碰墙（合并版编辑器）
   Future<void> _addMoveStep() async {
+    // 锚点 = 组合初始位置（灰点参考）；没有初始位置就画在屏幕中间
+    final anchor = _startRef != null
+        ? PetMoveRef.basePoint(_startRef!, x: _startX, y: _startY)
+        : const PetPoint(0.5, 0.5);
     final step = await showDialog<PetActivityStep>(
       context: context,
-      builder: (_) => const _MoveStepDialog(),
+      builder: (_) => _MoveStepDialog(anchor: anchor),
     );
     if (step == null) return;
     setState(() => _steps.add(step));
@@ -1229,7 +1181,7 @@ class _ComboEditDialogState extends State<_ComboEditDialog> {
                       child: const Text(
                         '还没有步骤：'
                         '「加动作」= 播一段动作；'
-                        '「加移动」= 朝一个方向走（可走到碰墙）',
+                        '「加移动」= 方向+距离 / 指哪走哪 / 走到碰墙',
                         style: TextStyle(
                             fontSize: 11.5,
                             color: Color(0xFF9A8A90),
@@ -1412,129 +1364,57 @@ class _AxisSlider extends StatelessWidget {
 
 /// 方向移动步骤：8 向 + 距离滑块 / 走到碰墙
 class _MoveStepDialog extends StatefulWidget {
-  const _MoveStepDialog();
+  /// 锚点（灰点）：组合初始位置，仅作方向输入的视觉参考
+  final PetPoint anchor;
+
+  const _MoveStepDialog({required this.anchor});
 
   @override
   State<_MoveStepDialog> createState() => _MoveStepDialogState();
 }
 
 class _MoveStepDialogState extends State<_MoveStepDialog> {
-  // 步骤类型：方向移动 / 到某个位置
-  bool _toSpot = false;
-  PetMoveDir _dir = PetMoveDir.left;
-  double _dist = 0.3;
-  bool _untilWall = false;
-  double _spotX = 0.5;
-  double _spotY = 0.5;
+  MoveTargetResult? _result;
+
+  PetActivityStep _buildStep() {
+    final r = _result ??
+        const MoveTargetResult(
+          target: PetPoint(0.5, 0.5),
+          dir: PetMoveDir.left,
+          dist: 0.3,
+          untilWall: false,
+          usedDir: true,
+        );
+    if (r.untilWall) {
+      // 一直走到屏幕边
+      return PetActivityStep(
+          actionId: 'idle', moveDir: r.dir, moveUntilWall: true);
+    }
+    if (r.usedDir) {
+      // 相对移动：从当前位置朝方向走 dist
+      return PetActivityStep(
+          actionId: 'idle', moveDir: r.dir, moveDist: r.dist);
+    }
+    // 绝对目标：走到这个屏幕位置
+    return PetActivityStep(
+        actionId: 'idle', targetX: r.target.x, targetY: r.target.y);
+  }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('加移动步骤'),
       content: SizedBox(
-        width: 320,
+        width: 330,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(
-                    value: false,
-                    label: Text('方向移动',
-                        style: TextStyle(fontSize: 11))),
-                ButtonSegment(
-                    value: true,
-                    label: Text('到某个位置',
-                        style: TextStyle(fontSize: 11))),
-              ],
-              selected: {_toSpot},
-              showSelectedIcon: false,
-              onSelectionChanged: (s) =>
-                  setState(() => _toSpot = s.first),
+            MoveTargetEditor(
+              anchor: widget.anchor,
+              showUntilWall: true,
+              onChanged: (r) => _result = r,
             ),
-            const SizedBox(height: 10),
-            if (!_toSpot) ...[
-              const Text('方向：', style: TextStyle(fontSize: 12)),
-              const SizedBox(height: 4),
-              Wrap(
-                spacing: 4,
-                runSpacing: 4,
-                children: [
-                  for (final d in PetMoveDir.values)
-                    SizedBox(
-                      width: 52,
-                      height: 32,
-                      child: OutlinedButton(
-                        onPressed: () => setState(() => _dir = d),
-                        style: OutlinedButton.styleFrom(
-                          padding: EdgeInsets.zero,
-                          backgroundColor: _dir == d
-                              ? const Color(0x22B0789A)
-                              : null,
-                          side: BorderSide(
-                            color: _dir == d
-                                ? const Color(0xFFB0789A)
-                                : const Color(0xFFD8C0CA),
-                          ),
-                        ),
-                        child: Text(d.label,
-                            style: const TextStyle(
-                                fontSize: 10, color: Color(0xFF8A5A72))),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  const Text('走到碰墙',
-                      style: TextStyle(
-                          fontSize: 12, color: Color(0xFF6A4A5A))),
-                  const Spacer(),
-                  Switch(
-                    value: _untilWall,
-                    activeTrackColor: const Color(0xFFB0789A),
-                    onChanged: (v) => setState(() => _untilWall = v),
-                  ),
-                ],
-              ),
-              if (!_untilWall) ...[
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    const Text('距离：', style: TextStyle(fontSize: 12)),
-                    const Spacer(),
-                    Text('${(_dist * 100).round()}%',
-                        style: const TextStyle(
-                            fontSize: 12, color: Color(0xFFB0789A))),
-                  ],
-                ),
-                Slider(
-                  value: _dist,
-                  min: 0.1,
-                  max: 1.0,
-                  divisions: 18,
-                  activeColor: const Color(0xFFB0789A),
-                  inactiveColor: const Color(0xFFE8D8E0),
-                  onChanged: (v) => setState(() => _dist = v),
-                ),
-              ],
-            ] else ...[
-              const Text('小人走到这里（屏幕位置）：',
-                  style: TextStyle(fontSize: 12)),
-              const SizedBox(height: 4),
-              _AxisSlider(
-                label: '左右',
-                value: _spotX,
-                onChanged: (v) => setState(() => _spotX = v),
-              ),
-              _AxisSlider(
-                label: '上下',
-                value: _spotY,
-                onChanged: (v) => setState(() => _spotY = v),
-              ),
-            ],
           ],
         ),
       ),
@@ -1542,21 +1422,7 @@ class _MoveStepDialogState extends State<_MoveStepDialog> {
         TextButton(
             onPressed: () => Navigator.pop(context), child: const Text('取消')),
         FilledButton(
-          onPressed: () => Navigator.pop(
-            context,
-            _toSpot
-                ? PetActivityStep(
-                    actionId: 'idle',
-                    targetX: _spotX,
-                    targetY: _spotY,
-                  )
-                : PetActivityStep(
-                    actionId: 'idle',
-                    moveDir: _dir,
-                    moveDist: _untilWall ? null : _dist,
-                    moveUntilWall: _untilWall,
-                  ),
-          ),
+          onPressed: () => Navigator.pop(context, _buildStep()),
           style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFFB0789A)),
           child: const Text('加入'),

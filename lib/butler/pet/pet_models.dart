@@ -67,6 +67,14 @@ enum PetMoveRef {
         // 老数据 self/hero/未知 都回退聊天框基准
         _ => PetMoveRef.dock,
       };
+
+  /// 基准点：方向+距离 的起点（dock=聊天框 / center=屏幕中间 / custom=自定义坐标）
+  static PetPoint basePoint(PetMoveRef ref, {double? x, double? y}) =>
+      switch (ref) {
+        PetMoveRef.dock => const PetPoint(0.5, 0.85),
+        PetMoveRef.center => const PetPoint(0.5, 0.5),
+        PetMoveRef.custom => PetPoint(x ?? 0.5, y ?? 0.5),
+      };
 }
 
 enum PetMoveDir {

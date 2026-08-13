@@ -10,46 +10,180 @@ import '../../butler/pet/pet_store.dart';
 import '../../services/pet_frame_source_impl.dart';
 import '../../services/pet_settings_notifier.dart';
 
-/// 目标点选择器：模拟手机屏幕的小方块 + 横向/竖向双滑块 + 8 向快捷按钮
-///
-/// 用户"指哪走哪"：滑滑块选目标位置，亮点实时显示，
-/// 角度/距离/时长全部由引擎自动换算，用户零配置。
-class TargetPicker extends StatefulWidget {
-  final PetPoint? initial;
-  final ValueChanged<PetPoint> onChanged;
+/// 移动目标编辑结果
+class MoveTargetResult {
+  /// 目标点（碰墙模式下 = 沿方向到屏幕边的点，仅预览）
+  final PetPoint target;
 
-  const TargetPicker({this.initial, required this.onChanged});
+  /// 当前方向（点过方向按钮，或由目标点相对锚点推断）
+  final PetMoveDir dir;
 
-  @override
-  State<TargetPicker> createState() => _TargetPickerState();
+  /// 当前距离 0.1~1.0
+  final double dist;
+
+  /// 碰墙模式（组合步骤用）：一直走到屏幕边才停
+  final bool untilWall;
+
+  /// true = 最后一次操作是方向按钮/距离滑块（"从锚点朝方向走"语义）
+  final bool usedDir;
+
+  const MoveTargetResult({
+    required this.target,
+    required this.dir,
+    required this.dist,
+    required this.untilWall,
+    required this.usedDir,
+  });
 }
 
-class _TargetPickerState extends State<TargetPicker> {
-  late double _x;
-  late double _y;
+/// 移动目标编辑器（方向+距离 与 到某个位置 合并版）
+///
+/// 迷你手机屏幕：灰点 = 起点锚点（方向+距离的基准），粉点 = 目标。
+/// - 点地图任意位置 = 直接指定目标点（"到某个位置"）
+/// - 8 向按钮 + 距离滑块 = 从灰点朝该方向走多远（"方向+距离"）
+/// - 碰墙开关（组合步骤用）= 朝方向一直走到屏幕边
+class MoveTargetEditor extends StatefulWidget {
+  /// 起点锚点（灰点）
+  final PetPoint anchor;
 
-  /// 起点（预览用）：默认屏幕中央
-  static const _origin = PetPoint(0.5, 0.5);
+  /// 初始目标点
+  final PetPoint? initialTarget;
+
+  /// 初始方向（旧数据带 moveDir 时传入，方向按钮会高亮）
+  final PetMoveDir? initialDir;
+
+  /// 初始距离
+  final double? initialDist;
+
+  /// 初始碰墙模式
+  final bool initialUntilWall;
+
+  /// 是否显示"一直走到屏幕边"开关（组合移动步骤用）
+  final bool showUntilWall;
+
+  final ValueChanged<MoveTargetResult> onChanged;
+
+  const MoveTargetEditor({
+    super.key,
+    required this.anchor,
+    this.initialTarget,
+    this.initialDir,
+    this.initialDist,
+    this.initialUntilWall = false,
+    this.showUntilWall = false,
+    required this.onChanged,
+  });
+
+  @override
+  State<MoveTargetEditor> createState() => _MoveTargetEditorState();
+}
+
+class _MoveTargetEditorState extends State<MoveTargetEditor> {
+  static const double _mapW = 150;
+  static const double _mapH = 250;
+
+  late PetPoint _target;
+  late PetMoveDir _dir;
+  late double _dist;
+  late bool _untilWall;
+  late bool _usedDir;
 
   @override
   void initState() {
     super.initState();
-    _x = widget.initial?.x ?? 0.5;
-    _y = widget.initial?.y ?? 0.5;
+    _dir = widget.initialDir ?? PetMoveDir.left;
+    _dist = widget.initialDist ?? 0.3;
+    _untilWall = widget.initialUntilWall;
+    // 带方向进来的（旧数据）视为"方向+距离"语义，锚点变化时目标跟着重算
+    _usedDir = widget.initialDir != null;
+    _target = widget.initialTarget ??
+        (_untilWall ? _edgeTarget(_dir) : _targetFor(_dir, _dist));
   }
 
-  void _set(double x, double y) {
-    setState(() {
-      _x = x.clamp(0.02, 0.98);
-      _y = y.clamp(0.02, 0.98);
-    });
-    widget.onChanged(PetPoint(_x, _y));
+  @override
+  void didUpdateWidget(MoveTargetEditor old) {
+    super.didUpdateWidget(old);
+    if (old.anchor != widget.anchor) {
+      // 锚点变了：方向模式的目标跟着新锚点重算；点选模式保持绝对目标
+      if (_usedDir && !_untilWall) {
+        _target = _targetFor(_dir, _dist);
+        _emit();
+      }
+    }
   }
 
-  void _quick(PetMoveDir d) {
+  PetPoint _targetFor(PetMoveDir d, double dist) {
     final (vx, vy) = d.vector;
-    // 朝方向走到屏幕边（边中点）
-    _set(0.5 + vx * 0.45, 0.5 + vy * 0.45);
+    return PetPoint(
+      (widget.anchor.x + vx * dist).clamp(0.02, 0.98),
+      (widget.anchor.y + vy * dist).clamp(0.02, 0.98),
+    );
+  }
+
+  /// 沿方向走到屏幕边（预览用，超出部分 clamp 到边）
+  PetPoint _edgeTarget(PetMoveDir d) => _targetFor(d, 1.5);
+
+  /// 由目标点相对锚点的方位推断方向（点地图后让方向按钮保持同步）
+  PetMoveDir _inferDir(PetPoint t) {
+    final dx = t.x - widget.anchor.x;
+    final dy = t.y - widget.anchor.y;
+    final ax = dx.abs();
+    final ay = dy.abs();
+    if (ax < 0.03 && ay < 0.03) return _dir;
+    if (ax > ay * 1.5) return dx > 0 ? PetMoveDir.right : PetMoveDir.left;
+    if (ay > ax * 1.5) return dy > 0 ? PetMoveDir.down : PetMoveDir.up;
+    if (dx > 0) return dy > 0 ? PetMoveDir.downRight : PetMoveDir.upRight;
+    return dy > 0 ? PetMoveDir.downLeft : PetMoveDir.upLeft;
+  }
+
+  void _emit() {
+    widget.onChanged(MoveTargetResult(
+      target: _target,
+      dir: _dir,
+      dist: _dist,
+      untilWall: _untilWall,
+      usedDir: _usedDir,
+    ));
+  }
+
+  void _tap(Offset local) {
+    setState(() {
+      _untilWall = false;
+      _target = PetPoint(
+        (local.dx / _mapW).clamp(0.02, 0.98),
+        (local.dy / _mapH).clamp(0.02, 0.98),
+      );
+      _usedDir = false;
+      _dir = _inferDir(_target);
+    });
+    _emit();
+  }
+
+  void _pickDir(PetMoveDir d) {
+    setState(() {
+      _dir = d;
+      _usedDir = true;
+      _target = _untilWall ? _edgeTarget(d) : _targetFor(d, _dist);
+    });
+    _emit();
+  }
+
+  void _setDist(double v) {
+    setState(() {
+      _dist = v;
+      _usedDir = true;
+      _target = _targetFor(_dir, v);
+    });
+    _emit();
+  }
+
+  void _setUntilWall(bool v) {
+    setState(() {
+      _untilWall = v;
+      _usedDir = true;
+      _target = v ? _edgeTarget(_dir) : _targetFor(_dir, _dist);
+    });
+    _emit();
   }
 
   @override
@@ -58,118 +192,96 @@ class _TargetPickerState extends State<TargetPicker> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 迷你屏幕：起点灰点 → 目标亮点 + 路径线
+        // 迷你屏幕：起点灰点 → 目标粉点 + 路径线（点地图 = 指哪走哪）
         Center(
-          child: Container(
-            width: 150,
-            height: 250,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF5F0F2),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFD8C8CE)),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(11),
-              child: Stack(
-                children: [
-                  // 起点
-                  Positioned(
-                    left: _origin.x * 150 - 4,
-                    top: _origin.y * 250 - 4,
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFC0B0B6),
-                        shape: BoxShape.circle,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (d) => _tap(d.localPosition),
+            child: Container(
+              width: _mapW,
+              height: _mapH,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF5F0F2),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFD8C8CE)),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(11),
+                child: Stack(
+                  children: [
+                    // 起点锚点
+                    Positioned(
+                      left: widget.anchor.x * _mapW - 4,
+                      top: widget.anchor.y * _mapH - 4,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFC0B0B6),
+                          shape: BoxShape.circle,
+                        ),
                       ),
                     ),
-                  ),
-                  // 路径线（起点 → 目标）
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: _PathPainter(
-                          from: _origin, to: PetPoint(_x, _y)),
-                    ),
-                  ),
-                  // 目标亮点
-                  Positioned(
-                    left: _x * 150 - 7,
-                    top: _y * 250 - 7,
-                    child: Container(
-                      width: 14,
-                      height: 14,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFB0789A),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
-                        boxShadow: const [
-                          BoxShadow(
-                              color: Color(0x55B0789A), blurRadius: 6),
-                        ],
+                    // 路径线（起点 → 目标）
+                    Positioned.fill(
+                      child: CustomPaint(
+                        painter: _PathPainter(
+                            from: widget.anchor, to: _target),
                       ),
                     ),
-                  ),
-                  // 边提示
-                  const Positioned(
-                    left: 6,
-                    top: 4,
-                    child: Text('屏幕',
-                        style:
-                            TextStyle(fontSize: 9, color: Color(0xFFB0A0A6))),
-                  ),
-                ],
+                    // 目标亮点
+                    Positioned(
+                      left: _target.x * _mapW - 7,
+                      top: _target.y * _mapH - 7,
+                      child: Container(
+                        width: 14,
+                        height: 14,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFB0789A),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                          boxShadow: const [
+                            BoxShadow(
+                                color: Color(0x55B0789A), blurRadius: 6),
+                          ],
+                        ),
+                      ),
+                    ),
+                    // 边提示
+                    const Positioned(
+                      left: 6,
+                      top: 4,
+                      child: Text('屏幕',
+                          style:
+                              TextStyle(fontSize: 9, color: Color(0xFFB0A0A6))),
+                    ),
+                    if (_untilWall)
+                      const Positioned(
+                        right: 6,
+                        top: 4,
+                        child: Text('走到屏幕边',
+                            style: TextStyle(
+                                fontSize: 9, color: Color(0xFFB0789A))),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
-        const SizedBox(height: 8),
-        // 双滑块：横向 + 竖向（竖向滑块在上 = 目标在上）
-        Row(
-          children: [
-            const SizedBox(width: 4),
-            RotatedBox(
-              quarterTurns: 3,
-              child: SizedBox(
-                width: 120,
-                child: Slider(
-                  value: 1 - _y,
-                  min: 0,
-                  max: 1,
-                  activeColor: const Color(0xFFB0789A),
-                  onChanged: (v) => _set(_x, 1 - v),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Slider(
-                value: _x,
-                min: 0,
-                max: 1,
-                activeColor: const Color(0xFFB0789A),
-                onChanged: (v) => _set(v, _y),
-              ),
-            ),
-            const SizedBox(width: 4),
-          ],
-        ),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('横向',
-                style: TextStyle(fontSize: 9, color: Color(0xFFB0A0A6))),
-            Text(
-              '目标：横向 ${(_x * 100).round()}% · 竖向 ${(_y * 100).round()}%',
-              style: const TextStyle(fontSize: 10, color: Color(0xFF8A5A72)),
-            ),
-            const Text('竖向',
-                style: TextStyle(fontSize: 9, color: Color(0xFFB0A0A6))),
-          ],
+        const SizedBox(height: 6),
+        // 距离 / 碰墙状态
+        Center(
+          child: Text(
+            _untilWall
+                ? '朝「${_dir.label}」一直走到屏幕边'
+                : '距离：${(_dist * 100).round()}%（从灰点出发）',
+            style: const TextStyle(fontSize: 10.5, color: Color(0xFF8A5A72)),
+          ),
         ),
         const SizedBox(height: 8),
-        // 8 向快捷：点一下 = 朝那个方向走到屏幕边
-        const Text('快捷：朝这个方向走到屏幕边',
+        // 8 向快捷按钮（方向+距离 / 碰墙 共用）
+        const Text('方向快捷：',
             style: TextStyle(fontSize: 10, color: Color(0xFFB0A0A6))),
         const SizedBox(height: 4),
         Wrap(
@@ -181,10 +293,17 @@ class _TargetPickerState extends State<TargetPicker> {
                 width: 40,
                 height: 28,
                 child: OutlinedButton(
-                  onPressed: () => _quick(d),
+                  onPressed: () => _pickDir(d),
                   style: OutlinedButton.styleFrom(
                     padding: EdgeInsets.zero,
-                    side: const BorderSide(color: Color(0xFFD8C0CA)),
+                    side: BorderSide(
+                      color: _dir == d
+                          ? const Color(0xFFB0789A)
+                          : const Color(0xFFD8C0CA),
+                      width: _dir == d ? 1.6 : 1,
+                    ),
+                    backgroundColor:
+                        _dir == d ? const Color(0x22B0789A) : null,
                   ),
                   child: Text(d.label,
                       style: const TextStyle(
@@ -193,8 +312,49 @@ class _TargetPickerState extends State<TargetPicker> {
               ),
           ],
         ),
+        // 距离滑块（碰墙时隐藏）
+        if (!_untilWall) ...[
+          const SizedBox(height: 2),
+          Row(
+            children: [
+              const Text('距离',
+                  style: TextStyle(fontSize: 10, color: Color(0xFFB0A0A6))),
+              Expanded(
+                child: Slider(
+                  value: _dist,
+                  min: 0.1,
+                  max: 1.0,
+                  activeColor: const Color(0xFFB0789A),
+                  onChanged: _setDist,
+                ),
+              ),
+              SizedBox(
+                width: 34,
+                child: Text('${(_dist * 100).round()}%',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                        fontSize: 10, color: Color(0xFF8A5A72))),
+              ),
+            ],
+          ),
+        ],
+        // 碰墙开关（组合步骤）
+        if (widget.showUntilWall)
+          Row(
+            children: [
+              const Expanded(
+                child: Text('一直走到屏幕边（碰到边缘才停）',
+                    style: TextStyle(fontSize: 11, color: Color(0xFF6A4A5A))),
+              ),
+              Switch(
+                value: _untilWall,
+                activeTrackColor: const Color(0xFFB0789A),
+                onChanged: _setUntilWall,
+              ),
+            ],
+          ),
         const SizedBox(height: 4),
-        const Text('超出屏幕的位置会自动截断到屏幕边，不会跑出去',
+        const Text('点地图 = 直接指定位置；点方向按钮 = 从灰点朝这个方向走',
             style: TextStyle(fontSize: 9.5, color: Color(0xFFC0B0B6))),
       ],
     );

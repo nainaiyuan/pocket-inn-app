@@ -400,11 +400,7 @@ class Pet {
 /// 移动起点计算：dock=聊天框（底部上方）/ center=屏幕中间 /
 /// custom=用户自定义坐标（startX/startY，缺省 0.5,0.5）
 PetPoint _moveBasePoint(PetMoveRef ref, {double? x, double? y}) =>
-    switch (ref) {
-      PetMoveRef.dock => const PetPoint(0.5, 0.85),
-      PetMoveRef.center => const PetPoint(0.5, 0.5),
-      PetMoveRef.custom => PetPoint(x ?? 0.5, y ?? 0.5),
-    };
+    PetMoveRef.basePoint(ref, x: x, y: y);
 
 class PetActivityRun {
   final PetActivityDef def;

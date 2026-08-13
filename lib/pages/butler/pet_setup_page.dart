@@ -225,7 +225,7 @@ class _PetSetupPageState extends State<PetSetupPage> {
                       SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          '这里放你的小人：\n单角色：上传图片做动作、组合表演\n多角色：选两个小人绑一段双人互动',
+                          '这里放你的小人：\n单角色 = 一个小人一个框：点进去配它的动作和组合表演\n双人互动 = 两个小人一组：点进去选人、绑一段互动',
                           style: TextStyle(
                               fontSize: 12.5, color: Color(0xFF8A5A72)),
                         ),
@@ -250,7 +250,7 @@ class _PetSetupPageState extends State<PetSetupPage> {
                   ],
                 ),
                 const SizedBox(height: 4),
-                const Text('点小框进去：基础动作 + 组合动作',
+                const Text('一个小人一个框：点进去配 动作 + 组合',
                     style: TextStyle(fontSize: 11, color: Color(0xFFB0A0A6))),
                 const SizedBox(height: 10),
                 if (_profiles.isEmpty) ...[
@@ -272,35 +272,41 @@ class _PetSetupPageState extends State<PetSetupPage> {
                     ),
                   ),
                 ] else
-                  GridView.count(
-                    crossAxisCount: 2,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    mainAxisExtent: 140,
-                    children: [
-                      for (final pet in _profiles)
-                        _PetCard(
-                          pet: pet,
-                          onTap: () async {
-                            await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) =>
-                                      PetProfilePage(petId: pet.petId)),
-                            );
-                            _load();
-                          },
-                          onToggle: (v) => _toggle(pet, v),
-                        ),
-                      _NewBox(label: '新建小人', onTap: _createPet),
-                    ],
+                  // 固定 3:4 竖框：列数随屏幕宽度自适应，宽平板也不变形
+                  LayoutBuilder(
+                    builder: (ctx, cons) {
+                      final cols = (cons.maxWidth / 200).floor().clamp(2, 6);
+                      return GridView.count(
+                        crossAxisCount: cols,
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: 3 / 4,
+                        children: [
+                          for (final pet in _profiles)
+                            _PetCard(
+                              pet: pet,
+                              onTap: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                      builder: (_) =>
+                                          PetProfilePage(petId: pet.petId)),
+                                );
+                                _load();
+                              },
+                              onToggle: (v) => _toggle(pet, v),
+                            ),
+                          _NewBox(label: '新建小人', onTap: _createPet),
+                        ],
+                      );
+                    },
                   ),
                 // ═══ 多角色互动 ═══
                 Row(
                   children: [
-                    const Text('多角色互动',
+                    const Text('双人互动',
                         style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
@@ -315,7 +321,7 @@ class _PetSetupPageState extends State<PetSetupPage> {
                   ],
                 ),
                 const SizedBox(height: 4),
-                const Text('点小框配置：选两个小人 → 绑一段互动 → 收进框里',
+                const Text('两个小人一组：点进去选人、绑互动（如 A+B 贴贴）',
                     style: TextStyle(fontSize: 11, color: Color(0xFFB0A0A6))),
                 const SizedBox(height: 10),
                 if (_duoConfigs.isEmpty) ...[
@@ -338,25 +344,31 @@ class _PetSetupPageState extends State<PetSetupPage> {
                     ),
                   ),
                 ] else
-                  GridView.count(
-                    crossAxisCount: 2,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    mainAxisExtent: 125,
-                    children: [
-                      for (final c in _duoConfigs)
-                        _DuoCard(
-                          config: c,
-                          petA: _petById(c.petA),
-                          petB: _petById(c.petB),
-                          actionName: _actionName(c.actionId),
-                          onTap: () => _editDuo(c),
-                          onDelete: () => _deleteDuo(c),
-                        ),
-                      _NewBox(label: '新建互动', onTap: () => _editDuo(null)),
-                    ],
+                  // 双人互动框同样固定 3:4，和单角色框整齐
+                  LayoutBuilder(
+                    builder: (ctx, cons) {
+                      final cols = (cons.maxWidth / 200).floor().clamp(2, 6);
+                      return GridView.count(
+                        crossAxisCount: cols,
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: 3 / 4,
+                        children: [
+                          for (final c in _duoConfigs)
+                            _DuoCard(
+                              config: c,
+                              petA: _petById(c.petA),
+                              petB: _petById(c.petB),
+                              actionName: _actionName(c.actionId),
+                              onTap: () => _editDuo(c),
+                              onDelete: () => _deleteDuo(c),
+                            ),
+                          _NewBox(label: '新建互动', onTap: () => _editDuo(null)),
+                        ],
+                      );
+                    },
                   ),
                 const SizedBox(height: 20),
 
@@ -469,9 +481,9 @@ class _DuoCard extends StatelessWidget {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          _avatar(petA, 22),
+                          _avatar(petA, 26),
                           const SizedBox(width: 4),
-                          _avatar(petB, 22),
+                          _avatar(petB, 26),
                         ],
                       ),
                     ),
