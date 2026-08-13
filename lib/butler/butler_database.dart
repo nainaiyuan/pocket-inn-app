@@ -31,7 +31,7 @@ class ButlerDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 5,
+      version: 6,
       onCreate: (db, version) async {
         await _createTables(db);
         // 各 Store 的表（IF NOT EXISTS，幂等）
@@ -40,6 +40,13 @@ class ButlerDatabase {
         }
       },
       onUpgrade: (db, oldVersion, newVersion) async {
+        // ⚠️ 关键修复：各 Store 的建表+补列迁移必须每次升级都跑。
+        // 以前只在 onCreate 里跑，老库升级时 pet_actions 的新列（move_dir/
+        // move_dist/target_x…）从来没补上 → 用户添加动作保存直接崩。
+        // createTables 全部幂等（IF NOT EXISTS + try/catch ALTER），重复跑安全。
+        for (final store in StorageRegistry.instance.all) {
+          await store.createTables(db);
+        }
         if (oldVersion < 2) {
           await _createInteractionsTable(db);
           await _createBlocklistTable(db);

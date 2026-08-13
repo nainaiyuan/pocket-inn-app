@@ -280,7 +280,7 @@ class PetStore extends ButlerStore implements PetAffectionStore {
   // ========== 动作定义 ==========
 
   Future<void> saveAction(PetActionDef def) async {
-    await insert('pet_actions', {
+    final row = {
       'action_id': def.id,
       'name': def.name,
       'kind': def.kind.name,
@@ -303,7 +303,15 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       'speed_tier': def.speedTier.name,
       'move_group_id': def.moveGroupId,
       'duration_seconds': def.durationSeconds,
-    });
+    };
+    try {
+      await insert('pet_actions', row);
+    } on DatabaseException {
+      // 自愈兜底：老库可能缺新列（升级路径没补上），补一次表结构再重试
+      // （createTables 幂等：IF NOT EXISTS + try/catch ALTER）
+      await createTables(db);
+      await insert('pet_actions', row);
+    }
   }
 
   Future<List<PetActionDef>> allActions() async {
