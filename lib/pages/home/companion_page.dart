@@ -11,6 +11,7 @@ import '../../butler/pet/pet_engine.dart';
 import '../../butler/pet/pet_models.dart';
 import '../../butler/pet/pet_scene.dart';
 import '../../butler/pet/pet_store.dart';
+import '../butler/pet_setup_page.dart';
 import '../../services/pet_frame_source_impl.dart';
 import '../../services/pet_settings_notifier.dart';
 import '../../utils/debug_logger.dart';
@@ -305,15 +306,130 @@ class _CompanionPageState extends State<CompanionPage>
   }
 
   void _onPetLongPress(PetWorld world, Pet pet) {
-    world.events.emit(PetInteractionEvent(
-      type: PetInteractionType.pet,
-      petId: pet.id,
-      intensity: 0.85,
-      x: pet.position.x,
-      y: pet.position.y,
-    ));
-    _showSpeech(pet.id, '嗯…好舒服');
-    world.playAction(pet.id, 'happy');
+    // 长按角色本体 → 选项菜单（摸摸头 / 调大小 / 去配置）
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Text(
+              pet.name,
+              style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF6A4A5A)),
+            ),
+            Text(
+              '当前大小 ${(pet.scale * 100).round()}%',
+              style:
+                  const TextStyle(fontSize: 11, color: Color(0xFFB0A0A6)),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.volunteer_activism,
+                  color: Color(0xFFB0789A)),
+              title: const Text('摸摸头', style: TextStyle(fontSize: 13.5)),
+              onTap: () {
+                Navigator.pop(ctx);
+                world.events.emit(PetInteractionEvent(
+                  type: PetInteractionType.pet,
+                  petId: pet.id,
+                  intensity: 0.85,
+                  x: pet.position.x,
+                  y: pet.position.y,
+                ));
+                _showSpeech(pet.id, '嗯…好舒服');
+                world.playAction(pet.id, 'happy');
+              },
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.straighten, color: Color(0xFFB0789A)),
+              title: const Text('调大小', style: TextStyle(fontSize: 13.5)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showPetScaleDialog(world, pet);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.pets, color: Color(0xFFB0789A)),
+              title: const Text('去配置桌宠', style: TextStyle(fontSize: 13.5)),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const PetSetupPage()),
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 调大小：滑块实时生效 + 持久化（每个角色分开）
+  void _showPetScaleDialog(PetWorld world, Pet pet) {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) {
+          return AlertDialog(
+            title: Text('「${pet.name}」的大小',
+                style: const TextStyle(fontSize: 15)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Slider(
+                  value: pet.scale.clamp(0.4, 2.0),
+                  min: 0.4,
+                  max: 2.0,
+                  divisions: 32,
+                  activeColor: const Color(0xFFB0789A),
+                  label: '${(pet.scale * 100).round()}%',
+                  onChanged: (v) async {
+                    pet.scale = v;
+                    setDlg(() {});
+                    setState(() {});
+                    // 持久化到该角色的 profile（每个角色分开）
+                    final profiles = await world.store.allProfiles();
+                    final profile = profiles
+                        .where((p) => p.petId == pet.id)
+                        .firstOrNull;
+                    if (profile != null) {
+                      profile.scale = v;
+                      await world.store.saveProfile(profile);
+                    }
+                    PetSettingsNotifier.instance.notifyChanged();
+                  },
+                ),
+                Text(
+                  '${(pet.scale * 100).round()}%',
+                  style: const TextStyle(
+                      fontSize: 13, color: Color(0xFF6A4A5A)),
+                ),
+                const SizedBox(height: 4),
+                const Text('50% 变小 · 100% 原样 · 200% 变大（每个角色单独设置）',
+                    style: TextStyle(
+                        fontSize: 10.5, color: Color(0xFFB0A0A6))),
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('完成')),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   void _onPetDrag(PetWorld world, Pet pet, DragUpdateDetails d, double w, double h) {
