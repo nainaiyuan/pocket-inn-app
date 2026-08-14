@@ -429,6 +429,15 @@ class PetActionDef {
         targetSpot: targetSpot,
         targetX: targetX,
         targetY: targetY,
+        // 8-14 20:5x（用户日志：restore 有方向 downLeft/1.00，播放
+        // 方向=无 走距=0.00——真根因）：copyWith 漏传 moveDir/moveDist/
+        // moveSec/trajectory → preloadFrames 注册的动作移动字段全丢 →
+        // 播放走 else 分支（目标=当前位置）→ 原地。19:22 教训重演：
+        // 检查创建/变换路径必须全字段透传，不能只补当下关注的字段。
+        moveDir: moveDir,
+        moveDist: moveDist,
+        moveSec: moveSec,
+        trajectory: trajectory,
         moveRef: moveRef,
         startX: startX,
         startY: startY,
