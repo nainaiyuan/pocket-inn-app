@@ -12,6 +12,8 @@ import '../../butler/pet/pet_models.dart';
 import '../../butler/pet/pet_scene.dart';
 import '../../butler/pet/pet_store.dart';
 import '../butler/pet_setup_page.dart';
+import '../chat/scene_page.dart';
+import '../../butler/pet/scene_models.dart' as sm;
 import '../../services/pet_frame_source_impl.dart';
 import '../../services/pet_settings_notifier.dart';
 import '../../utils/debug_logger.dart';
@@ -218,6 +220,24 @@ class _CompanionPageState extends State<CompanionPage>
           if (_feedingItemId != null) _buildFeedingHint(),
           // 全局提示
           if (_toast != null) _buildToast(),
+          // 全屏场景入口（8-15 03:0x 文游/小屋模式 P0）
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: IconButton.filled(
+                  style: IconButton.styleFrom(
+                    backgroundColor: const Color(0xCCB0789A),
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: const Icon(Icons.fullscreen),
+                  tooltip: '全屏场景',
+                  onPressed: () => _openSceneMode(),
+                ),
+              ),
+            ),
+          ),
           // 控制面板
           Positioned(
             left: 0,
@@ -292,6 +312,103 @@ class _CompanionPageState extends State<CompanionPage>
         );
       }),
     );
+  }
+
+
+
+  // ========== 全屏场景模式（8-15 03:0x P0） ==========
+
+  Future<void> _openSceneMode() async {
+    final store = PetStore();
+    final scenes = await store.allScenes();
+    if (scenes.isEmpty) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('还没有场景'),
+          content: const Text('要创建一个"测试小屋"演示场景，先跑通\n场景 → 热点 → 卡片 → 选项 → 下一节点 闭环吗？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFB0789A),
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('创建演示场景'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+      final sceneId = await _createDemoScene(store);
+      if (sceneId == null) return;
+      if (!mounted) return;
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ScenePage(sceneId: sceneId),
+      ));
+      return;
+    }
+    if (!mounted) return;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ScenePage(sceneId: scenes.first.sceneId),
+    ));
+  }
+
+  /// 演示场景：1 热点（点）→ 节点链 A(happy)→B(choice)→C/D→E(end)
+  Future<String?> _createDemoScene(PetStore store) async {
+    try {
+      const sceneId = 'demo_home';
+      await store.saveScene(const sm.PetScene(
+        sceneId: sceneId, name: '测试小屋'));
+      await store.saveNode(const sm.PetNode(
+        nodeId: 'A', sceneId: sceneId, seq: 0,
+        type: sm.PetNodeType.fixed, continueType: sm.PetContinueType.auto,
+        waitUser: false,
+        content: '{"text":"星星：你回来啦~","action":"happy"}',
+        targetNode: 'B'));
+      await store.saveNode(const sm.PetNode(
+        nodeId: 'B', sceneId: sceneId, seq: 1,
+        type: sm.PetNodeType.fixed, continueType: sm.PetContinueType.choice,
+        waitUser: true,
+        content: '{"text":"星星：想做什么？"}'));
+      await store.saveNode(const sm.PetNode(
+        nodeId: 'C', sceneId: sceneId, seq: 2,
+        type: sm.PetNodeType.fixed, continueType: sm.PetContinueType.auto,
+        waitUser: false,
+        content: '{"text":"星星：好梦~","action":"spin"}',
+        targetNode: 'E'));
+      await store.saveNode(const sm.PetNode(
+        nodeId: 'D', sceneId: sceneId, seq: 3,
+        type: sm.PetNodeType.fixed, continueType: sm.PetContinueType.auto,
+        waitUser: false,
+        content: '{"text":"星星：开饭啦~","action":"jump"}',
+        targetNode: 'E'));
+      await store.saveNode(const sm.PetNode(
+        nodeId: 'E', sceneId: sceneId, seq: 4,
+        type: sm.PetNodeType.end));
+      await store.saveChoice(const sm.PetChoice(
+        choiceId: 'b1', nodeId: 'B', seq: 0,
+        label: '睡觉', targetNode: 'C'));
+      await store.saveChoice(const sm.PetChoice(
+        choiceId: 'b2', nodeId: 'B', seq: 1,
+        label: '吃饭', targetNode: 'D'));
+      await store.saveChoice(const sm.PetChoice(
+        choiceId: 'b3', nodeId: 'B', seq: 2,
+        label: '离开', targetNode: 'E'));
+      await store.saveHotspot(const sm.PetHotspot(
+        hotspotId: 'h1', sceneId: sceneId,
+        type: sm.PetHotspotType.point, trigger: sm.PetHotspotTrigger.click,
+        x: 0.5, y: 0.35, w: 0.12, h: 0.12,
+        bindingType: 'node', bindingId: 'A'));
+      DebugLogger.log('桌宠', '演示场景创建完成：$sceneId');
+      return sceneId;
+    } catch (e) {
+      DebugLogger.log('桌宠', '创建演示场景失败: $e');
+      return null;
+    }
   }
 
   void _onPetTap(PetWorld world, Pet pet) {

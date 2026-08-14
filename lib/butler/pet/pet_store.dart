@@ -16,9 +16,11 @@ import 'package:sqflite/sqflite.dart';
 import '../storage/butler_store.dart';
 import 'pet_feed.dart';
 import 'pet_models.dart';
+import 'scene_director.dart';
 import 'scene_models.dart';
 
-class PetStore extends ButlerStore implements PetAffectionStore {
+class PetStore extends ButlerStore
+    implements PetAffectionStore, SceneStore {
   /// 头像目录（应用文档目录 pet/avatars/）
   static Future<String> avatarsDir() async {
     final support = await getApplicationSupportDirectory();
