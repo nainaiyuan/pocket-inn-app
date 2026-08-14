@@ -273,6 +273,13 @@ class Pet {
 
   String? _lastPlayedActionId;
 
+  /// 8-14 17:0x（用户：设了单个动作小人就是不动——真根因）：
+  /// 自主播放的剩余秒数。>0 时每秒递减，归零 stop() 回待机。
+  /// 因为用户动作是 loop 无限循环，PetAnimPlayer.finished 永远
+  /// false，_player 永不为 null，旧触发条件（_player == null）
+  /// 导致 _tickAutoAct 是死代码——小人永远只播待机帧。
+  double autoActionLeft = 0;
+
   /// 播放待机（回落到待机帧）
   void playIdle(List<String> idleFrames, {double fps = 8}) {
     _player = PetAnimPlayer(frames: idleFrames, fps: fps, loop: PetAnimLoop.loop);
@@ -790,13 +797,25 @@ class PetScene {
     // ① 空闲时随机自发做动作（养宠物自主性 MVP：随机触发"什么时候动"）
     // ② idle 帧优先用用户上传的图，不再显示内置粉色小人）
     for (final pet in _pets) {
-      if (pet._player == null &&
-          pet._pair == null &&
+      // 8-14 17:0x（自主行动死代码修复）：idle 状态（待机帧在播）也
+      // 触发——loop 无限循环导致 _player 永不为 null，旧条件永远不满足
+      if (pet._pair == null &&
           pet._activity == null &&
-          !pet.moving) {
+          !pet.moving &&
+          pet.state == PetState.idle) {
         _tickAutoAct(pet, dt);
         if (pet._player == null) {
           pet.playIdle(_resolveIdleFrames(pet), fps: 4);
+        }
+      }
+      // 自主动作播够秒数 → 停帧回待机（loop 无限循环不会自己结束）
+      if (pet.autoActionLeft > 0) {
+        pet.autoActionLeft -= dt;
+        if (pet.autoActionLeft <= 0) {
+          pet.autoActionLeft = 0;
+          if (pet._pair == null && pet._activity == null) {
+            pet.stop();
+          }
         }
       }
     }
@@ -952,6 +971,7 @@ class PetScene {
         PetMoveTrajectory.fly => 0.45,
       };
       pet.playAction(def, _resolveFramesSync(actionId));
+      pet.autoActionLeft = def.durationSeconds ?? 2;
       pet.moveTo(
         clamped,
         duration: def.moveSec ?? dist / speed,
@@ -990,6 +1010,7 @@ class PetScene {
         PetMoveTrajectory.fly => 0.45,
       };
       pet.playAction(def, _resolveFramesSync(actionId));
+      pet.autoActionLeft = def.durationSeconds ?? 2;
       pet.moveTo(
         clamped,
         duration: actualDist / speed,
@@ -1019,6 +1040,7 @@ class PetScene {
         PetMoveTrajectory.fly => 0.45,
       };
       pet.playAction(def, _resolveFramesSync(actionId));
+      pet.autoActionLeft = def.durationSeconds ?? 2;
       pet.moveTo(
         clamped,
         duration: def.moveSec ?? actualDist / speed,
@@ -1032,6 +1054,7 @@ class PetScene {
       return;
     }
     pet.playAction(def, _resolveFramesSync(actionId));
+    pet.autoActionLeft = def.durationSeconds ?? 2;
   }
 
   /// 同步取帧（无图时用占位帧兜底）
