@@ -186,6 +186,10 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       await db.execute(
           'ALTER TABLE pet_actions ADD COLUMN slot_id TEXT');
     } catch (_) {}
+    try {
+      await db.execute(
+          'ALTER TABLE pet_actions ADD COLUMN profile_id TEXT');
+    } catch (_) {}
   }
 
   // ========== 宠物档案 ==========
@@ -345,6 +349,7 @@ class PetStore extends ButlerStore implements PetAffectionStore {
         fps: (r['fps'] as num?)?.toDouble() ?? 10,
         loop: PetAnimLoop.values.byName(r['loop'] as String? ?? 'loop'),
         frameDir: r['frame_dir'] as String?,
+        profileId: r['profile_id'] as String?,
         frameCount: r['frame_count'] as int? ?? 0,
         moveAnimId: r['move_anim_id'] as String? ?? 'walk',
         targetSpot: r['target_spot'] != null
@@ -515,6 +520,7 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       'move_group_id': def.moveGroupId,
       'duration_seconds': def.durationSeconds,
       'slot_id': def.slotId,
+      'profile_id': def.profileId,
     };
     try {
       await insert('pet_actions', row);

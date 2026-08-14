@@ -338,6 +338,10 @@ class PetActionDef {
   /// 所属互动组坑位 id（null = 单人自己的动作；非 null = 互动组里某个坑的动作库）
   final String? slotId;
 
+  /// 所属角色 id（8-14 15:4x：区分"我的小人"和"初始小人"的图——
+  /// 单人动作按角色归属，互动组坑动作 null = 共享）
+  final String? profileId;
+
   /// 该动作当前实际帧数（由引擎扫描自动得到，0 = 用户还没放图）
   final int frameCount;
 
@@ -387,6 +391,7 @@ class PetActionDef {
     this.loop = PetAnimLoop.loop,
     this.frameDir,
     this.slotId,
+    this.profileId,
     this.frameCount = 0,
     this.moveAnimId = 'walk',
     this.targetSpot,

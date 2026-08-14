@@ -970,6 +970,10 @@ class _PetGroupPageState extends State<PetGroupPage> {
       frameCount: result.files.length,
       durationSeconds: seconds,
       slotId: slot.slotId,
+      // 8-14 15:5x：播放时移动（方向+距离+移动时长）
+      moveDir: result.moveEnabled ? result.moveDir : null,
+      moveDist: result.moveEnabled ? result.moveDist : null,
+      moveSec: result.moveEnabled ? result.moveSec : null,
     );
     try {
       await _store.saveSlotAction(def);
@@ -1239,6 +1243,11 @@ class _SlotActionDraft {
   final List<String> files;
   final List<Uint8List> bytes;
   final bool repicked;
+  // 8-14 15:5x：播放时怎么动（方向+距离，边播帧边移动）
+  final bool moveEnabled;
+  final PetMoveDir moveDir;
+  final double moveDist;
+  final double moveSec;
 
   _SlotActionDraft({
     required this.nameCtrl,
@@ -1246,6 +1255,10 @@ class _SlotActionDraft {
     required this.files,
     required this.bytes,
     required this.repicked,
+    required this.moveEnabled,
+    required this.moveDir,
+    required this.moveDist,
+    required this.moveSec,
   });
 }
 
@@ -1267,6 +1280,12 @@ class _SlotActionDialogState extends State<_SlotActionDialog> {
   List<Uint8List> _bytes = [];
   bool _repicked = false;
   bool _picking = false;
+  // 8-14 15:5x：播放时怎么动（用户：帧率是3秒，但保持3秒的帧率
+  // 运动到目标目的地是几秒？→ 加方向/距离/移动时长配置）
+  bool _moveEnabled = false;
+  PetMoveDir _moveDir = PetMoveDir.left;
+  double _moveDist = 0.3;
+  double _moveSec = 3.0;
 
   @override
   void initState() {
@@ -1274,7 +1293,25 @@ class _SlotActionDialogState extends State<_SlotActionDialog> {
     _nameCtrl = TextEditingController(text: widget.existing?.name ?? '');
     _secondsCtrl = TextEditingController(
         text: (widget.existing?.durationSeconds ?? 1.0).toString());
+    final e = widget.existing;
+    if (e != null && e.moveDir != null && e.moveDist != null) {
+      _moveEnabled = true;
+      _moveDir = e.moveDir!;
+      _moveDist = e.moveDist!;
+      _moveSec = e.moveSec ?? 3.0;
+    }
   }
+
+  String _dirLabel(PetMoveDir d) => switch (d) {
+        PetMoveDir.up => '上',
+        PetMoveDir.down => '下',
+        PetMoveDir.left => '左',
+        PetMoveDir.right => '右',
+        PetMoveDir.upLeft => '左上',
+        PetMoveDir.upRight => '右上',
+        PetMoveDir.downLeft => '左下',
+        PetMoveDir.downRight => '右下',
+      };
 
   Future<void> _pick() async {
     setState(() => _picking = true);
@@ -1351,6 +1388,69 @@ class _SlotActionDialogState extends State<_SlotActionDialog> {
               style: const TextStyle(fontSize: 13),
               keyboardType: TextInputType.number,
             ),
+            const SizedBox(height: 6),
+            // 8-14 15:5x（用户：没给用户选移动时长——帧率3秒，
+            // 但保持3秒帧率运动到目的地是几秒？）：
+            // 播放时怎么动：开关 + 方向 + 距离 + 移动时长
+            Row(
+              children: [
+                const Text('播放时移动',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF7B6A8F))),
+                Switch(
+                  value: _moveEnabled,
+                  onChanged: (v) => setState(() => _moveEnabled = v),
+                ),
+              ],
+            ),
+            if (_moveEnabled) ...[
+              // 8 向方向按钮
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final d in PetMoveDir.values)
+                    ChoiceChip(
+                      label: Text(_dirLabel(d),
+                          style: const TextStyle(fontSize: 11)),
+                      selected: _moveDir == d,
+                      onSelected: (_) => setState(() => _moveDir = d),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  const Text('距离',
+                      style: TextStyle(fontSize: 11, color: Color(0xFFB0A0A6))),
+                  Expanded(
+                    child: Slider(
+                      value: _moveDist,
+                      min: 0.1,
+                      max: 0.9,
+                      onChanged: (v) => setState(() => _moveDist = v),
+                    ),
+                  ),
+                  Text('${(_moveDist * 100).round()}%',
+                      style: const TextStyle(fontSize: 11)),
+                ],
+              ),
+              Row(
+                children: [
+                  const Text('移动时长',
+                      style: TextStyle(fontSize: 11, color: Color(0xFFB0A0A6))),
+                  Expanded(
+                    child: Slider(
+                      value: _moveSec,
+                      min: 0.5,
+                      max: 10,
+                      onChanged: (v) => setState(() => _moveSec = v),
+                    ),
+                  ),
+                  Text('${_moveSec.toStringAsFixed(1)}s',
+                      style: const TextStyle(fontSize: 11)),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -1386,6 +1486,10 @@ class _SlotActionDialogState extends State<_SlotActionDialog> {
                   bytes: _bytes,
                   files: files,
                   repicked: _repicked,
+                  moveEnabled: _moveEnabled,
+                  moveDir: _moveDir,
+                  moveDist: _moveDist,
+                  moveSec: _moveSec,
                 ));
           },
           style: FilledButton.styleFrom(

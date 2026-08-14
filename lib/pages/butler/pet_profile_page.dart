@@ -114,7 +114,10 @@ class _PetProfilePageState extends State<PetProfilePage> {
   Future<void> _editAction(PetActionDef? existing) async {
     final created = await showDialog<bool>(
       context: context,
-      builder: (_) => _ActionEditDialog(existing: existing),
+      builder: (_) => _ActionEditDialog(
+        existing: existing,
+        profileId: widget.petId,
+      ),
     );
     if (created == true) _load();
   }
@@ -585,7 +588,10 @@ class _ComboCard extends StatelessWidget {
 class _ActionEditDialog extends StatefulWidget {
   final PetActionDef? existing;
 
-  const _ActionEditDialog({this.existing});
+  /// 8-14 15:4x：动作归属角色（区分"我的小人"和"初始小人"的图）
+  final String? profileId;
+
+  const _ActionEditDialog({this.existing, this.profileId});
 
   @override
   State<_ActionEditDialog> createState() => _ActionEditDialogState();
@@ -754,6 +760,7 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
       fps: fps,
       loop: loop,
       frameDir: actionId,
+      profileId: widget.profileId,
       frameCount: frameCount,
       durationSeconds: seconds,
       // 移动统一存"目标点"（方向+距离 在编辑器里已换算成目标点）

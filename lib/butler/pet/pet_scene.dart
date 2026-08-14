@@ -796,7 +796,7 @@ class PetScene {
           !pet.moving) {
         _tickAutoAct(pet, dt);
         if (pet._player == null) {
-          pet.playIdle(_resolveIdleFrames(), fps: 4);
+          pet.playIdle(_resolveIdleFrames(pet), fps: 4);
         }
       }
     }
@@ -1053,11 +1053,13 @@ class PetScene {
       return;
     }
     _autoActIn[pet.id] = 8 + _autoRand.nextDouble() * 12;
+    // 8-14 15:4x：只挑自己角色的动作（旧数据 profileId=null 共享兼容）
     final pool = _actionDefs.values
         .where((d) =>
             d.kind == PetActionKind.inPlace &&
             d.frameDir != null &&
-            d.slotId == null)
+            d.slotId == null &&
+            (d.profileId == null || d.profileId == pet.id))
         .toList();
     if (pool.isEmpty) return;
     final def = pool[_autoRand.nextInt(pool.length)];
@@ -1066,16 +1068,18 @@ class PetScene {
 
   /// idle 帧解析：用户上传的动作帧优先（8-14 15:0x 用户反馈——
   /// 聊天页显示内置粉色小人而不是自己的图），没有才用内置占位。
-  List<String> _resolveIdleFrames() {
-    List<String>? userFrames;
+  /// 8-14 15:4x：按角色区分——先找该 pet 自己的动作（profileId 匹配），
+  /// 再兼容旧数据（profileId=null 的共享动作），最后内置占位。
+  List<String> _resolveIdleFrames(Pet pet) {
+    List<String>? shared;
     for (final e in _frameCache.entries) {
       if (e.value.isEmpty) continue;
       final def = _actionDefs[e.key];
-      if (def == null || def.frameDir == null) continue;
-      userFrames = e.value;
-      if (def.slotId == null) break; // 单人共享动作最优先
+      if (def == null || def.frameDir == null || def.slotId != null) continue;
+      if (def.profileId == pet.id) return e.value; // 自己的图最优先
+      if (def.profileId == null && shared == null) shared = e.value;
     }
-    if (userFrames != null) return userFrames;
+    if (shared != null) return shared; // 旧数据共享动作兜底
     final def = _actionDefs['idle'];
     if (def != null) return PetPlaceholderFrames.forAction(def);
     return List.generate(4, (i) => 'placeholder:idle:$i:4');
