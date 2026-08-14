@@ -65,6 +65,7 @@ class PetStore extends ButlerStore implements PetAffectionStore {
         target_x REAL,
         target_y REAL,
         trajectory TEXT DEFAULT 'walk',
+        move_mode TEXT DEFAULT 'distance',
         move_duration REAL DEFAULT 3,
         speed_tier TEXT DEFAULT 'normal',
         move_group_id TEXT,
@@ -153,6 +154,10 @@ class PetStore extends ButlerStore implements PetAffectionStore {
     try {
       await db.execute(
           'ALTER TABLE pet_actions ADD COLUMN move_sec REAL');
+    } catch (_) {}
+    try {
+      await db.execute(
+          'ALTER TABLE pet_actions ADD COLUMN move_mode TEXT DEFAULT \'distance\'');
     } catch (_) {}
     try {
       await db.execute(
@@ -326,6 +331,7 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       'move_duration': def.moveDurationSec,
       'move_dir': def.moveDir?.name,
       'move_dist': def.moveDist,
+      'move_mode': def.moveMode.name,
       'move_sec': def.moveSec,
       'move_ref': def.moveRef.name,
       'start_x': def.startX,
@@ -380,6 +386,14 @@ class PetStore extends ButlerStore implements PetAffectionStore {
         moveDurationSec: (r['move_duration'] as num?)?.toDouble() ?? 3,
         moveDir: PetMoveDir.fromName(r['move_dir'] as String?),
         moveDist: (r['move_dist'] as num?)?.toDouble(),
+        // 8-14 22:2x（GPT 方案）：moveMode=distance/toEdge 分开语义。
+        // 旧数据迁移：move_dist>=0.98（用户当时配"走到底"=满屏）→ toEdge
+        moveMode: PetMoveMode.fromName(r['move_mode'] as String?) ==
+                    PetMoveMode.toEdge
+                ? PetMoveMode.toEdge
+                : ((r['move_dist'] as num?)?.toDouble() ?? 0) >= 0.98
+                    ? PetMoveMode.toEdge
+                    : PetMoveMode.distance,
         moveSec: (r['move_sec'] as num?)?.toDouble(),
         moveRef: PetMoveRef.fromName(r['move_ref'] as String?),
         startX: (r['start_x'] as num?)?.toDouble(),

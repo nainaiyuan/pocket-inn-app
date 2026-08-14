@@ -136,9 +136,11 @@ class PetWorld {
     for (var i = 0; i < wanted.length; i++) {
       final p = wanted[i];
       if (scene.petById(p.petId) == null) {
-        // 8-14 17:4x（用户：默认小人为什么要绑定我新角色的初始位置）：
-        // 初始位置 = 自己配的起点；没配 → dock 输入框上方
-        var pos = scene.preferredStart(p.petId) ??
+        // 8-14 22:2x（GPT 方案：桌宠是连续存在的实体）：
+        // 位置恢复顺序 = 运行时缓存（页面重建不瞬移）→ 自己配的起点
+        // （preferredStart，首次出现用）→ dock 输入框上方
+        var pos = Pet.lastPositions[p.petId] ??
+            scene.preferredStart(p.petId) ??
             PetPoint(0.5 + (i - (wanted.length - 1) / 2) * 0.16, 0.85);
         // 8-14 17:5x（联动：配了起点也可能叠一起）——离已有小人太近
         // 就横向挪开，保证每个小人都有自己的位置

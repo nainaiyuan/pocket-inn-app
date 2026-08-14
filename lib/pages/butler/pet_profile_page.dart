@@ -608,6 +608,9 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
 
   // 播的时候怎么动
   _HowMove _howMove = _HowMove.none;
+  // 8-14 22:2x（GPT 方案）：走到底 = 沿方向撞墙才停（toEdge），
+  // 与"走固定距离"（distance）分开语义
+  bool _untilWall = false;
   PetMoveDir _moveDir = PetMoveDir.left;
   double _moveDist = 0.3;
   double _targetX = 0.5;
@@ -659,6 +662,8 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
         _targetX = (base.x + vx * _moveDist).clamp(0.02, 0.98);
         _targetY = (base.y + vy * _moveDist).clamp(0.02, 0.98);
       }
+      // 8-14 22:2x（GPT 方案）：编辑时回填"走到底"开关
+      _untilWall = e.moveMode == PetMoveMode.toEdge;
       // 编辑：把已有帧图回填，不重新选图也能保存（保留原帧）
       _loadExistingFrames(e.id);
     }
@@ -810,6 +815,11 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
       // 向左走 0.3。保证"配了移动"的动作一定有方向，一定能走。
       moveDir: _howMove == _HowMove.move ? _ensureMoveDir() : null,
       moveDist: _howMove == _HowMove.move ? _moveDist ?? 0.3 : null,
+      // 8-14 22:2x（GPT 方案）：走到底 = toEdge（沿方向撞墙），
+      // 普通 = distance（方向+距离）
+      moveMode: _howMove == _HowMove.move && _untilWall
+          ? PetMoveMode.toEdge
+          : PetMoveMode.distance,
       // 起点（dock=输入框 / center=中间 / custom=自定义坐标）：只用于
       // 刷新/首次出现时小人的初始位置（preferredStart），不在播放时瞬移
       moveRef: _moveRef,
@@ -976,6 +986,8 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
                   initialTarget: PetPoint(_targetX, _targetY),
                   initialDir: _moveDir,
                   initialDist: _moveDist,
+                  showUntilWall: true,
+                  initialUntilWall: _untilWall,
                   onChanged: (r) {
                     // 8-14 17:1x（用户：设置的距离是相对的，换设备还能用）：
                     // 存方向+距离（相对当前位置），不存绝对目标点
@@ -983,6 +995,8 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
                     _moveDist = r.dist;
                     _targetX = r.target.x;
                     _targetY = r.target.y;
+                    // 8-14 22:2x（GPT 方案）：走到底开关
+                    _untilWall = r.untilWall;
                   },
                 ),
                 const SizedBox(height: 8),

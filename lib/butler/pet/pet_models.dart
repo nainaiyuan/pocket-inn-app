@@ -78,6 +78,20 @@ enum PetMoveRef {
       };
 }
 
+/// 移动模式（8-14 22:2x GPT 方案：两种语义分开，不再用 moveDist=1.0 兼职）
+enum PetMoveMode {
+  /// 走固定距离：target = 当前位置 + 方向 * moveDist
+  distance,
+
+  /// 走到底：target = 沿方向与屏幕边界的第一个交点（撞墙才停）
+  toEdge;
+
+  static PetMoveMode fromName(String? name) => switch (name) {
+        'toEdge' => PetMoveMode.toEdge,
+        _ => PetMoveMode.distance,
+      };
+}
+
 enum PetMoveDir {
   up,
   down,
@@ -358,6 +372,10 @@ class PetActionDef {
   /// 相对位移：朝方向走 moveDist（屏幕百分比 0~1），从当前位置出发
   final PetMoveDir? moveDir;
   final double? moveDist;
+
+  /// 移动模式（8-14 22:2x GPT 方案）：distance=走固定距离 /
+  /// toEdge=沿方向走到屏幕边（撞墙才停），两种语义分开
+  final PetMoveMode moveMode;
   final double? moveSec;
 
   /// 移动起点基准：dock/center 预设 / custom 自定义
@@ -399,6 +417,7 @@ class PetActionDef {
     this.targetY,
     this.moveDir,
     this.moveDist,
+    this.moveMode = PetMoveMode.distance,
     this.moveSec,
     this.moveRef = PetMoveRef.dock,
     this.startX,
@@ -436,6 +455,7 @@ class PetActionDef {
         // 检查创建/变换路径必须全字段透传，不能只补当下关注的字段。
         moveDir: moveDir,
         moveDist: moveDist,
+        moveMode: moveMode,
         moveSec: moveSec,
         trajectory: trajectory,
         moveRef: moveRef,

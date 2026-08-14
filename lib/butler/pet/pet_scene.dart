@@ -36,8 +36,19 @@ class Pet {
   final String id;
   String name;
 
-  /// 相对坐标（0~1）
-  PetPoint position;
+  /// 8-14 22:2x（GPT 方案：桌宠是连续存在的实体）：
+  /// 运行时位置缓存（App 进程级静态）——页面重建/restore 后恢复
+  /// 当前位置，不再瞬移回 preferredStart（preferredStart 只是
+  /// "首次出现位置"，不是"每次刷新位置"）。App 重启才回起点。
+  static final Map<String, PetPoint> lastPositions = {};
+
+  /// 相对坐标（0~1）；setter 同步进静态缓存
+  PetPoint _position;
+  PetPoint get position => _position;
+  set position(PetPoint v) {
+    _position = v;
+    lastPositions[id] = v;
+  }
 
   /// 朝向（影响镜像）
   PetFacing facing;
@@ -100,7 +111,7 @@ class Pet {
     this.facing = PetFacing.right,
     this.scale = 1.0,
     this.avatarPath,
-  }) : position = position ?? const PetPoint(0.5, 0.5);
+  }) : _position = position ?? const PetPoint(0.5, 0.5);
 
   /// 8-14 17:4x（用户：我的小人是你小人复制的，一模一样）：
   /// 角色头像——没配动作帧时 idle 显示自己的头像，
@@ -677,6 +688,12 @@ class PetScene {
   /// 动作定义库（内置 + 用户自建，id → 定义）
   final Map<String, PetActionDef> _actionDefs = {};
 
+  // 8-14 22:2x（GPT 方案：自主行动状态机 MOVE→DWELL→MOVE）：
+  // 移动完成后的停留秒数 / 上一帧是否在移动 / 自主移动序号（日志）
+  final Map<String, double> _dwellLeft = {};
+  final Map<String, bool> _wasMoving = {};
+  final Map<String, int> _autoSeq = {};
+
   /// 移动动画组（走+跑绑定，id → 定义）
   final Map<String, PetMoveGroupDef> _moveGroups = {};
 
@@ -946,6 +963,50 @@ class PetScene {
     return run;
   }
 
+  /// 移动速度（按轨迹）
+  double _moveSpeed(PetActionDef def) => switch (def.trajectory) {
+        PetMoveTrajectory.walk => 0.35,
+        PetMoveTrajectory.jump => 0.55,
+        PetMoveTrajectory.fly => 0.45,
+      };
+
+  /// 统一目标计算（GPT 8-14 22:2x：绝对目标 / toEdge 撞墙 / distance
+  /// 方向+距离 三种语义分开，不再用 moveDist=1.0 兼职"走到底"）
+  PetPoint _targetFor(Pet pet, PetActionDef def) {
+    if (def.target != null) return def.target!;
+    if (def.moveDir == null) return pet.position;
+    if (def.moveMode == PetMoveMode.toEdge) {
+      return _edgeTargetFor(pet, def.moveDir!);
+    }
+    final (vx, vy) = def.moveDir!.vector;
+    return PetPoint(pet.position.x + vx * (def.moveDist ?? 0.3),
+        pet.position.y + vy * (def.moveDist ?? 0.3));
+  }
+
+  /// 沿方向与活动区域边界求交（走到底 = 撞墙才停，目标不出屏）
+  PetPoint _edgeTargetFor(Pet pet, PetMoveDir dir) {
+    final (vx, vy) = dir.vector;
+    const minX = 0.02, maxX = 0.98;
+    final (minY, maxY) = switch (pet.area) {
+      PetArea.full => (0.02, 0.98),
+      PetArea.bottom => (0.55, 0.95),
+      PetArea.fixed => (pet.position.y, pet.position.y),
+    };
+    double t = double.infinity;
+    if (vx > 0) {
+      t = (maxX - pet.position.x) / vx;
+    } else if (vx < 0) {
+      t = (minX - pet.position.x) / vx;
+    }
+    if (vy > 0) {
+      t = math.min(t, (maxY - pet.position.y) / vy);
+    } else if (vy < 0) {
+      t = math.min(t, (minY - pet.position.y) / vy);
+    }
+    if (!t.isFinite) return pet.position;
+    return PetPoint(pet.position.x + vx * t, pet.position.y + vy * t);
+  }
+
   /// 给指定小人播放单个动作
   void playAction(String petId, String actionId) {
     final pet = petById(petId);
@@ -968,43 +1029,30 @@ class PetScene {
     if (def.kind == PetActionKind.moveTo) {
       // 8-14 17:1x（用户：动作之间要相对衔接，不能每次都瞬移回起点）：
       // 从【当前位置】出发——上个动作在哪结束，这个就从哪继续。
-      // 目标 = 绝对目标点（旧数据）或 方向+距离（相对当前位置）。
-      // 起点（moveRef/startX/startY）只在刷新时用（preferredStart），
-      // 播放动作不再瞬移。
-      final PetPoint target;
-      if (def.target != null) {
-        target = def.target!;
-      } else if (def.moveDir != null) {
-        final (vx, vy) = def.moveDir!.vector;
-        target = PetPoint(pet.position.x + vx * (def.moveDist ?? 0.3),
-            pet.position.y + vy * (def.moveDist ?? 0.3));
-      } else {
-        target = pet.position;
-      }
+      // 8-14 22:2x（GPT 方案）：目标 = 绝对目标点 / toEdge 沿方向撞墙 /
+      // distance 方向+距离，三种语义分开（_targetFor 统一计算）。
+      final target = _targetFor(pet, def);
       final clamped = pet.clampToArea(target);
       final dist = pet.position.distanceTo(clamped);
-      // 8-14 20:3x（用户：配了移动从不见走）：移动播放日志——
-      // 方向/距离/目标/走距，一眼看出动作配置是否生效
+      // 8-14 22:2x（GPT 方案：日志增强）——序号/mode/起点/目标/距离/时长
+      final seq = (_autoSeq[pet.id] ?? 0) + 1;
+      _autoSeq[pet.id] = seq;
+      final moveDur = def.moveSec ?? dist / _moveSpeed(def);
       DebugLogger.log('桌宠',
-          '移动播放 ${def.id} | 方向=${def.moveDir?.name ?? "无"} '
-          '距离=${def.moveDist?.toStringAsFixed(2) ?? "无"} '
-          '目标=(${target.x.toStringAsFixed(2)},${target.y.toStringAsFixed(2)}) '
-          '当前位置=(${pet.position.x.toStringAsFixed(2)},${pet.position.y.toStringAsFixed(2)}) '
-          '走距=${dist.toStringAsFixed(2)}');
-      final speed = switch (def.trajectory) {
-        PetMoveTrajectory.walk => 0.35,
-        PetMoveTrajectory.jump => 0.55,
-        PetMoveTrajectory.fly => 0.45,
-      };
+          '自主移动 #$seq mode=${def.moveMode.name} '
+          '方向=${def.moveDir?.name ?? "无"} '
+          'from=(${pet.position.x.toStringAsFixed(2)},${pet.position.y.toStringAsFixed(2)}) '
+          'to=(${clamped.x.toStringAsFixed(2)},${clamped.y.toStringAsFixed(2)}) '
+          '距离=${dist.toStringAsFixed(2)} 时长=${moveDur.toStringAsFixed(2)}s');
       pet.playAction(def, _resolveFramesSync(actionId));
       // 8-14 21:2x（用户：走走停停、走一半就停——真根因）：autoActionLeft
       // 之前 = 帧播秒数（durationSeconds），移动走到底远不止 2 秒 →
       // 2 秒被掐断只走 20% → 等 8~20 秒再触发。改成移动时长：
       // 走完才算完，一次走到底。
-      pet.autoActionLeft = (def.moveSec ?? dist / speed) + 0.3;
+      pet.autoActionLeft = moveDur + 0.3;
       pet.moveTo(
         clamped,
-        duration: def.moveSec ?? dist / speed,
+        duration: moveDur,
         ease: switch (def.trajectory) {
           PetMoveTrajectory.walk => PetMoveEase.linear,
           PetMoveTrajectory.jump => PetMoveEase.jump,
@@ -1028,51 +1076,22 @@ class PetScene {
         return;
       }
     }
-    // 原地动作带位移目标（导入时配的"播的时候怎么动"）：
-    // 边播帧边移动到目标点，速度固定，时长按距离自动换算
-    if (def.kind == PetActionKind.inPlace && def.target != null) {
-      final from = pet.position;
-      final clamped = pet.clampToArea(def.target!);
-      final actualDist = from.distanceTo(clamped);
-      final speed = switch (def.trajectory) {
-        PetMoveTrajectory.walk => 0.35,
-        PetMoveTrajectory.jump => 0.55,
-        PetMoveTrajectory.fly => 0.45,
-      };
-      pet.playAction(def, _resolveFramesSync(actionId));
-      pet.autoActionLeft = actualDist / speed + 0.3;
-      pet.moveTo(
-        clamped,
-        duration: actualDist / speed,
-        ease: switch (def.trajectory) {
-          PetMoveTrajectory.walk => PetMoveEase.linear,
-          PetMoveTrajectory.jump => PetMoveEase.jump,
-          PetMoveTrajectory.fly => PetMoveEase.easeInOut,
-        },
-        jumpHeight: def.trajectory == PetMoveTrajectory.jump ? 0.25 : 0,
-      );
-      return;
-    }
-    // 原地动作带相对位移（方向+距离，从当前位置出发——8-14 17:1x：
-    // 用户：相对动作，上个动作在哪结束这个就从哪继续，不瞬移回起点）
+    // 原地动作带位移（导入时配的"播的时候怎么动"）：边播帧边移动，
+    // 目标统一 _targetFor（绝对目标 / toEdge 撞墙 / distance 方向+距离）
     if (def.kind == PetActionKind.inPlace &&
-        def.moveDir != null &&
-        def.moveDist != null) {
+        (def.target != null ||
+            (def.moveDir != null &&
+                (def.moveMode == PetMoveMode.toEdge || def.moveDist != null)))) {
       final from = pet.position;
-      final (vx, vy) = def.moveDir!.vector;
-      final clamped = pet.clampToArea(PetPoint(
-          from.x + vx * def.moveDist!, from.y + vy * def.moveDist!));
+      final clamped = pet.clampToArea(_targetFor(pet, def));
       final actualDist = from.distanceTo(clamped);
-      final speed = switch (def.trajectory) {
-        PetMoveTrajectory.walk => 0.35,
-        PetMoveTrajectory.jump => 0.55,
-        PetMoveTrajectory.fly => 0.45,
-      };
+      final speed = _moveSpeed(def);
+      final moveDur = def.moveSec ?? actualDist / speed;
       pet.playAction(def, _resolveFramesSync(actionId));
-      pet.autoActionLeft = (def.moveSec ?? actualDist / speed) + 0.3;
+      pet.autoActionLeft = moveDur + 0.3;
       pet.moveTo(
         clamped,
-        duration: def.moveSec ?? actualDist / speed,
+        duration: moveDur,
         ease: switch (def.trajectory) {
           PetMoveTrajectory.walk => PetMoveEase.linear,
           PetMoveTrajectory.jump => PetMoveEase.jump,
@@ -1112,18 +1131,24 @@ class PetScene {
     // 小人——互动组运行时没参与的小人照常自主行动
     final run = _groupRun;
     if (run != null && run.cast.contains(pet)) return;
-    final left = (_autoActIn[pet.id] ?? 3.0) - dt;
-    if (left > 0) {
-      _autoActIn[pet.id] = left;
+    // 8-14 22:2x（GPT 方案：状态机 MOVE→DWELL→MOVE，动作完成驱动，
+    // 不用固定 timer）：移动刚完成 → 设 1.5~3s 停留，再选下一动作
+    final wasMoving = _wasMoving[pet.id] ?? false;
+    if (wasMoving && !pet.moving) {
+      _dwellLeft[pet.id] = 1.5 + _autoRand.nextDouble() * 1.5;
+      DebugLogger.log('桌宠',
+          '自主移动完成 → 停留 ${_dwellLeft[pet.id]!.toStringAsFixed(1)}s');
+    }
+    _wasMoving[pet.id] = pet.moving;
+    // 停留中 → 递减等待（走到底后待一小会儿）
+    final dwell = _dwellLeft[pet.id] ?? 0;
+    if (dwell > 0) {
+      _dwellLeft[pet.id] = dwell - dt;
       return;
     }
-    // 8-14 21:5x（用户：走到底→停 8~20 秒→再走，像卡住）：
-    // 缩短到 3~6 秒——走到底，待一小会儿，再走，连贯不卡顿
-    _autoActIn[pet.id] = 3 + _autoRand.nextDouble() * 3;
-    // 8-14 15:4x：只挑自己角色的动作（旧数据 profileId=null 共享兼容）
-    // 8-14 17:2x（用户：没办法自主行动——只挑 inPlace 导致移动动作
-    // 永远不触发）：inPlace + moveTo 都收，播放交给 playAction
-    // （moveTo 分支会瞬移到起点再移动到目标）
+    // 正在移动/演动作 → 等完成（下一次动作由完成驱动，不是 timer 到点）
+    if (pet.moving || pet.state != PetState.idle) return;
+    // 8-14 15:4x：只挑自己角色的动作
     // 8-14 17:2x（用户：不要给我的小人设置我没做的动作）：
     // 只播该小人自己配的动作（profileId 匹配），排除内置动作
     // （walk/run/jump/spin/wave/happy...）和旧数据 null 共享——
@@ -1138,8 +1163,22 @@ class PetScene {
             PetBuiltinActions.byId(d.id) == null)
         .toList();
     if (pool.isEmpty) return;
-    final def = pool[_autoRand.nextInt(pool.length)];
-    playAction(pet.id, def.id);
+    // 8-14 22:2x（GPT 方案：贴边处理）——选动作先算目标，走距 < 0.05
+    // （当前方向已撞墙/没可移动距离）就换方向/换动作重试，最多 6 次；
+    // 全贴边 → 短等 1.5s 再试，不播 0 距离动作（避免"走不动"）
+    PetActionDef? picked;
+    for (var attempt = 0; attempt < 6; attempt++) {
+      final def = pool[_autoRand.nextInt(pool.length)];
+      if (pet.position.distanceTo(_targetFor(pet, def)) >= 0.05) {
+        picked = def;
+        break;
+      }
+    }
+    if (picked == null) {
+      _dwellLeft[pet.id] = 1.5;
+      return;
+    }
+    playAction(pet.id, picked.id);
   }
 
   /// 8-14 17:2x（用户：一刷新又跑屏幕中间去了——我设置了从输入框
