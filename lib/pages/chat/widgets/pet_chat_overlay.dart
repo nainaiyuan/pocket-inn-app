@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -288,6 +289,51 @@ class _PetChatOverlayState extends State<PetChatOverlay>
     world.scene.resumeGroup();
   }
 
+  // ---------------- 8-14 16:1x：eager pan 自管理手势 ----------------
+  bool _panMoved = false;
+  bool _panLongPressHandled = false;
+  Timer? _panLongPressTimer;
+
+  void _onPetPanStart(PetWorld world, Pet pet) {
+    _panMoved = false;
+    _panLongPressHandled = false;
+    widget.onDragStateChanged?.call(true);
+    // 长按候选：500ms 内没移动 = 长按（摸摸头/调大小/去配置菜单）
+    _panLongPressTimer?.cancel();
+    _panLongPressTimer = Timer(const Duration(milliseconds: 500), () {
+      _panLongPressHandled = true;
+      _onPetLongPress(world, pet);
+    });
+  }
+
+  void _onPetPanUpdate(PetWorld world, Pet pet, DragUpdateDetails d, double w,
+      double h) {
+    if (d.delta.distance > 2) {
+      _panMoved = true;
+      _panLongPressTimer?.cancel();
+    }
+    if (_panLongPressHandled) return; // 长按已触发，忽略后续拖动
+    _onPetDrag(world, pet, d, w, h);
+  }
+
+  void _onPetPanEnd(PetWorld world, Pet pet) {
+    _panLongPressTimer?.cancel();
+    widget.onDragStateChanged?.call(false);
+    if (_panLongPressHandled) {
+      _panLongPressHandled = false;
+      return;
+    }
+    if (!_panMoved) {
+      _onPetTap(world, pet); // 没动 = 点击
+    }
+    _onPetDragEnd(world, pet);
+  }
+
+  void _onPetPanCancel() {
+    _panLongPressTimer?.cancel();
+    widget.onDragStateChanged?.call(false);
+  }
+
   void _showSpeech(String petId, String text) {
     _speechSeq++;
     setState(() {
@@ -341,29 +387,35 @@ class _PetChatOverlayState extends State<PetChatOverlay>
           top: top,
           width: size,
           height: size,
-          // Listener 包一层：按下瞬间就锁列表滚动（不等手势判定）——
-          // 8-14 15:0x（用户：拖一下直接拖页面去了）：pointer down 立即
-          // 通知 chat_page 禁用 ListView 滚动，下一帧竞技场里 ListView
-          // 不注册 drag recognizer → 只有小人 pan 赢 → 拖小人不滚列表
-          child: Listener(
-            onPointerDown: (_) => widget.onDragStateChanged?.call(true),
-            onPointerUp: (_) => widget.onDragStateChanged?.call(false),
-            onPointerCancel: (_) => widget.onDragStateChanged?.call(false),
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => _onPetTap(world, pet),
-              onLongPress: () => _onPetLongPress(world, pet),
-              onPanStart: (_) => widget.onDragStateChanged?.call(true),
-              onPanUpdate: (d) => _onPetDrag(world, pet, d, w, h),
-              onPanEnd: (_) {
-                widget.onDragStateChanged?.call(false);
-                _onPetDragEnd(world, pet);
-              },
-              onPanCancel: () => widget.onDragStateChanged?.call(false),
-                child: PetFrameView(pet: pet, size: size),
+          // 8-14 16:1x 必杀技（用户：小人就是另一个导航球，要能随时
+          // 全方位拖动、绝不触发其他任何东西）：自定义 eager pan——
+          // 触摸小人的瞬间立即在竞技场宣布胜利，ListView 滚动识别器
+          // 直接出局，列表绝对不滚。点击/长按/拖动全部自管理
+          // （eager pan 会吞掉 onTap/onLongPress，所以自己判定）。
+          child: RawGestureDetector(
+            gestures: {
+              _EagerPanRecognizer: GestureRecognizerFactoryWithHandlers<
+                  _EagerPanRecognizer>(
+                () => _EagerPanRecognizer(),
+                (r) {
+                  r.onStart = (_) {
+                    _onPetPanStart(world, pet);
+                  };
+                  r.onUpdate = (d) {
+                    _onPetPanUpdate(world, pet, d, w, h);
+                  };
+                  r.onEnd = (_) {
+                    _onPetPanEnd(world, pet);
+                  };
+                  r.onCancel = () {
+                    _onPetPanCancel();
+                  };
+                },
               ),
-            ),
+            },
+            child: PetFrameView(pet: pet, size: size),
           ),
+        ),
         if (_speeches[pet.id] != null)
           Positioned(
             left: left + size / 2 - 90,
@@ -376,5 +428,17 @@ class _PetChatOverlayState extends State<PetChatOverlay>
           ),
       ],
     );
+  }
+}
+
+
+/// 8-14 16:1x：立即获胜的 pan 识别器——addAllowedPointer 时直接
+/// resolve(accepted)，竞技场当场判定胜利，下层 ListView 滚动识别器
+/// 没有任何机会竞争 → 拖小人绝不触发列表滚动（导航球同款手感）。
+class _EagerPanRecognizer extends PanGestureRecognizer {
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    super.addAllowedPointer(event);
+    resolve(GestureDisposition.accepted);
   }
 }
