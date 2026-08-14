@@ -42,7 +42,9 @@ class _PetProfilePageState extends State<PetProfilePage> {
 
   Future<void> _load() async {
     final pet = await _store.getProfile(widget.petId);
-    final actions = await _store.allActions();
+    // 8-14 19:5x（用户：默认小人显示新角色动作的图——实为配置页全量
+    // 列表没按角色过滤）：配置页只显示当前角色的单人动作（归属收口）
+    final actions = await _store.actionsForProfile(widget.petId);
     final activities = await _store.allActivities();
     if (!mounted) return;
     setState(() {

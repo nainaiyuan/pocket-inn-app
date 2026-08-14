@@ -298,6 +298,17 @@ class PetStore extends ButlerStore implements PetAffectionStore {
 
   // ========== 动作定义 ==========
 
+  /// 某个角色的单人动作（归属收口统一入口——8-14 19:5x GPT 定案）。
+  ///
+  /// 所有"这个角色有哪些动作"的判断（配置页/测试列表/自主行动/idle）
+  /// 都走这里，不再各自手写 profileId 过滤。
+  /// 只返回普通动作（slot_id IS NULL），互动组坑动作走 slotActions(slotId)。
+  Future<List<PetActionDef>> actionsForProfile(String profileId) async {
+    final rows = await query('pet_actions',
+        where: 'profile_id = ? AND slot_id IS NULL', whereArgs: [profileId]);
+    return [for (final r in rows) _actionFromRow(r)];
+  }
+
   Future<void> saveAction(PetActionDef def) async {
     final row = {
       'action_id': def.id,
