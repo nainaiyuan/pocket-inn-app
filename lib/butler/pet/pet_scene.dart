@@ -9,6 +9,7 @@ library;
 import 'dart:async';
 import 'dart:math' as math;
 
+import '../../utils/debug_logger.dart';
 import 'pet_engine.dart';
 import 'pet_models.dart';
 
@@ -980,16 +981,16 @@ class PetScene {
       } else {
         target = pet.position;
       }
+      final clamped = pet.clampToArea(target);
+      final dist = pet.position.distanceTo(clamped);
       // 8-14 20:3x（用户：配了移动从不见走）：移动播放日志——
-      // 方向/距离/目标/距离，一眼看出动作配置是否生效
+      // 方向/距离/目标/走距，一眼看出动作配置是否生效
       DebugLogger.log('桌宠',
           '移动播放 ${def.id} | 方向=${def.moveDir?.name ?? "无"} '
           '距离=${def.moveDist?.toStringAsFixed(2) ?? "无"} '
           '目标=(${target.x.toStringAsFixed(2)},${target.y.toStringAsFixed(2)}) '
           '当前位置=(${pet.position.x.toStringAsFixed(2)},${pet.position.y.toStringAsFixed(2)}) '
           '走距=${dist.toStringAsFixed(2)}');
-      final clamped = pet.clampToArea(target);
-      final dist = pet.position.distanceTo(clamped);
       final speed = switch (def.trajectory) {
         PetMoveTrajectory.walk => 0.35,
         PetMoveTrajectory.jump => 0.55,
