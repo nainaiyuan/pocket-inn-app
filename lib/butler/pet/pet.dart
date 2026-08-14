@@ -75,6 +75,24 @@ class PetWorld {
           '类型=${a.kind.name} | 方向=${a.moveDir?.name ?? "无"} '
           '距离=${a.moveDist?.toStringAsFixed(2) ?? "无"} | ${a.name}');
     }
+    // 8-14 23:2x 状态系统：加载状态绑定 + 跨角色联动
+    final profiles = await store.allProfiles();
+    final bindings = <PetStateBinding>[];
+    for (final p in profiles) {
+      bindings.addAll(await store.stateBindingsFor(p.petId));
+    }
+    final links = <PetStateLink>[];
+    for (final p in profiles) {
+      for (final q in profiles) {
+        if (p.petId == q.petId) continue;
+        for (final s in PetStateIds.all) {
+          links.addAll(await store.stateLinksFor(p.petId, q.petId, s));
+        }
+      }
+    }
+    scene.loadStateConfigs(bindings, links);
+    DebugLogger.log('桌宠',
+        '状态配置加载：绑定 ${bindings.length} / 联动 ${links.length}');
   }
 
   /// 预载所有动作的帧图（扫描目录，自动数帧）
@@ -163,13 +181,15 @@ class PetWorld {
           avatarPath: p.avatarPath,
         );
         pet.breakActionId = p.breakActionId;
+        pet.throwDistance = p.throwDistance;
       }
     }
-    // 同步已有小人的打断动作配置 + 显示大小
+    // 同步已有小人的打断动作配置 + 显示大小 + 扔出距离
     for (final p in wanted) {
       final existing = scene.petById(p.petId);
       existing?.breakActionId = p.breakActionId;
       existing?.scale = p.scale;
+      existing?.throwDistance = p.throwDistance;
     }
     // 挂上说话回调（页面气泡）
     for (final pet in scene.pets) {

@@ -87,6 +87,35 @@ class PetStore extends ButlerStore implements PetAffectionStore {
         steps_json TEXT NOT NULL
       )
     ''');
+    // 8-14 23:2x（GPT 19 条设计 v1.2）：状态系统两张新表——
+    // 状态绑定（角色×状态×来源→响应，多行顺序播）+ 跨角色联动
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pet_state_bindings (
+        profile_id TEXT NOT NULL,
+        state_id TEXT NOT NULL,
+        source TEXT DEFAULT 'auto',
+        seq INTEGER DEFAULT 0,
+        enabled INTEGER DEFAULT 1,
+        auto_detect INTEGER DEFAULT 1,
+        priority INTEGER DEFAULT 0,
+        response_type TEXT DEFAULT 'action',
+        response_id TEXT,
+        resume_after INTEGER DEFAULT 1,
+        PRIMARY KEY (profile_id, state_id, source, seq)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pet_state_links (
+        observer_id TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        target_state TEXT NOT NULL,
+        seq INTEGER DEFAULT 0,
+        enabled INTEGER DEFAULT 1,
+        response_type TEXT DEFAULT 'action',
+        response_id TEXT,
+        PRIMARY KEY (observer_id, target_id, target_state, seq)
+      )
+    ''');
     await db.execute('''
       CREATE TABLE IF NOT EXISTS pet_groups (
         group_id TEXT PRIMARY KEY,
@@ -122,6 +151,40 @@ class PetStore extends ButlerStore implements PetAffectionStore {
     try {
       await db.execute(
           'ALTER TABLE pet_profiles ADD COLUMN fixed_y REAL');
+    } catch (_) {}
+    // 8-14 23:2x：扔出距离（用户配置：扔屏幕百分之多少）
+    try {
+      await db.execute(
+          'ALTER TABLE pet_profiles ADD COLUMN throw_distance REAL DEFAULT 0.5');
+    } catch (_) {}
+    try {
+      await db.execute('''
+          CREATE TABLE IF NOT EXISTS pet_state_bindings (
+            profile_id TEXT NOT NULL,
+            state_id TEXT NOT NULL,
+            source TEXT DEFAULT 'auto',
+            seq INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1,
+            auto_detect INTEGER DEFAULT 1,
+            priority INTEGER DEFAULT 0,
+            response_type TEXT DEFAULT 'action',
+            response_id TEXT,
+            resume_after INTEGER DEFAULT 1,
+            PRIMARY KEY (profile_id, state_id, source, seq)
+          )''');
+    } catch (_) {}
+    try {
+      await db.execute('''
+          CREATE TABLE IF NOT EXISTS pet_state_links (
+            observer_id TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            target_state TEXT NOT NULL,
+            seq INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1,
+            response_type TEXT DEFAULT 'action',
+            response_id TEXT,
+            PRIMARY KEY (observer_id, target_id, target_state, seq)
+          )''');
     } catch (_) {}
     try {
       await db.execute(
@@ -216,6 +279,7 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       area: PetArea.fromName(rows.first['area'] as String?),
       fixedX: (rows.first['fixed_x'] as num?)?.toDouble(),
       fixedY: (rows.first['fixed_y'] as num?)?.toDouble(),
+      throwDistance: (rows.first['throw_distance'] as num?)?.toDouble() ?? 0.5,
       breakActionId: rows.first['break_action_id'] as String? ?? 'idle',
       avatarPath: rows.first['avatar_path'] as String?,
     );
@@ -233,6 +297,7 @@ class PetStore extends ButlerStore implements PetAffectionStore {
               area: PetArea.fromName(r['area'] as String?),
               fixedX: (r['fixed_x'] as num?)?.toDouble(),
               fixedY: (r['fixed_y'] as num?)?.toDouble(),
+              throwDistance: (r['throw_distance'] as num?)?.toDouble() ?? 0.5,
               breakActionId: r['break_action_id'] as String? ?? 'idle',
               avatarPath: r['avatar_path'] as String?,
             ))
@@ -251,6 +316,7 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       'fixed_y': profile.fixedY,
       'break_action_id': profile.breakActionId,
       'avatar_path': profile.avatarPath,
+      'throw_distance': profile.throwDistance,
       'updated_at': DateTime.now().toIso8601String(),
     });
   }
@@ -582,4 +648,102 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       }
     } catch (_) {}
   }
+
+  // ========== 8-14 23:2x 状态绑定 / 跨角色联动 CRUD ==========
+
+  Future<void> saveStateBinding(PetStateBinding b) async {
+    await insert('pet_state_bindings', {
+      'profile_id': b.profileId,
+      'state_id': b.stateId,
+      'source': b.source,
+      'seq': b.seq,
+      'enabled': b.enabled ? 1 : 0,
+      'auto_detect': b.autoDetect ? 1 : 0,
+      'priority': b.priority,
+      'response_type': b.responseType,
+      'response_id': b.responseId,
+      'resume_after': b.resumeAfter ? 1 : 0,
+    });
+  }
+
+  /// 某角色全部状态绑定（按 状态/来源/顺序 排序）
+  Future<List<PetStateBinding>> stateBindingsFor(String profileId) async {
+    final rows = await db.query('pet_state_bindings',
+        where: 'profile_id = ?', whereArgs: [profileId],
+        orderBy: 'state_id, source, seq');
+    return rows.map((r) => PetStateBinding(
+          profileId: r['profile_id'] as String,
+          stateId: r['state_id'] as String,
+          source: r['source'] as String? ?? 'auto',
+          seq: r['seq'] as int? ?? 0,
+          enabled: (r['enabled'] as int? ?? 1) == 1,
+          autoDetect: (r['auto_detect'] as int? ?? 1) == 1,
+          priority: r['priority'] as int? ?? 0,
+          responseType: r['response_type'] as String? ?? PetResponseType.action,
+          responseId: r['response_id'] as String?,
+          resumeAfter: (r['resume_after'] as int? ?? 1) == 1,
+        )).toList();
+  }
+
+  Future<void> deleteStateBinding(String profileId, String stateId,
+      String source, int seq) async {
+    await db.delete('pet_state_bindings', where: 'profile_id = ? AND state_id = ? AND source = ? AND seq = ?',
+        whereArgs: [profileId, stateId, source, seq]);
+  }
+
+  Future<void> saveStateLink(PetStateLink l) async {
+    await insert('pet_state_links', {
+      'observer_id': l.observerId,
+      'target_id': l.targetId,
+      'target_state': l.targetState,
+      'seq': l.seq,
+      'enabled': l.enabled ? 1 : 0,
+      'response_type': l.responseType,
+      'response_id': l.responseId,
+    });
+  }
+
+  /// B 观察到 A 的某状态 → 响应列表（按 seq）
+  Future<List<PetStateLink>> stateLinksFor(
+      String observerId, String targetId, String targetState) async {
+    final rows = await db.query('pet_state_links',
+        where: 'observer_id = ? AND target_id = ? AND target_state = ?',
+        whereArgs: [observerId, targetId, targetState],
+        orderBy: 'seq');
+    return rows.map((r) => PetStateLink(
+          observerId: r['observer_id'] as String,
+          targetId: r['target_id'] as String,
+          targetState: r['target_state'] as String,
+          seq: r['seq'] as int? ?? 0,
+          enabled: (r['enabled'] as int? ?? 1) == 1,
+          responseType: r['response_type'] as String? ?? PetResponseType.action,
+          responseId: r['response_id'] as String?,
+        )).toList();
+  }
+
+  /// A 进入某状态时，所有观察者（全部联动，按 observer 分组）
+  Future<List<PetStateLink>> stateLinksTargeting(
+      String targetId, String targetState) async {
+    final rows = await db.query('pet_state_links',
+        where: 'target_id = ? AND target_state = ?',
+        whereArgs: [targetId, targetState],
+        orderBy: 'observer_id, seq');
+    return rows.map((r) => PetStateLink(
+          observerId: r['observer_id'] as String,
+          targetId: r['target_id'] as String,
+          targetState: r['target_state'] as String,
+          seq: r['seq'] as int? ?? 0,
+          enabled: (r['enabled'] as int? ?? 1) == 1,
+          responseType: r['response_type'] as String? ?? PetResponseType.action,
+          responseId: r['response_id'] as String?,
+        )).toList();
+  }
+
+  Future<void> deleteStateLink(String observerId, String targetId,
+      String targetState, int seq) async {
+    await db.delete('pet_state_links',
+        where: 'observer_id = ? AND target_id = ? AND target_state = ? AND seq = ?',
+        whereArgs: [observerId, targetId, targetState, seq]);
+  }
+
 }

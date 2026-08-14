@@ -851,6 +851,10 @@ class PetProfile {
   /// 头像图路径（大类框/聊天页显示缩略图；null = 用第一个动作的第一帧）
   String? avatarPath;
 
+  /// 8-14 23:2x（用户：扔的屏幕百分之多少自己设）：
+  /// 被扔时的飞行距离（屏幕百分比 0~1），默认 50%
+  double throwDistance;
+
   PetProfile({
     required this.petId,
     required this.name,
@@ -862,6 +866,7 @@ class PetProfile {
     this.fixedY,
     this.breakActionId = 'idle',
     this.avatarPath,
+    this.throwDistance = 0.5,
   });
 
   Map<String, dynamic> toJson() => {
@@ -875,6 +880,7 @@ class PetProfile {
         'fixedY': fixedY,
         'breakActionId': breakActionId,
         'avatarPath': avatarPath,
+        'throwDistance': throwDistance,
       };
 
   factory PetProfile.fromJson(Map<String, dynamic> json) => PetProfile(
@@ -888,6 +894,7 @@ class PetProfile {
         fixedY: (json['fixedY'] as num?)?.toDouble(),
         breakActionId: json['breakActionId'] as String? ?? 'idle',
         avatarPath: json['avatarPath'] as String?,
+        throwDistance: (json['throwDistance'] as num?)?.toDouble() ?? 0.5,
       );
 
   PetProfile copyWith({
@@ -1121,4 +1128,117 @@ class PetGroupDef {
                 .toList(),
         updatedAt: j['updated_at'] as String? ?? '',
       );
+}
+
+// ========== 8-14 23:2x 控制权 + 状态系统（GPT 19 条设计，v1.2 已确认） ==========
+
+/// 控制权：桌宠每帧只归一个人管（user > response > interaction > auto）
+enum PetControlOwner {
+  auto, // 自主行动/待机/自动状态响应
+  user, // 用户直接操作（按住/拖动/拎起/扔出）——最高
+  interaction, // 互动组/组合动作
+  response, // 状态响应播放（介于 user 和 auto 之间）
+}
+
+/// 状态/事件注册表（字符串 id，可扩展——新增状态只加这里 + 检测器）
+class PetStateIds {
+  // 持续状态
+  static const held = 'held'; // 被拎起（用户按住中）
+  static const idle = 'idle'; // 待机
+  static const moving = 'moving'; // 移动中
+  static const edgeLeft = 'edgeLeft';
+  static const edgeRight = 'edgeRight';
+  static const edgeTop = 'edgeTop';
+  static const edgeBottom = 'edgeBottom';
+  static const center = 'center'; // 不在任何边
+  static const interaction = 'interaction'; // 互动组进行中
+  // 瞬时事件
+  static const userRelease = 'userRelease'; // 用户松手
+  static const thrown = 'thrown'; // 被扔
+  static const dropped = 'dropped'; // 被放下
+  static const hitEdge = 'hitEdge'; // 撞墙
+  static const reachTop = 'reachTop'; // 自己走到顶部
+  static const reachEdge = 'reachEdge'; // 自己走到边缘
+
+  /// 全部状态/事件 id（UI 遍历用）
+  static const all = [
+    held, idle, moving,
+    edgeLeft, edgeRight, edgeTop, edgeBottom, center, interaction,
+    userRelease, thrown, dropped, hitEdge, reachTop, reachEdge,
+  ];
+
+  /// 中文名（UI 显示）
+  static String label(String id) => switch (id) {
+        held => '被拎起',
+        idle => '待机',
+        moving => '移动中',
+        edgeLeft => '贴左边',
+        edgeRight => '贴右边',
+        edgeTop => '贴顶部',
+        edgeBottom => '贴底部',
+        center => '居中',
+        interaction => '互动中',
+        userRelease => '用户松手',
+        thrown => '被扔',
+        dropped => '被放下',
+        hitEdge => '撞墙',
+        reachTop => '自己到顶',
+        reachEdge => '自己到边',
+        _ => id,
+      };
+}
+
+/// 状态响应类型
+class PetResponseType {
+  static const action = 'action'; // 单动作
+  static const activity = 'activity'; // 组合动作
+  static const goto = 'goto'; // 走到目标小人身边（联动专用）
+}
+
+/// 状态绑定：某角色某状态（含来源）→ 响应（单动作/组合动作），可多行顺序播
+class PetStateBinding {
+  final String profileId;
+  final String stateId;
+  final String source; // auto / user
+  final int seq;
+  final bool enabled;
+  final bool autoDetect;
+  final int priority;
+  final String responseType;
+  final String? responseId;
+  final bool resumeAfter;
+
+  const PetStateBinding({
+    required this.profileId,
+    required this.stateId,
+    this.source = 'auto',
+    this.seq = 0,
+    this.enabled = true,
+    this.autoDetect = true,
+    this.priority = 0,
+    this.responseType = PetResponseType.action,
+    this.responseId,
+    this.resumeAfter = true,
+  });
+}
+
+/// 跨角色联动：B 观察到 A 进入某状态/事件 → B 顺序播多个响应
+class PetStateLink {
+  final String observerId; // B
+  final String targetId; // A
+  final String targetState;
+  final int seq;
+  final bool enabled;
+  final String responseType; // action / activity / goto
+  final String? responseId;
+
+  const PetStateLink({
+    required this.observerId,
+    required this.targetId,
+    required this.targetState,
+    this.seq = 0,
+    this.enabled = true,
+    this.responseType = PetResponseType.action,
+    this.responseId,
+  });
 }

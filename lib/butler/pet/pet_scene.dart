@@ -11,6 +11,7 @@ import 'dart:math' as math;
 
 import '../../utils/debug_logger.dart';
 import 'pet_engine.dart';
+import 'pet_state_detector.dart';
 import 'pet_models.dart';
 
 /// 小人状态
@@ -49,6 +50,23 @@ class Pet {
     _position = v;
     lastPositions[id] = v;
   }
+
+  // ===== 8-14 23:2x 控制权 + 状态系统（GPT 19 条 v1.2） =====
+
+  /// 控制权：auto / user（用户操作）/ interaction（互动组）/ response（状态响应）
+  PetControlOwner controlOwner = PetControlOwner.auto;
+
+  /// 被用户按住（held 状态，拖动中）
+  bool held = false;
+
+  /// 暂停的移动快照（用户抓住时暂停，响应结束可恢复——不销毁）
+  PetMoveState? suspendedMove;
+
+  /// 状态检测器（per-pet，previous != current 防重复触发）
+  PetStateDetector detector = PetStateDetector();
+
+  /// 被扔时的飞行距离（屏幕百分比，来自角色配置）
+  double throwDistance = 0.5;
 
   /// 朝向（影响镜像）
   PetFacing facing;
@@ -694,6 +712,18 @@ class PetScene {
   final Map<String, bool> _wasMoving = {};
   final Map<String, int> _autoSeq = {};
 
+  // ===== 8-14 23:2x 状态系统（GPT 19 条 v1.2） =====
+  /// 状态绑定缓存（profileId → 绑定列表，PetWorld restore 时加载）
+  final Map<String, List<PetStateBinding>> _stateBindings = {};
+  /// 联动缓存（'targetId|stateId' → 观察者响应列表）
+  final Map<String, List<PetStateLink>> _stateLinks = {};
+  /// 响应队列（petId → 待播 (type, id)）
+  final Map<String, List<MapEntry<String, String>>> _respQueue = {};
+  /// 响应进行中
+  final Map<String, bool> _respActive = {};
+  /// 抛射飞行中（移动完成 → 落点检测）
+  final Map<String, bool> _pendingThrow = {};
+
   /// 移动动画组（走+跑绑定，id → 定义）
   final Map<String, PetMoveGroupDef> _moveGroups = {};
 
@@ -823,6 +853,21 @@ class PetScene {
     // ① 空闲时随机自发做动作（养宠物自主性 MVP：随机触发"什么时候动"）
     // ② idle 帧优先用用户上传的图，不再显示内置粉色小人）
     for (final pet in _pets) {
+      // 8-14 23:2x 状态系统：响应队列推进（含抛射落点检测）
+      _tickStateResponses(pet);
+      // 位置状态自动检测（GPT 14/15 条）：auto 控制权、没在移动、
+      // 没被用户抓住时才检测；previous != current 才触发（防重复）
+      if (pet.controlOwner == PetControlOwner.auto &&
+          !pet.moving &&
+          !pet.held) {
+        final r = pet.detector.detectPosition(pet);
+        if (pet.detector.isEntered(r)) {
+          DebugLogger.log('桌宠',
+              '状态进入 ${pet.name} → ${PetStateIds.label(r.stateId)} (${r.source})');
+          _enqueueStateResponses(pet, r.stateId, r.source);
+          _fireLinks(pet.id, r.stateId);
+        }
+      }
       // 8-14 17:0x（自主行动死代码修复）：idle 状态（待机帧在播）也
       // 触发——loop 无限循环导致 _player 永不为 null，旧条件永远不满足
       if (pet._pair == null &&
@@ -830,7 +875,9 @@ class PetScene {
           !pet.moving &&
           pet.state == PetState.idle) {
         _tickAutoAct(pet, dt);
-        if (pet._player == null) {
+        if (pet._player == null &&
+            !pet.held &&
+            pet.controlOwner == PetControlOwner.auto) {
           pet.playIdle(_resolveIdleFrames(pet), fps: 4);
         }
       }
@@ -1126,7 +1173,216 @@ class PetScene {
 
   /// 自主行动：空闲小人每隔随机时间自发做一个动作（用户动作优先），
   /// 移动方式（上下/左右/方向+距离）由动作定义驱动，播完回 idle。
+  // ===== 8-14 23:2x 控制权 + 状态系统核心（GPT 19 条 v1.2） =====
+
+  /// 加载状态配置（PetWorld restore 后调用，缓存到场景）
+  void loadStateConfigs(
+      List<PetStateBinding> bindings, List<PetStateLink> links) {
+    _stateBindings.clear();
+    for (final b in bindings) {
+      _stateBindings.putIfAbsent(b.profileId, () => []).add(b);
+    }
+    _stateLinks.clear();
+    for (final l in links) {
+      if (!l.enabled) continue;
+      _stateLinks
+          .putIfAbsent('${l.targetId}|${l.targetState}', () => [])
+          .add(l);
+    }
+  }
+
+  /// 用户开始控制（panStart）：控制权 user + 暂停移动 + held 响应
+  void beginUserControl(String petId) {
+    final pet = petById(petId);
+    if (pet == null) return;
+    pet.controlOwner = PetControlOwner.user;
+    pet.held = true;
+    // 暂停当前移动（不销毁，记快照；响应结束可恢复）
+    if (pet.moving && pet._move != null) {
+      pet.suspendedMove = pet._move;
+      pet.stopMoving();
+    }
+    pet.stop(); // 停当前动作
+    _respQueue.remove(petId);
+    _respActive[petId] = false;
+    pet.detector.reset();
+    DebugLogger.log('桌宠', '用户控制开始 ${pet.name}（held）');
+    _enqueueStateResponses(pet, PetStateIds.held, 'user');
+  }
+
+  /// 用户结束控制（panEnd）：扔/放判定 + 事件响应 + 抛射/落点
+  void endUserControl(String petId,
+      {double speed = 0, double dx = 0, double dy = 0}) {
+    final pet = petById(petId);
+    if (pet == null) return;
+    pet.held = false;
+    _enqueueStateResponses(pet, PetStateIds.userRelease, 'user');
+    // 判定扔/放：快速滑动必扔；慢速但手滑方向明确也算扔（用户配置距离）
+    final hasDir = dx != 0 || dy != 0;
+    final isThrow = speed >= PetStateDetector.throwSpeedThreshold || hasDir;
+    if (isThrow) {
+      final (vx, vy) = hasDir
+          ? _normalize(dx, dy)
+          : PetMoveDir.left.vector;
+      final target = pet.clampToArea(PetPoint(
+          pet.position.x + vx * pet.throwDistance,
+          pet.position.y + vy * pet.throwDistance));
+      final dur = pet.position.distanceTo(target) / 0.5;
+      DebugLogger.log('桌宠',
+          '被扔 ${pet.name} 方向=(${vx.toStringAsFixed(2)},${vy.toStringAsFixed(2)}) '
+          '距离=${pet.throwDistance.toStringAsFixed(2)} 目标=(${target.x.toStringAsFixed(2)},${target.y.toStringAsFixed(2)})');
+      pet.controlOwner = PetControlOwner.response;
+      _pendingThrow[pet.id] = true;
+      pet.moveTo(target, duration: dur, ease: PetMoveEase.linear);
+      _enqueueStateResponses(pet, PetStateIds.thrown, 'user');
+      _fireLinks(pet.id, PetStateIds.thrown);
+    } else {
+      pet.controlOwner = PetControlOwner.response;
+      _enqueueStateResponses(pet, PetStateIds.dropped, 'user');
+      _fireLinks(pet.id, PetStateIds.dropped);
+    }
+    _fireLinks(pet.id, PetStateIds.userRelease);
+  }
+
+  /// 归一化方向向量
+  (double, double) _normalize(double x, double y) {
+    final len = math.sqrt(x * x + y * y);
+    if (len < 0.0001) return (0, 0);
+    return (x / len, y / len);
+  }
+
+  /// 把某状态（含来源）的绑定响应排进队列（顺序播）
+  void _enqueueStateResponses(Pet pet, String stateId, String source) {
+    final binds = (_stateBindings[pet.id] ?? const [])
+        .where((b) =>
+            b.stateId == stateId &&
+            b.source == source &&
+            b.enabled &&
+            b.autoDetect &&
+            b.responseId != null)
+        .toList()
+      ..sort((a, b) => a.seq.compareTo(b.seq));
+    if (binds.isEmpty) return;
+    for (final b in binds) {
+      _respQueue
+          .putIfAbsent(pet.id, () => [])
+          .add(MapEntry(b.responseType, b.responseId!));
+    }
+    DebugLogger.log('桌宠',
+        '状态 ${PetStateIds.label(stateId)}($source) → ${binds.length} 个响应 ${pet.name}');
+  }
+
+  /// A 进入某状态/事件 → 所有观察者联动响应（没配置 = 无反应）
+  void _fireLinks(String targetId, String stateId) {
+    final links = _stateLinks['$targetId|$stateId'] ?? const [];
+    for (final l in links) {
+      final observer = petById(l.observerId);
+      if (observer == null) continue;
+      // 用户正在操作 / 在演互动组 → 不抢
+      if (observer.held || observer.controlOwner == PetControlOwner.user) {
+        continue;
+      }
+      if (observer._activity != null || observer._pair != null) continue;
+      if (l.responseType == PetResponseType.goto) {
+        _respQueue.putIfAbsent(observer.id, () => []).add(
+            MapEntry(PetResponseType.goto, l.responseId ?? targetId));
+      } else if (l.responseId != null) {
+        _respQueue
+            .putIfAbsent(observer.id, () => [])
+            .add(MapEntry(l.responseType, l.responseId!));
+      }
+    }
+  }
+
+  /// 播放一个响应项
+  void _playRespItem(Pet pet, MapEntry<String, String> item) {
+    final type = item.key, id = item.value;
+    switch (type) {
+      case PetResponseType.action:
+        playAction(pet.id, id);
+      case PetResponseType.activity:
+        runActivity(pet.id, id);
+      case PetResponseType.goto:
+        // 无视距离走到目标小人身边
+        final target = petById(id);
+        if (target != null) {
+          final dist = pet.position.distanceTo(target.position);
+          DebugLogger.log('桌宠',
+              '联动 ${pet.name} → 走到 ${target.name} 身边（${dist.toStringAsFixed(2)}）');
+          pet.moveTo(target.position,
+              duration: dist / 0.5, ease: PetMoveEase.linear);
+        }
+      default:
+        playAction(pet.id, id);
+    }
+  }
+
+  /// 每帧推进状态响应队列（顺序播完 → 恢复阶段）
+  void _tickStateResponses(Pet pet) {
+    // 抛射完成 → 落点检测（进入落点状态 → 响应）
+    if ((_pendingThrow[pet.id] ?? false) && !pet.moving) {
+      _pendingThrow[pet.id] = false;
+      final r = pet.detector.detectPosition(pet, source: 'user');
+      DebugLogger.log('桌宠',
+          '抛射落点 ${pet.name} → ${PetStateIds.label(r.stateId)}');
+      if (pet.detector.isEntered(r)) {
+        _enqueueStateResponses(pet, r.stateId, 'user');
+        _fireLinks(pet.id, r.stateId);
+      }
+    }
+    final q = _respQueue[pet.id] ?? const <MapEntry<String, String>>[];
+    if (q.isEmpty) {
+      if (_respActive[pet.id] ?? false) {
+        _respActive[pet.id] = false;
+        _finishResponsePhase(pet);
+      }
+      return;
+    }
+    if (!(_respActive[pet.id] ?? false)) {
+      _respActive[pet.id] = true;
+      pet.controlOwner = PetControlOwner.response;
+      _playRespItem(pet, q.first);
+      _respQueue[pet.id] = q.sublist(1);
+      return;
+    }
+    // 上一个响应播完（回 idle 且没在移动）→ 播下一个 / 收尾
+    if (pet.state == PetState.idle && !pet.moving) {
+      final rest = _respQueue[pet.id] ?? const <MapEntry<String, String>>[];
+      if (rest.isEmpty) {
+        _respActive[pet.id] = false;
+        _finishResponsePhase(pet);
+      } else {
+        _playRespItem(pet, rest.first);
+        _respQueue[pet.id] = rest.sublist(1);
+      }
+    }
+  }
+
+  /// 响应阶段结束：恢复互动组参与 / 恢复被暂停的移动 / 回待机
+  void _finishResponsePhase(Pet pet) {
+    pet.controlOwner = PetControlOwner.auto;
+    final suspended = pet.suspendedMove;
+    pet.suspendedMove = null;
+    if (suspended != null && !suspended.finished) {
+      final remaining = suspended.duration * (1 - suspended.progress);
+      if (remaining > 0.05) {
+        DebugLogger.log('桌宠',
+            '${pet.name} 恢复移动 剩余 ${remaining.toStringAsFixed(1)}s');
+        pet.moveTo(suspended.to,
+            duration: remaining,
+            ease: suspended.ease,
+            jumpHeight: suspended.jumpHeight);
+        return;
+      }
+    }
+    pet.playIdle(_resolveIdleFrames(pet), fps: 4);
+  }
+
   void _tickAutoAct(Pet pet, double dt) {
+    // 8-14 23:2x（控制权）：只有 auto 拥有者才自主行动；
+    // 用户操作（user/held）、状态响应（response）、互动组（interaction）都不抢
+    if (pet.controlOwner != PetControlOwner.auto) return;
+    if (pet.held) return;
     // 8-14 16:5x（用户：其他小人该干嘛干嘛）：只跳过正在演剧本的
     // 小人——互动组运行时没参与的小人照常自主行动
     final run = _groupRun;
@@ -1406,6 +1662,10 @@ class PetGroupRun {
     for (final slotStep in step.slotSteps) {
       final idx = _indexOfSlot(slotStep.slotId);
       if (idx < 0 || idx >= cast.length) continue;
+      // 8-14 23:2x：被用户抓住的演员跳过（互动组其他人照常演）
+      if (cast[idx].held || cast[idx].controlOwner == PetControlOwner.user) {
+        continue;
+      }
       final def = slotStep.actionId != null
           ? actionResolver(slotStep.actionId!)
           : null;
@@ -1421,6 +1681,10 @@ class PetGroupRun {
       final idx = _indexOfSlot(slotStep.slotId);
       if (idx < 0 || idx >= cast.length) continue;
       final pet = cast[idx];
+      // 8-14 23:2x：被用户抓住的演员跳过本步（松手后下步自动恢复）
+      if (pet.held || pet.controlOwner == PetControlOwner.user) {
+        continue;
+      }
       final def = slotStep.actionId != null
           ? actionResolver(slotStep.actionId!)
           : null;

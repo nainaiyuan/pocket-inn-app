@@ -343,11 +343,13 @@ class _PetChatOverlayState extends State<PetChatOverlay>
   void _onPetDrag(PetWorld world, Pet pet, DragUpdateDetails d, double w,
       double h) {
     if (w <= 0 || h <= 0) return;
-    // 互动组在演 → 提起来暂停（放下续播）
-    final groupRun = world.scene.groupRun;
-    if (groupRun != null && groupRun.cast.contains(pet)) {
-      world.scene.pauseGroup();
+    // 8-14 23:2x：记录松手瞬间的滑动方向（扔的方向）
+    // 只记最后几帧的位移（避免累计整段拖动方向）
+    if (d.delta.distance > 1) {
+      _lastPanDelta = d.delta;
     }
+    // 8-14 23:2x（用户：互动被抓只抓 A，B 没配就照常）：
+    // 不再整组暂停——互动组 update 已跳过 held 演员，其他人照常演
     if (pet.inDuo) {
       world.breakDuo(pet.id);
     }
@@ -366,18 +368,15 @@ class _PetChatOverlayState extends State<PetChatOverlay>
   }
 
   void _onPetDragEnd(PetWorld world, Pet pet) {
-    // 8-14 16:5x：只在拖的是互动组成员时才恢复互动组——
-    // 拖没参与互动组的小人，互动组状态一点不动（其他小人该干嘛干嘛）
-    final groupRun = world.scene.groupRun;
-    if (groupRun != null && groupRun.cast.contains(pet)) {
-      world.scene.resumeGroup();
-    }
+    // 8-14 23:2x：松手判定在 _onPetPanEnd 统一做（需要屏幕尺寸换算速度）
   }
 
   // ---------------- 8-14 16:1x：eager pan 自管理手势 ----------------
   bool _panMoved = false;
   bool _panLongPressHandled = false;
   Timer? _panLongPressTimer;
+  /// 8-14 23:2x：松手瞬间的滑动方向（扔的方向）
+  Offset _lastPanDelta = Offset.zero;
 
   /// 8-14 16:3x（用户：点一个小人，其他的所有手势锁定；没点的小人
   /// 自己玩自己的）：当前被触摸的小人 id——其他小人手势禁用（纯展示，
@@ -402,6 +401,11 @@ class _PetChatOverlayState extends State<PetChatOverlay>
   void _onPetPanUpdate(PetWorld world, Pet pet, DragUpdateDetails d, double w,
       double h) {
     if (d.delta.distance > 2) {
+      if (!_panMoved) {
+        // 8-14 23:2x（控制权）：第一次实际拖动 → 接管控制权
+        // （暂停自主行动/移动 + held 状态 + held 响应）
+        world.scene.beginUserControl(pet.id);
+      }
       _panMoved = true;
       _panLongPressTimer?.cancel();
     }
@@ -421,6 +425,15 @@ class _PetChatOverlayState extends State<PetChatOverlay>
     }
     if (!_panMoved) {
       _onPetTap(world, pet); // 没动 = 点击
+    } else {
+      // 8-14 23:2x（控制权）：松手 → 扔/放判定 + 事件响应 + 落点状态。
+      // 速度换算屏幕相对值（0.8 屏幕/秒 = 扔阈值）；方向 = 最后滑动方向
+      final delta = _lastPanDelta;
+      _lastPanDelta = Offset.zero;
+      final w = MediaQuery.of(context).size.width;
+      final relSpeed = delta.distance / (16 / 1000) / (w <= 0 ? 1 : w);
+      world.scene.endUserControl(pet.id,
+          speed: relSpeed, dx: delta.dx, dy: delta.dy);
     }
     _onPetDragEnd(world, pet);
   }
