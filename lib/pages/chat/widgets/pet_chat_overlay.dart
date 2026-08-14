@@ -294,9 +294,17 @@ class _PetChatOverlayState extends State<PetChatOverlay>
   bool _panLongPressHandled = false;
   Timer? _panLongPressTimer;
 
+  /// 8-14 16:3x（用户：点一个小人，其他的所有手势锁定；没点的小人
+  /// 自己玩自己的）：当前被触摸的小人 id——其他小人手势禁用（纯展示，
+  /// 自主行动动画照常），列表滚动已由 onDragStateChanged 锁。
+  String? _touchingPetId;
+
   void _onPetPanStart(PetWorld world, Pet pet) {
     _panMoved = false;
     _panLongPressHandled = false;
+    if (_touchingPetId != pet.id) {
+      setState(() => _touchingPetId = pet.id);
+    }
     widget.onDragStateChanged?.call(true);
     // 长按候选：500ms 内没移动 = 长按（摸摸头/调大小/去配置菜单）
     _panLongPressTimer?.cancel();
@@ -318,6 +326,9 @@ class _PetChatOverlayState extends State<PetChatOverlay>
 
   void _onPetPanEnd(PetWorld world, Pet pet) {
     _panLongPressTimer?.cancel();
+    if (_touchingPetId != null) {
+      setState(() => _touchingPetId = null);
+    }
     widget.onDragStateChanged?.call(false);
     if (_panLongPressHandled) {
       _panLongPressHandled = false;
@@ -331,6 +342,9 @@ class _PetChatOverlayState extends State<PetChatOverlay>
 
   void _onPetPanCancel() {
     _panLongPressTimer?.cancel();
+    if (_touchingPetId != null) {
+      setState(() => _touchingPetId = null);
+    }
     widget.onDragStateChanged?.call(false);
   }
 
@@ -392,29 +406,33 @@ class _PetChatOverlayState extends State<PetChatOverlay>
           // 触摸小人的瞬间立即在竞技场宣布胜利，ListView 滚动识别器
           // 直接出局，列表绝对不滚。点击/长按/拖动全部自管理
           // （eager pan 会吞掉 onTap/onLongPress，所以自己判定）。
-          child: RawGestureDetector(
-            gestures: {
-              _EagerPanRecognizer: GestureRecognizerFactoryWithHandlers<
-                  _EagerPanRecognizer>(
-                () => _EagerPanRecognizer(),
-                (r) {
-                  r.onStart = (_) {
-                    _onPetPanStart(world, pet);
-                  };
-                  r.onUpdate = (d) {
-                    _onPetPanUpdate(world, pet, d, w, h);
-                  };
-                  r.onEnd = (_) {
-                    _onPetPanEnd(world, pet);
-                  };
-                  r.onCancel = () {
-                    _onPetPanCancel();
-                  };
-                },
-              ),
-            },
-            child: PetFrameView(pet: pet, size: size),
-          ),
+          // 8-14 16:3x：全局手势锁——正在拖 A 时，B/C 不注册手势
+          // （纯展示 PetFrameView，自主行动动画照常，只是不能同时拖）。
+          child: (_touchingPetId != null && _touchingPetId != pet.id)
+              ? PetFrameView(pet: pet, size: size)
+              : RawGestureDetector(
+                  gestures: {
+                    _EagerPanRecognizer: GestureRecognizerFactoryWithHandlers<
+                        _EagerPanRecognizer>(
+                      () => _EagerPanRecognizer(),
+                      (r) {
+                        r.onStart = (_) {
+                          _onPetPanStart(world, pet);
+                        };
+                        r.onUpdate = (d) {
+                          _onPetPanUpdate(world, pet, d, w, h);
+                        };
+                        r.onEnd = (_) {
+                          _onPetPanEnd(world, pet);
+                        };
+                        r.onCancel = () {
+                          _onPetPanCancel();
+                        };
+                      },
+                    ),
+                  },
+                  child: PetFrameView(pet: pet, size: size),
+                ),
         ),
         if (_speeches[pet.id] != null)
           Positioned(
