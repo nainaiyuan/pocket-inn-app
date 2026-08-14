@@ -187,6 +187,17 @@ class _PetChatOverlayState extends State<PetChatOverlay>
                 _showScaleDialog(world, pet);
               },
             ),
+            // 8-14 16:5x（用户：单个动作不能测试吗？一定要多个组合？）：
+            // 长按 → 测试动作：列出该小人的动作（自己的+共享+内置），点播
+            ListTile(
+              leading: const Icon(Icons.play_circle_outline,
+                  color: Color(0xFFB0789A)),
+              title: const Text('测试动作', style: TextStyle(fontSize: 13.5)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showTestActionSheet(world, pet);
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.pets, color: Color(0xFFB0789A)),
               title: const Text('去配置桌宠', style: TextStyle(fontSize: 13.5)),
@@ -199,6 +210,91 @@ class _PetChatOverlayState extends State<PetChatOverlay>
               },
             ),
             const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 8-14 16:5x：测试单个动作（用户动作 + 内置动作，点播立即生效）
+  Future<void> _showTestActionSheet(PetWorld world, Pet pet) async {
+    final store = PetStore();
+    List<PetActionDef> mine = const [];
+    try {
+      final all = await store.allActions();
+      mine = all
+          .where((a) => a.profileId == pet.id || a.profileId == null)
+          .toList();
+    } catch (_) {}
+    final builtins = PetBuiltinActions.all
+        .where((a) => a.id != 'idle')
+        .toList();
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Text(
+              '测试动作 · ${pet.name}',
+              style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF6A4A5A)),
+            ),
+            const SizedBox(height: 4),
+            const Text('点一个立刻播放，移动动作会从起点走到目标',
+                style: TextStyle(fontSize: 11, color: Color(0xFFB0A0A6))),
+            const SizedBox(height: 8),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  if (mine.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Text('还没有自己的动作，去配置桌宠里新建',
+                          style: TextStyle(
+                              fontSize: 12, color: Color(0xFFB0A0A6))),
+                    ),
+                  for (final a in mine)
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.upload_file,
+                          size: 18, color: Color(0xFFB0789A)),
+                      title: Text(a.name,
+                          style: const TextStyle(fontSize: 13)),
+                      subtitle: const Text('我的动作',
+                          style: TextStyle(fontSize: 10)),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        world.playAction(pet.id, a.id);
+                      },
+                    ),
+                  const Divider(height: 1),
+                  for (final a in builtins)
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.auto_awesome,
+                          size: 18, color: Color(0xFFC0A0B0)),
+                      title: Text(a.name,
+                          style: const TextStyle(fontSize: 13)),
+                      subtitle: const Text('内置',
+                          style: TextStyle(fontSize: 10)),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        world.playAction(pet.id, a.id);
+                      },
+                    ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
