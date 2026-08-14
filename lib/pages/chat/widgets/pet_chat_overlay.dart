@@ -341,20 +341,29 @@ class _PetChatOverlayState extends State<PetChatOverlay>
           top: top,
           width: size,
           height: size,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => _onPetTap(world, pet),
-            onLongPress: () => _onPetLongPress(world, pet),
-            onPanStart: (_) => widget.onDragStateChanged?.call(true),
-            onPanUpdate: (d) => _onPetDrag(world, pet, d, w, h),
-            onPanEnd: (_) {
-              widget.onDragStateChanged?.call(false);
-              _onPetDragEnd(world, pet);
-            },
-            onPanCancel: () => widget.onDragStateChanged?.call(false),
-            child: PetFrameView(pet: pet, size: size),
+          // Listener 包一层：按下瞬间就锁列表滚动（不等手势判定）——
+          // 8-14 15:0x（用户：拖一下直接拖页面去了）：pointer down 立即
+          // 通知 chat_page 禁用 ListView 滚动，下一帧竞技场里 ListView
+          // 不注册 drag recognizer → 只有小人 pan 赢 → 拖小人不滚列表
+          child: Listener(
+            onPointerDown: (_) => widget.onDragStateChanged?.call(true),
+            onPointerUp: (_) => widget.onDragStateChanged?.call(false),
+            onPointerCancel: (_) => widget.onDragStateChanged?.call(false),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _onPetTap(world, pet),
+              onLongPress: () => _onPetLongPress(world, pet),
+              onPanStart: (_) => widget.onDragStateChanged?.call(true),
+              onPanUpdate: (d) => _onPetDrag(world, pet, d, w, h),
+              onPanEnd: (_) {
+                widget.onDragStateChanged?.call(false);
+                _onPetDragEnd(world, pet);
+              },
+              onPanCancel: () => widget.onDragStateChanged?.call(false),
+                child: PetFrameView(pet: pet, size: size),
+              ),
+            ),
           ),
-        ),
         if (_speeches[pet.id] != null)
           Positioned(
             left: left + size / 2 - 90,

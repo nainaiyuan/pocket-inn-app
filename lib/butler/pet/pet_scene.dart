@@ -785,16 +785,19 @@ class PetScene {
     for (final pet in _pets) {
       pet.update(dt);
     }
-    // idle 兜底：没在播任何东西的小人自动循环待机帧
-    // （8-14 13:5x 修复：playIdle 从未被调用 → 静止小人 _player==null
-    //   → currentFrame null → 渲染 SizedBox.shrink 完全不可见。
-    //   现在无动作播放时自动播占位 idle，小人永远可见）
+    // idle 兜底 + 自主行动（8-14 13:5x 修复 playIdle 从未被调用 → 隐形；
+    // 8-14 15:0x 扩展：用户反馈小人不会动/显示内置粉色小人——
+    // ① 空闲时随机自发做动作（养宠物自主性 MVP：随机触发"什么时候动"）
+    // ② idle 帧优先用用户上传的图，不再显示内置粉色小人）
     for (final pet in _pets) {
       if (pet._player == null &&
           pet._pair == null &&
           pet._activity == null &&
           !pet.moving) {
-        pet.playIdle(_resolveFramesSync('idle'), fps: 4);
+        _tickAutoAct(pet, dt);
+        if (pet._player == null) {
+          pet.playIdle(_resolveIdleFrames(), fps: 4);
+        }
       }
     }
     // 互动组编排推进（先让小人动，再算步骤计时）
@@ -1035,6 +1038,48 @@ class PetScene {
 
   /// 帧图缓存（UI 层预载入：扫描目录 → 存入）
   final Map<String, List<String>> _frameCache = {};
+
+  /// 自主行动倒计时（petId → 剩余秒）——8-14 15:0x：养宠物自主性
+  final Map<String, double> _autoActIn = {};
+  final math.Random _autoRand = math.Random();
+
+  /// 自主行动：空闲小人每隔随机时间自发做一个动作（用户动作优先），
+  /// 移动方式（上下/左右/方向+距离）由动作定义驱动，播完回 idle。
+  void _tickAutoAct(Pet pet, double dt) {
+    if (_groupRun != null) return; // 互动组在演时不抢戏
+    final left = (_autoActIn[pet.id] ?? 3.0) - dt;
+    if (left > 0) {
+      _autoActIn[pet.id] = left;
+      return;
+    }
+    _autoActIn[pet.id] = 8 + _autoRand.nextDouble() * 12;
+    final pool = _actionDefs.values
+        .where((d) =>
+            d.kind == PetActionKind.inPlace &&
+            d.frameDir != null &&
+            d.slotId == null)
+        .toList();
+    if (pool.isEmpty) return;
+    final def = pool[_autoRand.nextInt(pool.length)];
+    playAction(pet.id, def.id);
+  }
+
+  /// idle 帧解析：用户上传的动作帧优先（8-14 15:0x 用户反馈——
+  /// 聊天页显示内置粉色小人而不是自己的图），没有才用内置占位。
+  List<String> _resolveIdleFrames() {
+    List<String>? userFrames;
+    for (final e in _frameCache.entries) {
+      if (e.value.isEmpty) continue;
+      final def = _actionDefs[e.key];
+      if (def == null || def.frameDir == null) continue;
+      userFrames = e.value;
+      if (def.slotId == null) break; // 单人共享动作最优先
+    }
+    if (userFrames != null) return userFrames;
+    final def = _actionDefs['idle'];
+    if (def != null) return PetPlaceholderFrames.forAction(def);
+    return List.generate(4, (i) => 'placeholder:idle:$i:4');
+  }
 
   /// 预载入动作帧图（UI 层调用）
   Future<void> preloadFrames(String actionId) async {
