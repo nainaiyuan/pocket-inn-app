@@ -66,6 +66,13 @@ class PetWorld {
     // 组合/单动作/移动组都加载了（互动组 0 组 ≠ 单动作没加载）
     DebugLogger.log('桌宠',
         'restore 加载：组合 ${activities.length} / 单动作 ${actions.length} / 移动组 ${groups.length}');
+    // 8-14 19:5x（用户：默认小人显示新角色动作的图——串图排查）：
+    // 归属明细日志——每个动作的 id/profileId/slotId/名字，一眼看出
+    // 动作到底属于谁（profileId == pet.id 是 idle/自主行动的唯一过滤依据）
+    for (final a in actions) {
+      DebugLogger.log('桌宠',
+          '  动作 ${a.id} | 归属=${a.profileId} | 坑=${a.slotId} | ${a.name}');
+    }
   }
 
   /// 预载所有动作的帧图（扫描目录，自动数帧）
