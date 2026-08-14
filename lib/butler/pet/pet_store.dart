@@ -16,6 +16,7 @@ import 'package:sqflite/sqflite.dart';
 import '../storage/butler_store.dart';
 import 'pet_feed.dart';
 import 'pet_models.dart';
+import 'pet_timer.dart';
 import 'scene_director.dart';
 import 'scene_models.dart';
 
@@ -183,6 +184,16 @@ class PetStore extends ButlerStore
         binding_id TEXT NOT NULL
       )
     ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pet_timer_settings (
+        pet_id TEXT PRIMARY KEY,
+        mode TEXT DEFAULT 'countdown',
+        duration_sec INTEGER DEFAULT 1500,
+        reward_interval_sec INTEGER DEFAULT 60,
+        reward_amount INTEGER DEFAULT 1,
+        lines_json TEXT
+      )
+    ''');
     // 旧库迁移：补 visible 列（已存在会报错，忽略）
     try {
       await db.execute(
@@ -264,6 +275,17 @@ class PetStore extends ButlerStore
             seq INTEGER DEFAULT 0,
             label TEXT NOT NULL,
             target_node TEXT NOT NULL
+          )''');
+    } catch (_) {}
+    try {
+      await db.execute('''
+          CREATE TABLE IF NOT EXISTS pet_timer_settings (
+            pet_id TEXT PRIMARY KEY,
+            mode TEXT DEFAULT 'countdown',
+            duration_sec INTEGER DEFAULT 1500,
+            reward_interval_sec INTEGER DEFAULT 60,
+            reward_amount INTEGER DEFAULT 1,
+            lines_json TEXT
           )''');
     } catch (_) {}
     try {
@@ -991,5 +1013,34 @@ class PetStore extends ButlerStore
   Future<void> deleteHotspot(String hotspotId) async {
     await delete('pet_hotspots',
         where: 'hotspot_id = ?', whereArgs: [hotspotId]);
+  }
+
+  // ===== 8-15 04:1x 陪伴计时配置（pet_timer_settings） =====
+
+  Future<void> saveTimerSetting(PetTimerSetting s) async {
+    await insert('pet_timer_settings', {
+      'pet_id': s.petId,
+      'mode': s.mode.name,
+      'duration_sec': s.durationSec,
+      'reward_interval_sec': s.rewardIntervalSec,
+      'reward_amount': s.rewardAmount,
+      'lines_json': s.linesJson,
+    });
+  }
+
+  Future<PetTimerSetting?> timerSettingFor(String petId) async {
+    final rows = await query('pet_timer_settings',
+        where: 'pet_id = ?', whereArgs: [petId], limit: 1);
+    if (rows.isEmpty) return null;
+    final r = rows.first;
+    return PetTimerSetting(
+      petId: r['pet_id'] as String,
+      mode: PetTimerMode.fromName(r['mode'] as String?),
+      durationSec: (r['duration_sec'] as num?)?.toInt() ?? 1500,
+      rewardIntervalSec:
+          (r['reward_interval_sec'] as num?)?.toInt() ?? 60,
+      rewardAmount: (r['reward_amount'] as num?)?.toInt() ?? 1,
+      linesJson: r['lines_json'] as String?,
+    );
   }
 }

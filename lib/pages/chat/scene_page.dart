@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -8,6 +10,7 @@ import 'package:flutter/scheduler.dart';
 import '../../butler/pet/pet.dart';
 import '../../butler/pet/pet_bridge.dart';
 import '../../butler/pet/pet_models.dart';
+import '../../butler/pet/pet_timer.dart';
 import '../../butler/pet/pet_scene.dart';
 import '../../butler/pet/pet_store.dart';
 import '../../butler/pet/scene_director.dart';
@@ -18,6 +21,7 @@ import '../../services/pet_frame_source_impl.dart';
 import '../../utils/debug_logger.dart';
 import '../home/companion_page.dart' show PetFrameView;
 import 'services/ai_chat_service.dart';
+import '../../ai_provider/models.dart';
 import 'state/current_character_state.dart';
 
 /// 8-15 03:0x 全屏场景模式 P0：场景页（16 号冲刺安排）
@@ -39,7 +43,7 @@ class ScenePage extends StatefulWidget {
 }
 
 class _ScenePageState extends State<ScenePage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   PetWorld? _world;
   Ticker? _ticker;
   Duration _lastTick = Duration.zero;
@@ -66,9 +70,21 @@ class _ScenePageState extends State<ScenePage>
   bool _aiBusy = false;
   String? _aiError;
 
+  // ---- 陪伴计时（8-15 P1/P2：正/倒计时 + 循环演出 + 奖励） ----
+  PetTimerSession? _timer;
+  bool _timerMode = false;
+  int _timerSecAcc = 0; // 累计秒（ticker 驱动）
+  int _loopActAcc = 0; // 循环动作累计秒
+  String? _speech; // 角色气泡
+  Timer? _speechTimer;
+  String? _toast; // 全局提示（好感度等）
+  Timer? _toastTimer;
+  bool _timerToastDone = false; // 完成 toast 只弹一次
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _init();
   }
 
@@ -80,9 +96,12 @@ class _ScenePageState extends State<ScenePage>
     if (identical(PetBridge.instance.world, _world)) {
       PetBridge.instance.detach();
     }
+    WidgetsBinding.instance.removeObserver(this);
     _ticker?.dispose();
     _director?.stop();
     _inputCtrl.dispose();
+    _speechTimer?.cancel();
+    _toastTimer?.cancel();
     super.dispose();
   }
 
@@ -123,6 +142,23 @@ class _ScenePageState extends State<ScenePage>
       ..attach(world)
       ..onCardShow = _onAiCard;
 
+    // 陪伴计时配置（无配置用默认：倒计时 25 分钟/每 60s +1）
+    final mainPet = world.scene.pets.isNotEmpty ? world.scene.pets.first : null;
+    if (mainPet != null) {
+      final setting =
+          await store.timerSettingFor(mainPet.id) ?? const PetTimerSetting(petId: '');
+      _timer = PetTimerSession(
+        mode: setting.mode,
+        durationSec: setting.durationSec,
+        rewardIntervalSec: setting.rewardIntervalSec,
+        rewardAmount: setting.rewardAmount,
+        lines: setting.lines,
+      );
+      DebugLogger.log('桌宠', '陪伴计时配置：${setting.mode.name} '
+          '${setting.durationSec}s 奖励每${setting.rewardIntervalSec}s+${setting.rewardAmount} '
+          '话术${setting.lines.length}条');
+    }
+
     DebugLogger.log('桌宠',
         '场景页加载：${scene.name} | 热点 ${hotspots.length} | 角色 ${world.scene.pets.length}');
     if (!mounted) return;
@@ -145,6 +181,7 @@ class _ScenePageState extends State<ScenePage>
     _lastTick = elapsed;
     world.scene.update(dt);
     _checkAreaTriggers(world);
+    _tickTimer();
     if (mounted) setState(() {});
   }
 
@@ -199,6 +236,201 @@ class _ScenePageState extends State<ScenePage>
       _cardChoices = const [];
       _showCard = true;
     });
+  }
+
+  // ===== 陪伴计时（8-15 P1/P2） =====
+
+  /// 分心感知：切后台/离开 → 暂停计时 + AI 主动说话拉回用户
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused &&
+        _timerMode &&
+        (_timer?.running ?? false)) {
+      DebugLogger.log('桌宠', '用户分心（切后台）→ 暂停计时 + AI 拉回');
+      _timer?.pause();
+      _onDistracted();
+    }
+  }
+
+  Future<void> _onDistracted() async {
+    final pid = _state.personaId;
+    if (pid == null || pid.isEmpty) {
+      _speak('怎么走了？我在这等你。');
+      return;
+    }
+    try {
+      final result = await _aiSvc.generateReply(
+        '',
+        pid,
+        personaName: _state.personaName ?? '角色',
+        personaPrompt: _state.persona?.prompt ?? '',
+        sessionId: 'scene_${widget.sceneId}',
+        systemEvent: '用户刚才走开了/切走了（陪伴计时中分心）。'
+            '说一句温柔的话把她拉回来，可以配一个小动作（pet_action）。',
+      );
+      if (!mounted) return;
+      await _applyAiResult(result);
+    } catch (e) {
+      DebugLogger.log('桌宠', '分心 AI 说话失败，降级预设话术: $e');
+      _speak('怎么走了？我在这等你。');
+    }
+  }
+
+  /// 切换正/倒计时（重置 + 持久化）
+  void _switchTimerMode() {
+    final t = _timer;
+    if (t == null) return;
+    setState(() {
+      t.mode = t.mode == PetTimerMode.countdown
+          ? PetTimerMode.countup
+          : PetTimerMode.countdown;
+      t.reset();
+      _timerSecAcc = 0;
+      _loopActAcc = 0;
+      _timerToastDone = false;
+    });
+    _saveTimerConfig();
+    _speak(t.mode == PetTimerMode.countdown ? '换成倒计时啦。' : '换成正计时啦。');
+  }
+
+  /// 持久化计时配置（模式/时长/奖励/话术）
+  Future<void> _saveTimerConfig() async {
+    final t = _timer;
+    final world = _world;
+    if (t == null || world == null || world.scene.pets.isEmpty) return;
+    try {
+      await PetStore().saveTimerSetting(PetTimerSetting(
+        petId: world.scene.pets.first.id,
+        mode: t.mode,
+        durationSec: t.durationSec,
+        rewardIntervalSec: t.rewardIntervalSec,
+        rewardAmount: t.rewardAmount,
+        linesJson: t.lines.isEmpty ? null : jsonEncode(t.lines),
+      ));
+    } catch (e) {
+      DebugLogger.log('桌宠', '保存计时配置失败: $e');
+    }
+  }
+
+  void _tickTimer() {
+    final timer = _timer;
+    if (timer == null || !_timerMode) return;
+    _timerSecAcc++;
+    if (_timerSecAcc < 1) return;
+    // 每秒推进一次（ticker 帧率 60，用累计秒做节流）
+    if (!timer.running) return;
+    final events = timer.tick();
+    for (final e in events) {
+      _onTimerEvent(e);
+    }
+    // 计时中角色循环演出：每 8~12 秒随机播一个动作
+    _loopActAcc++;
+    if (_loopActAcc >= 8 + (_timerSecAcc % 5)) {
+      _loopActAcc = 0;
+      _playRandomAct();
+    }
+  }
+
+  void _onTimerEvent(PetTimerEvent e) {
+    final world = _world;
+    switch (e.type) {
+      case PetTimerEventType.reward:
+        // 好感度奖励
+        if (world != null && world.scene.pets.isNotEmpty) {
+          final petId = world.scene.pets.first.id;
+          world.feedSystem.store.addAffection(petId, e.amount);
+        }
+        _showToast('陪伴 +${e.amount} ❤');
+        _speak('谢谢你陪我这么久。');
+        break;
+      case PetTimerEventType.line:
+        if (e.text != null && e.text!.isNotEmpty) {
+          _speak(e.text!);
+        }
+        break;
+      case PetTimerEventType.completed:
+        if (world != null && world.scene.pets.isNotEmpty) {
+          final petId = world.scene.pets.first.id;
+          world.feedSystem.store.addAffection(petId, 5);
+        }
+        if (!_timerToastDone) {
+          _timerToastDone = true;
+          _showToast('陪伴完成！好感 +5 ❤❤');
+        }
+        _speak('时间到了，谢谢你陪我。今天也辛苦了。');
+        _playRandomAct();
+        break;
+    }
+  }
+
+  /// 随机播一个动作（计时中循环演出 / 点击互动）
+  void _playRandomAct() {
+    final world = _world;
+    if (world == null || world.scene.pets.isEmpty) return;
+    const acts = ['happy', 'wave', 'spin', 'jump'];
+    final act = acts[Random().nextInt(acts.length)];
+    world.scene.playAction(world.scene.pets.first.id, act);
+  }
+
+  /// 角色气泡说话（自动消失）
+  void _speak(String text) {
+    setState(() => _speech = text);
+    _speechTimer?.cancel();
+    _speechTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _speech = null);
+    });
+  }
+
+  void _showToast(String text) {
+    setState(() => _toast = text);
+    _toastTimer?.cancel();
+    _toastTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _toast = null);
+    });
+  }
+
+  void _toggleTimerMode() {
+    setState(() => _timerMode = !_timerMode);
+    if (_timerMode) {
+      _timerSecAcc = 0;
+      _loopActAcc = 0;
+      _speak('我会一直陪着你的。');
+    } else {
+      _timer?.pause();
+    }
+  }
+
+  void _startTimer() {
+    _timerSecAcc = 0;
+    _timerToastDone = false;
+    _timer?.start();
+    _speak('开始啦，专心做事，我陪你。');
+  }
+
+  void _pauseTimer() {
+    _timer?.pause();
+    _speak('休息一下也好。');
+  }
+
+  void _resetTimer() {
+    _timer?.reset();
+    _timerSecAcc = 0;
+    _loopActAcc = 0;
+    _timerToastDone = false;
+  }
+
+  /// 点角色互动：计时中播随机动作 + 说一句（预设/默认）
+  void _onPetTap() {
+    _playRandomAct();
+    final timer = _timer;
+    if (timer != null && _timerMode && timer.running) {
+      final pool = timer.lines.isNotEmpty ? timer.lines : timer.defaultLines;
+      if (pool.isNotEmpty) {
+        _speak(pool[Random().nextInt(pool.length)]);
+      }
+    } else {
+      _speak('嗯？我在呢。');
+    }
   }
 
   /// area 热点：角色进入矩形区域自动触发（enter；离开重置可再触发）
@@ -339,36 +571,9 @@ class _ScenePageState extends State<ScenePage>
             'choices（选项卡片，如 "推开他|抱住他"，等用户选）。'
             '说话直接显示在卡片上。',
       );
-      var textOut = result.text.trim();
-      // 工具直执行（单轮）：原生 toolCalls + 文本块 ⟨工具:⟩ 都收
-      final calls = result.toolCalls ?? ToolIntentParser.extract(result.text);
-      if (calls != null && calls.isNotEmpty) {
-        final outs = <String>[];
-        for (final c in calls) {
-          final name = c['name']?.toString() ?? '';
-          final tool = ButlerToolRegistry.instance.get(name);
-          if (tool == null) continue;
-          try {
-            final args = c['arguments'];
-            final out = await tool.call(
-                args is Map ? Map<String, dynamic>.from(args) : {});
-            outs.add(out);
-            DebugLogger.log('桌宠', '场景 AI 工具 $name → $out');
-          } catch (e) {
-            outs.add('工具 $name 执行失败: $e');
-          }
-        }
-        if (outs.isNotEmpty) {
-          textOut = textOut.isEmpty
-              ? '[演出] ${outs.join('；')}'
-              : '$textOut\n\n[演出] ${outs.join('；')}';
-        }
-      }
+      await _applyAiResult(result);
       if (!mounted) return;
-      setState(() {
-        _cardText = textOut.isEmpty ? '（男主没有回应）' : textOut;
-        _aiBusy = false;
-      });
+      setState(() => _aiBusy = false);
     } catch (e) {
       DebugLogger.log('桌宠', '场景 AI 对话失败: $e');
       if (!mounted) return;
@@ -377,6 +582,42 @@ class _ScenePageState extends State<ScenePage>
         _aiError = '对话失败：$e';
       });
     }
+  }
+
+  /// 应用 AI 结果：文本上卡片 + 工具（pet_action 演出指令）直执行
+  Future<void> _applyAiResult(AIProviderResult result) async {
+    var textOut = result.text.trim();
+    // 工具直执行（单轮）：原生 toolCalls + 文本块 ⟨工具:⟩ 都收
+    final calls = result.toolCalls ?? ToolIntentParser.extract(result.text);
+    if (calls != null && calls.isNotEmpty) {
+      final outs = <String>[];
+      for (final c in calls) {
+        final name = c['name']?.toString() ?? '';
+        final tool = ButlerToolRegistry.instance.get(name);
+        if (tool == null) continue;
+        try {
+          final args = c['arguments'];
+          final out = await tool.call(
+              args is Map ? Map<String, dynamic>.from(args) : {});
+          outs.add(out);
+          DebugLogger.log('桌宠', '场景 AI 工具 $name → $out');
+        } catch (e) {
+          outs.add('工具 $name 执行失败: $e');
+        }
+      }
+      if (outs.isNotEmpty) {
+        textOut = textOut.isEmpty
+            ? '[演出] ${outs.join('；')}'
+            : '$textOut\n\n[演出] ${outs.join('；')}';
+      }
+    }
+    setState(() {
+      _cardText = textOut.isEmpty ? '（男主没有回应）' : textOut;
+      _cardChoices = const [];
+      _showCard = true;
+      _cardDone = false;
+      _aiCard = false;
+    });
   }
 
   /// AI 演出卡片（男主用 pet_action choices 参数弹的选项）
@@ -435,23 +676,66 @@ class _ScenePageState extends State<ScenePage>
               ),
             ),
           ),
-          // 返回按钮
+          // 顶部按钮：返回 + 陪伴计时
           SafeArea(
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: IconButton.filled(
-                  style: IconButton.styleFrom(
-                    backgroundColor: const Color(0xCCB0789A),
-                    foregroundColor: Colors.white,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton.filled(
+                    style: IconButton.styleFrom(
+                      backgroundColor: const Color(0xCCB0789A),
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: () => Navigator.of(context).maybePop(),
                   ),
-                  icon: const Icon(Icons.arrow_back),
-                  onPressed: () => Navigator.of(context).maybePop(),
-                ),
+                  if (_timer != null)
+                    IconButton.filled(
+                      style: IconButton.styleFrom(
+                        backgroundColor: _timerMode
+                            ? const Color(0xCCD08A6A)
+                            : const Color(0xCCB0789A),
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: Icon(
+                          _timerMode ? Icons.timer_off : Icons.timer_outlined),
+                      tooltip: '陪伴计时',
+                      onPressed: _toggleTimerMode,
+                    ),
+                ],
               ),
             ),
           ),
+          // 陪伴计时覆盖层
+          if (_timerMode && _timer != null) _buildTimerOverlay(),
+          // 全局提示（好感度等）
+          if (_toast != null)
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 60),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xE6FDF6F9),
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: const [
+                        BoxShadow(color: Color(0x22B0789A), blurRadius: 8),
+                      ],
+                    ),
+                    child: Text(
+                      _toast!,
+                      style: const TextStyle(
+                          fontSize: 14, color: Color(0xFFB0789A)),
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -537,31 +821,65 @@ class _ScenePageState extends State<ScenePage>
           const baseSize = 150.0; // 全屏场景：小人放大
           return Stack(
             clipBehavior: Clip.none,
-            children: world.scene.pets.map((pet) {
-              final size = (baseSize * pet.scale).clamp(60.0, 320.0);
-              final left = pet.position.x * w - size / 2;
-              final top = pet.position.y * h - size / 2;
-              return Positioned(
-                left: left,
-                top: top,
-                width: size,
-                height: size,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onPanUpdate: (d) {
-                    // 8-15 P1：场景页角色可拖动（0~1 坐标），
-                    // 松手落道具上 = 投喂
-                    pet.position = PetPoint(
-                      (pet.position.x + d.delta.dx / w).clamp(0.0, 1.0),
-                      (pet.position.y + d.delta.dy / h).clamp(0.0, 1.0),
-                    );
-                    pet.stopMoving();
-                  },
-                  onPanEnd: (_) => _checkDrop(world, pet),
-                  child: PetFrameView(pet: pet, size: size),
-                ),
-              );
-            }).toList(),
+            children: [
+              for (final pet in world.scene.pets) ...[
+                () {
+                  final size = (baseSize * pet.scale).clamp(60.0, 320.0);
+                  final left = pet.position.x * w - size / 2;
+                  final top = pet.position.y * h - size / 2;
+                  return Positioned(
+                    left: left,
+                    top: top,
+                    width: size,
+                    height: size,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: _onPetTap,
+                      onPanUpdate: (d) {
+                        // 8-15 P1：场景页角色可拖动（0~1 坐标），
+                        // 松手落道具上 = 投喂
+                        pet.position = PetPoint(
+                          (pet.position.x + d.delta.dx / w).clamp(0.0, 1.0),
+                          (pet.position.y + d.delta.dy / h).clamp(0.0, 1.0),
+                        );
+                        pet.stopMoving();
+                      },
+                      onPanEnd: (_) => _checkDrop(world, pet),
+                      child: PetFrameView(pet: pet, size: size),
+                    ),
+                  );
+                }(),
+                // 角色气泡（陪伴计时说话）
+                if (_speech != null && pet.id == world.scene.pets.first.id)
+                  Positioned(
+                    left: pet.position.x * w - 60,
+                    top: pet.position.y * h - 46,
+                    width: 120,
+                    child: IgnorePointer(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xF2FDF6F9),
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: const [
+                            BoxShadow(
+                                color: Color(0x22B0789A), blurRadius: 6),
+                          ],
+                        ),
+                        child: Text(
+                          _speech!,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 12, color: Color(0xFF5A4049)),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ],
           );
         }),
       ),
@@ -622,6 +940,113 @@ class _ScenePageState extends State<ScenePage>
                 ),
               ],
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 陪伴计时覆盖层：大数字 + 进度条 + 控制按钮
+  Widget _buildTimerOverlay() {
+    final timer = _timer!;
+    final mm = (timer.displaySec ~/ 60).toString().padLeft(2, '0');
+    final ss = (timer.displaySec % 60).toString().padLeft(2, '0');
+    final modeLabel = timer.mode == PetTimerMode.countdown ? '倒计时' : '正计时';
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: 0,
+      child: IgnorePointer(
+        ignoring: true,
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                const Color(0x33B0789A),
+                Colors.transparent,
+                const Color(0x22B0789A),
+              ],
+            ),
+          ),
+          child: SafeArea(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 52),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xE6FDF6F9),
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: const [
+                      BoxShadow(color: Color(0x33B0789A), blurRadius: 12),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('$modeLabel · 陪伴中',
+                          style: const TextStyle(
+                              fontSize: 12, color: Color(0xFF9A7B8C))),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$mm:$ss',
+                        style: const TextStyle(
+                          fontSize: 44,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF5A4049),
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: timer.progress,
+                          minHeight: 6,
+                          backgroundColor: const Color(0x33B0789A),
+                          valueColor: const AlwaysStoppedAnimation(
+                              Color(0xFFB0789A)),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (timer.running)
+                            IconButton(
+                              icon: const Icon(Icons.pause_circle,
+                                  color: Color(0xFFB0789A), size: 30),
+                              onPressed: _pauseTimer,
+                            )
+                          else
+                            IconButton(
+                              icon: const Icon(Icons.play_circle,
+                                  color: Color(0xFFB0789A), size: 30),
+                              onPressed: _startTimer,
+                            ),
+                          IconButton(
+                            icon: const Icon(Icons.refresh,
+                                color: Color(0xFF9A7B8C), size: 24),
+                            onPressed: _resetTimer,
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.swap_horiz,
+                                color: Color(0xFF9A7B8C), size: 24),
+                            tooltip: '正/倒计时切换',
+                            onPressed: _switchTimerMode,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),
