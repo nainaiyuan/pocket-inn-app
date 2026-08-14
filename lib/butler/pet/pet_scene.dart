@@ -876,8 +876,9 @@ class PetScene {
           pet.state == PetState.idle) {
         _tickAutoAct(pet, dt);
         if (pet._player == null &&
-            !pet.held &&
-            pet.controlOwner == PetControlOwner.auto) {
+            pet.controlOwner != PetControlOwner.response) {
+          // 8-15 00:5x（用户：扔出去就消失看不见）：held/飞行期间
+          // _player==null 会导致小人不可见——统一播待机帧兜底
           pet.playIdle(_resolveIdleFrames(pet), fps: 4);
         }
       }
@@ -1217,11 +1218,11 @@ class PetScene {
     if (pet == null) return;
     pet.held = false;
     _enqueueStateResponses(pet, PetStateIds.userRelease, 'user');
-    // 判定扔/放：快速滑动必扔；慢速但手滑方向明确也算扔（用户配置距离）
-    final hasDir = dx != 0 || dy != 0;
-    final isThrow = speed >= PetStateDetector.throwSpeedThreshold || hasDir;
+    // 判定扔/放（8-15 00:5x 用户：我只是想挪动它——慢速拖动=放下）：
+    // 只看松手速度——快速甩 = 扔，慢速挪 = 原地放下
+    final isThrow = speed >= PetStateDetector.throwSpeedThreshold;
     if (isThrow) {
-      final (vx, vy) = hasDir
+      final (vx, vy) = (dx != 0 || dy != 0)
           ? _normalize(dx, dy)
           : PetMoveDir.left.vector;
       final target = pet.clampToArea(PetPoint(
@@ -1360,6 +1361,8 @@ class PetScene {
 
   /// 响应阶段结束：恢复互动组参与 / 恢复被暂停的移动 / 回待机
   void _finishResponsePhase(Pet pet) {
+    // 8-15 00:5x：用户还抓着（held）→ 控制权保持 user，不结束
+    if (pet.held) return;
     pet.controlOwner = PetControlOwner.auto;
     final suspended = pet.suspendedMove;
     pet.suspendedMove = null;
