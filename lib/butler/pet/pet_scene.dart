@@ -1046,7 +1046,10 @@ class PetScene {
   /// 自主行动：空闲小人每隔随机时间自发做一个动作（用户动作优先），
   /// 移动方式（上下/左右/方向+距离）由动作定义驱动，播完回 idle。
   void _tickAutoAct(Pet pet, double dt) {
-    if (_groupRun != null) return; // 互动组在演时不抢戏
+    // 8-14 16:5x（用户：其他小人该干嘛干嘛）：只跳过正在演剧本的
+    // 小人——互动组运行时没参与的小人照常自主行动
+    final run = _groupRun;
+    if (run != null && run.cast.contains(pet)) return;
     final left = (_autoActIn[pet.id] ?? 3.0) - dt;
     if (left > 0) {
       _autoActIn[pet.id] = left;

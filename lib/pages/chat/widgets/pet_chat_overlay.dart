@@ -286,7 +286,12 @@ class _PetChatOverlayState extends State<PetChatOverlay>
   }
 
   void _onPetDragEnd(PetWorld world, Pet pet) {
-    world.scene.resumeGroup();
+    // 8-14 16:5x：只在拖的是互动组成员时才恢复互动组——
+    // 拖没参与互动组的小人，互动组状态一点不动（其他小人该干嘛干嘛）
+    final groupRun = world.scene.groupRun;
+    if (groupRun != null && groupRun.cast.contains(pet)) {
+      world.scene.resumeGroup();
+    }
   }
 
   // ---------------- 8-14 16:1x：eager pan 自管理手势 ----------------
