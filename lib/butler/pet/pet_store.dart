@@ -322,8 +322,14 @@ class PetStore extends ButlerStore implements PetAffectionStore {
       'speed_tier': def.speedTier.name,
       'move_group_id': def.moveGroupId,
       'duration_seconds': def.durationSeconds,
+      // 8-14 18:4x（根因修复）：单人动作也写归属——profile_id=属于哪个角色、
+      // slot_id=属于哪个互动组坑（普通动作 null，合法）。
+      // 之前漏写 → 库里全 NULL → 测试列表/自主行动/idle 帧全被过滤掉
+      'slot_id': def.slotId,
+      'profile_id': def.profileId,
     };
     try {
+      // ButlerStore.insert 内置 replace：新建插入，编辑同 id 覆盖
       await insert('pet_actions', row);
     } on DatabaseException {
       // 自愈兜底：老库可能缺新列（升级路径没补上），补一次表结构再重试
@@ -350,6 +356,7 @@ class PetStore extends ButlerStore implements PetAffectionStore {
         loop: PetAnimLoop.values.byName(r['loop'] as String? ?? 'loop'),
         frameDir: r['frame_dir'] as String?,
         profileId: r['profile_id'] as String?,
+        slotId: r['slot_id'] as String?,
         frameCount: r['frame_count'] as int? ?? 0,
         moveAnimId: r['move_anim_id'] as String? ?? 'walk',
         targetSpot: r['target_spot'] != null
