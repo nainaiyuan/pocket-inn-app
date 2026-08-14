@@ -168,6 +168,12 @@ class _MoveTargetEditorState extends State<MoveTargetEditor> {
       );
       _usedDir = false;
       _dir = _inferDir(_target);
+      // 8-14 20:4x（用户：目标球必须相对灰球绑定——"你要把两个绑起来"）：
+      // 点地图选目标 = 目标相对起点锚点的距离，保存的方向+距离与
+      // 看到的目标球位置一致（之前只更新方向，距离还是旧值 0.3）
+      final dx = _target.x - widget.anchor.x;
+      final dy = _target.y - widget.anchor.y;
+      _dist = math.sqrt(dx * dx + dy * dy);
     });
     _emit();
   }
