@@ -6,6 +6,7 @@
 library;
 
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -73,6 +74,30 @@ class FilePetFrameSource implements PetFrameSource {
       final target =
           p.join(cacheDir.path, '${i.toString().padLeft(3, '0')}_${p.basename(src)}');
       await File(src).copy(target);
+      out.add(target);
+    }
+    return out;
+  }
+
+  /// 内存字节落盘到 `__pick_cache`（预览用稳定路径）。
+  ///
+  /// 8-14 14:0x：withData 选图后 bytes 在内存（保存时直写动作目录），
+  /// 但预览需要真实文件路径——把 bytes 立即写进私有目录，路径稳定、
+  /// 不依赖系统临时文件。每次调用清空上次暂存。
+  static Future<List<String>> stagePickedBytes(
+      List<Uint8List> bytes, List<String> names) async {
+    final root = await rootPath();
+    final cacheDir = Directory(p.join(root, '__pick_cache'));
+    if (await cacheDir.exists()) {
+      await cacheDir.delete(recursive: true);
+    }
+    await cacheDir.create(recursive: true);
+    final out = <String>[];
+    for (var i = 0; i < bytes.length; i++) {
+      final name = i < names.length ? names[i] : 'frame_$i.jpg';
+      final target = p.join(
+          cacheDir.path, '${i.toString().padLeft(3, '0')}_${p.basename(name)}');
+      await File(target).writeAsBytes(bytes[i]);
       out.add(target);
     }
     return out;

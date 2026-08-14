@@ -1282,15 +1282,19 @@ class _SlotActionDialogState extends State<_SlotActionDialog> {
         withData: true, // 图片字节直接进内存，不依赖临时文件
       );
       if (result != null && result.files.isNotEmpty) {
+        // 8-14 14:0x 修正：bytes 进内存（保存用）+ 同时落盘 __pick_cache
+        // （预览用稳定路径）。之前 _files 直接存 file_picker cache 路径，
+        // 又被 cleanupFilePickerCache 删掉 → 预览图全灰。
+        final bytes = result.files.map((f) => f.bytes ?? Uint8List(0)).toList();
+        final staged = await FilePetFrameSource.stagePickedBytes(bytes,
+            result.files.map((f) => f.name).toList());
+        // 清掉 file_picker 留在系统 cache 的副本（防相册堆积）
+        FilePetFrameSource.cleanupFilePickerCache();
+        if (!mounted) return;
         setState(() {
-          _files = result.files
-              .map((f) => f.path ?? '')
-              .where((e) => e.isNotEmpty)
-              .toList();
-          _bytes = result.files.map((f) => f.bytes ?? Uint8List(0)).toList();
+          _files = staged;
+          _bytes = bytes;
           _repicked = true;
-          // 清掉 file_picker 留在系统 cache 的副本（防相册堆积）
-          FilePetFrameSource.cleanupFilePickerCache();
           // 自动算秒数：帧数 / 10fps
           if (_files.isNotEmpty) {
             _secondsCtrl.text = (_files.length / 10).toStringAsFixed(1);

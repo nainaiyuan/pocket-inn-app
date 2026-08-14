@@ -785,6 +785,18 @@ class PetScene {
     for (final pet in _pets) {
       pet.update(dt);
     }
+    // idle 兜底：没在播任何东西的小人自动循环待机帧
+    // （8-14 13:5x 修复：playIdle 从未被调用 → 静止小人 _player==null
+    //   → currentFrame null → 渲染 SizedBox.shrink 完全不可见。
+    //   现在无动作播放时自动播占位 idle，小人永远可见）
+    for (final pet in _pets) {
+      if (pet._player == null &&
+          pet._pair == null &&
+          pet._activity == null &&
+          !pet.moving) {
+        pet.playIdle(_resolveFramesSync('idle'), fps: 4);
+      }
+    }
     // 互动组编排推进（先让小人动，再算步骤计时）
     final run = _groupRun;
     if (run != null) {
