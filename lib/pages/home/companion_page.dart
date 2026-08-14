@@ -138,6 +138,13 @@ class _CompanionPageState extends State<CompanionPage>
   void _onTick(Duration elapsed) {
     final world = _world;
     if (world == null) return;
+    // 8-15 P1：全屏场景页开着时不得抢回 attach（场景页 attach 了
+    // 自己的世界，AI 演出指令要直达场景页）；从场景页返回后自动
+    // 重新 attach 本页世界（attach 幂等：pending 空时无副作用）
+    if (!PetBridge.instance.sceneActive &&
+        !identical(PetBridge.instance.world, world)) {
+      PetBridge.instance.attach(world);
+    }
     final dt = _lastTick == Duration.zero
         ? 1 / 60
         : (elapsed - _lastTick).inMicroseconds / 1e6;
@@ -387,6 +394,12 @@ class _CompanionPageState extends State<CompanionPage>
         content: '{"text":"星星：开饭啦~","action":"jump"}',
         targetNode: 'E'));
       await store.saveNode(const sm.PetNode(
+        nodeId: 'A2', sceneId: sceneId, seq: 0,
+        type: sm.PetNodeType.fixed, continueType: sm.PetContinueType.auto,
+        waitUser: false,
+        content: '{"text":"星星：给我的礼物？谢谢~","action":"happy"}',
+        targetNode: 'B'));
+      await store.saveNode(const sm.PetNode(
         nodeId: 'E', sceneId: sceneId, seq: 4,
         type: sm.PetNodeType.end));
       await store.saveChoice(const sm.PetChoice(
@@ -403,6 +416,12 @@ class _CompanionPageState extends State<CompanionPage>
         type: sm.PetHotspotType.point, trigger: sm.PetHotspotTrigger.click,
         x: 0.5, y: 0.35, w: 0.12, h: 0.12,
         bindingType: 'node', bindingId: 'A'));
+      // 投喂闭环：道具 🎁（0.82, 0.68）——把小人拖上去松手触发
+      await store.saveHotspot(const sm.PetHotspot(
+        hotspotId: 'h2', sceneId: sceneId,
+        type: sm.PetHotspotType.item, trigger: sm.PetHotspotTrigger.drop,
+        x: 0.82, y: 0.68, w: 0.14, h: 0.14,
+        bindingType: 'node', bindingId: 'A2'));
       DebugLogger.log('桌宠', '演示场景创建完成：$sceneId');
       return sceneId;
     } catch (e) {
