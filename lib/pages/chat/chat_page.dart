@@ -264,6 +264,11 @@ class _ChatPageState extends State<ChatPage>
 
   void _onDown(PointerDownEvent e) {
     if (_showPlus) return;
+    // 8-14 16:4x（用户：左右滑小人还是会切页）：拖小人时切页手势
+    // 完全不参与——eager pan 只在手势竞技场里赢，拦不住 Listener
+    // 的原始指针监听，必须在这里直接拦截（pointerId 不记录，
+    // 后续 _onMove/_onUp 因 pointer 不匹配全部失效）
+    if (_petDragging) return;
     // 安全兜底：如果 _pointerId 已经被释放但状态残留，直接重置
     if (_pointerId >= 0 && _pointerId != e.pointer) {
       _pointerId = -1;
@@ -289,6 +294,7 @@ class _ChatPageState extends State<ChatPage>
 
   void _onMove(PointerMoveEvent e) {
     if (_showPlus) return;
+    if (_petDragging) return;
     if (e.pointer != _pointerId) return;
 
     final dx = e.position.dx - _startX;
@@ -337,6 +343,7 @@ class _ChatPageState extends State<ChatPage>
 
   void _onUp(PointerUpEvent e) {
     if (_showPlus) return;
+    if (_petDragging) return;
     if (_pointerId != e.pointer) return;
     _pointerId = -1;
 
