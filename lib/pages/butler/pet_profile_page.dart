@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -594,6 +595,8 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
   final _nameController = TextEditingController();
   final _secondsController = TextEditingController(text: '1');
   List<String>? _files;
+  // 8-14 13:3x 终极修复：图片字节进内存，保存时从内存写文件
+  List<Uint8List> _bytes = [];
 
   // 播的时候怎么动
   _HowMove _howMove = _HowMove.none;
@@ -658,21 +661,17 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.image,
       allowMultiple: true,
+      withData: true, // 图片字节直接进内存，不依赖临时文件
     );
     if (result == null || result.files.isEmpty) return;
-    try {
-      // 立即复制到应用私有目录，防止 file_picker 临时文件被系统清理
-      final staged = await FilePetFrameSource.stagePickedFiles(
-          result.files.map((f) => f.path ?? '').where((e) => e.isNotEmpty).toList());
-      if (!mounted) return;
-      setState(() {
-        _files = staged;
-        _repicked = true;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      _toast('图片暂存失败，请重选：$e');
-    }
+    setState(() {
+      _files = result.files
+          .map((f) => f.path ?? '')
+          .where((e) => e.isNotEmpty)
+          .toList();
+      _bytes = result.files.map((f) => f.bytes ?? Uint8List(0)).toList();
+      _repicked = true;
+    });
   }
 
   String get _frameHint {
@@ -718,7 +717,12 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
           // 加序号前缀：多选同名文件不互相覆盖，且天然按选择顺序播放
           final target = p.join(
               dir, '${i.toString().padLeft(3, '0')}_${p.basename(f)}');
-          await File(f).copy(target);
+          if (i < _bytes.length && _bytes[i].isNotEmpty) {
+            // 从内存写文件——源文件不存在也照样保存
+            await File(target).writeAsBytes(_bytes[i]);
+          } else {
+            await File(f).copy(target);
+          }
         }
       } catch (e) {
         DebugLogger.log('桌宠', '帧图复制失败: $e');

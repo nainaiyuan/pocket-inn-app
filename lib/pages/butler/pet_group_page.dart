@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
@@ -941,7 +942,12 @@ class _PetGroupPageState extends State<PetGroupPage> {
           final f = result.files[i];
           final target = p.join(
               dir, '${i.toString().padLeft(3, '0')}_${p.basename(f)}');
-          await File(f).copy(target);
+          if (i < result.bytes.length && result.bytes[i].isNotEmpty) {
+            // 从内存写文件——源文件不存在也照样保存
+            await File(target).writeAsBytes(result.bytes[i]);
+          } else {
+            await File(f).copy(target);
+          }
         }
       } catch (e) {
         DebugLogger.log('桌宠', '坑动作帧图复制失败: $e');
@@ -1228,12 +1234,14 @@ class _SlotActionDraft {
   final TextEditingController nameCtrl;
   final TextEditingController secondsCtrl;
   final List<String> files;
+  final List<Uint8List> bytes;
   final bool repicked;
 
   _SlotActionDraft({
     required this.nameCtrl,
     required this.secondsCtrl,
     required this.files,
+    required this.bytes,
     required this.repicked,
   });
 }
@@ -1251,6 +1259,9 @@ class _SlotActionDialogState extends State<_SlotActionDialog> {
   late final TextEditingController _nameCtrl;
   late final TextEditingController _secondsCtrl;
   List<String> _files = [];
+  // 8-14 13:3x 终极修复：图片字节进内存，保存时从内存写文件，
+  // 不再依赖任何临时文件（系统连 files/ 私有目录都会清）
+  List<Uint8List> _bytes = [];
   bool _repicked = false;
   bool _picking = false;
 
@@ -1268,28 +1279,21 @@ class _SlotActionDialogState extends State<_SlotActionDialog> {
       final result = await FilePicker.platform.pickFiles(
         allowMultiple: true,
         type: FileType.image,
+        withData: true, // 图片字节直接进内存，不依赖临时文件
       );
       if (result != null && result.files.isNotEmpty) {
-        try {
-          // 立即复制到应用私有目录，防止 file_picker 临时文件被系统清理
-          final staged = await FilePetFrameSource.stagePickedFiles(
-              result.files.map((f) => f.path ?? '').where((e) => e.isNotEmpty).toList());
-          if (!mounted) return;
-          setState(() {
-            _files = staged;
-            _repicked = true;
-            // 自动算秒数：帧数 / 10fps
-            if (_files.isNotEmpty) {
-              _secondsCtrl.text = (_files.length / 10).toStringAsFixed(1);
-            }
-          });
-        } catch (e) {
-          if (!mounted) return;
-          setState(() => _files = []);
-          ScaffoldMessenger.of(context)
-            ..clearSnackBars()
-            ..showSnackBar(SnackBar(content: Text('图片暂存失败，请重选：$e')));
-        }
+        setState(() {
+          _files = result.files
+              .map((f) => f.path ?? '')
+              .where((e) => e.isNotEmpty)
+              .toList();
+          _bytes = result.files.map((f) => f.bytes ?? Uint8List(0)).toList();
+          _repicked = true;
+          // 自动算秒数：帧数 / 10fps
+          if (_files.isNotEmpty) {
+            _secondsCtrl.text = (_files.length / 10).toStringAsFixed(1);
+          }
+        });
       }
     } finally {
       if (mounted) setState(() => _picking = false);
@@ -1370,6 +1374,7 @@ class _SlotActionDialogState extends State<_SlotActionDialog> {
                 _SlotActionDraft(
                   nameCtrl: _nameCtrl,
                   secondsCtrl: _secondsCtrl,
+                  bytes: _bytes,
                   files: files,
                   repicked: _repicked,
                 ));
