@@ -1289,6 +1289,8 @@ class _SlotActionDialogState extends State<_SlotActionDialog> {
               .toList();
           _bytes = result.files.map((f) => f.bytes ?? Uint8List(0)).toList();
           _repicked = true;
+          // 清掉 file_picker 留在系统 cache 的副本（防相册堆积）
+          FilePetFrameSource.cleanupFilePickerCache();
           // 自动算秒数：帧数 / 10fps
           if (_files.isNotEmpty) {
             _secondsCtrl.text = (_files.length / 10).toStringAsFixed(1);

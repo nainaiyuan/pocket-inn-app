@@ -38,6 +38,21 @@ class FilePetFrameSource implements PetFrameSource {
     return dir.path;
   }
 
+  /// 清理 file_picker 选图后留在系统 cache 的副本。
+  ///
+  /// 8-14 13:3x 用户反馈：相册里同一个文件越来越多——荣耀图库会索引
+  /// 应用 cache 目录，每次选图 file_picker 都留一份副本 → 相册堆积。
+  /// 选图完成（bytes 已进内存）后调用，删掉这些副本。
+  static Future<void> cleanupFilePickerCache() async {
+    try {
+      final tmp = await getTemporaryDirectory();
+      final dir = Directory(p.join(tmp.path, 'file_picker'));
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
+    } catch (_) {}
+  }
+
   /// 选图后立即把 FilePicker 临时文件复制进应用私有目录（`__pick_cache`）。
   ///
   /// 8-14 06:52 根因修复：FilePicker 的临时文件在系统 cache/ 下，

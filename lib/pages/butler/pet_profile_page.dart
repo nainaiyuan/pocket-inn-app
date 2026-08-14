@@ -671,6 +671,8 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
           .toList();
       _bytes = result.files.map((f) => f.bytes ?? Uint8List(0)).toList();
       _repicked = true;
+      // 清掉 file_picker 留在系统 cache 的副本（防相册堆积）
+      FilePetFrameSource.cleanupFilePickerCache();
     });
   }
 
