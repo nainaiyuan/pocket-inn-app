@@ -768,12 +768,17 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
       profileId: widget.profileId,
       frameCount: frameCount,
       durationSeconds: seconds,
-      // 移动统一存"目标点"（方向+距离 在编辑器里已换算成目标点）
-      targetX: _howMove == _HowMove.move ? _targetX : null,
-      targetY: _howMove == _HowMove.move ? _targetY : null,
+      // 8-14 17:1x（用户：设置的距离是相对的——换设备还能用）：
+      // 移动 = 方向+距离（相对当前位置），动作之间自然衔接：
+      // 上个动作在哪结束，下个动作就从哪继续，不瞬移回起点。
+      // 绝对目标点不存（换屏幕/设备就废了）。
+      targetX: null,
+      targetY: null,
       trajectory: _trajectory,
-      // 8-14 17:2x（用户：从输入框某个位置开始动 + 几秒到目标）：
-      // 起点（dock=输入框 / center=中间 / custom=自定义坐标）+ 移动时长
+      moveDir: _howMove == _HowMove.move ? _moveDir : null,
+      moveDist: _howMove == _HowMove.move ? _moveDist : null,
+      // 起点（dock=输入框 / center=中间 / custom=自定义坐标）：只用于
+      // 刷新/首次出现时小人的初始位置（preferredStart），不在播放时瞬移
       moveRef: _moveRef,
       startX: _howMove == _HowMove.move ? _startX : null,
       startY: _howMove == _HowMove.move ? _startY : null,
@@ -939,6 +944,10 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
                   initialDir: _moveDir,
                   initialDist: _moveDist,
                   onChanged: (r) {
+                    // 8-14 17:1x（用户：设置的距离是相对的，换设备还能用）：
+                    // 存方向+距离（相对当前位置），不存绝对目标点
+                    _moveDir = r.dir;
+                    _moveDist = r.dist;
                     _targetX = r.target.x;
                     _targetY = r.target.y;
                   },

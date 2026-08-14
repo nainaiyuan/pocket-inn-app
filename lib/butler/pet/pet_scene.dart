@@ -957,12 +957,21 @@ class PetScene {
       return;
     }
     if (def.kind == PetActionKind.moveTo) {
-      // 8-14 17:2x（用户：从初始位置去目标地点——起点先瞬移过去，
-      // 播自己的帧 + 移动同时进行，时长 = moveSec 或按距离自动）
-      final base = _moveBasePoint(def.moveRef, x: def.startX, y: def.startY);
-      pet.position = pet.clampToArea(base);
-      pet.stopMoving();
-      final target = def.target ?? const PetPoint(0.5, 0.5);
+      // 8-14 17:1x（用户：动作之间要相对衔接，不能每次都瞬移回起点）：
+      // 从【当前位置】出发——上个动作在哪结束，这个就从哪继续。
+      // 目标 = 绝对目标点（旧数据）或 方向+距离（相对当前位置）。
+      // 起点（moveRef/startX/startY）只在刷新时用（preferredStart），
+      // 播放动作不再瞬移。
+      final PetPoint target;
+      if (def.target != null) {
+        target = def.target!;
+      } else if (def.moveDir != null) {
+        final (vx, vy) = def.moveDir!.vector;
+        target = PetPoint(pet.position.x + vx * (def.moveDist ?? 0.3),
+            pet.position.y + vy * (def.moveDist ?? 0.3));
+      } else {
+        target = pet.position;
+      }
       final clamped = pet.clampToArea(target);
       final dist = pet.position.distanceTo(clamped);
       final speed = switch (def.trajectory) {
@@ -1023,16 +1032,15 @@ class PetScene {
       );
       return;
     }
-    // 原地动作带相对位移（方向+距离，从当前位置出发）
+    // 原地动作带相对位移（方向+距离，从当前位置出发——8-14 17:1x：
+    // 用户：相对动作，上个动作在哪结束这个就从哪继续，不瞬移回起点）
     if (def.kind == PetActionKind.inPlace &&
         def.moveDir != null &&
         def.moveDist != null) {
       final from = pet.position;
       final (vx, vy) = def.moveDir!.vector;
-      final base = _moveBasePoint(def.moveRef,
-          x: def.startX, y: def.startY);
-      final clamped = pet.clampToArea(
-          PetPoint(base.x + vx * def.moveDist!, base.y + vy * def.moveDist!));
+      final clamped = pet.clampToArea(PetPoint(
+          from.x + vx * def.moveDist!, from.y + vy * def.moveDist!));
       final actualDist = from.distanceTo(clamped);
       final speed = switch (def.trajectory) {
         PetMoveTrajectory.walk => 0.35,
