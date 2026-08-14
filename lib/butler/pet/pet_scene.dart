@@ -1101,13 +1101,18 @@ class PetScene {
     // 8-14 17:2x（用户：没办法自主行动——只挑 inPlace 导致移动动作
     // 永远不触发）：inPlace + moveTo 都收，播放交给 playAction
     // （moveTo 分支会瞬移到起点再移动到目标）
+    // 8-14 17:2x（用户：不要给我的小人设置我没做的动作）：
+    // 只播该小人自己配的动作（profileId 匹配），排除内置动作
+    // （walk/run/jump/spin/wave/happy...）和旧数据 null 共享——
+    // 没配动作的小人就不自主做动作，安静待机
     final pool = _actionDefs.values
         .where((d) =>
             (d.kind == PetActionKind.inPlace ||
                 d.kind == PetActionKind.moveTo) &&
             d.frameDir != null &&
             d.slotId == null &&
-            (d.profileId == null || d.profileId == pet.id))
+            d.profileId == pet.id &&
+            PetBuiltinActions.byId(d.id) == null)
         .toList();
     if (pool.isEmpty) return;
     final def = pool[_autoRand.nextInt(pool.length)];
@@ -1137,18 +1142,17 @@ class PetScene {
   /// 8-14 15:4x：按角色区分——先找该 pet 自己的动作（profileId 匹配），
   /// 再兼容旧数据（profileId=null 的共享动作），最后内置占位。
   List<String> _resolveIdleFrames(Pet pet) {
-    List<String>? shared;
+    // 8-14 17:2x（用户：默认的和我自己的角色没有分开，该分开分开）：
+    // 只认 profileId == 自己的动作；旧数据 null 共享兜底取消——
+    // 默认小人不会再用用户角色的图，用户小人也不会被默认覆盖。
+    // 没配动作 → 单帧静态占位（不闪不乱动，安静待机）。
     for (final e in _frameCache.entries) {
       if (e.value.isEmpty) continue;
       final def = _actionDefs[e.key];
       if (def == null || def.frameDir == null || def.slotId != null) continue;
-      if (def.profileId == pet.id) return e.value; // 自己的图最优先
-      if (def.profileId == null && shared == null) shared = e.value;
+      if (def.profileId == pet.id) return e.value;
     }
-    if (shared != null) return shared; // 旧数据共享动作兜底
-    final def = _actionDefs['idle'];
-    if (def != null) return PetPlaceholderFrames.forAction(def);
-    return List.generate(4, (i) => 'placeholder:idle:$i:4');
+    return const ['placeholder:idle:0:1'];
   }
 
   /// 预载入动作帧图（UI 层调用）

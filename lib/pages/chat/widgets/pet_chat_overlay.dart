@@ -222,9 +222,7 @@ class _PetChatOverlayState extends State<PetChatOverlay>
     List<PetActionDef> mine = const [];
     try {
       final all = await store.allActions();
-      mine = all
-          .where((a) => a.profileId == pet.id || a.profileId == null)
-          .toList();
+      mine = all.where((a) => a.profileId == pet.id).toList();
     } catch (_) {}
     final builtins = PetBuiltinActions.all
         .where((a) => a.id != 'idle')
