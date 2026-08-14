@@ -18,6 +18,7 @@ import 'pet_event_bus.dart';
 import 'pet_feed.dart';
 import 'pet_models.dart';
 import 'pet_scene.dart';
+import '../../utils/debug_logger.dart';
 import 'pet_store.dart';
 
 class PetWorld {
@@ -61,6 +62,10 @@ class PetWorld {
     for (final g in groups) {
       scene.registerMoveGroup(g);
     }
+    // 8-14 18:5x：单动作加载日志——让用户能从运行日志确认
+    // 组合/单动作/移动组都加载了（互动组 0 组 ≠ 单动作没加载）
+    DebugLogger.log('桌宠',
+        'restore 加载：组合 ${activities.length} / 单动作 ${actions.length} / 移动组 ${groups.length}');
   }
 
   /// 预载所有动作的帧图（扫描目录，自动数帧）
