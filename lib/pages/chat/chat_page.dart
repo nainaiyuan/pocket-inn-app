@@ -3483,8 +3483,9 @@ class _ChatPageState extends State<ChatPage>
                     _buildFlowStopBar(),
                   // 桌宠层：趴在聊天框上方，和男主聊天时小人就在旁边互动
                   // 8-14 06:5x（用户：桌宠就是放聊天页的，不是单独页面）
+                  // 8-14 14:3x：190 → 120 高度，聊天记录区多留空间
                   const SizedBox(
-                    height: 190,
+                    height: 120,
                     child: PetChatOverlay(),
                   ),
                   ChatInputBar(
