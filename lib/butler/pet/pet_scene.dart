@@ -997,7 +997,11 @@ class PetScene {
         PetMoveTrajectory.fly => 0.45,
       };
       pet.playAction(def, _resolveFramesSync(actionId));
-      pet.autoActionLeft = def.durationSeconds ?? 2;
+      // 8-14 21:2x（用户：走走停停、走一半就停——真根因）：autoActionLeft
+      // 之前 = 帧播秒数（durationSeconds），移动走到底远不止 2 秒 →
+      // 2 秒被掐断只走 20% → 等 8~20 秒再触发。改成移动时长：
+      // 走完才算完，一次走到底。
+      pet.autoActionLeft = (def.moveSec ?? dist / speed) + 0.3;
       pet.moveTo(
         clamped,
         duration: def.moveSec ?? dist / speed,
@@ -1036,7 +1040,7 @@ class PetScene {
         PetMoveTrajectory.fly => 0.45,
       };
       pet.playAction(def, _resolveFramesSync(actionId));
-      pet.autoActionLeft = def.durationSeconds ?? 2;
+      pet.autoActionLeft = actualDist / speed + 0.3;
       pet.moveTo(
         clamped,
         duration: actualDist / speed,
@@ -1065,7 +1069,7 @@ class PetScene {
         PetMoveTrajectory.fly => 0.45,
       };
       pet.playAction(def, _resolveFramesSync(actionId));
-      pet.autoActionLeft = def.durationSeconds ?? 2;
+      pet.autoActionLeft = (def.moveSec ?? actualDist / speed) + 0.3;
       pet.moveTo(
         clamped,
         duration: def.moveSec ?? actualDist / speed,
