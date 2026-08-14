@@ -322,10 +322,10 @@ class _PetChatOverlayState extends State<PetChatOverlay>
   Widget _buildPetLayer(
       PetWorld world, Pet pet, double w, double h) {
     const baseSize = 100.0;
-    // 聊天页里小人小一点（不抢聊天），且不超过 overlay 高度——
-    // 8-14 14:3x 修复：之前 size 最大 180 且 top/left 不 clamp，
-    // 小人会溢出到聊天记录区挡住消息。现在强制在 overlay 内。
-    final size = (baseSize * pet.scale).clamp(0.0, h * 0.9);
+    // 聊天页小人自由活动：撞到消息区边界自己停（clamp 到区域内），
+    // 不限制高度——8-14 14:4x（用户：不要限高，他撞墙自己撞，
+    // 只要不跑到输入框下面就行；overlay 覆盖消息区，底部=输入框顶）
+    final size = (baseSize * pet.scale).clamp(0.0, 180.0);
     final left = (pet.position.x * w - size / 2).clamp(0.0, w - size);
     final top = (pet.position.y * h - size / 2).clamp(0.0, h - size);
 

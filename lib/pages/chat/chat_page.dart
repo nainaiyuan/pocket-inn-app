@@ -3451,6 +3451,11 @@ class _ChatPageState extends State<ChatPage>
                               ? '${_state.personaId}${AIProviderManager.mockTestSuffix}'
                               : null,
                         ),
+                        // 桌宠层：覆盖整个消息区，小人自由活动（撞墙自己停）
+                        // 8-14 06:5x（用户：桌宠就是放聊天页的）
+                        // 8-14 14:4x（用户：不要限高锁位置，自由跑，
+                        // 只要不跑到输入框下面——消息区底部=输入框顶，天然满足）
+                        const Positioned.fill(child: PetChatOverlay()),
                       ],
                     ),
                   ),
@@ -3481,13 +3486,8 @@ class _ChatPageState extends State<ChatPage>
                                 : '${_state.leadId}_default'),
                       ))
                     _buildFlowStopBar(),
-                  // 桌宠层：趴在聊天框上方，和男主聊天时小人就在旁边互动
-                  // 8-14 06:5x（用户：桌宠就是放聊天页的，不是单独页面）
-                  // 8-14 14:3x：190 → 120 高度，聊天记录区多留空间
-                  const SizedBox(
-                    height: 120,
-                    child: PetChatOverlay(),
-                  ),
+                  // 桌宠层已移入消息区 Stack（Positioned.fill 自由活动）——
+                  // 8-14 14:4x：不再用固定高度 SizedBox 限制小人
                   ChatInputBar(
                     externalCtrl: _inputCtrl,
                     onCameraTap: () {},
