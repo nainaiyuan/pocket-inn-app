@@ -16,6 +16,7 @@ import 'package:sqflite/sqflite.dart';
 import '../storage/butler_store.dart';
 import 'pet_feed.dart';
 import 'pet_models.dart';
+import 'scene_models.dart';
 
 class PetStore extends ButlerStore implements PetAffectionStore {
   /// 头像目录（应用文档目录 pet/avatars/）
@@ -135,6 +136,51 @@ class PetStore extends ButlerStore implements PetAffectionStore {
         run_action_id TEXT
       )
     ''');
+    // 8-15 02:2x 全屏场景模式 P0（16 号冲刺安排）：场景/节点/选项/热点
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pet_scenes (
+        scene_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        bg_path TEXT,
+        sort_order INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pet_nodes (
+        node_id TEXT PRIMARY KEY,
+        scene_id TEXT NOT NULL,
+        seq INTEGER DEFAULT 0,
+        type TEXT DEFAULT 'fixed',
+        continue_type TEXT DEFAULT 'auto',
+        wait_user INTEGER DEFAULT 0,
+        content TEXT,
+        target_node TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pet_choices (
+        choice_id TEXT PRIMARY KEY,
+        node_id TEXT NOT NULL,
+        seq INTEGER DEFAULT 0,
+        label TEXT NOT NULL,
+        target_node TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pet_hotspots (
+        hotspot_id TEXT PRIMARY KEY,
+        scene_id TEXT NOT NULL,
+        type TEXT DEFAULT 'point',
+        trigger TEXT DEFAULT 'click',
+        pet_id TEXT,
+        x REAL DEFAULT 0.5,
+        y REAL DEFAULT 0.5,
+        w REAL DEFAULT 0.1,
+        h REAL DEFAULT 0.1,
+        binding_type TEXT DEFAULT 'action',
+        binding_id TEXT NOT NULL
+      )
+    ''');
     // 旧库迁移：补 visible 列（已存在会报错，忽略）
     try {
       await db.execute(
@@ -184,6 +230,54 @@ class PetStore extends ButlerStore implements PetAffectionStore {
             response_type TEXT DEFAULT 'action',
             response_id TEXT,
             PRIMARY KEY (observer_id, target_id, target_state, seq)
+          )''');
+    } catch (_) {}
+    try {
+      await db.execute('''
+          CREATE TABLE IF NOT EXISTS pet_scenes (
+            scene_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            bg_path TEXT,
+            sort_order INTEGER DEFAULT 0
+          )''');
+    } catch (_) {}
+    try {
+      await db.execute('''
+          CREATE TABLE IF NOT EXISTS pet_nodes (
+            node_id TEXT PRIMARY KEY,
+            scene_id TEXT NOT NULL,
+            seq INTEGER DEFAULT 0,
+            type TEXT DEFAULT 'fixed',
+            continue_type TEXT DEFAULT 'auto',
+            wait_user INTEGER DEFAULT 0,
+            content TEXT,
+            target_node TEXT
+          )''');
+    } catch (_) {}
+    try {
+      await db.execute('''
+          CREATE TABLE IF NOT EXISTS pet_choices (
+            choice_id TEXT PRIMARY KEY,
+            node_id TEXT NOT NULL,
+            seq INTEGER DEFAULT 0,
+            label TEXT NOT NULL,
+            target_node TEXT NOT NULL
+          )''');
+    } catch (_) {}
+    try {
+      await db.execute('''
+          CREATE TABLE IF NOT EXISTS pet_hotspots (
+            hotspot_id TEXT PRIMARY KEY,
+            scene_id TEXT NOT NULL,
+            type TEXT DEFAULT 'point',
+            trigger TEXT DEFAULT 'click',
+            pet_id TEXT,
+            x REAL DEFAULT 0.5,
+            y REAL DEFAULT 0.5,
+            w REAL DEFAULT 0.1,
+            h REAL DEFAULT 0.1,
+            binding_type TEXT DEFAULT 'action',
+            binding_id TEXT NOT NULL
           )''');
     } catch (_) {}
     try {
@@ -746,4 +840,154 @@ class PetStore extends ButlerStore implements PetAffectionStore {
         whereArgs: [observerId, targetId, targetState, seq]);
   }
 
+
+  // ========== 8-15 02:2x 全屏场景模式 P0 CRUD（16 号冲刺安排） ==========
+
+  // ---- 场景 ----
+  Future<void> saveScene(PetScene s) async {
+    await insert('pet_scenes', {
+      'scene_id': s.sceneId,
+      'name': s.name,
+      'bg_path': s.bgPath,
+      'sort_order': s.sortOrder,
+    });
+  }
+
+  Future<List<PetScene>> allScenes() async {
+    final rows = await query('pet_scenes', orderBy: 'sort_order ASC');
+    return rows
+        .map((r) => PetScene(
+              sceneId: r['scene_id'] as String,
+              name: r['name'] as String,
+              bgPath: r['bg_path'] as String?,
+              sortOrder: (r['sort_order'] as int?) ?? 0,
+            ))
+        .toList();
+  }
+
+  Future<void> deleteScene(String sceneId) async {
+    await delete('pet_scenes',
+        where: 'scene_id = ?', whereArgs: [sceneId]);
+    await delete('pet_nodes',
+        where: 'scene_id = ?', whereArgs: [sceneId]);
+    await delete('pet_hotspots',
+        where: 'scene_id = ?', whereArgs: [sceneId]);
+  }
+
+  // ---- 节点 ----
+  Future<void> saveNode(PetNode n) async {
+    await insert('pet_nodes', {
+      'node_id': n.nodeId,
+      'scene_id': n.sceneId,
+      'seq': n.seq,
+      'type': n.type.name,
+      'continue_type': n.continueType.name,
+      'wait_user': n.waitUser ? 1 : 0,
+      'content': n.content,
+      'target_node': n.targetNode,
+    });
+  }
+
+  Future<List<PetNode>> nodesForScene(String sceneId) async {
+    final rows = await query('pet_nodes',
+        where: 'scene_id = ?',
+        whereArgs: [sceneId],
+        orderBy: 'seq ASC');
+    return rows
+        .map((r) => PetNode(
+              nodeId: r['node_id'] as String,
+              sceneId: r['scene_id'] as String,
+              seq: (r['seq'] as int?) ?? 0,
+              type: PetNodeType.fromName(r['type'] as String?),
+              continueType:
+                  PetContinueType.fromName(r['continue_type'] as String?),
+              waitUser: (r['wait_user'] as int?) == 1,
+              content: r['content'] as String?,
+              targetNode: r['target_node'] as String?,
+            ))
+        .toList();
+  }
+
+  Future<void> deleteNode(String nodeId) async {
+    await delete('pet_nodes',
+        where: 'node_id = ?', whereArgs: [nodeId]);
+    await delete('pet_choices',
+        where: 'node_id = ?', whereArgs: [nodeId]);
+  }
+
+  // ---- 选项 ----
+  Future<void> saveChoice(PetChoice c) async {
+    await insert('pet_choices', {
+      'choice_id': c.choiceId,
+      'node_id': c.nodeId,
+      'seq': c.seq,
+      'label': c.label,
+      'target_node': c.targetNode,
+    });
+  }
+
+  Future<List<PetChoice>> choicesForNode(String nodeId) async {
+    final rows = await query('pet_choices',
+        where: 'node_id = ?',
+        whereArgs: [nodeId],
+        orderBy: 'seq ASC');
+    return rows
+        .map((r) => PetChoice(
+              choiceId: r['choice_id'] as String,
+              nodeId: r['node_id'] as String,
+              seq: (r['seq'] as int?) ?? 0,
+              label: r['label'] as String,
+              targetNode: r['target_node'] as String,
+            ))
+        .toList();
+  }
+
+  Future<void> deleteChoice(String choiceId) async {
+    await delete('pet_choices',
+        where: 'choice_id = ?', whereArgs: [choiceId]);
+  }
+
+  // ---- 热点 ----
+  Future<void> saveHotspot(PetHotspot h) async {
+    await insert('pet_hotspots', {
+      'hotspot_id': h.hotspotId,
+      'scene_id': h.sceneId,
+      'type': h.type.name,
+      'trigger': h.trigger.name,
+      'pet_id': h.petId,
+      'x': h.x,
+      'y': h.y,
+      'w': h.w,
+      'h': h.h,
+      'binding_type': h.bindingType,
+      'binding_id': h.bindingId,
+    });
+  }
+
+  Future<List<PetHotspot>> hotspotsForScene(String sceneId) async {
+    final rows = await query('pet_hotspots',
+        where: 'scene_id = ?',
+        whereArgs: [sceneId],
+        orderBy: 'type ASC');
+    return rows
+        .map((r) => PetHotspot(
+              hotspotId: r['hotspot_id'] as String,
+              sceneId: r['scene_id'] as String,
+              type: PetHotspotType.fromName(r['type'] as String?),
+              trigger: PetHotspotTrigger.fromName(r['trigger'] as String?),
+              petId: r['pet_id'] as String?,
+              x: (r['x'] as num?)?.toDouble() ?? 0.5,
+              y: (r['y'] as num?)?.toDouble() ?? 0.5,
+              w: (r['w'] as num?)?.toDouble() ?? 0.1,
+              h: (r['h'] as num?)?.toDouble() ?? 0.1,
+              bindingType: (r['binding_type'] as String?) ?? 'action',
+              bindingId: r['binding_id'] as String,
+            ))
+        .toList();
+  }
+
+  Future<void> deleteHotspot(String hotspotId) async {
+    await delete('pet_hotspots',
+        where: 'hotspot_id = ?', whereArgs: [hotspotId]);
+  }
 }
