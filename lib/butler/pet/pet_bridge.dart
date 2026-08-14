@@ -30,6 +30,9 @@ class PetBridge {
   /// AI 演出卡片回调（场景页注册）：收到 choices 时显示选项卡片
   void Function(String text, List<String> choices)? onCardShow;
 
+  /// 表情指令回调（立绘模式注册）：expression 指令 → 切立绘表情
+  void Function(String expression)? onExpression;
+
   /// 用户在 AI 卡片上最后一次选择（感知注入用，选完不清除——
   /// 男主下一轮就能"记得"用户上次选了什么）
   String? lastChoice;
@@ -99,9 +102,9 @@ class PetBridge {
       onCardShow?.call(cmd.say ?? '', cmd.choices!);
     }
     if (cmd.expression != null) {
-      // 表情映射系统在 P2（normal/smile/happy/sad/angry/surprised/
-      // embarrassed/crying → 立绘资源）；第一版只记录+日志
-      DebugLogger.log('桌宠桥', '演出表情 ${cmd.expression}（P2 映射资源）');
+      // 表情指令：立绘模式切表情（占位立绘直接响应；真素材 P2 替换）
+      onExpression?.call(cmd.expression!);
+      DebugLogger.log('桌宠桥', '演出表情 ${cmd.expression}');
     }
     DebugLogger.log('桌宠桥', '执行: ${cmd.summary} (pet=$petId)');
   }

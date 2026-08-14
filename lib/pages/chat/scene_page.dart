@@ -23,6 +23,7 @@ import '../home/companion_page.dart' show PetFrameView;
 import 'services/ai_chat_service.dart';
 import '../../ai_provider/models.dart';
 import 'state/current_character_state.dart';
+import 'placeholder_portrait.dart';
 
 /// 8-15 03:0x 全屏场景模式 P0：场景页（16 号冲刺安排）
 ///
@@ -81,6 +82,10 @@ class _ScenePageState extends State<ScenePage>
   Timer? _toastTimer;
   bool _timerToastDone = false; // 完成 toast 只弹一次
 
+  // ---- 立绘模式（P2 占位：程序绘制 8 表情） ----
+  bool _portraitMode = false;
+  String _expression = 'normal';
+
   @override
   void initState() {
     super.initState();
@@ -92,7 +97,8 @@ class _ScenePageState extends State<ScenePage>
   void dispose() {
     PetBridge.instance
       ..sceneActive = false
-      ..onCardShow = null;
+      ..onCardShow = null
+      ..onExpression = null;
     if (identical(PetBridge.instance.world, _world)) {
       PetBridge.instance.detach();
     }
@@ -140,7 +146,8 @@ class _ScenePageState extends State<ScenePage>
     PetBridge.instance
       ..sceneActive = true
       ..attach(world)
-      ..onCardShow = _onAiCard;
+      ..onCardShow = _onAiCard
+      ..onExpression = _onExpression;
 
     // 陪伴计时配置（无配置用默认：倒计时 25 分钟/每 60s +1）
     final mainPet = world.scene.pets.isNotEmpty ? world.scene.pets.first : null;
@@ -704,12 +711,27 @@ class _ScenePageState extends State<ScenePage>
                       tooltip: '陪伴计时',
                       onPressed: _toggleTimerMode,
                     ),
+                  IconButton.filled(
+                    style: IconButton.styleFrom(
+                      backgroundColor: _portraitMode
+                          ? const Color(0xCCD08A6A)
+                          : const Color(0xCCB0789A),
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: Icon(_portraitMode
+                        ? Icons.portrait
+                        : Icons.portrait_outlined),
+                    tooltip: '立绘模式',
+                    onPressed: _togglePortraitMode,
+                  ),
                 ],
               ),
             ),
           ),
           // 陪伴计时覆盖层
           if (_timerMode && _timer != null) _buildTimerOverlay(),
+          // 立绘覆盖层
+          if (_portraitMode) _buildPortraitOverlay(),
           // 全局提示（好感度等）
           if (_toast != null)
             SafeArea(
@@ -939,6 +961,89 @@ class _ScenePageState extends State<ScenePage>
                   child: const SizedBox(height: 10),
                 ),
               ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ===== 立绘模式（P2 占位） =====
+
+  void _togglePortraitMode() {
+    setState(() => _portraitMode = !_portraitMode);
+  }
+
+  /// AI expression 指令 → 切表情（占位立绘直接响应）
+  void _onExpression(String expr) {
+    if (!kExpressionLabels.containsKey(expr)) {
+      DebugLogger.log('桌宠', '未知表情 $expr，忽略');
+      return;
+    }
+    DebugLogger.log('桌宠', '立绘表情切换 → $expr');
+    if (mounted) setState(() => _expression = expr);
+  }
+
+  /// 立绘覆盖层：全屏大图 + 表情按钮行 + 关闭
+  Widget _buildPortraitOverlay() {
+    return Positioned.fill(
+      child: Container(
+        color: const Color(0xF7FDF0F5),
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.close,
+                          color: Color(0xFF9A7B8C)),
+                      onPressed: _togglePortraitMode,
+                    ),
+                    Text(
+                      '立绘 · ${kExpressionLabels[_expression] ?? _expression}',
+                      style: const TextStyle(
+                          fontSize: 14, color: Color(0xFF9A7B8C)),
+                    ),
+                    const SizedBox(width: 40),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Center(
+                  child: PlaceholderPortrait(
+                    expression: _expression,
+                    size: MediaQuery.of(context).size.width * 0.72,
+                  ),
+                ),
+              ),
+              // 表情按钮行
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: kExpressionLabels.entries.map((e) {
+                    final selected = e.key == _expression;
+                    return ChoiceChip(
+                      label: Text(e.value,
+                          style: TextStyle(
+                              fontSize: 13,
+                              color: selected
+                                  ? Colors.white
+                                  : const Color(0xFF5A4049))),
+                      selected: selected,
+                      selectedColor: const Color(0xFFB0789A),
+                      backgroundColor: const Color(0xFFFDF6F9),
+                      onSelected: (_) =>
+                          setState(() => _expression = e.key),
+                    );
+                  }).toList(),
+                ),
+              ),
             ],
           ),
         ),
