@@ -617,6 +617,10 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
   /// 移动起点：聊天框 / 屏幕中间（预设快捷）/ 自定义
   PetMoveRef _moveRef = PetMoveRef.dock;
 
+  /// 8-14 17:2x（用户：几秒移动到目标位置，快慢移动，无关帧率）：
+  /// null = 按距离自动算时长（默认）
+  double? _moveSec;
+
   /// 编辑时是否重选了图（没重选 = 保留原帧图，不重拷）
   bool _repicked = false;
   bool _nameEdited = false;
@@ -634,6 +638,7 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
       _moveRef = e.moveRef;
       _startX = e.startX ?? 0.5;
       _startY = e.startY ?? 0.5;
+      _moveSec = e.moveSec;
       final t = e.target;
       if (t != null) {
         // 新格式：目标点（绝对位置）
@@ -767,6 +772,12 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
       targetX: _howMove == _HowMove.move ? _targetX : null,
       targetY: _howMove == _HowMove.move ? _targetY : null,
       trajectory: _trajectory,
+      // 8-14 17:2x（用户：从输入框某个位置开始动 + 几秒到目标）：
+      // 起点（dock=输入框 / center=中间 / custom=自定义坐标）+ 移动时长
+      moveRef: _moveRef,
+      startX: _howMove == _HowMove.move ? _startX : null,
+      startY: _howMove == _HowMove.move ? _startY : null,
+      moveSec: _howMove == _HowMove.move ? _moveSec : null,
     );
     try {
       await store.saveAction(def);
@@ -937,6 +948,42 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
                   value: _trajectory,
                   onChanged: (t) => setState(() => _trajectory = t),
                 ),
+                const SizedBox(height: 6),
+                // 8-14 17:2x（用户：几秒移动到目标，快慢移动，无关帧率）
+                Row(
+                  children: [
+                    const Text('移动时长',
+                        style:
+                            TextStyle(fontSize: 11, color: Color(0xFFB0A0A6))),
+                    const SizedBox(width: 4),
+                    Text(_moveSec == null ? '自动' : '手动',
+                        style: TextStyle(
+                            fontSize: 10,
+                            color: _moveSec == null
+                                ? const Color(0xFFB0789A)
+                                : const Color(0xFF7B6A8F))),
+                    Switch(
+                      value: _moveSec != null,
+                      onChanged: (v) =>
+                          setState(() => _moveSec = v ? 3.0 : null),
+                    ),
+                  ],
+                ),
+                if (_moveSec != null)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Slider(
+                          value: _moveSec!,
+                          min: 0.5,
+                          max: 10,
+                          onChanged: (v) => setState(() => _moveSec = v),
+                        ),
+                      ),
+                      Text('${_moveSec!.toStringAsFixed(1)}s',
+                          style: const TextStyle(fontSize: 11)),
+                    ],
+                  ),
               ],
             ],
           ),

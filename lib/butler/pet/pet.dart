@@ -122,7 +122,9 @@ class PetWorld {
           id: p.petId,
           name: p.name,
           scale: p.scale,
-          position: PetPoint(0.5, 0.6),
+          // 8-14 17:2x：刷新后初始位置 = 该小人配置的移动起点
+          // （dock=输入框上方），没配才用默认中间偏下
+          position: scene.preferredStart(p.petId) ?? PetPoint(0.5, 0.6),
           area: p.area,
           fixedPosition: (p.fixedX != null && p.fixedY != null)
               ? PetPoint(p.fixedX!, p.fixedY!)

@@ -938,19 +938,29 @@ class PetScene {
       return;
     }
     if (def.kind == PetActionKind.moveTo) {
+      // 8-14 17:2x（用户：从初始位置去目标地点——起点先瞬移过去，
+      // 播自己的帧 + 移动同时进行，时长 = moveSec 或按距离自动）
+      final base = _moveBasePoint(def.moveRef, x: def.startX, y: def.startY);
+      pet.position = pet.clampToArea(base);
+      pet.stopMoving();
       final target = def.target ?? const PetPoint(0.5, 0.5);
-      // 按速度选走/跑动画（移动组）
-      final dist = pet.position.distanceTo(target);
-      final speed = def.moveDurationSec > 0 ? dist / def.moveDurationSec : 0.0;
-      final moveDef = resolveMoveAnim(def.moveGroupId, speed);
-      final movePlayer = PetAnimPlayer(
-        frames: _resolveFramesSync(moveDef.id),
-        fps: moveDef.fps * moveDef.speedTier.factor,
-        loop: PetAnimLoop.loop,
-      );      pet.moveTo(
-        target,
-        duration: def.moveDurationSec,
-        movePlayer: movePlayer,
+      final clamped = pet.clampToArea(target);
+      final dist = pet.position.distanceTo(clamped);
+      final speed = switch (def.trajectory) {
+        PetMoveTrajectory.walk => 0.35,
+        PetMoveTrajectory.jump => 0.55,
+        PetMoveTrajectory.fly => 0.45,
+      };
+      pet.playAction(def, _resolveFramesSync(actionId));
+      pet.moveTo(
+        clamped,
+        duration: def.moveSec ?? dist / speed,
+        ease: switch (def.trajectory) {
+          PetMoveTrajectory.walk => PetMoveEase.linear,
+          PetMoveTrajectory.jump => PetMoveEase.jump,
+          PetMoveTrajectory.fly => PetMoveEase.easeInOut,
+        },
+        jumpHeight: def.trajectory == PetMoveTrajectory.jump ? 0.25 : 0,
       );
       return;
     }
@@ -1057,9 +1067,13 @@ class PetScene {
     }
     _autoActIn[pet.id] = 8 + _autoRand.nextDouble() * 12;
     // 8-14 15:4x：只挑自己角色的动作（旧数据 profileId=null 共享兼容）
+    // 8-14 17:2x（用户：没办法自主行动——只挑 inPlace 导致移动动作
+    // 永远不触发）：inPlace + moveTo 都收，播放交给 playAction
+    // （moveTo 分支会瞬移到起点再移动到目标）
     final pool = _actionDefs.values
         .where((d) =>
-            d.kind == PetActionKind.inPlace &&
+            (d.kind == PetActionKind.inPlace ||
+                d.kind == PetActionKind.moveTo) &&
             d.frameDir != null &&
             d.slotId == null &&
             (d.profileId == null || d.profileId == pet.id))
@@ -1067,6 +1081,24 @@ class PetScene {
     if (pool.isEmpty) return;
     final def = pool[_autoRand.nextInt(pool.length)];
     playAction(pet.id, def.id);
+  }
+
+  /// 8-14 17:2x（用户：一刷新又跑屏幕中间去了——我设置了从输入框
+  /// 某个位置开始动）：该小人的首选起点（第一个带起点的移动动作），
+  /// 刷新后小人出现在配置的起点，而不是屏幕中间。
+  PetPoint? preferredStart(String petId) {
+    for (final d in _actionDefs.values) {
+      if (d.slotId != null) continue;
+      if (d.profileId != petId) continue;
+      if (d.moveRef == null) continue;
+      final isMove =
+          d.kind == PetActionKind.moveTo ||
+              (d.kind == PetActionKind.inPlace &&
+                  (d.target != null || d.moveDir != null));
+      if (!isMove) continue;
+      return _moveBasePoint(d.moveRef, x: d.startX, y: d.startY);
+    }
+    return null;
   }
 
   /// idle 帧解析：用户上传的动作帧优先（8-14 15:0x 用户反馈——
