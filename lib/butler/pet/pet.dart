@@ -71,7 +71,9 @@ class PetWorld {
     // 动作到底属于谁（profileId == pet.id 是 idle/自主行动的唯一过滤依据）
     for (final a in actions) {
       DebugLogger.log('桌宠',
-          '  动作 ${a.id} | 归属=${a.profileId} | 坑=${a.slotId} | ${a.name}');
+          '  动作 ${a.id} | 归属=${a.profileId} | 坑=${a.slotId} | '
+          '类型=${a.kind.name} | 方向=${a.moveDir?.name ?? "无"} '
+          '距离=${a.moveDist?.toStringAsFixed(2) ?? "无"} | ${a.name}');
     }
   }
 

@@ -699,6 +699,33 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
     return '已选 ${files.length} 张，按文件名顺序播放';
   }
 
+  /// 移动动作方向兜底：目标点 → 推断方向；没目标 → 默认向左
+  PetMoveDir? _ensureMoveDir() {
+    if (_moveDir != null) return _moveDir;
+    final tx = _targetX;
+    final ty = _targetY;
+    if (tx != null && ty != null) {
+      final base =
+          PetMoveRef.basePoint(_moveRef, x: _startX ?? 0.5, y: _startY ?? 0.5);
+      final dx = tx - base.x;
+      final dy = ty - base.y;
+      if (dx.abs() > 0.01 || dy.abs() > 0.01) {
+        return _inferDir(dx, dy);
+      }
+    }
+    return PetMoveDir.left;
+  }
+
+  /// 由偏移量推断 8 方向（与 MoveTargetEditor._inferDir 同逻辑）
+  PetMoveDir _inferDir(double dx, double dy) {
+    final ax = dx.abs();
+    final ay = dy.abs();
+    if (ax > ay * 1.5) return dx > 0 ? PetMoveDir.right : PetMoveDir.left;
+    if (ay > ax * 1.5) return dy > 0 ? PetMoveDir.down : PetMoveDir.up;
+    if (dx > 0) return dy > 0 ? PetMoveDir.downRight : PetMoveDir.upRight;
+    return dy > 0 ? PetMoveDir.downLeft : PetMoveDir.upLeft;
+  }
+
   Future<void> _save() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
@@ -777,8 +804,12 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
       targetX: null,
       targetY: null,
       trajectory: _trajectory,
-      moveDir: _howMove == _HowMove.move ? _moveDir : null,
-      moveDist: _howMove == _HowMove.move ? _moveDist : null,
+      // 8-14 20:3x（用户：调了起点和目标但小人从不动——真根因：新建
+      // 移动动作没点地图目标点时 moveDir 为 null，保存后播放无方向→原地）：
+      // 保存前兜底——有目标点就按目标点推断方向+距离；完全没有就默认
+      // 向左走 0.3。保证"配了移动"的动作一定有方向，一定能走。
+      moveDir: _howMove == _HowMove.move ? _ensureMoveDir() : null,
+      moveDist: _howMove == _HowMove.move ? _moveDist ?? 0.3 : null,
       // 起点（dock=输入框 / center=中间 / custom=自定义坐标）：只用于
       // 刷新/首次出现时小人的初始位置（preferredStart），不在播放时瞬移
       moveRef: _moveRef,
