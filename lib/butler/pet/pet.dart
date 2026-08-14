@@ -120,10 +120,18 @@ class PetWorld {
       final p = wanted[i];
       if (scene.petById(p.petId) == null) {
         // 8-14 17:4x（用户：默认小人为什么要绑定我新角色的初始位置）：
-        // 初始位置 = 自己配的起点；没配 → dock 输入框上方，
-        // 多个小人横向排开（0.5±i*0.16），不叠在一起
-        final pos = scene.preferredStart(p.petId) ??
+        // 初始位置 = 自己配的起点；没配 → dock 输入框上方
+        var pos = scene.preferredStart(p.petId) ??
             PetPoint(0.5 + (i - (wanted.length - 1) / 2) * 0.16, 0.85);
+        // 8-14 17:5x（联动：配了起点也可能叠一起）——离已有小人太近
+        // 就横向挪开，保证每个小人都有自己的位置
+        var guard = 0;
+        while (scene.pets.any((o) =>
+                o.id != p.petId && o.position.distanceTo(pos) < 0.14) &&
+            guard < 6) {
+          pos = PetPoint(pos.x + 0.18, pos.y);
+          guard++;
+        }
         final pet = scene.createPet(
           id: p.petId,
           name: p.name,

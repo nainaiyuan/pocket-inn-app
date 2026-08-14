@@ -600,11 +600,11 @@ class PetActivityRun {
         if (def.target != null) {
           target = def.target!;
         } else {
+          // 8-14 17:5x（用户：修 bug 要看联动——组合动作步骤也一样）：
+          // 从当前位置出发（上一步在哪结束就从哪继续），不瞬移回起点
           final (vx, vy) = def.moveDir!.vector;
-          final base = _moveBasePoint(def.moveRef,
-              x: def.startX, y: def.startY);
-          target = PetPoint(
-              base.x + vx * def.moveDist!, base.y + vy * def.moveDist!);
+          target = PetPoint(from.x + vx * def.moveDist!,
+              from.y + vy * def.moveDist!);
         }
         final clamped = pet.clampToArea(target);
         final actualDist = from.distanceTo(clamped);
