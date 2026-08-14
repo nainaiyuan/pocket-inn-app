@@ -1336,6 +1336,17 @@ class PetScene {
       if (_respActive[pet.id] ?? false) {
         _respActive[pet.id] = false;
         _finishResponsePhase(pet);
+      } else if (pet.controlOwner == PetControlOwner.response &&
+          !pet.moving) {
+        // 8-15 05:1x 修复（用户：拖完小人闪着闪着就没了）：
+        // 没绑定响应（队列空且从未激活）→ 归还控制权。否则
+        // controlOwner 卡 response → 待机帧兜底(controlOwner!=response
+        // 才播)被挡 → playIdle 帧播完 _player=null → 小人消失。
+        // 放（无响应）与扔（飞行完落点检测后无响应）两条路径都覆盖；
+        // 飞行中 !pet.moving 为 false → 不打断抛射。
+        DebugLogger.log('桌宠',
+            '${pet.name} 无绑定响应 → 归还控制权 auto');
+        _finishResponsePhase(pet);
       }
       return;
     }
