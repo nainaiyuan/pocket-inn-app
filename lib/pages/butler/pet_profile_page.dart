@@ -716,8 +716,11 @@ class _ActionEditDialogState extends State<_ActionEditDialog> {
     if (_repicked || existing == null) {
       try {
         if (await Directory(dir).exists()) {
+          // 8-14 14:5x 真根因修复：先删后建——之前 actionDir 创建目录后
+          // 又被 delete 删掉，writeAsBytes 写到已删除目录 → Cannot open file
           await Directory(dir).delete(recursive: true);
         }
+        await Directory(dir).create(recursive: true);
         for (var i = 0; i < files.length; i++) {
           final f = files[i];
           // 加序号前缀：多选同名文件不互相覆盖，且天然按选择顺序播放

@@ -20,7 +20,11 @@ import '../../home/companion_page.dart' show PetFrameView, SpeechBubble, SpeechD
 /// 交互：点一下 = 互动事件；长按 = 菜单（摸摸头/调大小/去配置）；
 /// 拖拽 = 移动（互动组演到一半提起来暂停、放下续播）。
 class PetChatOverlay extends StatefulWidget {
-  const PetChatOverlay({super.key});
+  /// 8-14 14:5x（用户：拖小人不触发页面滑动）：拖动开始/结束回调，
+  /// 聊天页据此锁定/解锁消息列表滚动
+  final ValueChanged<bool>? onDragStateChanged;
+
+  const PetChatOverlay({super.key, this.onDragStateChanged});
 
   @override
   State<PetChatOverlay> createState() => _PetChatOverlayState();
@@ -341,8 +345,13 @@ class _PetChatOverlayState extends State<PetChatOverlay>
             behavior: HitTestBehavior.opaque,
             onTap: () => _onPetTap(world, pet),
             onLongPress: () => _onPetLongPress(world, pet),
+            onPanStart: (_) => widget.onDragStateChanged?.call(true),
             onPanUpdate: (d) => _onPetDrag(world, pet, d, w, h),
-            onPanEnd: (_) => _onPetDragEnd(world, pet),
+            onPanEnd: (_) {
+              widget.onDragStateChanged?.call(false);
+              _onPetDragEnd(world, pet);
+            },
+            onPanCancel: () => widget.onDragStateChanged?.call(false),
             child: PetFrameView(pet: pet, size: size),
           ),
         ),

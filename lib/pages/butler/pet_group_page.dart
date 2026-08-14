@@ -936,8 +936,11 @@ class _PetGroupPageState extends State<PetGroupPage> {
     if (result.repicked || existing == null) {
       try {
         if (await Directory(dir).exists()) {
+          // 8-14 14:5x 真根因修复：先删后建——之前 actionDir 创建目录后
+          // 又被 delete 删掉，writeAsBytes 写到已删除目录 → Cannot open file
           await Directory(dir).delete(recursive: true);
         }
+        await Directory(dir).create(recursive: true);
         for (var i = 0; i < result.files.length; i++) {
           final f = result.files[i];
           final target = p.join(

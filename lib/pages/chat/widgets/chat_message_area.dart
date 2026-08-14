@@ -17,12 +17,17 @@ class ChatMessageArea extends StatefulWidget {
   /// （${真实persona}__mock__test）→ 测试对话有自己的消息空间
   final String? storagePersonaId;
 
+  /// 8-14 14:5x（用户：拖小人不触发页面滑动）：拖桌宠时锁定列表滚动，
+  /// 松手恢复——判定命中小人 → 一次只移动一个
+  final bool scrollEnabled;
+
   const ChatMessageArea({
     super.key,
     required this.currentPersona,
     this.characterAvatarPath,
     this.onAvatarTap,
     this.storagePersonaId,
+    this.scrollEnabled = true,
   });
 
   @override
@@ -276,6 +281,9 @@ class ChatMessageAreaState extends State<ChatMessageArea> {
         Expanded(
           child: ListView.builder(
             controller: _scrollCtrl,
+            physics: widget.scrollEnabled
+                ? null
+                : const NeverScrollableScrollPhysics(),
             padding: const EdgeInsets.only(top: 8, bottom: 8),
             // 8-08 20:4x（用户+GPT 定稿）：展示层聚合——连续 [tool] 消息
             // 聚成工具卡（折叠一行/展开原样）。注意：chat_page 实际走的是

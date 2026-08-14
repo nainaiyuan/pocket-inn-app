@@ -87,6 +87,8 @@ class _ChatPageState extends State<ChatPage>
   // ---- 状态 ----
   double _offset = 0;
   Panel _currentPanel = Panel.center;
+  // 8-14 14:5x：拖桌宠时锁定消息列表滚动
+  bool _petDragging = false;
   Timer? _notifyWakeTimer; // 8-06 notify_user 超时唤醒
   Timer? _alarmTimer; // 8-10 定时任务检查器（闹钟到点 → 插流程步骤）
   /// 8-09 16:0x：FlowStore 变化通知回调引用（dispose 时注销用）
@@ -3450,12 +3452,22 @@ class _ChatPageState extends State<ChatPage>
                           storagePersonaId: _useTestSpace()
                               ? '${_state.personaId}${AIProviderManager.mockTestSuffix}'
                               : null,
+                          // 拖桌宠时锁定列表滚动（8-14 14:5x 用户反馈）
+                          scrollEnabled: !_petDragging,
                         ),
                         // 桌宠层：覆盖整个消息区，小人自由活动（撞墙自己停）
                         // 8-14 06:5x（用户：桌宠就是放聊天页的）
                         // 8-14 14:4x（用户：不要限高锁位置，自由跑，
                         // 只要不跑到输入框下面——消息区底部=输入框顶，天然满足）
-                        const Positioned.fill(child: PetChatOverlay()),
+                        Positioned.fill(
+                          child: PetChatOverlay(
+                            onDragStateChanged: (dragging) {
+                              if (dragging != _petDragging) {
+                                setState(() => _petDragging = dragging);
+                              }
+                            },
+                          ),
+                        ),
                       ],
                     ),
                   ),
