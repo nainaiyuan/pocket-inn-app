@@ -303,7 +303,6 @@ class Pet {
     bool turnBack = false,
     PetMoveEase ease = PetMoveEase.easeInOut,
     double jumpHeight = 0,
-    double delay = 0,
   }) {
     if (area == PetArea.fixed) {
       // 固定位置的小人不移动，原地待着
@@ -322,8 +321,7 @@ class Pet {
         duration: duration,
         movePlayer: movePlayer,
         ease: ease,
-        jumpHeight: jumpHeight,
-        delay: delay);
+        jumpHeight: jumpHeight);
   }
 
   void _startMove({
@@ -333,7 +331,6 @@ class Pet {
     PetAnimPlayer? movePlayer,
     PetMoveEase ease = PetMoveEase.easeInOut,
     double jumpHeight = 0.3,
-    double delay = 0,
   }) {
     _move = PetMoveState(
       from: from,
@@ -341,7 +338,6 @@ class Pet {
       duration: duration,
       ease: ease,
       jumpHeight: jumpHeight,
-      delay: delay,
     );
     if (movePlayer != null) {
       _player = movePlayer;
@@ -1001,16 +997,14 @@ class PetScene {
         PetMoveTrajectory.fly => 0.45,
       };
       pet.playAction(def, _resolveFramesSync(actionId));
-      // 8-14 21:3x（用户：两段式——先原地播 durationSeconds 秒，
-      // 再走 moveSec 秒到达目的地，速度=距离/moveSec 与原地时长无关）：
-      // delay = 原地时长；autoActionLeft = 原地+移动总时长，走完才停。
-      final actDur = def.durationSeconds ?? 1;
-      final moveDur = def.moveSec ?? dist / speed;
-      pet.autoActionLeft = actDur + moveDur + 0.3;
+      // 8-14 21:2x（用户：走走停停、走一半就停——真根因）：autoActionLeft
+      // 之前 = 帧播秒数（durationSeconds），移动走到底远不止 2 秒 →
+      // 2 秒被掐断只走 20% → 等 8~20 秒再触发。改成移动时长：
+      // 走完才算完，一次走到底。
+      pet.autoActionLeft = (def.moveSec ?? dist / speed) + 0.3;
       pet.moveTo(
         clamped,
-        duration: moveDur,
-        delay: actDur,
+        duration: def.moveSec ?? dist / speed,
         ease: switch (def.trajectory) {
           PetMoveTrajectory.walk => PetMoveEase.linear,
           PetMoveTrajectory.jump => PetMoveEase.jump,
@@ -1046,12 +1040,10 @@ class PetScene {
         PetMoveTrajectory.fly => 0.45,
       };
       pet.playAction(def, _resolveFramesSync(actionId));
-      final actDur2 = def.durationSeconds ?? 1;
-      pet.autoActionLeft = actDur2 + actualDist / speed + 0.3;
+      pet.autoActionLeft = actualDist / speed + 0.3;
       pet.moveTo(
         clamped,
         duration: actualDist / speed,
-        delay: actDur2,
         ease: switch (def.trajectory) {
           PetMoveTrajectory.walk => PetMoveEase.linear,
           PetMoveTrajectory.jump => PetMoveEase.jump,
@@ -1077,13 +1069,10 @@ class PetScene {
         PetMoveTrajectory.fly => 0.45,
       };
       pet.playAction(def, _resolveFramesSync(actionId));
-      final actDur3 = def.durationSeconds ?? 1;
-      final moveDur3 = def.moveSec ?? actualDist / speed;
-      pet.autoActionLeft = actDur3 + moveDur3 + 0.3;
+      pet.autoActionLeft = (def.moveSec ?? actualDist / speed) + 0.3;
       pet.moveTo(
         clamped,
-        duration: moveDur3,
-        delay: actDur3,
+        duration: def.moveSec ?? actualDist / speed,
         ease: switch (def.trajectory) {
           PetMoveTrajectory.walk => PetMoveEase.linear,
           PetMoveTrajectory.jump => PetMoveEase.jump,
