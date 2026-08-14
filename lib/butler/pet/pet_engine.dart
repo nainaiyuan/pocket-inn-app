@@ -151,7 +151,13 @@ class PetMoveState {
   /// 跳跃高度（相对坐标，jump 曲线用）
   final double jumpHeight;
 
+  /// 8-14 21:3x（用户：先原地播 N 秒再走 M 秒到目的地——两段式）：
+  /// 延迟启动（秒），delay 期间位置不动（帧照播=原地行为），
+  /// 播完才开始移动。移动速度 = 距离/M 秒，与原地时长无关。
+  final double delay;
+
   double _elapsed = 0;
+  double _waited = 0;
 
   PetMoveState({
     required this.from,
@@ -159,12 +165,19 @@ class PetMoveState {
     this.duration = 3,
     this.ease = PetMoveEase.easeInOut,
     this.jumpHeight = 0.3,
+    this.delay = 0,
   });
 
-  bool get finished => _elapsed >= duration;
+  bool get finished =>
+      _waited < delay ? false : _elapsed >= duration;
 
-  /// 当前进度 0~1
-  double get progress => duration <= 0 ? 1 : (_elapsed / duration).clamp(0, 1);
+  /// 当前进度 0~1（delay 期间恒 0）
+  double get progress =>
+      _waited < delay
+          ? 0
+          : duration <= 0
+              ? 1
+              : (_elapsed / duration).clamp(0, 1);
 
   /// 水平缓动进度
   double get eased => switch (ease) {
@@ -187,6 +200,10 @@ class PetMoveState {
   }
 
   void update(double dt) {
+    if (_waited < delay) {
+      _waited += dt;
+      return;
+    }
     _elapsed += dt;
   }
 
