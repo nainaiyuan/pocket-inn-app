@@ -1117,7 +1117,9 @@ class PetScene {
       _autoActIn[pet.id] = left;
       return;
     }
-    _autoActIn[pet.id] = 8 + _autoRand.nextDouble() * 12;
+    // 8-14 21:5x（用户：走到底→停 8~20 秒→再走，像卡住）：
+    // 缩短到 3~6 秒——走到底，待一小会儿，再走，连贯不卡顿
+    _autoActIn[pet.id] = 3 + _autoRand.nextDouble() * 3;
     // 8-14 15:4x：只挑自己角色的动作（旧数据 profileId=null 共享兼容）
     // 8-14 17:2x（用户：没办法自主行动——只挑 inPlace 导致移动动作
     // 永远不触发）：inPlace + moveTo 都收，播放交给 playAction
