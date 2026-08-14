@@ -116,21 +116,24 @@ class PetWorld {
       }
     }
     // 创建新显示的小人
-    for (final p in wanted) {
+    for (var i = 0; i < wanted.length; i++) {
+      final p = wanted[i];
       if (scene.petById(p.petId) == null) {
+        // 8-14 17:4x（用户：默认小人为什么要绑定我新角色的初始位置）：
+        // 初始位置 = 自己配的起点；没配 → dock 输入框上方，
+        // 多个小人横向排开（0.5±i*0.16），不叠在一起
+        final pos = scene.preferredStart(p.petId) ??
+            PetPoint(0.5 + (i - (wanted.length - 1) / 2) * 0.16, 0.85);
         final pet = scene.createPet(
           id: p.petId,
           name: p.name,
           scale: p.scale,
-          // 8-14 17:2x：初始位置 = 该小人配置的移动起点；
-          // 没配 → 和默认小人同一个地方（dock 输入框上方）——
-          // 用户：初始小人从同一个地方读取，新小人别跑屏幕中间
-          position: scene.preferredStart(p.petId) ??
-              PetMoveRef.basePoint(PetMoveRef.dock),
+          position: pos,
           area: p.area,
           fixedPosition: (p.fixedX != null && p.fixedY != null)
               ? PetPoint(p.fixedX!, p.fixedY!)
               : null,
+          avatarPath: p.avatarPath,
         );
         pet.breakActionId = p.breakActionId;
       }

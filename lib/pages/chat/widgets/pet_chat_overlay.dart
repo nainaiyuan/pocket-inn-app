@@ -255,10 +255,12 @@ class _PetChatOverlayState extends State<PetChatOverlay>
                 shrinkWrap: true,
                 children: [
                   if (mine.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: Text('还没有自己的动作，去配置桌宠里新建',
-                          style: TextStyle(
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text('「${pet.name}」还没有自己的动作\n'
+                          '去 配置桌宠 → 这个角色 → 新建动作 给它配',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
                               fontSize: 12, color: Color(0xFFB0A0A6))),
                     ),
                   for (final a in mine)

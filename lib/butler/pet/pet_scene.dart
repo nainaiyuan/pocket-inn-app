@@ -98,7 +98,13 @@ class Pet {
     PetPoint? position,
     this.facing = PetFacing.right,
     this.scale = 1.0,
+    this.avatarPath,
   }) : position = position ?? const PetPoint(0.5, 0.5);
+
+  /// 8-14 17:4x（用户：我的小人是你小人复制的，一模一样）：
+  /// 角色头像——没配动作帧时 idle 显示自己的头像，
+  /// 不再所有新角色都撞脸默认小人
+  String? avatarPath;
 
   /// 按活动区域约束坐标
   PetPoint clampToArea(PetPoint p) {
@@ -749,12 +755,14 @@ class PetScene {
     double scale = 1.0,
     PetArea area = PetArea.full,
     PetPoint? fixedPosition,
+    String? avatarPath,
   }) {
     final pet = Pet(
       id: id,
       name: name ?? id,
       position: position,
       scale: scale,
+      avatarPath: avatarPath,
     );
     pet.area = area;
     pet.fixedPosition = fixedPosition;
@@ -1152,6 +1160,9 @@ class PetScene {
       if (def == null || def.frameDir == null || def.slotId != null) continue;
       if (def.profileId == pet.id) return e.value;
     }
+    // 没配动作帧：有头像就显示头像（自己角色的样子，不撞脸默认小人）
+    final av = pet.avatarPath;
+    if (av != null && av.isNotEmpty) return [av];
     return const ['placeholder:idle:0:1'];
   }
 
