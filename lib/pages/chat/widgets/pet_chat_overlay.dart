@@ -228,9 +228,6 @@ class _PetChatOverlayState extends State<PetChatOverlay>
       final all = await store.allActions();
       mine = all.where((a) => a.profileId == pet.id).toList();
     } catch (_) {}
-    final builtins = PetBuiltinActions.all
-        .where((a) => a.id != 'idle')
-        .toList();
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
@@ -274,23 +271,6 @@ class _PetChatOverlayState extends State<PetChatOverlay>
                           size: 18, color: Color(0xFFB0789A)),
                       title: Text(a.name,
                           style: const TextStyle(fontSize: 13)),
-                      subtitle: const Text('我的动作',
-                          style: TextStyle(fontSize: 10)),
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        world.playAction(pet.id, a.id);
-                      },
-                    ),
-                  const Divider(height: 1),
-                  for (final a in builtins)
-                    ListTile(
-                      dense: true,
-                      leading: const Icon(Icons.auto_awesome,
-                          size: 18, color: Color(0xFFC0A0B0)),
-                      title: Text(a.name,
-                          style: const TextStyle(fontSize: 13)),
-                      subtitle: const Text('内置',
-                          style: TextStyle(fontSize: 10)),
                       onTap: () {
                         Navigator.pop(ctx);
                         world.playAction(pet.id, a.id);
