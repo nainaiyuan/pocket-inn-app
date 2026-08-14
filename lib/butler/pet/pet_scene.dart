@@ -1058,7 +1058,19 @@ class PetScene {
   /// 给指定小人播放单个动作
   void playAction(String petId, String actionId) {
     final pet = petById(petId);
-    final def = _actionDefs[actionId];
+    var def = _actionDefs[actionId];
+    if (def == null) {
+      // 8-15 05:2x（用户：表情=用户给一组动作取名字，AI 按名字触发）：
+      // id 查不到 → 按名字查（如 AI 说 action="开心" → 播用户配的
+      // 开心动作组；查不到仍 return，零回归）
+      for (final d in _actionDefs.values) {
+        if (d.name == actionId) {
+          def = d;
+          DebugLogger.log('桌宠', '动作按名字命中 ${d.name} → ${d.id}');
+          break;
+        }
+      }
+    }
     if (pet == null || def == null) return;
     if (def.kind == PetActionKind.duo) {
       // 双人互动：找另一个小人一起
