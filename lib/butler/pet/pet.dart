@@ -46,6 +46,9 @@ class PetWorld {
 
   /// 从持久化恢复：组合动作、用户自建动作、移动组
   Future<void> restore() async {
+    // 8-14 17:5x（用户：怕刷新不同步）：先清空再全量重载——
+    // 配置页删除的动作在这里真正移除，新增的才会出现
+    scene.clearActions();
     final activities = await store.allActivities();
     for (final a in activities) {
       scene.saveActivity(a);

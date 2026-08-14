@@ -1176,6 +1176,15 @@ class PetScene {
     }
   }
 
+  /// 8-14 17:5x（用户：怕刷新不同步）——清空所有动作定义/帧缓存，
+  /// 供 restore 全量重载：配置页新增/删除/修改动作后，聊天页同步生效
+  void clearActions() {
+    _actionDefs.clear();
+    _activities.clear();
+    _moveGroups.clear();
+    _frameCache.clear();
+  }
+
   /// 预载入所有已注册动作的帧图
   Future<void> preloadAllFrames() async {
     for (final id in _actionDefs.keys) {

@@ -97,7 +97,11 @@ class _PetChatOverlayState extends State<PetChatOverlay>
     _settingsDebounce = Timer(const Duration(milliseconds: 800), () {
       final world = _world;
       if (world == null) return;
-      world.syncVisible().then((_) {
+      // 8-14 17:5x（用户：怕刷新不同步）：完整刷新链——
+      // 重载动作定义(restore) → 重载帧图(preloadAll) → 重载小人显示
+      world.restore().then((_) => world.preloadAll()).then((_) {
+        return world.syncVisible();
+      }).then((_) {
         if (!mounted) return;
         _loadGroupRuntimes(world);
         setState(() {});
