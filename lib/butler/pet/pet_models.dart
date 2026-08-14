@@ -419,6 +419,12 @@ class PetActionDef {
         loop: loop,
         frameDir: frameDir,
         frameCount: frameCount ?? this.frameCount,
+        // 8-14 19:2x（用户：播完恢复3:4图）：copyWith 必须保留归属字段——
+        // preloadFrames 用 copyWith(frameCount) 更新帧数时若丢掉
+        // profileId/slotId → _actionDefs 里的动作变无主 →
+        // idle 匹配/自主行动 pool 全部失效（头像兜底）
+        profileId: profileId,
+        slotId: slotId,
         moveAnimId: moveAnimId,
         targetSpot: targetSpot,
         targetX: targetX,
