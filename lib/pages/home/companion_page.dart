@@ -326,9 +326,12 @@ class _CompanionPageState extends State<CompanionPage>
   // ========== 全屏场景模式（8-15 03:0x P0） ==========
 
   Future<void> _openSceneMode() async {
+    DebugLogger.log('桌宠', '全屏场景入口：点击 ⛶');
     final store = PetStore();
-    final scenes = await store.allScenes();
-    if (scenes.isEmpty) {
+    try {
+      final scenes = await store.allScenes();
+      DebugLogger.log('桌宠', '全屏场景：已有场景 ${scenes.length} 个');
+      if (scenes.isEmpty) {
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -353,15 +356,25 @@ class _CompanionPageState extends State<CompanionPage>
       final sceneId = await _createDemoScene(store);
       if (sceneId == null) return;
       if (!mounted) return;
+      DebugLogger.log('桌宠', '全屏场景：演示场景就绪，push 场景页 $sceneId');
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => ScenePage(sceneId: sceneId),
       ));
       return;
     }
     if (!mounted) return;
+    DebugLogger.log('桌宠', '全屏场景：push 场景页 ${scenes.first.sceneId}');
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => ScenePage(sceneId: scenes.first.sceneId),
     ));
+    } catch (e, st) {
+      DebugLogger.log('桌宠', '全屏场景入口异常: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('进入场景失败：$e'),
+        ));
+      }
+    }
   }
 
   /// 演示场景：1 热点（点）→ 节点链 A(happy)→B(choice)→C/D→E(end)

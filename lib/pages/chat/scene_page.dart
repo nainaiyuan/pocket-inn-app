@@ -53,6 +53,7 @@ class _ScenePageState extends State<ScenePage>
   SceneDirector? _director;
   bool _loading = true;
   bool _missing = false;
+  String? _loadError; // 8-15 14:1x：初始化异常兜底（防静默卡死）
 
   // ---- 卡片状态 ----
   String? _cardText;
@@ -90,7 +91,9 @@ class _ScenePageState extends State<ScenePage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _init();
+    // 8-15 14:1x（ANR 防护）：先渲染 loading 首帧，路由动画完成后再
+    // 跑初始化——避免 push 过渡期间主线程被初始化抢满导致无响应
+    WidgetsBinding.instance.addPostFrameCallback((_) => _init());
   }
 
   @override
@@ -112,71 +115,87 @@ class _ScenePageState extends State<ScenePage>
   }
 
   Future<void> _init() async {
-    await _state.init();
-    final store = PetStore();
-    sm.PetScene? scene;
-    final scenes = await store.allScenes();
-    for (final s in scenes) {
-      if (s.sceneId == widget.sceneId) {
-        scene = s;
-        break;
+    try {
+      DebugLogger.log('桌宠', '场景页初始化：开始');
+      await _state.init();
+      DebugLogger.log('桌宠', '场景页初始化：角色状态就绪');
+      final store = PetStore();
+      sm.PetScene? scene;
+      final scenes = await store.allScenes();
+      DebugLogger.log('桌宠', '场景页初始化：读到场景 ${scenes.length} 个');
+      for (final s in scenes) {
+        if (s.sceneId == widget.sceneId) {
+          scene = s;
+          break;
+        }
       }
-    }
-    if (scene == null) {
-      DebugLogger.log('桌宠', '场景页：场景 ${widget.sceneId} 不存在');
+      if (scene == null) {
+        DebugLogger.log('桌宠', '场景页：场景 ${widget.sceneId} 不存在');
+        if (mounted) setState(() {
+          _loading = false;
+          _missing = true;
+        });
+        return;
+      }
+      final hotspots = await store.hotspotsForScene(scene.sceneId);
+      DebugLogger.log('桌宠', '场景页初始化：热点 ${hotspots.length} 个');
+      final world = PetWorld(store: store, frames: FilePetFrameSource());
+      await world.restore();
+      DebugLogger.log('桌宠', '场景页初始化：世界 restore 完成');
+      await world.preloadAll();
+      DebugLogger.log('桌宠', '场景页初始化：帧图预载完成');
+      await world.syncVisible();
+      DebugLogger.log('桌宠', '场景页初始化：小人同步完成 ${world.scene.pets.length} 个');
+
+      final director = SceneDirector(store: store, scene: scene)
+        ..onNodeEntered = _onNodeEntered
+        ..onCard = _onCard
+        ..onFinished = _onSceneFinished;
+
+      // 8-15 P1：AI 演出指令直达场景页——PetBridge.world 指向本页世界；
+      // 桌宠页 ticker 通过 sceneActive 防抢回
+      PetBridge.instance
+        ..sceneActive = true
+        ..attach(world)
+        ..onCardShow = _onAiCard
+        ..onExpression = _onExpression;
+
+      // 陪伴计时配置（无配置用默认：倒计时 25 分钟/每 60s +1）
+      final mainPet = world.scene.pets.isNotEmpty ? world.scene.pets.first : null;
+      if (mainPet != null) {
+        final setting =
+            await store.timerSettingFor(mainPet.id) ?? const PetTimerSetting(petId: '');
+        _timer = PetTimerSession(
+          mode: setting.mode,
+          durationSec: setting.durationSec,
+          rewardIntervalSec: setting.rewardIntervalSec,
+          rewardAmount: setting.rewardAmount,
+          lines: setting.lines,
+        );
+        DebugLogger.log('桌宠', '陪伴计时配置：${setting.mode.name} '
+            '${setting.durationSec}s 奖励每${setting.rewardIntervalSec}s+${setting.rewardAmount} '
+            '话术${setting.lines.length}条');
+      }
+
+      DebugLogger.log('桌宠',
+          '场景页加载：${scene.name} | 热点 ${hotspots.length} | 角色 ${world.scene.pets.length}');
+      if (!mounted) return;
+      setState(() {
+        _world = world;
+        _scene = scene;
+        _hotspots = hotspots;
+        _director = director;
+        _loading = false;
+      });
+      _ticker = createTicker(_onTick)..start();
+      DebugLogger.log('桌宠', '场景页初始化：完成，ticker 已启动');
+    } catch (e, st) {
+      DebugLogger.log('桌宠', '场景页初始化异常: $e\n$st');
       if (mounted) setState(() {
         _loading = false;
-        _missing = true;
+        _loadError = '$e';
       });
-      return;
     }
-    final hotspots = await store.hotspotsForScene(scene.sceneId);
-    final world = PetWorld(store: store, frames: FilePetFrameSource());
-    await world.restore();
-    await world.preloadAll();
-    await world.syncVisible();
-
-    final director = SceneDirector(store: store, scene: scene)
-      ..onNodeEntered = _onNodeEntered
-      ..onCard = _onCard
-      ..onFinished = _onSceneFinished;
-
-    // 8-15 P1：AI 演出指令直达场景页——PetBridge.world 指向本页世界；
-    // 桌宠页 ticker 通过 sceneActive 防抢回
-    PetBridge.instance
-      ..sceneActive = true
-      ..attach(world)
-      ..onCardShow = _onAiCard
-      ..onExpression = _onExpression;
-
-    // 陪伴计时配置（无配置用默认：倒计时 25 分钟/每 60s +1）
-    final mainPet = world.scene.pets.isNotEmpty ? world.scene.pets.first : null;
-    if (mainPet != null) {
-      final setting =
-          await store.timerSettingFor(mainPet.id) ?? const PetTimerSetting(petId: '');
-      _timer = PetTimerSession(
-        mode: setting.mode,
-        durationSec: setting.durationSec,
-        rewardIntervalSec: setting.rewardIntervalSec,
-        rewardAmount: setting.rewardAmount,
-        lines: setting.lines,
-      );
-      DebugLogger.log('桌宠', '陪伴计时配置：${setting.mode.name} '
-          '${setting.durationSec}s 奖励每${setting.rewardIntervalSec}s+${setting.rewardAmount} '
-          '话术${setting.lines.length}条');
-    }
-
-    DebugLogger.log('桌宠',
-        '场景页加载：${scene.name} | 热点 ${hotspots.length} | 角色 ${world.scene.pets.length}');
-    if (!mounted) return;
-    setState(() {
-      _world = world;
-      _scene = scene;
-      _hotspots = hotspots;
-      _director = director;
-      _loading = false;
-    });
-    _ticker = createTicker(_onTick)..start();
   }
 
   void _onTick(Duration elapsed) {
@@ -660,6 +679,37 @@ class _ScenePageState extends State<ScenePage>
       return Scaffold(
         appBar: AppBar(title: const Text('场景不存在')),
         body: const Center(child: Text('未找到场景配置')),
+      );
+    }
+    if (_loadError != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('场景加载失败')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline,
+                    color: Color(0xFFE07A7A), size: 40),
+                const SizedBox(height: 12),
+                Text(
+                  '$_loadError',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF5A4049)),
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFB0789A),
+                  ),
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  child: const Text('返回'),
+                ),
+              ],
+            ),
+          ),
+        ),
       );
     }
     return Scaffold(
