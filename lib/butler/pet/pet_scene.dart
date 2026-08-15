@@ -12,6 +12,7 @@ import 'dart:math' as math;
 import '../../utils/debug_logger.dart';
 import 'pet_engine.dart';
 import 'pet_group_run.dart';
+export 'pet_group_run.dart';
 import 'pet_state_detector.dart';
 import 'pet_models.dart';
 
