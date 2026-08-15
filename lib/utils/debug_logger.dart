@@ -20,6 +20,16 @@ class DebugLogger {
   static int _seq = 0;
   static Stopwatch? _watch;
 
+  /// 构建标识（workflow 编译时注入 GIT_HASH；本地跑为 dev）
+  static const String _buildHash =
+      String.fromEnvironment('GIT_HASH', defaultValue: 'dev');
+
+  /// 8-15 14:5x（ANR 诊断）：读当天日志文件全文
+  /// 日志面板默认只看内存 buffer（重启即丢）——卡死排查时读文件，
+  /// 能看到卡死前同步落盘的所有日志。
+  static String readTodayFile() =>
+      _readFile(_pathFor(DateTime.now())).join('\n');
+
   /// 日志保留天数（8-06 01:10 用户定案：15 天绰绰有余）
   static const int retentionDays = 15;
 
@@ -48,7 +58,7 @@ class DebugLogger {
       await _cleanupOldLogs();
       _ready = true;
       final entry = '========== APP 启动 '
-          '${DateTime.now().toString()} ==========\n';
+          '${DateTime.now().toString()} (build $_buildHash) ==========\n';
       debugPrint(entry.trim());
       _buffer.add(entry.trim());
       if (_pending.isNotEmpty) {
@@ -104,8 +114,12 @@ class DebugLogger {
       _pending.add(entry);
       return;
     }
+    // 8-15 14:5x（ANR 诊断）：改同步落盘。原来异步追加在"卡死瞬间"
+    // 事件循环不空闲 → IO 不执行 → 日志丢失；同步写在关键步骤调用
+    // 频率低，毫秒级开销可接受，但保证卡死前日志 100% 进文件。
     try {
-      await _appendToToday(entry);
+      final f = File(_pathFor(DateTime.now()));
+      f.writeAsStringSync(entry, mode: FileMode.append);
     } catch (_) {}
   }
 

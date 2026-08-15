@@ -96,7 +96,7 @@ jobs:
             gradle-${{ runner.os }}-
 
       - name: Build APK
-        run: flutter build apk --${{ github.event.inputs.mode }}
+        run: flutter build apk --${{ github.event.inputs.mode }} --dart-define=GIT_HASH=$(git rev-parse --short HEAD)
 
       # 上传到固定 Release（latest-apk），下载链接永远不变
       - name: Upload APK to Release

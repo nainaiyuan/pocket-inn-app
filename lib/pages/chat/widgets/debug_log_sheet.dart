@@ -30,7 +30,9 @@ void showDebugLogSheet(BuildContext context,
 }
 
 /// 8-11 22:2x：调试弹层三视图（互斥枚举，避免多 bool 状态打架）
-enum DbgView { logs, flows, rounds }
+/// 8-15 14:5x：加 file 视图——读当天日志文件（卡死排查：内存 buffer
+/// 重启即丢，文件里才有卡死前的同步落盘日志）
+enum DbgView { logs, flows, rounds, file }
 
 class _DebugLogSheet extends StatefulWidget {
   final DbgView initialView;
@@ -132,6 +134,21 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
                   onSelected: (_) => setState(() => _view = DbgView.rounds),
                 ),
                 const SizedBox(width: 6),
+                ChoiceChip(
+                  label: const Text('文件', style: TextStyle(fontSize: 11)),
+                  selected: _view == DbgView.file,
+                  selectedColor: const Color(0xFFD9A05B),
+                  labelStyle: TextStyle(
+                    color: _view == DbgView.file ? Colors.white : Colors.white70,
+                  ),
+                  side: BorderSide(
+                    color: _view == DbgView.file
+                        ? const Color(0xFFD9A05B)
+                        : Colors.white24,
+                  ),
+                  onSelected: (_) => setState(() => _view = DbgView.file),
+                ),
+                const SizedBox(width: 6),
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
                   child: const Text('关闭', style: TextStyle(color: Colors.white70)),
@@ -196,6 +213,22 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
               _RoundsView(scrollController: scrollCtrl),
             ] else if (_view == DbgView.flows) ...[
               _FlowTreeView(scrollController: scrollCtrl),
+            ] else if (_view == DbgView.file) ...[
+              // 8-15 14:5x（ANR 诊断）：读当天日志文件全文——
+              // 内存 buffer 重启即丢，文件里有卡死前同步落盘的日志
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: scrollCtrl,
+                  child: SelectableText(
+                    _fileText.isEmpty ? '（当天文件为空或不存在）' : _fileText,
+                    style: const TextStyle(
+                      color: Colors.amberAccent,
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ),
             ] else ...[
               // 只看关键锚点 + 一键复制（08-08 新增：日志太长找不到关键行）
               Padding(
@@ -288,6 +321,9 @@ class _DebugLogSheetState extends State<_DebugLogSheet> {
       ),
     );
   }
+
+  /// 8-15 14:5x（ANR 诊断）：文件视图内容 = 当天日志文件全文
+  String get _fileText => DebugLogger.readTodayFile();
 
   String get _filteredText {
     final all = DebugLogger.recentLogs;
