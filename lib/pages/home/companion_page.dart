@@ -227,24 +227,8 @@ class _CompanionPageState extends State<CompanionPage>
           if (_feedingItemId != null) _buildFeedingHint(),
           // 全局提示
           if (_toast != null) _buildToast(),
-          // 全屏场景入口（8-15 03:0x 文游/小屋模式 P0）
-          SafeArea(
-            child: Align(
-              alignment: Alignment.topRight,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: IconButton.filled(
-                  style: IconButton.styleFrom(
-                    backgroundColor: const Color(0xCCB0789A),
-                    foregroundColor: Colors.white,
-                  ),
-                  icon: const Icon(Icons.fullscreen),
-                  tooltip: '全屏场景',
-                  onPressed: () => _openSceneMode(),
-                ),
-              ),
-            ),
-          ),
+          // ⛶ 全屏场景入口：8-15 15:0x 已移除（用户拍板：卡死排查暂停，
+          // 入口换地方，底层引擎做好后接到指定页面）
           // 控制面板
           Positioned(
             left: 0,

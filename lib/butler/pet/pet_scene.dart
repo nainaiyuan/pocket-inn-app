@@ -11,6 +11,7 @@ import 'dart:math' as math;
 
 import '../../utils/debug_logger.dart';
 import 'pet_engine.dart';
+import 'pet_group_run.dart';
 import 'pet_state_detector.dart';
 import 'pet_models.dart';
 
@@ -33,7 +34,8 @@ enum PetState {
 }
 
 /// 单个小人实例
-class Pet {
+class Pet implements PetActor {
+  @override
   final String id;
   String name;
 
@@ -45,6 +47,7 @@ class Pet {
 
   /// 相对坐标（0~1）；setter 同步进静态缓存
   PetPoint _position;
+  @override
   PetPoint get position => _position;
   set position(PetPoint v) {
     _position = v;
@@ -54,9 +57,11 @@ class Pet {
   // ===== 8-14 23:2x 控制权 + 状态系统（GPT 19 条 v1.2） =====
 
   /// 控制权：auto / user（用户操作）/ interaction（互动组）/ response（状态响应）
+  @override
   PetControlOwner controlOwner = PetControlOwner.auto;
 
   /// 被用户按住（held 状态，拖动中）
+  @override
   bool held = false;
 
   /// 暂停的移动快照（用户抓住时暂停，响应结束可恢复——不销毁）
@@ -87,6 +92,7 @@ class Pet {
   PetActivityRun? _activity;
 
   /// 当前动作 id（null = 待机）
+  @override
   String? currentActionId;
 
   /// 说话回调（UI 层设置：显示气泡）
@@ -137,6 +143,7 @@ class Pet {
   String? avatarPath;
 
   /// 按活动区域约束坐标
+  @override
   PetPoint clampToArea(PetPoint p) {
     switch (area) {
       case PetArea.fixed:
@@ -169,6 +176,7 @@ class Pet {
   bool get moving => _move != null && !_move!.finished;
 
   /// 立即停下当前移动
+  @override
   void stopMoving() => _move = null;
 
   /// 是否忙（有动作/移动/组合动作/双人互动在跑）
@@ -293,6 +301,7 @@ class Pet {
   ///
   /// 注意：不清理 _activity —— 组合动作执行器在活动期间调用本方法，
   /// 活动需要保持存活来驱动后续步骤。
+  @override
   void playAction(PetActionDef def, List<String> frames, {int? repeat}) {
     _move = null;
     _lastPlayedActionId = def.id;
@@ -325,6 +334,7 @@ class Pet {
   }
 
   /// 移动到目标位置（播放移动帧 + 插值）
+  @override
   void moveTo(
     PetPoint target, {
     double duration = 3,
@@ -419,6 +429,7 @@ class Pet {
   }
 
   /// 停止当前一切，回待机
+  @override
   void stop() {
     _endPair();
     _activity = null;
@@ -1593,242 +1604,6 @@ class PetScene {
   /// 设置小人的"被打断后动作"
   void setBreakAction(String petId, String actionId) {
     petById(petId)?.breakActionId = actionId;
-  }
-}
-
-// ==================== 互动组运行器（多角色剧本） ====================
-//
-// 驱动一组 Pet 按剧本一步步演：
-// - 每步开始：给每个坑播它动作库里的动作 + 按移动类型算目标点并 moveTo
-// - 每步时长：自动取各坑动作时长最大值（最少 2.5s），或用手动时长
-// - 帧/移动的逐帧推进仍由各 Pet 自己的 update() 完成，这里只管编排和计时
-/// 互动组运行时数据（def + 各坑动作库 + 帧），由 UI 层从数据库加载后注入场景
-class PetGroupRuntime {
-  final PetGroupDef def;
-  final Map<String, PetActionDef> slotActions;
-  final Map<String, List<String>> slotFrames;
-
-  PetGroupRuntime({
-    required this.def,
-    required this.slotActions,
-    required this.slotFrames,
-  });
-}
-
-class PetGroupRun {
-  final PetGroupDef def;
-  final List<Pet> cast;
-
-  /// 与 cast 一一对应的坑
-  final List<PetGroupSlot> slots;
-
-  final PetActionDef? Function(String actionId) actionResolver;
-  final List<String> Function(String actionId) framesResolver;
-
-  int _stepIndex = 0;
-  double _stepElapsed = 0;
-  double _stepDuration = 2.5;
-  bool _stepStarted = false;
-  bool _finished = false;
-  bool _paused = false;
-
-  PetGroupRun({
-    required this.def,
-    required this.cast,
-    required this.slots,
-    required this.actionResolver,
-    required this.framesResolver,
-  });
-
-  bool get finished => _finished;
-  int get stepIndex => _stepIndex;
-
-  /// 剧本进度 0~1
-  double get progress =>
-      def.steps.isEmpty ? 1 : _stepIndex / def.steps.length;
-
-  PetGroupStep? get currentStep =>
-      _stepIndex < def.steps.length ? def.steps[_stepIndex] : null;
-
-  /// 暂停（提起来）：停掉各小人的移动，步骤计时冻结；放下后 resume 续播
-  void pause() {
-    if (_paused || _finished) return;
-    _paused = true;
-    for (final pet in cast) {
-      pet.stopMoving();
-    }
-  }
-
-  void resume() {
-    if (!_paused) return;
-    _paused = false;
-  }
-
-  /// 场景每帧调用（先让各 Pet 自己 update，再推进编排计时）
-  void update(double dt) {
-    if (_finished || _paused) return;
-    if (_stepIndex >= def.steps.length) {
-      _finished = true;
-      return;
-    }
-    final step = def.steps[_stepIndex];
-    if (!_stepStarted) {
-      _startStep(step);
-      _stepStarted = true;
-    }
-    _stepElapsed += dt;
-    if (_stepElapsed >= _stepDuration) {
-      _advanceStep();
-    }
-  }
-
-  void _startStep(PetGroupStep step) {
-    // 步时长：手动优先；否则取各坑动作时长最大值，最少 2.5s
-    _stepDuration = step.duration ?? 2.5;
-    for (final slotStep in step.slotSteps) {
-      final idx = _indexOfSlot(slotStep.slotId);
-      if (idx < 0 || idx >= cast.length) continue;
-      // 8-14 23:2x：被用户抓住的演员跳过（互动组其他人照常演）
-      if (cast[idx].held || cast[idx].controlOwner == PetControlOwner.user) {
-        continue;
-      }
-      final def = slotStep.actionId != null
-          ? actionResolver(slotStep.actionId!)
-          : null;
-      if (def != null && slotStep.actionId != null) {
-        final d = def.durationSeconds > 0 ? def.durationSeconds : 2.5;
-        if (step.duration == null && d > _stepDuration) _stepDuration = d;
-      }
-    }
-    if (_stepDuration < 2.5) _stepDuration = 2.5;
-
-    // 各坑开演
-    for (final slotStep in step.slotSteps) {
-      final idx = _indexOfSlot(slotStep.slotId);
-      if (idx < 0 || idx >= cast.length) continue;
-      final pet = cast[idx];
-      // 8-14 23:2x：被用户抓住的演员跳过本步（松手后下步自动恢复）
-      if (pet.held || pet.controlOwner == PetControlOwner.user) {
-        continue;
-      }
-      final def = slotStep.actionId != null
-          ? actionResolver(slotStep.actionId!)
-          : null;
-      // 动作：有动作就播（循环帧播满整步）；没有就不动它现有的播放器
-      if (def != null && slotStep.actionId != null) {
-        pet.playAction(def, framesResolver(slotStep.actionId!));
-      }
-      // 移动
-      final duration = _stepDuration;
-      switch (slotStep.moveType) {
-        case PetGroupMoveType.stay:
-          break;
-        case PetGroupMoveType.dir:
-          final (vx, vy) =
-              (slotStep.moveDir ?? PetMoveDir.left).vector;
-          final dist = slotStep.moveDist ?? 0.3;
-          pet.moveTo(
-            pet.clampToArea(PetPoint(
-              pet.position.x + vx * dist,
-              pet.position.y + vy * dist,
-            )),
-            duration: duration,
-          );
-        case PetGroupMoveType.spot:
-          pet.moveTo(
-            pet.clampToArea(PetPoint(
-              slotStep.targetX ?? 0.5,
-              slotStep.targetY ?? 0.5,
-            )),
-            duration: duration,
-          );
-        case PetGroupMoveType.approach:
-          final partner = _partnerOf(idx);
-          if (partner != null) {
-            pet.moveTo(
-              _approachTarget(pet.position, partner.position,
-                  slotStep.moveDist ?? 0.05),
-              duration: duration,
-            );
-          }
-        case PetGroupMoveType.leave:
-          final partner = _partnerOf(idx);
-          if (partner != null) {
-            pet.moveTo(
-              _leaveTarget(pet.position, partner.position,
-                  slotStep.moveDist ?? 0.3),
-              duration: duration,
-            );
-          }
-        case PetGroupMoveType.wall:
-          final (vx, vy) =
-              (slotStep.moveDir ?? PetMoveDir.left).vector;
-          pet.moveTo(
-            pet.clampToArea(PetPoint(
-              pet.position.x + vx * 2,
-              pet.position.y + vy * 2,
-            )),
-            duration: duration,
-          );
-      }
-    }
-  }
-
-  int _indexOfSlot(String slotId) {
-    for (var i = 0; i < slots.length; i++) {
-      if (slots[i].slotId == slotId) return i;
-    }
-    return -1;
-  }
-
-  /// 搭档：两人组 = 对方；多人组 = 下一个坑（循环）
-  Pet? _partnerOf(int idx) {
-    if (cast.length < 2) return null;
-    return cast[(idx + 1) % cast.length];
-  }
-
-  /// 靠近：朝对方走到间隔 [gap]（默认 0.05 = 挨着）
-  PetPoint _approachTarget(PetPoint me, PetPoint other, double gap) {
-    final dx = other.x - me.x;
-    final dy = other.y - me.y;
-    final len = math.sqrt(dx * dx + dy * dy);
-    if (len < 1e-6) return other;
-    return PetPoint(
-      (other.x - dx / len * gap).clamp(0.02, 0.98),
-      (other.y - dy / len * gap).clamp(0.02, 0.98),
-    );
-  }
-
-  /// 离开：往反方向拉开 [dist]
-  PetPoint _leaveTarget(PetPoint me, PetPoint other, double dist) {
-    final dx = me.x - other.x;
-    final dy = me.y - other.y;
-    final len = math.sqrt(dx * dx + dy * dy);
-    if (len < 1e-6) {
-      return PetPoint(
-        (me.x + 0.2).clamp(0.02, 0.98),
-        (me.y + 0.2).clamp(0.02, 0.98),
-      );
-    }
-    return PetPoint(
-      (me.x + dx / len * dist).clamp(0.02, 0.98),
-      (me.y + dy / len * dist).clamp(0.02, 0.98),
-    );
-  }
-
-  void _advanceStep() {
-    _stepIndex++;
-    _stepElapsed = 0;
-    _stepStarted = false;
-    if (_stepIndex >= def.steps.length) {
-      _finished = true;
-      // 散场：各小人回待机（留在当前位置）
-      for (final pet in cast) {
-        pet.stopMoving();
-        pet.state = PetState.idle;
-        pet.currentActionId = 'idle';
-      }
-    }
   }
 }
 

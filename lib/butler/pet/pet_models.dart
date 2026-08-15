@@ -964,6 +964,15 @@ class PetGroupSlot {
   final double x;
   final double y;
 
+  /// 8-15 底层引擎 v2：待机行为——组里没任务（这步没动作也没移动）时循环播的动作
+  final String? idleActionId;
+
+  /// 8-15 底层引擎 v2：提起反应——组里**别人**被用户提起时，这个坑播的动作
+  final String? heldReactionActionId;
+
+  /// 8-15 底层引擎 v2：摆放行为——这个坑被用户放下时播的动作
+  final String? placedActionId;
+
   const PetGroupSlot({
     required this.slotId,
     required this.index,
@@ -971,6 +980,9 @@ class PetGroupSlot {
     this.label = '',
     this.x = 0.5,
     this.y = 0.6,
+    this.idleActionId,
+    this.heldReactionActionId,
+    this.placedActionId,
   });
 
   Map<String, dynamic> toJson() => {
@@ -980,6 +992,9 @@ class PetGroupSlot {
         'l': label,
         'x': x,
         'y': y,
+        if (idleActionId != null) 'ia': idleActionId,
+        if (heldReactionActionId != null) 'hr': heldReactionActionId,
+        if (placedActionId != null) 'pa': placedActionId,
       };
 
   static PetGroupSlot fromJson(Map<String, dynamic> j) => PetGroupSlot(
@@ -989,6 +1004,9 @@ class PetGroupSlot {
         label: j['l'] as String? ?? '',
         x: (j['x'] as num?)?.toDouble() ?? 0.5,
         y: (j['y'] as num?)?.toDouble() ?? 0.6,
+        idleActionId: j['ia'] as String?,
+        heldReactionActionId: j['hr'] as String?,
+        placedActionId: j['pa'] as String?,
       );
 }
 
@@ -1061,11 +1079,17 @@ class PetGroupStep {
   /// 手动时长（秒，null = 自动：取各坑动作时长最大值，最少 2.5s）
   final double? duration;
 
-  const PetGroupStep(this.slotSteps, {this.duration});
+  /// 8-15 底层引擎 v2：编队移动带头坑（slotId）。非空 = 本步编队：
+  /// 带头坑按自己的移动任务走，其他 moveType=stay 的坑保持相对位置跟随
+  final String? formationLeaderId;
+
+  const PetGroupStep(this.slotSteps,
+      {this.duration, this.formationLeaderId});
 
   Map<String, dynamic> toJson() => {
         'slots': slotSteps.map((e) => e.toJson()).toList(),
         if (duration != null) 'duration': duration,
+        if (formationLeaderId != null) 'fl': formationLeaderId,
       };
 
   static PetGroupStep fromJson(Map<String, dynamic> j) => PetGroupStep(
@@ -1073,6 +1097,7 @@ class PetGroupStep {
             .map((e) => PetSlotStep.fromJson(e as Map<String, dynamic>))
             .toList(),
         duration: (j['duration'] as num?)?.toDouble(),
+        formationLeaderId: j['fl'] as String?,
       );
 }
 
