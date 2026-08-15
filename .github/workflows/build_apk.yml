@@ -33,6 +33,29 @@ jobs:
       - name: pub get
         run: flutter pub get
 
+      # pub 依赖缓存：第二次起 pub get 秒过（08-15 用户：编译太慢）
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: pub-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            pub-
+
+      # build_runner 产物缓存：代码生成增量复用（lib 变了才全量重跑）
+      - name: Cache build_runner outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            .dart_tool/build
+            .dart_tool/package_config.json
+          key: build-runner-${{ hashFiles('pubspec.lock') }}-${{ hashFiles('lib/**/*.dart') }}
+          restore-keys: |
+            build-runner-${{ hashFiles('pubspec.lock') }}-
+            build-runner-
+
       # 语义情绪模型缓存：154MB 每次重下很慢，缓存后第二次起秒过
       # 模型更新时把 key 的 v1 改成 v2 即可强制刷新
       - name: Cache emotion model
@@ -67,6 +90,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
+            android/.gradle
           key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-${{ runner.os }}-
